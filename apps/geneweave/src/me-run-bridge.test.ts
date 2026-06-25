@@ -293,6 +293,42 @@ describe('bridge — search derivatives (stress)', () => {
   });
 });
 
+// ─── F2 — emit_widget → widget.update ────────────────────────
+
+describe('bridge — emit_widget (generative UI)', () => {
+  it('maps an emit_widget tool result to a widget (positive)', async () => {
+    const widget = { id: 'w-1', type: 'table', title: 'Sales', data: { columns: ['A'], rows: [[1]] }, interactive: false, schemaVersion: 1 };
+    const rec = await feed([{ type: 'tool_end', name: 'emit_widget', result: JSON.stringify({ ok: true, widget }) }]);
+    expect(rec.widget).toHaveLength(1);
+    expect(rec.widget[0]!.id).toBe('w-1');
+    expect((rec.widget[0]!.payload as { type: string }).type).toBe('table');
+    expect(rec.widget[0]!.schemaVersion).toBe(1);
+    // It is still a normal tool completion too.
+    expect(rec.toolCompleted).toHaveLength(1);
+  });
+
+  it('accepts an already-parsed object result', async () => {
+    const rec = await feed([{ type: 'tool_end', name: 'emit_widget', result: { ok: true, widget: { id: 'w-2', type: 'chart' } } }]);
+    expect(rec.widget).toHaveLength(1);
+    expect(rec.widget[0]!.id).toBe('w-2');
+  });
+
+  it('emits nothing when the tool failed (negative)', async () => {
+    const rec = await feed([{ type: 'tool_end', name: 'emit_widget', result: JSON.stringify({ ok: false, error: 'bad type' }) }]);
+    expect(rec.widget).toHaveLength(0);
+  });
+
+  it('does not emit a widget for other tools (security: scoped to emit_widget)', async () => {
+    const rec = await feed([{ type: 'tool_end', name: 'calculator', result: { ok: true, widget: { id: 'x' } } }]);
+    expect(rec.widget).toHaveLength(0);
+  });
+
+  it('ignores a malformed widget payload without throwing', async () => {
+    const rec = await feed([{ type: 'tool_end', name: 'emit_widget', result: JSON.stringify({ ok: true, widget: 'not-an-object' }) }]);
+    expect(rec.widget).toHaveLength(0);
+  });
+});
+
 // ─── stress ──────────────────────────────────────────────────
 
 describe('bridge — stress', () => {

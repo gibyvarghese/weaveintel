@@ -1593,6 +1593,48 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
         tags: ['artifacts', 'output'],
       }),
     } : {}),
+    // F2: Generative-UI widget emission. The model calls this to render a typed
+    // widget inline; the run bridge maps the result onto a `widget.update` event
+    // (reusing the @weaveintel/ui-primitives builders for the payload).
+    emit_widget: weaveTool({
+      name: 'emit_widget',
+      description: 'Render a structured UI widget (table, chart, code block, etc.) inline. Use to present tabular data, a chart, or formatted code so the client renders an interactive component instead of plain text.',
+      parameters: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', enum: ['table', 'chart', 'code', 'form', 'image', 'map', 'timeline', 'custom'], description: 'Widget kind' },
+          title: { type: 'string', description: 'Optional widget title' },
+          data: { type: 'object', description: 'Widget data. table: {columns:string[], rows:any[][]}; chart: {chartType:"bar"|"line"|"pie"|"scatter", labels:string[], datasets:[{label:string,data:number[]}]}; code: {code:string, language?:string}; other: any object.' },
+        },
+        required: ['type', 'data'],
+      },
+      execute: async (args: { type: string; title?: string; data?: Record<string, unknown> }) => {
+        try {
+          const uip = await import('@weaveintel/ui-primitives');
+          const title = typeof args.title === 'string' ? args.title : '';
+          const d = (args.data && typeof args.data === 'object') ? args.data : {};
+          let widget: import('@weaveintel/core').WidgetPayload;
+          if (args.type === 'table') {
+            const columns = Array.isArray(d['columns']) ? (d['columns'] as unknown[]).map(String) : [];
+            const rows = Array.isArray(d['rows']) ? (d['rows'] as unknown[][]) : [];
+            widget = uip.tableWidget(title || 'Table', columns, rows);
+          } else if (args.type === 'chart') {
+            const chartType = (['bar', 'line', 'pie', 'scatter'] as const).find((c) => c === d['chartType']) ?? 'bar';
+            const labels = Array.isArray(d['labels']) ? (d['labels'] as unknown[]).map(String) : [];
+            const datasets = Array.isArray(d['datasets']) ? (d['datasets'] as Array<{ label: string; data: number[] }>) : [];
+            widget = uip.chartWidget(title || 'Chart', chartType, labels, datasets);
+          } else if (args.type === 'code') {
+            widget = uip.codeWidget(title || 'Code', typeof d['code'] === 'string' ? d['code'] as string : '', typeof d['language'] === 'string' ? d['language'] as string : undefined);
+          } else {
+            widget = uip.createWidget({ type: args.type as import('@weaveintel/core').WidgetType, ...(title ? { title } : {}), data: d, interactive: false });
+          }
+          return JSON.stringify({ ok: true, widget });
+        } catch (e) {
+          return JSON.stringify({ ok: false, error: e instanceof Error ? e.message : String(e) });
+        }
+      },
+      tags: ['ui', 'output'],
+    }),
   };
   for (const name of filterToolNamesByPersona(toolNames, actorPersona)) {
     // Skip tools disabled in the operator-managed tool catalog

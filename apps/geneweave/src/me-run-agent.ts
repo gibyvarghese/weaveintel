@@ -362,6 +362,8 @@ export class SseCaptureResponse extends EventEmitter {
         else this.#enqueue(() => this.#out.toolCompleted(name, result, id));
         // Phase 3: derive citations + a results widget from search tool output.
         this.#emitSearchDerivatives(name, result);
+        // F2: an explicit emit_widget tool result becomes a widget.update.
+        this.#emitWidgetFromTool(name, result);
         break;
       }
       case 'step': {
@@ -440,6 +442,25 @@ export class SseCaptureResponse extends EventEmitter {
     this.#tail = this.#tail.then(fn).catch(() => {
       // Emitter writes are best-effort; a failed append must not break the run.
     });
+  }
+
+  /**
+   * F2 — autonomous generative UI. The `emit_widget` tool returns
+   * `{ ok, widget: WidgetPayload }`; surface it as a `widget.update` event so the
+   * client reconstructs a widget part.
+   */
+  #emitWidgetFromTool(toolName: string, rawResult: unknown): void {
+    if (toolName !== 'emit_widget') return;
+    let parsed: Record<string, unknown> | undefined;
+    if (rawResult && typeof rawResult === 'object') parsed = rawResult as Record<string, unknown>;
+    else if (typeof rawResult === 'string') { try { parsed = JSON.parse(rawResult) as Record<string, unknown>; } catch { return; } }
+    if (!parsed || parsed['ok'] !== true) return;
+    const widget = parsed['widget'];
+    if (!widget || typeof widget !== 'object') return;
+    const w = widget as Record<string, unknown>;
+    const id = typeof w['id'] === 'string' ? w['id'] : `widget-${Date.now()}`;
+    const schemaVersion = typeof w['schemaVersion'] === 'number' ? w['schemaVersion'] as number : undefined;
+    this.#enqueue(() => this.#out.widget(id, w, schemaVersion));
   }
 
   /**

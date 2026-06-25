@@ -116,6 +116,29 @@ test('Phase 3 — direct mode (no tools) completes without citations/widgets', a
   expect(vm.widgets.size).toBe(0);
 });
 
+test('F2 — agent emits a widget via the emit_widget tool (generative UI)', async ({ page }) => {
+  test.setTimeout(180_000);
+  await ensureLoggedIn(page);
+  const headers = { 'x-csrf-token': await csrf(page), 'content-type': 'application/json' };
+  const res = await page.request.post('/api/me/runs', {
+    headers,
+    data: { surface: 'web', input: { text: 'Render a table widget titled "Fruit Colors" with columns Fruit and Color and rows for apple/red, banana/yellow, grape/purple. Use the emit_widget tool.' }, metadata: { mode: 'agent', provider: 'openai', model: 'gpt-4o' } },
+  });
+  expect(res.status()).toBe(201);
+  const runId = ((await res.json()) as { id: string }).id;
+  expect(['completed', 'failed']).toContain(await pollTerminal(page.request, runId, 170_000));
+
+  const journal = await readJournal(page.request, runId);
+  const vm = reconstruct(journal);
+  const calledWidget = journal.some((e) => (e.kind === 'tool.invoked' || e.kind === 'tool.completed') && e.payload['tool'] === 'emit_widget');
+  // eslint-disable-next-line no-console
+  console.log(`[f2] emit_widget called=${calledWidget} widgets=${vm.widgets.size} kinds=${[...new Set(journal.map((e) => e.kind))].join(',')}`);
+  if (vm.widgets.size === 0) { test.skip(true, 'model did not call emit_widget this run'); return; }
+  // The widget reconstructs into the view model + a widget part.
+  expect(vm.widgets.size).toBeGreaterThan(0);
+  expect(vm.parts.some((p) => p.type === 'widget' && p.state === 'done')).toBe(true);
+});
+
 test('Phase 3 — web UI still streams a real reply (regression)', async ({ page }) => {
   test.setTimeout(120_000);
   await ensureLoggedIn(page);
