@@ -30,6 +30,12 @@ export type {
   StatusView,
   ToolCallView,
   ErrorView,
+  ReasoningChunk,
+  UsageView,
+  StepView,
+  CitationView,
+  ArtifactView,
+  DiagnosticView,
   RunEventEnvelope,
 } from './reducer.js';
 export { streamReducer, emptyRunViewModel } from './reducer.js';

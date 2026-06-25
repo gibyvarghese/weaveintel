@@ -209,7 +209,7 @@ export function createChatPipelineMeRunAgent(chatEngine: ChatEngine, db: Databas
  * `write`, `writeHead`, `end`, `writableEnded`, `destroyed`, plus the
  * EventEmitter `on/once/off/emit` used for `drain`/`close` backpressure.
  */
-class SseCaptureResponse extends EventEmitter {
+export class SseCaptureResponse extends EventEmitter {
   writableEnded = false;
   destroyed = false;
   /** Captured `error` frame text, surfaced to the executor as a run failure. */
@@ -274,8 +274,9 @@ class SseCaptureResponse extends EventEmitter {
         break;
       }
       case 'reasoning': {
+        // Phase 1: a DISTINCT reasoning channel — no longer folded into text.
         const text = typeof payload['text'] === 'string' ? payload['text'] as string : '';
-        if (text) this.#enqueue(() => this.#out.text(text, 'reasoning'));
+        if (text) this.#enqueue(() => this.#out.reasoning(text));
         break;
       }
       case 'tool_start': {
@@ -289,16 +290,86 @@ class SseCaptureResponse extends EventEmitter {
       }
       case 'tool_end': {
         const name = typeof payload['name'] === 'string' ? payload['name'] as string : '';
-        if (name) this.#enqueue(() => this.#out.toolCompleted(name, payload['result']));
+        if (!name) break;
+        const result = payload['result'];
+        // A real tool.errored path: a tool result shaped `{ error: <string> }`
+        // (or carrying an `error` field) is surfaced as a tool failure rather
+        // than a successful completion.
+        const errText = (result && typeof result === 'object' && typeof (result as Record<string, unknown>)['error'] === 'string')
+          ? (result as Record<string, string>)['error']
+          : undefined;
+        if (errText) this.#enqueue(() => this.#out.toolErrored(name, errText));
+        else this.#enqueue(() => this.#out.toolCompleted(name, result));
+        break;
+      }
+      case 'step': {
+        // Phase 1: agent / supervisor plan steps.
+        const s = (payload['step'] && typeof payload['step'] === 'object')
+          ? payload['step'] as Record<string, unknown>
+          : undefined;
+        if (!s) break;
+        const tc = (s['toolCall'] && typeof s['toolCall'] === 'object') ? s['toolCall'] as Record<string, unknown> : undefined;
+        const step = {
+          ...(typeof s['index'] === 'number' ? { index: s['index'] as number } : {}),
+          ...(typeof s['type'] === 'string' ? { type: s['type'] as string } : {}),
+          ...(typeof s['content'] === 'string' ? { content: s['content'] as string } : {}),
+          ...(typeof tc?.['name'] === 'string' ? { toolName: tc['name'] as string } : {}),
+          ...(typeof s['durationMs'] === 'number' ? { durationMs: s['durationMs'] as number } : {}),
+          ...(payload['phase'] === 'step_start' || payload['phase'] === 'step_end' ? { phase: payload['phase'] as 'step_start' | 'step_end' } : {}),
+        };
+        this.#enqueue(() => this.#out.step(step));
+        break;
+      }
+      case 'done': {
+        // Phase 1: the richest dropped payload — usage / cost / latency / model,
+        // plus any artifact references the turn produced.
+        const u = (payload['usage'] && typeof payload['usage'] === 'object') ? payload['usage'] as Record<string, unknown> : {};
+        const usage = {
+          ...(typeof u['promptTokens'] === 'number' ? { promptTokens: u['promptTokens'] as number } : {}),
+          ...(typeof u['completionTokens'] === 'number' ? { completionTokens: u['completionTokens'] as number } : {}),
+          ...(typeof u['totalTokens'] === 'number' ? { totalTokens: u['totalTokens'] as number } : {}),
+          ...(typeof payload['cost'] === 'number' ? { costUsd: payload['cost'] as number } : {}),
+          ...(typeof payload['latencyMs'] === 'number' ? { latencyMs: payload['latencyMs'] as number } : {}),
+          ...(typeof payload['model'] === 'string' ? { model: payload['model'] as string } : {}),
+          ...(typeof payload['provider'] === 'string' ? { provider: payload['provider'] as string } : {}),
+          ...(typeof payload['mode'] === 'string' ? { mode: payload['mode'] as string } : {}),
+        };
+        this.#enqueue(() => this.#out.usage(usage));
+        const refs = Array.isArray(payload['artifactRefs']) ? payload['artifactRefs'] : [];
+        for (const raw of refs) {
+          if (!raw || typeof raw !== 'object') continue;
+          const r = raw as Record<string, unknown>;
+          const id = typeof r['id'] === 'string' ? r['id'] : (typeof r['artifactId'] === 'string' ? r['artifactId'] as string : undefined);
+          if (!id) continue;
+          const artifact = {
+            id,
+            ...(typeof r['type'] === 'string' ? { type: r['type'] as string } : {}),
+            ...(typeof r['title'] === 'string' ? { title: r['title'] as string } : (typeof r['name'] === 'string' ? { title: r['name'] as string } : {})),
+            ...(typeof r['mimeType'] === 'string' ? { mimeType: r['mimeType'] as string } : (typeof r['mime_type'] === 'string' ? { mimeType: r['mime_type'] as string } : {})),
+            ...(typeof r['url'] === 'string' ? { url: r['url'] as string } : {}),
+          };
+          this.#enqueue(() => this.#out.artifact(artifact));
+        }
         break;
       }
       case 'error': {
         this.error = typeof payload['error'] === 'string' ? payload['error'] as string : 'Run failed';
         break;
       }
+      case 'guardrail':
+      case 'policy_checks':
+      case 'eval':
+      case 'eval_error':
+      case 'cognitive':
+      case 'contracts':
+      case 'ensemble_result': {
+        // Phase 1: surface (rather than drop) non-output metadata as diagnostics.
+        const { type: _t, ...data } = payload;
+        this.#enqueue(() => this.#out.diagnostic(type, data));
+        break;
+      }
       default:
-        // step / guardrail / redaction / cognitive / ensemble_result / screenshot
-        // / done are metadata frames the executor does not need to mirror.
+        // redaction / generation / screenshot remain internal — not mirrored.
         break;
     }
   }

@@ -39,9 +39,66 @@ export const RUN_EVENT_KINDS = [
   'tool.completed',
   'tool.errored',
   'widget.update',
+  // Phase 1 — lossless chat→run parity. Previously dropped by the bridge.
+  'reasoning.delta',  // model thinking, as a DISTINCT channel (not folded into text)
+  'step.update',      // agent/supervisor plan step lifecycle
+  'usage.update',     // token usage, cost, latency, model (from the chat `done` frame)
+  'citation.add',     // source/citation (forward-compatible; no producer yet)
+  'artifact.update',  // artifact reference produced by the run
+  'diagnostic',       // guardrail / policy / eval / cognitive / ensemble metadata
 ] as const;
 
 export type RunEventKind = (typeof RUN_EVENT_KINDS)[number];
+
+// ─── Phase 1 payload contracts ───────────────────────────────
+// Typed payloads for the parity kinds, shared by the geneweave emitter/bridge
+// (producer) and the @weaveintel/client reducer (consumer).
+
+/** Token usage + cost + timing for a run (from the chat `done` frame). */
+export interface RunUsage {
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+  costUsd?: number;
+  latencyMs?: number;
+  model?: string;
+  provider?: string;
+  mode?: string;
+}
+
+/** A single agent/supervisor plan step. */
+export interface RunStep {
+  index?: number;
+  type?: string;
+  content?: string;
+  toolName?: string;
+  durationMs?: number;
+  /** Lifecycle phase, when known. */
+  phase?: 'step_start' | 'step_end';
+}
+
+/** A reference to an artifact produced by the run. */
+export interface RunArtifactRef {
+  id: string;
+  type?: string;
+  title?: string;
+  mimeType?: string;
+  url?: string;
+}
+
+/** A source / citation surfaced during the run. */
+export interface RunCitation {
+  id: string;
+  text?: string;
+  source?: string;
+  url?: string;
+}
+
+/** A non-output diagnostic frame (guardrail / policy / eval / cognitive / ensemble). */
+export interface RunDiagnostic {
+  channel: string;
+  data?: unknown;
+}
 
 /** Kinds that close a run — exactly one is emitted per run. */
 export const TERMINAL_RUN_EVENT_KINDS = ['run.completed', 'run.failed', 'run.cancelled'] as const;

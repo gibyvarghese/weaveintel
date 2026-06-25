@@ -52,7 +52,62 @@ export type ErrorView = {
   message: string;
 };
 
-export type StreamItem = TextChunk | WidgetView | StatusView | ToolCallView | ErrorView;
+// ─── Phase 1 — parity view kinds ─────────────────────────────
+
+export type ReasoningChunk = {
+  kind: 'reasoning';
+  text: string;   // full accumulated reasoning so far
+  delta: string;  // latest chunk
+};
+
+export type UsageView = {
+  kind: 'usage';
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+  costUsd?: number;
+  latencyMs?: number;
+  model?: string;
+  provider?: string;
+  mode?: string;
+};
+
+export type StepView = {
+  kind: 'step';
+  index?: number;
+  type?: string;
+  content?: string;
+  toolName?: string;
+  durationMs?: number;
+  phase?: 'step_start' | 'step_end';
+};
+
+export type CitationView = {
+  kind: 'citation';
+  id: string;
+  text?: string;
+  source?: string;
+  url?: string;
+};
+
+export type ArtifactView = {
+  kind: 'artifact';
+  id: string;
+  type?: string;
+  title?: string;
+  mimeType?: string;
+  url?: string;
+};
+
+export type DiagnosticView = {
+  kind: 'diagnostic';
+  channel: string;
+  data?: unknown;
+};
+
+export type StreamItem =
+  | TextChunk | WidgetView | StatusView | ToolCallView | ErrorView
+  | ReasoningChunk | UsageView | StepView | CitationView | ArtifactView | DiagnosticView;
 
 // ---------------------------------------------------------------------------
 // The accumulated view model
@@ -73,6 +128,21 @@ export interface RunViewModel {
   toolCalls: ToolCallView[];
   /** Last error (if any). */
   lastError?: ErrorView;
+  // ── Phase 1 — parity ──
+  /** Accumulated reasoning text (distinct channel, not part of `fullText`). */
+  reasoningText: string;
+  /** All reasoning chunks in order. */
+  reasoningChunks: ReasoningChunk[];
+  /** Latest usage / cost / model snapshot for the run. */
+  usage?: UsageView;
+  /** Ordered agent / supervisor plan steps. */
+  steps: StepView[];
+  /** Citations / sources surfaced during the run. */
+  citations: CitationView[];
+  /** Artifacts produced, keyed by id (upserted). */
+  artifacts: Map<string, ArtifactView>;
+  /** Non-output diagnostics (guardrail / policy / eval / cognitive / ensemble). */
+  diagnostics: DiagnosticView[];
   /** All items in event order (for a linear render). */
   items: StreamItem[];
 }
@@ -85,6 +155,12 @@ export function emptyRunViewModel(): RunViewModel {
     textChunks: [],
     widgets: new Map(),
     toolCalls: [],
+    reasoningText: '',
+    reasoningChunks: [],
+    steps: [],
+    citations: [],
+    artifacts: new Map(),
+    diagnostics: [],
     items: [],
   };
 }
@@ -117,6 +193,11 @@ export function streamReducer(state: RunViewModel, envelope: RunEventEnvelope): 
     textChunks: [...state.textChunks],
     widgets: new Map(state.widgets),
     toolCalls: [...state.toolCalls],
+    reasoningChunks: [...state.reasoningChunks],
+    steps: [...state.steps],
+    citations: [...state.citations],
+    artifacts: new Map(state.artifacts),
+    diagnostics: [...state.diagnostics],
     items: [...state.items],
   };
 
@@ -218,6 +299,90 @@ export function streamReducer(state: RunViewModel, envelope: RunEventEnvelope): 
         const realIdx = next.toolCalls.length - 1 - lastIdx;
         next.toolCalls[realIdx] = { ...next.toolCalls[realIdx]!, error: errorMsg };
       }
+      break;
+    }
+
+    // ── Phase 1 — parity kinds ──
+
+    case 'reasoning.delta': {
+      // Accept either `delta` (canonical) or `text` (raw chat-frame shape).
+      const delta = typeof p['delta'] === 'string' ? p['delta']
+        : typeof p['text'] === 'string' ? p['text'] : '';
+      next.reasoningText = state.reasoningText + delta;
+      const chunk: ReasoningChunk = { kind: 'reasoning', text: next.reasoningText, delta };
+      next.reasoningChunks.push(chunk);
+      next.items.push(chunk);
+      break;
+    }
+
+    case 'usage.update': {
+      const num = (k: string): number | undefined => (typeof p[k] === 'number' ? p[k] as number : undefined);
+      const str = (k: string): string | undefined => (typeof p[k] === 'string' ? p[k] as string : undefined);
+      const uv: UsageView = {
+        kind: 'usage',
+        ...(num('promptTokens') !== undefined ? { promptTokens: num('promptTokens') } : {}),
+        ...(num('completionTokens') !== undefined ? { completionTokens: num('completionTokens') } : {}),
+        ...(num('totalTokens') !== undefined ? { totalTokens: num('totalTokens') } : {}),
+        ...(num('costUsd') !== undefined ? { costUsd: num('costUsd') } : {}),
+        ...(num('latencyMs') !== undefined ? { latencyMs: num('latencyMs') } : {}),
+        ...(str('model') !== undefined ? { model: str('model') } : {}),
+        ...(str('provider') !== undefined ? { provider: str('provider') } : {}),
+        ...(str('mode') !== undefined ? { mode: str('mode') } : {}),
+      };
+      next.usage = uv;
+      next.items.push(uv);
+      break;
+    }
+
+    case 'step.update': {
+      const sv: StepView = {
+        kind: 'step',
+        ...(typeof p['index'] === 'number' ? { index: p['index'] as number } : {}),
+        ...(typeof p['type'] === 'string' ? { type: p['type'] as string } : {}),
+        ...(typeof p['content'] === 'string' ? { content: p['content'] as string } : {}),
+        ...(typeof p['toolName'] === 'string' ? { toolName: p['toolName'] as string } : {}),
+        ...(typeof p['durationMs'] === 'number' ? { durationMs: p['durationMs'] as number } : {}),
+        ...(p['phase'] === 'step_start' || p['phase'] === 'step_end' ? { phase: p['phase'] as 'step_start' | 'step_end' } : {}),
+      };
+      next.steps.push(sv);
+      next.items.push(sv);
+      break;
+    }
+
+    case 'citation.add': {
+      const id = typeof p['id'] === 'string' ? p['id'] : `citation-${envelope.sequence}`;
+      const cv: CitationView = {
+        kind: 'citation', id,
+        ...(typeof p['text'] === 'string' ? { text: p['text'] as string } : {}),
+        ...(typeof p['source'] === 'string' ? { source: p['source'] as string } : {}),
+        ...(typeof p['url'] === 'string' ? { url: p['url'] as string } : {}),
+      };
+      if (!next.citations.some((c) => c.id === cv.id)) { // dedupe by id
+        next.citations.push(cv);
+        next.items.push(cv);
+      }
+      break;
+    }
+
+    case 'artifact.update': {
+      const id = typeof p['id'] === 'string' ? p['id'] : `artifact-${envelope.sequence}`;
+      const av: ArtifactView = {
+        kind: 'artifact', id,
+        ...(typeof p['type'] === 'string' ? { type: p['type'] as string } : {}),
+        ...(typeof p['title'] === 'string' ? { title: p['title'] as string } : {}),
+        ...(typeof p['mimeType'] === 'string' ? { mimeType: p['mimeType'] as string } : {}),
+        ...(typeof p['url'] === 'string' ? { url: p['url'] as string } : {}),
+      };
+      next.artifacts.set(id, av); // upsert by id
+      next.items.push(av);
+      break;
+    }
+
+    case 'diagnostic': {
+      const channel = typeof p['channel'] === 'string' ? p['channel'] : 'unknown';
+      const dv: DiagnosticView = { kind: 'diagnostic', channel, data: p['data'] };
+      next.diagnostics.push(dv);
+      next.items.push(dv);
       break;
     }
 

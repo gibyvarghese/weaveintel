@@ -25,7 +25,7 @@
  */
 
 import { newUUIDv7, createLogger, weaveContext } from '@weaveintel/core';
-import type { ExecutionContext, RunEventEnvelope } from '@weaveintel/core';
+import type { ExecutionContext, RunEventEnvelope, RunStep, RunUsage, RunCitation, RunArtifactRef } from '@weaveintel/core';
 
 const logger = createLogger('me-run-executor');
 import type { ServerResponse } from 'node:http';
@@ -59,6 +59,19 @@ export interface MeRunEmitter {
   toolCompleted(tool: string, result: unknown): Promise<void>;
   toolErrored(tool: string, error: string): Promise<void>;
   widget(id: string, payload: Record<string, unknown>, schemaVersion?: number): Promise<void>;
+  // Phase 1 — parity: previously these channels were dropped by the bridge.
+  /** Model thinking, as a DISTINCT channel (not folded into `text`). */
+  reasoning(delta: string): Promise<void>;
+  /** An agent / supervisor plan step. */
+  step(step: RunStep): Promise<void>;
+  /** Token usage / cost / latency / model for the run (from the chat `done` frame). */
+  usage(usage: RunUsage): Promise<void>;
+  /** A source / citation surfaced during the run. */
+  citation(citation: RunCitation): Promise<void>;
+  /** An artifact reference produced by the run. */
+  artifact(artifact: RunArtifactRef): Promise<void>;
+  /** A non-output diagnostic (guardrail / policy / eval / cognitive / ensemble). */
+  diagnostic(channel: string, data?: unknown): Promise<void>;
 }
 
 export interface MeRunAgentArgs {
@@ -344,6 +357,30 @@ export class MeRunExecutor {
             payload,
             ...(schemaVersion !== undefined ? { schemaVersion } : {}),
           });
+        },
+        reasoning: async (delta) => {
+          if (controller.signal.aborted) return;
+          await this.appendEvent(runId, 'reasoning.delta', { delta });
+        },
+        step: async (step) => {
+          if (controller.signal.aborted) return;
+          await this.appendEvent(runId, 'step.update', { ...step });
+        },
+        usage: async (usage) => {
+          if (controller.signal.aborted) return;
+          await this.appendEvent(runId, 'usage.update', { ...usage });
+        },
+        citation: async (citation) => {
+          if (controller.signal.aborted) return;
+          await this.appendEvent(runId, 'citation.add', { ...citation });
+        },
+        artifact: async (artifact) => {
+          if (controller.signal.aborted) return;
+          await this.appendEvent(runId, 'artifact.update', { ...artifact });
+        },
+        diagnostic: async (channel, data) => {
+          if (controller.signal.aborted) return;
+          await this.appendEvent(runId, 'diagnostic', { channel, ...(data !== undefined ? { data } : {}) });
         },
       };
 
