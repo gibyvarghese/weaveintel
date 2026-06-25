@@ -66,6 +66,8 @@ function harness(): Harness {
       },
       async postEvent(runId, payload) { h.posted.push({ runId, payload }); },
       async setPresence() { return { participants: [] }; },
+      async shareRun() { return { sessionId: 's', token: 't', tokenId: 'tid', role: 'viewer', url: '/shared/t', expiresAt: null }; },
+      async joinSession() { return { runId: 'run-1', sessionId: 's', role: 'viewer' }; },
     },
   };
   return h;

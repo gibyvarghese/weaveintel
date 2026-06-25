@@ -74,6 +74,7 @@ import { applyM91RunStreamConfig } from './m91-run-stream-config.js';
 import { applyM92ReasoningSettings } from './m92-reasoning-settings.js';
 import { applyM93HitlRunScope } from './m93-hitl-run-scope.js';
 import { applyM94CollaborationPresence } from './m94-collaboration-presence.js';
+import { applyM95SharedSessions } from './m95-shared-sessions.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -156,6 +157,7 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm92-reasoning-settings', description: 'Reasoning request: chat_settings.reasoning_enabled/reasoning_effort/reasoning_budget_tokens — request provider reasoning (Anthropic thinking / OpenAI effort) for reasoning-capable models so reasoning frames surface', run: applyM92ReasoningSettings },
   { id: 'm93-hitl-run-scope', description: 'HITL Phase 4: add run_id to hitl_interrupt_requests so /api/me/runs approvals are run-scoped + persisted (survive restart)', run: applyM93HitlRunScope },
   { id: 'm94-collaboration-presence', description: 'Collaboration Phase 1: run_presence current-state table (heartbeat-upsert, TTL-expiring; humans + agent peers; tenant-isolated; NOT journaled) + collaboration_config single-row (presence heartbeat/ttl/sweep cadence, DB-driven) for live "who is watching this run" presence', run: applyM94CollaborationPresence },
+  { id: 'm95-shared-sessions', description: 'Collaboration Phase 2: shared_sessions + session_participants (durable membership, UNIQUE(session,user) idempotent join, owner/collaborator/viewer roles) + session_share_tokens (invite links: 256-bit token, SHA-256-hashed at rest, expiry/revocation) — turns a single-owner run into a multi-user one with server-side role enforcement', run: applyM95SharedSessions },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

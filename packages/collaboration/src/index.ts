@@ -52,3 +52,21 @@ export {
   type PresenceHarness,
   presenceManagerContract,
 } from './presence-contract.js';
+
+// Phase 2 — Shared sessions + roles (multi-user access). The PORT + in-memory
+// reference adapter; geneWeave provides the SQL adapter over `shared_sessions` +
+// `session_participants`. Both pass `sessionManagerContract`.
+export {
+  type SessionRole,
+  type SharedSession as SharedRunSession,
+  type SessionParticipant as SharedSessionParticipant,
+  type CreateSessionInput,
+  type SessionManager,
+  type InMemorySessionManagerOptions,
+  createInMemorySessionManager,
+  roleAtLeast,
+} from './shared-session.js';
+export {
+  type ContractTestApi as SessionContractTestApi,
+  sessionManagerContract,
+} from './shared-session-contract.js';

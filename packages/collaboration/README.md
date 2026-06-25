@@ -13,7 +13,8 @@ here"), live run subscriptions, and user handoff.
 | Primitive | What it does |
 |---|---|
 | `createInMemoryPresenceManager()` | **Presence** ("who else is here"): a heartbeat-driven, TTL-expiring set of participants watching a run. The PORT + an in-memory reference adapter; geneWeave provides a SQL adapter over `run_presence`. Both pass `presenceManagerContract`. |
-| `createSharedSessionManager()` | A shared "room": participants with roles (owner / collaborator / viewer) and a presence state. |
+| `createInMemorySessionManager()` | **Shared sessions** (Phase 2): turn a single-owner run into a multi-user one — members join with a **role** (owner / collaborator / viewer). The PORT + in-memory adapter; geneWeave's SQL adapter + invite-link tokens layer on top. Both pass `sessionManagerContract`. |
+| `createSharedSessionManager()` | (legacy in-memory prototype) a shared "room" with presence state. |
 | `createRunSubscriptionManager()` | Track who is **subscribed** to a run and broadcast status/progress changes to all of them. |
 | `createHandoffManager()` | The **handoff** lifecycle — request → accept / reject / cancel / complete — for passing a session from one user to another. |
 
@@ -39,6 +40,33 @@ not delta** (each `presence.update` is the full participant list — idempotent 
 gap-safe over SSE), **ephemeral** (a current-state table, never the durable run
 journal), and **server-derived identity** (the user id comes from auth, never the
 client — so presence can't be spoofed).
+
+### Shared sessions + invite links (Phase 2) — how it works
+
+> New to this? It's exactly Google-Docs sharing, for a live AI run. The owner
+> clicks "share", picks a level (**view** or **edit**), and sends a link. Whoever
+> opens it gets *exactly* that level — a **viewer** can watch, a **collaborator**
+> can also send input, and only the **owner** can cancel the run or manage
+> sharing. The rule that matters: the "manage/share" power is its own top tier —
+> editing does not grant sharing.
+
+```ts
+import { createInMemorySessionManager } from '@weaveintel/collaboration';
+
+const sessions = createInMemorySessionManager();
+const s = await sessions.createSession({ id, runId, tenantId, ownerId });
+await sessions.join(s.id, 'bob', 'viewer');     // join via link → membership row
+await sessions.getRole(s.id, 'bob');            // 'viewer' — used to gate every request
+```
+
+Security model (mid-2026 research — Google/Notion/Figma/Liveblocks + W3C
+capability-URL guidance): invite **tokens are 256-bit random and SHA-256-hashed
+at rest** (the plaintext is shown once, never stored); **identity is
+server-derived** (no spoofing); the **tenant gate runs before role logic** on
+every request; membership is a table with `UNIQUE(session, user)` so **joining
+twice is idempotent**; and **role is enforced server-side on every endpoint** —
+the client's claimed role is never trusted. Only the **owner** holds the
+share/cancel capability (the Notion "Full access vs Can edit" split).
 
 ```ts
 import { createSharedSessionManager } from '@weaveintel/collaboration';
@@ -79,7 +107,7 @@ are still **in-memory prototypes** that later phases make durable. See
 **`COLLABORATION_PACKAGE_REVIEW_AND_ROADMAP_2026.md`**:
 
 - **Phase 1 ✅** — Presence persisted (`run_presence`) + SSE broadcast + agent-as-peer.
-- **Phase 2** — Shared sessions + invite links (`shared_sessions`).
+- **Phase 2 ✅** — Shared sessions + invite links (`shared_sessions`/`session_participants`) + role-gated multi-user access.
 - **Phase 3** — Durable subscriptions + offline notifications.
 - **Phase 4** — Collaborative run comments / annotations.
 - **Phase 5** — Unified handoff (built on `@weaveintel/human-tasks` + `@weaveintel/a2a`).

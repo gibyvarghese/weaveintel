@@ -51,6 +51,45 @@ export interface CollaborationConfigRow {
   updated_at: string;
 }
 
+/** m95 (Collaboration Phase 2) — a shared session over a run. */
+export interface SharedSessionRow {
+  id: string;
+  run_id: string;
+  tenant_id: string | null;
+  owner_id: string;
+  status: 'live' | 'ended';
+  max_participants: number;
+  created_at: number;
+  ended_at: number | null;
+}
+
+/** m95 — a durable membership row (who may access the run + their role). */
+export interface SessionParticipantRow {
+  id: string;
+  session_id: string;
+  tenant_id: string | null;
+  user_id: string;
+  role: 'owner' | 'collaborator' | 'viewer';
+  joined_at: number;
+  invited_via_token_id: string | null;
+}
+
+/** m95 — an invite-link token (SHA-256 hash stored; plaintext shown once). */
+export interface ShareTokenRow {
+  id: string;
+  session_id: string;
+  tenant_id: string | null;
+  role: 'owner' | 'collaborator' | 'viewer';
+  token_hash: string;
+  token_prefix: string;
+  max_uses: number | null;
+  uses: number;
+  expires_at: number | null;
+  revoked_at: number | null;
+  created_by: string;
+  created_at: number;
+}
+
 export interface UserDeviceRow {
   id: string;
   user_id: string;
@@ -119,6 +158,19 @@ export interface IMeStore {
   deleteRunPresence(runId: string, userId: string): Promise<number>;
   deleteExpiredRunPresence(now: number): Promise<Array<{ run_id: string; tenant_id: string | null }>>;
   getCollaborationConfig(): Promise<CollaborationConfigRow | null>;
+  // ── Shared sessions + invite links (m95, Collaboration Phase 2) ────────────
+  createSharedSession(row: { id: string; run_id: string; tenant_id?: string | null; owner_id: string; max_participants: number; created_at: number }): Promise<void>;
+  getSharedSessionById(id: string): Promise<SharedSessionRow | null>;
+  getSharedSessionByRun(runId: string): Promise<SharedSessionRow | null>;
+  endSharedSession(id: string, endedAt: number): Promise<void>;
+  upsertSessionParticipant(row: { id: string; session_id: string; tenant_id?: string | null; user_id: string; role: string; joined_at: number; invited_via_token_id?: string | null }): Promise<void>;
+  getSessionParticipant(sessionId: string, userId: string): Promise<SessionParticipantRow | null>;
+  listSessionParticipants(sessionId: string): Promise<SessionParticipantRow[]>;
+  deleteSessionParticipant(sessionId: string, userId: string): Promise<number>;
+  createShareToken(row: { id: string; session_id: string; tenant_id?: string | null; role: string; token_hash: string; token_prefix: string; max_uses?: number | null; expires_at?: number | null; created_by: string; created_at: number }): Promise<void>;
+  getShareTokenByHash(tokenHash: string): Promise<ShareTokenRow | null>;
+  incrementShareTokenUses(id: string): Promise<void>;
+  revokeShareToken(id: string, revokedAt: number): Promise<void>;
   /**
    * Prune the run-event journal (Client Phase 0). Removes events for terminal
    * runs older than `olderThanHours`, and trims any run whose event count

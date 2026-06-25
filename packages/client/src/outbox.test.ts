@@ -23,6 +23,8 @@ function mockClient(opts: {
     attach() { return new AbortController(); },
     async postEvent(runId, payload) { opts.onPost?.(runId, payload); posts.push({ runId, payload }); },
     async setPresence() { return { participants: [] }; },
+    async shareRun() { return { sessionId: 's', token: 't', tokenId: 'tid', role: 'viewer', url: '/shared/t', expiresAt: null }; },
+    async joinSession() { return { runId: 'run-1', sessionId: 's', role: 'viewer' }; },
   };
 }
 

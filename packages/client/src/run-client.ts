@@ -102,6 +102,13 @@ export interface RunClient {
    * Pass `{ leave: true }` to leave. Returns the current participant snapshot.
    */
   setPresence(runId: string, body: { presence?: string; displayName?: string; cursor?: Record<string, unknown>; leave?: boolean }): Promise<{ participants: unknown[] }>;
+  /**
+   * Collaboration Phase 2 — share a run (owner only). Mints an invite token
+   * (default role `viewer`) and returns it ONCE plus the share URL.
+   */
+  shareRun(runId: string, body?: { role?: 'viewer' | 'collaborator'; expiresInMs?: number; maxUses?: number }): Promise<{ sessionId: string; token: string; tokenId: string; role: string; url: string; expiresAt: number | null }>;
+  /** Collaboration Phase 2 — join a shared run via an invite token. */
+  joinSession(token: string): Promise<{ runId: string; sessionId: string; role: string }>;
 }
 
 export interface CreateRunClientOptions {
@@ -263,6 +270,14 @@ export function createRunClient(opts: CreateRunClientOptions): RunClient {
 
     async setPresence(runId, body) {
       return json.post<{ participants: unknown[] }>(`/api/me/runs/${runId}/presence`, body);
+    },
+
+    async shareRun(runId, body = {}) {
+      return json.post(`/api/me/runs/${runId}/share`, body);
+    },
+
+    async joinSession(token) {
+      return json.post('/api/me/sessions/join', { token });
     },
   };
 }

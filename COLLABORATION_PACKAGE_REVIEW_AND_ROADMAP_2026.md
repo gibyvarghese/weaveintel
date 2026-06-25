@@ -209,11 +209,20 @@ Each phase extends existing code (geneWeave SQL, `@weaveintel/client`, core `Eve
 
 **Scope note:** Phase 1 runs are single‑owner, so genuine MULTI‑USER presence on one run (two different humans) arrives with **Phase 2** (shared sessions grant a second user access). Phase 1's "second participant" is the **agent peer**, which exercises the full multi‑participant snapshot/broadcast mechanism. TTL expiry + sweep are covered deterministically by the unit/contract tests (clock‑injected).
 
-### Phase 2 — Shared sessions + invite links · C5
+### Phase 2 — Shared sessions + invite links · C5  ✅ delivered
 **Goal:** multi‑user shared runs/chats with roles.
 - `shared_sessions` + `session_participants` (7.2) + `SessionManager`; share‑token route (reuse the artifact share‑token pattern). Roles gate write vs view. Presence (Phase 1) scopes to a session.
 - Client: `useRun`/`createRunSession` accept a `sessionId`; the reducer exposes participants+roles.
 - **Acceptance:** an owner shares a run via link; a second user joins as viewer, sees live output + presence, cannot send control events; roles enforced server‑side. Playwright multi‑context test.
+
+**What shipped (research‑anchored on Google/Notion/Figma/Liveblocks + W3C capability‑URL guidance):**
+- **`@weaveintel/collaboration`** — `SessionManager` PORT + in‑memory adapter + `sessionManagerContract`. Roles `owner` ⊃ `collaborator` ⊃ `viewer` (`roleAtLeast`); idempotent join keeps the higher role ("highest permission wins"); owner‑only manage/end. 15 unit tests.
+- **geneWeave** — `m95`: `shared_sessions` + `session_participants` (`UNIQUE(session,user)` idempotent membership) + `session_share_tokens` (invite links). `SqlSessionManager` passes the **same** `sessionManagerContract` (14 tests). **`resolveRunAccess`** — the single authorization chokepoint (owner → `owner`; participant → their role; else `null`=404). Endpoints: `POST /runs/:id/share` (owner mints a token), `POST /sessions/join` (authenticated join), `GET /runs/:id/session`, `POST /runs/:id/share/revoke`. Every run route is **re‑gated by role**: read SSE/presence = any participant; post control events = collaborator+; **cancel/share = owner only**. Presence snapshots are **badged with each participant's role**.
+- **Security (mid‑2026 research):** invite token = **256‑bit CSPRNG, SHA‑256‑hashed at rest** (plaintext shown once); **identity server‑derived** (anti‑spoof); **tenant gate before role logic**; uniform rejection on bad/expired/revoked token (no enumeration); owner can never mint an owner link; revocation supported.
+- **`@weaveintel/client`** — `RunClient.shareRun()` / `joinSession()`; the `presence.update` snapshot now carries each participant's `role` (the reducer "exposes participants + roles" via `vm.presence`).
+- **Real‑LLM e2e** (`run-shared-session-phase2.e2e.ts`): owner shares → a SECOND real user joins as viewer → **two humans present, badged owner/viewer** (the genuine multi‑user presence Phase 1 set up) → the viewer can read but is **403'd on control events + cancel**; a collaborator can post events but not cancel; a non‑participant gets 404, an invalid token is rejected. Across direct/agent/supervisor/ensemble + web‑UI regression.
+
+**Hardening note (documented, not blocking):** the SSE read stream is authorized at connect; per the mid‑2026 CVE‑2026‑53843 pattern, revoking a *connected* viewer mid‑stream should force‑close their socket — a follow‑up (control endpoints already re‑authorize per request).
 
 ### Phase 3 — Durable subscriptions + offline notifications · C3
 **Goal:** subscribe to a run and get notified even when not watching.

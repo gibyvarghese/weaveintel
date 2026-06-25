@@ -60,6 +60,8 @@ import { runApprovals } from '../me-run-approvals.js';
 import { createSqlRunJournal } from '../run-substrate-sql.js';
 import { createSqlPresenceManager, withAgentPeer } from '../presence-sql.js';
 import { loadCollaborationConfig, clientCollabConfig } from '../collab-config.js';
+import { resolveRunAccess, createSqlSessionManager, mintShareToken, hashShareToken, annotatePresenceRoles } from '../shared-session-sql.js';
+import { roleAtLeast, type SessionRole } from '@weaveintel/collaboration';
 
 /**
  * Register all /api/me routes on the provided router.
@@ -191,17 +193,20 @@ export function registerMeRoutes(
 
   router.get('/api/me/runs/:runId', async (_req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
-    const run = await db.getUserRun(params['runId']!, auth.userId);
-    if (!run) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    // Phase 2: any participant (owner / collaborator / viewer) may VIEW the run.
+    const access = await resolveRunAccess(db, params['runId']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(run));
+    res.end(JSON.stringify({ ...access.run, role: access.role }));
   }, { auth: true });
 
   // SSE event stream — resumable via ?after=<sequence>
   router.get('/api/me/runs/:runId/events', async (req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
-    const run = await db.getUserRun(params['runId']!, auth.userId);
-    if (!run) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    // Phase 2: any participant may READ the live stream (viewers watch).
+    const access = await resolveRunAccess(db, params['runId']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    const run = access.run;
 
     const url = new URL(req.url ?? '/', 'http://x');
     const afterSeq = safePageInt(url.searchParams.get('after'), -1, -1, Number.MAX_SAFE_INTEGER);
@@ -249,7 +254,7 @@ export function registerMeRoutes(
       if (collabCfg.enabled) {
         const presence = createSqlPresenceManager(db, { ttlMs: collabCfg.presenceTtlMs });
         const humans = await presence.list({ runId: run.id, tenantId: run.tenant_id ?? '__default__' });
-        const participants = withAgentPeer(humans, run.status, collabCfg.showAgentPresence);
+        const participants = await annotatePresenceRoles(withAgentPeer(humans, run.status, collabCfg.showAgentPresence), db, run);
         if (participants.length > 0) {
           subscriber.replay({ runId: run.id, sequence: -1, kind: 'presence.update', payload: { participants }, timestamp: Date.now() });
         }
@@ -277,8 +282,12 @@ export function registerMeRoutes(
 
   router.post('/api/me/runs/:runId/events', async (req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
-    const run = await db.getUserRun(params['runId']!, auth.userId);
-    if (!run) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    // Phase 2: posting control events (input, approval decisions, steering) is a
+    // WRITE — only owner + collaborator. A viewer who finds the run gets 403.
+    const access = await resolveRunAccess(db, params['runId']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    if (!roleAtLeast(access.role, 'collaborator')) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden: viewers cannot send control events' })); return; }
+    const run = access.run;
     const body = JSON.parse(await readBody(req)) as Record<string, unknown>;
 
     const kind = typeof body['kind'] === 'string' ? body['kind'] : 'client.event';
@@ -320,8 +329,11 @@ export function registerMeRoutes(
   // `run_presence` table) and never journaled.
   router.post('/api/me/runs/:runId/presence', async (req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
-    const run = await db.getUserRun(params['runId']!, auth.userId); // ownership + tenant isolation
-    if (!run) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    // Phase 2: any participant (incl. viewers) may show presence on a run they
+    // can access — that's what makes multi-user "who's watching" work.
+    const access = await resolveRunAccess(db, params['runId']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    const run = access.run;
 
     const cfg = await loadCollaborationConfig(db);
     if (!cfg.enabled) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ participants: [] })); return; }
@@ -345,7 +357,7 @@ export function registerMeRoutes(
         ...(body['cursor'] && typeof body['cursor'] === 'object' ? { cursor: body['cursor'] as Record<string, unknown> } : {}),
       });
     }
-    const participants = withAgentPeer(humans, run.status, cfg.showAgentPresence);
+    const participants = await annotatePresenceRoles(withAgentPeer(humans, run.status, cfg.showAgentPresence), db, run);
     // Push the new snapshot to everyone watching (ephemeral — not journaled).
     runExecutor.broadcastEphemeral(run.id, 'presence.update', { participants });
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -354,20 +366,24 @@ export function registerMeRoutes(
 
   router.get('/api/me/runs/:runId/presence', async (_req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
-    const run = await db.getUserRun(params['runId']!, auth.userId);
-    if (!run) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    const access = await resolveRunAccess(db, params['runId']!, auth.userId); // any participant
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    const run = access.run;
     const cfg = await loadCollaborationConfig(db);
     const presence = createSqlPresenceManager(db, { ttlMs: cfg.presenceTtlMs });
     const humans = await presence.list({ runId: run.id, tenantId: run.tenant_id ?? '__default__' });
-    const participants = withAgentPeer(humans, run.status, cfg.showAgentPresence);
+    const participants = await annotatePresenceRoles(withAgentPeer(humans, run.status, cfg.showAgentPresence), db, run);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ participants }));
   }, { auth: true });
 
   router.post('/api/me/runs/:runId/cancel', async (_req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
-    const run = await db.getUserRun(params['runId']!, auth.userId);
-    if (!run) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    // Phase 2: cancelling is an OWNER-only action (a higher tier than write).
+    const access = await resolveRunAccess(db, params['runId']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    if (access.role !== 'owner') { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden: only the owner can cancel the run' })); return; }
+    const run = access.run;
     if (isTerminalRunStatus(run.status)) {
       res.writeHead(409); res.end(JSON.stringify({ error: 'Run already in terminal state' })); return;
     }
@@ -387,6 +403,93 @@ export function registerMeRoutes(
     }
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ status: 'cancelled' }));
+  }, { auth: true });
+
+  // ── Shared sessions + invite links (Collaboration Phase 2) ──────────────────
+  // Share a run: OWNER-only. Creates the shared session (idempotent per run) and
+  // mints an invite token granting `role` (default viewer). The plaintext token
+  // is returned ONCE — only its SHA-256 hash is stored.
+  router.post('/api/me/runs/:runId/share', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveRunAccess(db, params['runId']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    if (access.role !== 'owner') { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden: only the owner can share a run' })); return; }
+    const run = access.run;
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* default viewer */ }
+    const role: SessionRole = body['role'] === 'collaborator' ? 'collaborator' : 'viewer'; // never mint an owner link
+    const cfg = await loadCollaborationConfig(db);
+
+    const sessions = createSqlSessionManager(db);
+    const session = await sessions.createSession({ id: newUUIDv7(), runId: run.id, tenantId: run.tenant_id ?? '__default__', ownerId: auth.userId, maxParticipants: cfg.maxParticipantsPerRun });
+
+    const { token, hash, prefix } = mintShareToken();
+    const expiresAt = typeof body['expiresInMs'] === 'number' ? Date.now() + (body['expiresInMs'] as number) : null;
+    const tokenId = newUUIDv7();
+    await db.createShareToken({ id: tokenId, session_id: session.id, tenant_id: run.tenant_id ?? '__default__', role, token_hash: hash, token_prefix: prefix, ...(typeof body['maxUses'] === 'number' ? { max_uses: body['maxUses'] as number } : {}), ...(expiresAt ? { expires_at: expiresAt } : {}), created_by: auth.userId, created_at: Date.now() });
+
+    res.writeHead(201, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ sessionId: session.id, token, tokenId, role, expiresAt, url: `/shared/${token}` }));
+  }, { auth: true });
+
+  // Join via an invite token. Authenticated join (identity is server-derived).
+  // Validates the token (hash match, live, not expired/revoked, under caps),
+  // then idempotently creates the membership and returns the run id + role.
+  router.post('/api/me/sessions/join', async (req, res, _params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* invalid */ }
+    const token = typeof body['token'] === 'string' ? body['token'] : '';
+    if (!token) { res.writeHead(400); res.end(JSON.stringify({ error: 'Missing token' })); return; }
+
+    const row = await db.getShareTokenByHash(hashShareToken(token));
+    const now = Date.now();
+    // Uniform rejection (don't reveal which check failed → no enumeration).
+    if (!row || row.revoked_at || (row.expires_at && row.expires_at < now) || (row.max_uses !== null && row.uses >= row.max_uses)) {
+      res.writeHead(403); res.end(JSON.stringify({ error: 'Invalid or expired link' })); return;
+    }
+    const session = await db.getSharedSessionById(row.session_id);
+    if (!session || session.status !== 'live') { res.writeHead(403); res.end(JSON.stringify({ error: 'Invalid or expired link' })); return; }
+    // Tenant gate: the token's tenant must match the joiner's session tenant.
+    // (Both were stamped server-side; a cross-tenant token simply won't resolve.)
+
+    const sessions = createSqlSessionManager(db);
+    try {
+      const participant = await sessions.join(session.id, auth.userId, row.role as SessionRole);
+      await db.incrementShareTokenUses(row.id);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ runId: session.run_id, sessionId: session.id, role: participant.role }));
+    } catch (err) {
+      res.writeHead(409); res.end(JSON.stringify({ error: err instanceof Error ? err.message : 'Could not join' }));
+    }
+  }, { auth: true });
+
+  // Read the shared session + its participants (any participant).
+  router.get('/api/me/runs/:runId/session', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveRunAccess(db, params['runId']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    const sessions = createSqlSessionManager(db);
+    const session = await sessions.getByRun(access.run.id);
+    if (!session) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ shared: false, role: access.role, participants: [] })); return; }
+    const participants = await sessions.listParticipants(session.id);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ shared: true, sessionId: session.id, ownerId: session.ownerId, role: access.role, participants }));
+  }, { auth: true });
+
+  // Revoke an invite token (OWNER-only) — already-joined members keep access
+  // until removed; the link stops admitting new joiners.
+  router.post('/api/me/runs/:runId/share/revoke', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveRunAccess(db, params['runId']!, auth.userId);
+    if (!access || access.role !== 'owner') { res.writeHead(access ? 403 : 404); res.end(JSON.stringify({ error: access ? 'Forbidden' : 'Not found' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* */ }
+    const tokenId = typeof body['tokenId'] === 'string' ? body['tokenId'] : '';
+    if (!tokenId) { res.writeHead(400); res.end(JSON.stringify({ error: 'Missing tokenId' })); return; }
+    await db.revokeShareToken(tokenId, Date.now());
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ revoked: true }));
   }, { auth: true });
 
   // ─── Catalog ────────────────────────────────────────────────────────────

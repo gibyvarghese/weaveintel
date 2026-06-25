@@ -8903,6 +8903,55 @@ export class SQLiteAdapter implements DatabaseAdapter {
     return (this.d.prepare(`SELECT * FROM collaboration_config WHERE id = 'global'`).get() ?? null) as import('./db-types/adapter-me.js').CollaborationConfigRow | null;
   }
 
+  // ── Shared sessions + invite links (m95, Collaboration Phase 2) ─────────────
+  async createSharedSession(row: { id: string; run_id: string; tenant_id?: string | null; owner_id: string; max_participants: number; created_at: number }): Promise<void> {
+    // Idempotent per run via UNIQUE(run_id) + the owner is participant #1.
+    this.d.prepare(
+      `INSERT OR IGNORE INTO shared_sessions (id, run_id, tenant_id, owner_id, status, max_participants, created_at)
+       VALUES (?, ?, ?, ?, 'live', ?, ?)`,
+    ).run(row.id, row.run_id, row.tenant_id ?? null, row.owner_id, row.max_participants, row.created_at);
+  }
+  async getSharedSessionById(id: string): Promise<import('./db-types/adapter-me.js').SharedSessionRow | null> {
+    return (this.d.prepare('SELECT * FROM shared_sessions WHERE id = ?').get(id) ?? null) as import('./db-types/adapter-me.js').SharedSessionRow | null;
+  }
+  async getSharedSessionByRun(runId: string): Promise<import('./db-types/adapter-me.js').SharedSessionRow | null> {
+    return (this.d.prepare('SELECT * FROM shared_sessions WHERE run_id = ?').get(runId) ?? null) as import('./db-types/adapter-me.js').SharedSessionRow | null;
+  }
+  async endSharedSession(id: string, endedAt: number): Promise<void> {
+    this.d.prepare(`UPDATE shared_sessions SET status = 'ended', ended_at = ? WHERE id = ?`).run(endedAt, id);
+  }
+  async upsertSessionParticipant(row: { id: string; session_id: string; tenant_id?: string | null; user_id: string; role: string; joined_at: number; invited_via_token_id?: string | null }): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO session_participants (id, session_id, tenant_id, user_id, role, joined_at, invited_via_token_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(session_id, user_id) DO UPDATE SET role = excluded.role`,
+    ).run(row.id, row.session_id, row.tenant_id ?? null, row.user_id, row.role, row.joined_at, row.invited_via_token_id ?? null);
+  }
+  async getSessionParticipant(sessionId: string, userId: string): Promise<import('./db-types/adapter-me.js').SessionParticipantRow | null> {
+    return (this.d.prepare('SELECT * FROM session_participants WHERE session_id = ? AND user_id = ?').get(sessionId, userId) ?? null) as import('./db-types/adapter-me.js').SessionParticipantRow | null;
+  }
+  async listSessionParticipants(sessionId: string): Promise<import('./db-types/adapter-me.js').SessionParticipantRow[]> {
+    return this.d.prepare('SELECT * FROM session_participants WHERE session_id = ? ORDER BY joined_at ASC').all(sessionId) as import('./db-types/adapter-me.js').SessionParticipantRow[];
+  }
+  async deleteSessionParticipant(sessionId: string, userId: string): Promise<number> {
+    return this.d.prepare('DELETE FROM session_participants WHERE session_id = ? AND user_id = ?').run(sessionId, userId).changes;
+  }
+  async createShareToken(row: { id: string; session_id: string; tenant_id?: string | null; role: string; token_hash: string; token_prefix: string; max_uses?: number | null; expires_at?: number | null; created_by: string; created_at: number }): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO session_share_tokens (id, session_id, tenant_id, role, token_hash, token_prefix, max_uses, uses, expires_at, created_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+    ).run(row.id, row.session_id, row.tenant_id ?? null, row.role, row.token_hash, row.token_prefix, row.max_uses ?? null, row.expires_at ?? null, row.created_by, row.created_at);
+  }
+  async getShareTokenByHash(tokenHash: string): Promise<import('./db-types/adapter-me.js').ShareTokenRow | null> {
+    return (this.d.prepare('SELECT * FROM session_share_tokens WHERE token_hash = ?').get(tokenHash) ?? null) as import('./db-types/adapter-me.js').ShareTokenRow | null;
+  }
+  async incrementShareTokenUses(id: string): Promise<void> {
+    this.d.prepare('UPDATE session_share_tokens SET uses = uses + 1 WHERE id = ?').run(id);
+  }
+  async revokeShareToken(id: string, revokedAt: number): Promise<void> {
+    this.d.prepare('UPDATE session_share_tokens SET revoked_at = ? WHERE id = ?').run(revokedAt, id);
+  }
+
   // ── HITL approvals (m64 table, m93 run-scoped) ─────────────────────────────
   async createHitlInterrupt(row: {
     id: string; chat_id: string; run_id?: string | null; agent_name: string; agent_step?: number;

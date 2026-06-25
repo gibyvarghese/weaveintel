@@ -171,6 +171,12 @@ export interface RunPresenceParticipant {
   peerType: 'human' | 'agent';
   /** Optional UI color for the participant's cursor/badge. */
   color?: string;
+  /**
+   * Collaboration Phase 2 — the participant's role in the shared session
+   * (`owner` / `collaborator` / `viewer`), when the run is shared. Surfaced so a
+   * UI can badge who can edit vs only watch.
+   */
+  role?: 'owner' | 'collaborator' | 'viewer';
   /** Epoch ms of the participant's last heartbeat (drives TTL expiry). */
   lastHeartbeatAt?: number;
   /** Optional cursor / viewport the participant is looking at. */
