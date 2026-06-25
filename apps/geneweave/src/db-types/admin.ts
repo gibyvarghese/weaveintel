@@ -40,10 +40,128 @@ export interface CachePolicyRow {
   scope: string;               // 'global' | 'tenant' | 'user' | 'session' | 'agent'
   ttl_ms: number;
   max_entries: number;
-  bypass_patterns: string | null;  // JSON array
+  max_bytes: number;               // approximate L1 byte budget; 0 = off
+  bypass_patterns: string | null;  // JSON array — matched against the prompt
+  output_bypass_patterns: string | null;  // JSON array — matched against the response
   invalidate_on: string | null;    // JSON array of event types
+  key_hashing: string;             // 'none' | 'sha256'
+  tenant_isolation: number;        // 1 = fold tenant id into the cache key
+  cache_temperature_gate: number;  // cache only when effective temperature ≤ this
+  swr_ms?: number;                 // Phase 7: stale-while-revalidate window (0 = off)
+  negative_ttl_ms?: number;        // Phase 7: negative-cache TTL for misses/errors (0 = off)
+  eviction_policy?: string;        // Phase 7: 'lru'|'lfu'|'fifo'|'tinylfu'|'gdsf'
   enabled: number;
   created_at: string;
+  updated_at: string;
+}
+
+export interface CacheMetricsRow {
+  window_start: string;            // hourly bucket 'YYYY-MM-DDTHH:00:00Z'
+  response_hits: number;
+  response_misses: number;
+  prompt_cache_read_tokens: number;
+  prompt_cache_write_tokens: number;
+  cost_saved_usd: number;
+  updated_at: string;
+}
+
+/** A partial increment applied to the current hourly cache_metrics window. */
+export interface CacheMetricsDelta {
+  responseHits?: number;
+  responseMisses?: number;
+  promptCacheReadTokens?: number;
+  promptCacheWriteTokens?: number;
+  costSavedUsd?: number;
+}
+
+/** Aggregate cache-metrics view returned to the admin dashboard. */
+export interface CacheMetricsSummary {
+  totals: {
+    responseHits: number;
+    responseMisses: number;
+    hitRate: number;
+    promptCacheReadTokens: number;
+    promptCacheWriteTokens: number;
+    costSavedUsd: number;
+  };
+  windows: CacheMetricsRow[];
+}
+
+export interface CacheInvalidationRuleRow {
+  id: string;
+  name: string;
+  trigger: string;          // event type ('model_change', 'prompt_update', ...)
+  pattern: string | null;   // optional payload regex
+  config: string | null;    // JSON: { clearAll, prefix, prefixFromPayload, scope, query, ... }
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ToolCachePolicyRow {
+  id: string;
+  tool_name: string;     // schema name of the tool this policy governs
+  cacheable: number;     // 1 = its result may be cached, 0 = never
+  ttl_ms: number;        // time-to-live for a cached result
+  enabled: number;       // 1 = policy active
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SemanticCacheConfigRow {
+  id: string;                      // always 'global'
+  enabled: number;
+  embedding_model: string;
+  embedding_version: string;
+  similarity_threshold: number;
+  invalidation_radius: number;
+  max_entries: number;
+  ttl_ms: number;
+  scope: string;                   // 'global' | 'tenant' | 'user' | 'session'
+  bypass_patterns: string | null;  // JSON array of time-sensitive patterns
+  verified_bounds: number;
+  updated_at: string;
+}
+
+export interface RunStreamConfigRow {
+  id: string;                      // always 'global'
+  enabled: number;
+  heartbeat_ms: number;            // SSE keepalive interval (server)
+  max_reconnects: number;          // client auto-reconnect budget
+  backoff_ms: string;              // JSON array of reconnect delays (ms)
+  stall_timeout_ms: number;        // tear-down window for a silent stream
+  throttle_ms: number;             // client UI-update throttle
+  journal_retention_hours: number; // user_run_events pruning horizon
+  journal_max_events: number;      // max persisted events per run
+  resume_window_seconds: number;   // refresh-proof resume window
+  updated_at: string;
+}
+
+export interface AgentPlanCacheConfigRow {
+  id: string;                      // always 'global'
+  enabled: number;
+  similarity_threshold: number;    // a past plan must clear this to be reused
+  min_steps: number;               // min executed steps before a plan is cached
+  max_entries: number;
+  ttl_ms: number;
+  scope: string;                   // 'global' | 'tenant' | 'user' | 'session'
+  embedding_model: string;
+  updated_at: string;
+}
+
+export interface CacheSettingsRow {
+  id: string;                      // always 'global'
+  l2_enabled: number;             // 1 = use distributed L2 (Redis)
+  l2_provider: string;            // 'none' | 'redis'
+  l1_max_entries: number;
+  l1_max_bytes: number;
+  l1_ttl_ms: number;              // staleness cap for L1 copies of L2 entries
+  key_namespace: string;          // Redis key prefix
+  global_version_token: string;   // bump to invalidate every cache key
+  stampede_protection: number;    // Phase 7: coalesce concurrent identical requests
+  metrics_enabled: number;        // Phase 3 observability rollup toggle
+  l1_eviction_policy?: string;    // Phase 7: 'lru'|'lfu'|'fifo'|'tinylfu'|'gdsf'
+  l1_negative_ttl_ms?: number;    // Phase 7: global negative-cache TTL fallback
   updated_at: string;
 }
 

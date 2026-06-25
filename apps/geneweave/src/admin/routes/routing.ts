@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: MIT
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { hardenedFetch, newUUIDv7 } from '@weaveintel/core';
+import { cacheScopeKeyString } from '@weaveintel/cache';
 import type { DatabaseAdapter } from '../../db.js';
 import { validateDetailedDescription, toDbUpdate } from '../api/admin-route-helpers.js';
+import { getActiveCacheInvalidator, emitCacheEvent, _resetInvalidationRulesCache, _resetCacheKeyVersionCache } from '../../cache-invalidator.js';
+import { _resetToolCachePoliciesCache, getToolCacheStats } from '../../tool-cache-registry.js';
+import { _resetStampedeConfigCache, getSingleflightStats } from '../../cache-stampede.js';
 import {
   registerToolRoutes,
   registerToolPolicyRoutes,
@@ -292,8 +296,16 @@ export function registerAdminRoutingRoutes(
       scope: (body['scope'] as string) ?? 'global',
       ttl_ms: (body['ttl_ms'] as number) ?? 300000,
       max_entries: (body['max_entries'] as number) ?? 1000,
+      max_bytes: (body['max_bytes'] as number) ?? 0,
       bypass_patterns: body['bypass_patterns'] ? (typeof body['bypass_patterns'] === 'string' ? body['bypass_patterns'] as string : JSON.stringify(body['bypass_patterns'])) : '[]',
+      output_bypass_patterns: body['output_bypass_patterns'] ? (typeof body['output_bypass_patterns'] === 'string' ? body['output_bypass_patterns'] as string : JSON.stringify(body['output_bypass_patterns'])) : '[]',
       invalidate_on: body['invalidate_on'] ? (typeof body['invalidate_on'] === 'string' ? body['invalidate_on'] as string : JSON.stringify(body['invalidate_on'])) : '[]',
+      key_hashing: (body['key_hashing'] as string) === 'none' ? 'none' : 'sha256',
+      tenant_isolation: body['tenant_isolation'] === false ? 0 : 1,
+      cache_temperature_gate: typeof body['cache_temperature_gate'] === 'number' ? body['cache_temperature_gate'] as number : 0,
+      swr_ms: typeof body['swr_ms'] === 'number' ? body['swr_ms'] as number : 0,
+      negative_ttl_ms: typeof body['negative_ttl_ms'] === 'number' ? body['negative_ttl_ms'] as number : 0,
+      eviction_policy: ['lru', 'lfu', 'fifo', 'tinylfu', 'gdsf'].includes(String(body['eviction_policy'])) ? String(body['eviction_policy']) : 'lru',
       enabled: body['enabled'] !== false ? 1 : 0,
     });
     const item = await db.getCachePolicy(id);
@@ -313,8 +325,16 @@ export function registerAdminRoutingRoutes(
     if (body['scope'] !== undefined) fields['scope'] = body['scope'];
     if (body['ttl_ms'] !== undefined) fields['ttl_ms'] = body['ttl_ms'];
     if (body['max_entries'] !== undefined) fields['max_entries'] = body['max_entries'];
+    if (body['max_bytes'] !== undefined) fields['max_bytes'] = body['max_bytes'];
     if (body['bypass_patterns'] !== undefined) fields['bypass_patterns'] = typeof body['bypass_patterns'] === 'string' ? body['bypass_patterns'] : JSON.stringify(body['bypass_patterns']);
+    if (body['output_bypass_patterns'] !== undefined) fields['output_bypass_patterns'] = typeof body['output_bypass_patterns'] === 'string' ? body['output_bypass_patterns'] : JSON.stringify(body['output_bypass_patterns']);
     if (body['invalidate_on'] !== undefined) fields['invalidate_on'] = typeof body['invalidate_on'] === 'string' ? body['invalidate_on'] : JSON.stringify(body['invalidate_on']);
+    if (body['key_hashing'] !== undefined) fields['key_hashing'] = body['key_hashing'] === 'none' ? 'none' : 'sha256';
+    if (body['tenant_isolation'] !== undefined) fields['tenant_isolation'] = body['tenant_isolation'] ? 1 : 0;
+    if (body['cache_temperature_gate'] !== undefined) fields['cache_temperature_gate'] = body['cache_temperature_gate'];
+    if (body['swr_ms'] !== undefined) fields['swr_ms'] = Math.max(0, Math.trunc(Number(body['swr_ms'])));
+    if (body['negative_ttl_ms'] !== undefined) fields['negative_ttl_ms'] = Math.max(0, Math.trunc(Number(body['negative_ttl_ms'])));
+    if (body['eviction_policy'] !== undefined) fields['eviction_policy'] = ['lru', 'lfu', 'fifo', 'tinylfu', 'gdsf'].includes(String(body['eviction_policy'])) ? String(body['eviction_policy']) : 'lru';
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
     await db.updateCachePolicy(params['id']!, toDbUpdate(fields));
     const item = await db.getCachePolicy(params['id']!);
@@ -325,6 +345,328 @@ export function registerAdminRoutingRoutes(
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
     await db.deleteCachePolicy(params['id']!);
     json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // ── Admin: Cache Settings (single global row — Phase 1 multi-tier topology) ──
+
+  router.get('/api/admin/cache-settings', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const settings = await db.getCacheSettings();
+    // Wrap the single row in an array for the generic schema-driven admin tab
+    // (mirrors semantic-cache-config); keep `config` for any object consumer.
+    json(res, 200, { 'cache-settings': settings ? [settings] : [], config: settings });
+  });
+
+  // ── Admin: Semantic Cache Config (Phase 4 single global row) ──
+
+  router.get('/api/admin/semantic-cache-config', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const cfg = await db.getSemanticCacheConfig();
+    // Array form powers the generic read/edit admin tab; `config` for direct use.
+    json(res, 200, { 'semantic-cache-config': cfg ? [cfg] : [], config: cfg });
+  });
+
+  const applySemanticConfigUpdate = async (body: Record<string, unknown>) => {
+    const fields: Record<string, unknown> = {};
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    if (body['embedding_model'] !== undefined) fields['embedding_model'] = String(body['embedding_model']).slice(0, 128);
+    if (body['embedding_version'] !== undefined) fields['embedding_version'] = String(body['embedding_version']).slice(0, 64);
+    if (body['similarity_threshold'] !== undefined) fields['similarity_threshold'] = Math.max(0, Math.min(1, Number(body['similarity_threshold'])));
+    if (body['invalidation_radius'] !== undefined) fields['invalidation_radius'] = Math.max(0, Math.min(1, Number(body['invalidation_radius'])));
+    if (body['max_entries'] !== undefined) fields['max_entries'] = Math.max(1, Math.trunc(Number(body['max_entries'])));
+    if (body['ttl_ms'] !== undefined) fields['ttl_ms'] = Math.max(0, Math.trunc(Number(body['ttl_ms'])));
+    if (body['scope'] !== undefined) fields['scope'] = ['global', 'tenant', 'user', 'session'].includes(String(body['scope'])) ? String(body['scope']) : 'user';
+    if (body['bypass_patterns'] !== undefined) fields['bypass_patterns'] = typeof body['bypass_patterns'] === 'string' ? body['bypass_patterns'] : JSON.stringify(body['bypass_patterns']);
+    if (body['verified_bounds'] !== undefined) fields['verified_bounds'] = body['verified_bounds'] ? 1 : 0;
+    await db.updateSemanticCacheConfig(toDbUpdate(fields));
+    // Invalidate the chat path's 60s config cache so the change takes effect now.
+    try { const { _resetSemanticConfigCache } = await import('../../chat-semantic-utils.js'); _resetSemanticConfigCache(); } catch { /* ignore */ }
+    return db.getSemanticCacheConfig();
+  };
+
+  const semanticConfigPut = async (req: any, res: any) => {
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const cfg = await applySemanticConfigUpdate(body);
+    json(res, 200, { 'semantic-cache-config': cfg });
+  };
+  router.put('/api/admin/semantic-cache-config', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await semanticConfigPut(req, res);
+  }, { auth: true, csrf: true });
+  router.put('/api/admin/semantic-cache-config/:id', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await semanticConfigPut(req, res);
+  }, { auth: true, csrf: true });
+
+  // ── Admin: Run Stream Config (Client Phase 0 single global row) ──
+
+  router.get('/api/admin/run-stream-config', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const cfg = await db.getRunStreamConfig();
+    json(res, 200, { 'run-stream-config': cfg ? [cfg] : [], config: cfg });
+  });
+
+  const applyRunStreamConfigUpdate = async (body: Record<string, unknown>) => {
+    const fields: Record<string, unknown> = {};
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    // heartbeat: clamp to a sane floor so a 0ms interval can't busy-loop the SSE keepalive.
+    if (body['heartbeat_ms'] !== undefined) fields['heartbeat_ms'] = Math.max(1000, Math.min(300_000, Math.trunc(Number(body['heartbeat_ms']))));
+    if (body['max_reconnects'] !== undefined) fields['max_reconnects'] = Math.max(0, Math.min(100, Math.trunc(Number(body['max_reconnects']))));
+    if (body['backoff_ms'] !== undefined) {
+      // Accept a JSON string or an array; validate it is a non-empty list of
+      // non-negative numbers before persisting (defence against malformed input).
+      let arr: unknown;
+      try { arr = typeof body['backoff_ms'] === 'string' ? JSON.parse(body['backoff_ms'] as string) : body['backoff_ms']; } catch { arr = undefined; }
+      if (Array.isArray(arr) && arr.length > 0 && arr.every((n) => typeof n === 'number' && n >= 0 && n <= 600_000)) {
+        fields['backoff_ms'] = JSON.stringify(arr.slice(0, 32));
+      }
+    }
+    if (body['stall_timeout_ms'] !== undefined) fields['stall_timeout_ms'] = Math.max(0, Math.min(600_000, Math.trunc(Number(body['stall_timeout_ms']))));
+    if (body['throttle_ms'] !== undefined) fields['throttle_ms'] = Math.max(0, Math.min(5000, Math.trunc(Number(body['throttle_ms']))));
+    if (body['journal_retention_hours'] !== undefined) fields['journal_retention_hours'] = Math.max(0, Math.min(8760, Math.trunc(Number(body['journal_retention_hours']))));
+    if (body['journal_max_events'] !== undefined) fields['journal_max_events'] = Math.max(0, Math.min(1_000_000, Math.trunc(Number(body['journal_max_events']))));
+    if (body['resume_window_seconds'] !== undefined) fields['resume_window_seconds'] = Math.max(0, Math.min(86_400, Math.trunc(Number(body['resume_window_seconds']))));
+    await db.updateRunStreamConfig(toDbUpdate(fields));
+    // Invalidate the 60s config cache so the SSE keepalive + served config update now.
+    try { const { _resetRunStreamConfigCache } = await import('../../chat-run-stream-utils.js'); _resetRunStreamConfigCache(); } catch { /* ignore */ }
+    return db.getRunStreamConfig();
+  };
+
+  const runStreamConfigPut = async (req: any, res: any) => {
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const cfg = await applyRunStreamConfigUpdate(body);
+    json(res, 200, { 'run-stream-config': cfg });
+  };
+  router.put('/api/admin/run-stream-config', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await runStreamConfigPut(req, res);
+  }, { auth: true, csrf: true });
+  router.put('/api/admin/run-stream-config/:id', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await runStreamConfigPut(req, res);
+  }, { auth: true, csrf: true });
+
+  // ── Admin: Agent Plan Cache Config (Phase 8 single global row) ──
+  router.get('/api/admin/agent-plan-cache-config', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const cfg = await db.getAgentPlanCacheConfig();
+    json(res, 200, { 'agent-plan-cache-config': cfg ? [cfg] : [], config: cfg });
+  });
+  const applyPlanConfigUpdate = async (body: Record<string, unknown>) => {
+    const fields: Record<string, unknown> = {};
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    if (body['similarity_threshold'] !== undefined) fields['similarity_threshold'] = Math.max(0, Math.min(1, Number(body['similarity_threshold'])));
+    if (body['min_steps'] !== undefined) fields['min_steps'] = Math.max(0, Math.trunc(Number(body['min_steps'])));
+    if (body['max_entries'] !== undefined) fields['max_entries'] = Math.max(1, Math.trunc(Number(body['max_entries'])));
+    if (body['ttl_ms'] !== undefined) fields['ttl_ms'] = Math.max(0, Math.trunc(Number(body['ttl_ms'])));
+    if (body['scope'] !== undefined) fields['scope'] = ['global', 'tenant', 'user', 'session'].includes(String(body['scope'])) ? String(body['scope']) : 'user';
+    if (body['embedding_model'] !== undefined) fields['embedding_model'] = String(body['embedding_model']).slice(0, 128);
+    await db.updateAgentPlanCacheConfig(toDbUpdate(fields));
+    // Reset the chat path's 60s plan-cache config cache so changes take effect now.
+    try { const { _resetPlanCacheConfigCache } = await import('../../agent-plan-cache.js'); _resetPlanCacheConfigCache(); } catch { /* ignore */ }
+    return db.getAgentPlanCacheConfig();
+  };
+  const planConfigPut = async (req: any, res: any) => {
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const cfg = await applyPlanConfigUpdate(body);
+    json(res, 200, { 'agent-plan-cache-config': cfg });
+  };
+  router.put('/api/admin/agent-plan-cache-config', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await planConfigPut(req, res);
+  }, { auth: true, csrf: true });
+  router.put('/api/admin/agent-plan-cache-config/:id', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await planConfigPut(req, res);
+  }, { auth: true, csrf: true });
+  // Phase 8 observability: live plan-cache hit/miss/store stats.
+  router.get('/api/admin/plan-cache/stats', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const { getPlanCacheStats } = await import('../../agent-plan-cache.js');
+    json(res, 200, { stats: getPlanCacheStats() });
+  });
+
+  // ── Admin: Cache Metrics (Phase 3 observability dashboard) ──
+
+  router.get('/api/admin/cache-metrics', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const url = new URL(req.url ?? '', 'http://localhost');
+    const limit = Number(url.searchParams.get('limit') ?? '168') || 168;
+    const summary = await db.getCacheMetrics(limit);
+    const settings = await db.getCacheSettings();
+    // Live, process-wide snapshot from the in-memory metrics sink (when wired).
+    const live = runtime?.cache?.metrics?.snapshot?.() ?? null;
+    json(res, 200, {
+      'cache-metrics': summary.windows,           // list view (read-only admin tab)
+      summary: summary.totals,                    // aggregate totals
+      live,                                        // live process snapshot
+      metricsEnabled: settings ? settings.metrics_enabled !== 0 : true,
+    });
+  });
+
+  // ── Admin: Cache Invalidation (Phase 5) ─────────────────────
+
+  // Manual / GDPR "Invalidate Now": clear everything, a tenant, or one user
+  // (response + semantic). Body: { all?, tenantId?, userId?, prefix?, semantic? }.
+  router.post('/api/admin/cache/invalidate', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw || '{}'); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const inv = getActiveCacheInvalidator();
+    if (!inv) { json(res, 200, { ok: true, cleared: 0, note: 'no active cache invalidator' }); return; }
+    const semantic = body['semantic'] !== false; // default true
+    if (body['all']) {
+      const cleared = await inv.invalidate({ all: true, semantic });
+      json(res, 200, { ok: true, scope: 'all', cleared });
+      return;
+    }
+    const tenantId = (body['tenantId'] as string | undefined) ?? undefined;
+    const userId = (body['userId'] as string | undefined) ?? undefined;
+    let prefix = body['prefix'] as string | undefined;
+    let semanticScope: string | undefined;
+    if (!prefix && (tenantId || userId)) {
+      if (userId) {
+        const p = cacheScopeKeyString({ tenantId, userId, scope: 'user' });
+        prefix = p + '||';
+        semanticScope = p; // semantic entries are scoped `t=..|u=..`
+      } else {
+        prefix = cacheScopeKeyString({ tenantId, scope: 'tenant' }) + '|';
+        semanticScope = cacheScopeKeyString({ tenantId, scope: 'tenant' });
+      }
+    }
+    const cleared = await inv.invalidate({ prefix, semantic, semanticScope });
+    json(res, 200, { ok: true, scope: userId ? 'user' : tenantId ? 'tenant' : 'prefix', prefix, cleared });
+  }, { auth: true, csrf: true });
+
+  // Cache Invalidation Rules CRUD
+  router.get('/api/admin/cache-invalidation-rules', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    json(res, 200, { 'cache-invalidation-rules': await db.listCacheInvalidationRules() });
+  });
+  router.post('/api/admin/cache-invalidation-rules', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['name'] || !body['trigger']) { json(res, 400, { error: 'name and trigger required' }); return; }
+    const id = newUUIDv7();
+    await db.createCacheInvalidationRule({
+      id, name: body['name'] as string, trigger: body['trigger'] as string,
+      pattern: (body['pattern'] as string) ?? null,
+      config: body['config'] ? (typeof body['config'] === 'string' ? body['config'] as string : JSON.stringify(body['config'])) : '{}',
+      enabled: body['enabled'] !== false ? 1 : 0,
+    });
+    _resetInvalidationRulesCache();
+    json(res, 201, { 'cache-invalidation-rule': await db.getCacheInvalidationRule(id) });
+  }, { auth: true, csrf: true });
+  router.put('/api/admin/cache-invalidation-rules/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const fields: Record<string, unknown> = {};
+    if (body['name'] !== undefined) fields['name'] = body['name'];
+    if (body['trigger'] !== undefined) fields['trigger'] = body['trigger'];
+    if (body['pattern'] !== undefined) fields['pattern'] = body['pattern'];
+    if (body['config'] !== undefined) fields['config'] = typeof body['config'] === 'string' ? body['config'] : JSON.stringify(body['config']);
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    await db.updateCacheInvalidationRule(params['id']!, toDbUpdate(fields));
+    _resetInvalidationRulesCache();
+    json(res, 200, { 'cache-invalidation-rule': await db.getCacheInvalidationRule(params['id']!) });
+  }, { auth: true, csrf: true });
+  router.del('/api/admin/cache-invalidation-rules/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteCacheInvalidationRule(params['id']!);
+    _resetInvalidationRulesCache();
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // ── Tool Cache Policies (Phase 6 opt-in tool-result caching) ──────────────
+  router.get('/api/admin/tool-cache-policies', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    json(res, 200, { 'tool-cache-policies': await db.listToolCachePolicies() });
+  });
+  router.post('/api/admin/tool-cache-policies', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['tool_name']) { json(res, 400, { error: 'tool_name required' }); return; }
+    const id = newUUIDv7();
+    await db.createToolCachePolicy({
+      id, tool_name: String(body['tool_name']).slice(0, 128),
+      cacheable: body['cacheable'] === false ? 0 : 1,
+      ttl_ms: Math.max(0, Math.trunc(Number(body['ttl_ms'] ?? 300_000))),
+      enabled: body['enabled'] === false ? 0 : 1,
+    });
+    _resetToolCachePoliciesCache();
+    json(res, 201, { 'tool-cache-policy': await db.getToolCachePolicy(id) });
+  }, { auth: true, csrf: true });
+  router.put('/api/admin/tool-cache-policies/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const fields: Record<string, unknown> = {};
+    if (body['tool_name'] !== undefined) fields['tool_name'] = String(body['tool_name']).slice(0, 128);
+    if (body['cacheable'] !== undefined) fields['cacheable'] = body['cacheable'] ? 1 : 0;
+    if (body['ttl_ms'] !== undefined) fields['ttl_ms'] = Math.max(0, Math.trunc(Number(body['ttl_ms'])));
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    await db.updateToolCachePolicy(params['id']!, toDbUpdate(fields));
+    _resetToolCachePoliciesCache();
+    json(res, 200, { 'tool-cache-policy': await db.getToolCachePolicy(params['id']!) });
+  }, { auth: true, csrf: true });
+  router.del('/api/admin/tool-cache-policies/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteToolCachePolicy(params['id']!);
+    _resetToolCachePoliciesCache();
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+  // Observability: live tool-cache hit/miss/entry stats.
+  router.get('/api/admin/tool-cache/stats', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    json(res, 200, { stats: await getToolCacheStats() });
+  });
+  // Phase 7 observability: live singleflight stampede stats (flights/coalesced).
+  router.get('/api/admin/stampede/stats', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    json(res, 200, { stats: getSingleflightStats() });
+  });
+
+  router.put('/api/admin/cache-settings', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const fields: Record<string, unknown> = {};
+    if (body['l2_enabled'] !== undefined) fields['l2_enabled'] = body['l2_enabled'] ? 1 : 0;
+    if (body['l2_provider'] !== undefined) fields['l2_provider'] = body['l2_provider'] === 'redis' ? 'redis' : 'none';
+    if (body['l1_max_entries'] !== undefined) fields['l1_max_entries'] = body['l1_max_entries'];
+    if (body['l1_max_bytes'] !== undefined) fields['l1_max_bytes'] = body['l1_max_bytes'];
+    if (body['l1_ttl_ms'] !== undefined) fields['l1_ttl_ms'] = body['l1_ttl_ms'];
+    if (body['key_namespace'] !== undefined) fields['key_namespace'] = String(body['key_namespace']).slice(0, 128);
+    if (body['global_version_token'] !== undefined) fields['global_version_token'] = String(body['global_version_token']).slice(0, 64);
+    if (body['stampede_protection'] !== undefined) fields['stampede_protection'] = body['stampede_protection'] ? 1 : 0;
+    if (body['metrics_enabled'] !== undefined) fields['metrics_enabled'] = body['metrics_enabled'] ? 1 : 0;
+    // Phase 7 — eviction strategy & global negative-cache TTL.
+    if (body['l1_eviction_policy'] !== undefined) fields['l1_eviction_policy'] = ['lru', 'lfu', 'fifo', 'tinylfu', 'gdsf'].includes(String(body['l1_eviction_policy'])) ? String(body['l1_eviction_policy']) : 'lru';
+    if (body['l1_negative_ttl_ms'] !== undefined) fields['l1_negative_ttl_ms'] = Math.max(0, Math.trunc(Number(body['l1_negative_ttl_ms'])));
+    await db.updateCacheSettings(toDbUpdate(fields));
+    // Phase 5: bumping the global_version_token must take effect immediately —
+    // reset the chat path's cached version so new requests use new keys.
+    if (body['global_version_token'] !== undefined) _resetCacheKeyVersionCache();
+    // Phase 7: stampede config (enabled + negative TTL) is read on the chat path
+    // via a 60s cache — reset it so toggles take effect promptly.
+    _resetStampedeConfigCache();
+    const settings = await db.getCacheSettings();
+    json(res, 200, { 'cache-settings': settings });
   }, { auth: true, csrf: true });
 
   // ── Admin: Memory Extraction Rules ────────────────────────

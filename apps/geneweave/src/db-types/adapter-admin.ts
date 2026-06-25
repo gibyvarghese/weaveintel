@@ -1,4 +1,4 @@
-import type { HumanTaskPolicyRow, TaskContractRow, CachePolicyRow, IdentityRuleRow, MemoryGovernanceRow, MemoryExtractionRuleRow, SearchProviderRow, HttpEndpointRow, SocialAccountRow, EnterpriseConnectorRow, ReplayScenarioRow, TriggerDefinitionRow, TenantConfigRow, SandboxPolicyRow, ExtractionPipelineRow, ArtifactPolicyRow, ReliabilityPolicyRow, CollaborationSessionRow, ComplianceRuleRow, GraphConfigRow, PluginConfigRow } from './admin.js';
+import type { HumanTaskPolicyRow, TaskContractRow, CachePolicyRow, CacheSettingsRow, CacheMetricsDelta, CacheMetricsSummary, SemanticCacheConfigRow, RunStreamConfigRow, AgentPlanCacheConfigRow, CacheInvalidationRuleRow, ToolCachePolicyRow, IdentityRuleRow, MemoryGovernanceRow, MemoryExtractionRuleRow, SearchProviderRow, HttpEndpointRow, SocialAccountRow, EnterpriseConnectorRow, ReplayScenarioRow, TriggerDefinitionRow, TenantConfigRow, SandboxPolicyRow, ExtractionPipelineRow, ArtifactPolicyRow, ReliabilityPolicyRow, CollaborationSessionRow, ComplianceRuleRow, GraphConfigRow, PluginConfigRow } from './admin.js';
 import type { ScaffoldTemplateRow, RecipeConfigRow, WidgetConfigRow, ValidationRuleRow } from './dev-experience.js';
 
 export interface IAdminStore {
@@ -22,6 +22,40 @@ export interface IAdminStore {
   listCachePolicies(): Promise<CachePolicyRow[]>;
   updateCachePolicy(id: string, fields: Partial<Omit<CachePolicyRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
   deleteCachePolicy(id: string): Promise<void>;
+
+  // Cache Settings (single global row, Phase 1 multi-tier topology)
+  getCacheSettings(): Promise<CacheSettingsRow | null>;
+  updateCacheSettings(fields: Partial<Omit<CacheSettingsRow, 'id' | 'updated_at'>>): Promise<void>;
+
+  // Cache Metrics (Phase 3 observability rollup)
+  recordCacheMetrics(delta: CacheMetricsDelta): Promise<void>;
+  getCacheMetrics(limit?: number): Promise<CacheMetricsSummary>;
+
+  // Semantic Cache Config (Phase 4 single global row)
+  getSemanticCacheConfig(): Promise<SemanticCacheConfigRow | null>;
+  updateSemanticCacheConfig(fields: Partial<Omit<SemanticCacheConfigRow, 'id' | 'updated_at'>>): Promise<void>;
+
+  // Run Stream Config (Client Phase 0 single global row)
+  getRunStreamConfig(): Promise<RunStreamConfigRow | null>;
+  updateRunStreamConfig(fields: Partial<Omit<RunStreamConfigRow, 'id' | 'updated_at'>>): Promise<void>;
+
+  // Agent Plan Cache Config (Phase 8 single global row)
+  getAgentPlanCacheConfig(): Promise<AgentPlanCacheConfigRow | null>;
+  updateAgentPlanCacheConfig(fields: Partial<Omit<AgentPlanCacheConfigRow, 'id' | 'updated_at'>>): Promise<void>;
+
+  // Cache Invalidation Rules (Phase 5 event-driven engine)
+  createCacheInvalidationRule(r: Omit<CacheInvalidationRuleRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getCacheInvalidationRule(id: string): Promise<CacheInvalidationRuleRow | null>;
+  listCacheInvalidationRules(): Promise<CacheInvalidationRuleRow[]>;
+  updateCacheInvalidationRule(id: string, fields: Partial<Omit<CacheInvalidationRuleRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteCacheInvalidationRule(id: string): Promise<void>;
+
+  // Tool Cache Policies (Phase 6 opt-in tool-result caching)
+  createToolCachePolicy(r: Omit<ToolCachePolicyRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getToolCachePolicy(id: string): Promise<ToolCachePolicyRow | null>;
+  listToolCachePolicies(): Promise<ToolCachePolicyRow[]>;
+  updateToolCachePolicy(id: string, fields: Partial<Omit<ToolCachePolicyRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteToolCachePolicy(id: string): Promise<void>;
 
   // Identity Rules
   createIdentityRule(r: Omit<IdentityRuleRow, 'created_at' | 'updated_at'>): Promise<void>;

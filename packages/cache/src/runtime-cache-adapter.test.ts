@@ -36,7 +36,7 @@ describe('createRuntimeCacheAdapter', () => {
 
   it('semanticGet returns null when no semantic cache is wired', async () => {
     const slot = createRuntimeCacheAdapter(weaveInMemoryCacheStore());
-    const result = await slot.semanticGet?.([0.1, 0.2, 0.3]);
+    const result = await slot.semanticGet?.('some query');
     expect(result).toBeNull();
   });
 

@@ -5,11 +5,15 @@ import type { ExecutionContext, Message, AgentStep, ModelRequest } from '@weavei
 import { weaveContext } from '@weaveintel/core';
 import type { GuardrailCategorySummary } from '@weaveintel/guardrails';
 import { applySkillsToPrompt } from '@weaveintel/skills';
-import { shouldBypass } from '@weaveintel/cache';
+import { shouldBypass, shouldBypassResponse, isCacheableTemperature, cacheScopeKey, cacheScopeKeyString, planPromptCacheBreakpoints } from '@weaveintel/cache';
+import type { SemanticCache } from '@weaveintel/core';
+import { semanticLookup, semanticStore, type SemanticConfig } from './chat-semantic-utils.js';
+import { readResponseWithSwr, writeResponseWithSwr, readNegativeCache, writeNegativeCache } from './cache-stampede.js';
 import type { RuntimeRoutingSlot } from '@weaveintel/core';
 import type { DurableConsentManager } from '@weaveintel/compliance';
 import type { DatabaseAdapter } from './db.js';
 import { normalizePersona } from './rbac.js';
+import { buildReasoningRequestMetadata, reasoningAdjustedTemperature, reasoningAdjustedMaxTokens, type ReasoningRequestMetadata } from './chat-reasoning-utils.js';
 import {
   calculateCost,
   getOrCreateModel,
@@ -75,6 +79,12 @@ export type SendMessageResult = {
   usage: { promptTokens: number; completionTokens: number; totalTokens: number };
   cost: number;
   latencyMs: number;
+  /** Phase 0/4: true when the response was served from cache (exact or semantic). */
+  cached?: boolean;
+  /** Phase 4: true when served from the semantic (embedding-similarity) cache. */
+  semantic?: boolean;
+  /** Phase 2: provider-native prompt-cache outcome for this turn (stable-prefix caching). */
+  promptCache?: { readTokens: number; writeTokens: number; applied: boolean; ttl: '5m' | '1h' };
   redaction?: { count: number; types: string[] };
   eval?: { passed: number; failed: number; total: number; score: number };
   steps?: AgentStep[];
@@ -106,7 +116,7 @@ export type SendMessageDeps = {
     get: (key: string) => Promise<unknown>;
     set: (key: string, value: unknown, ttlMs: number) => Promise<void>;
   };
-  cacheKeyBuilder: { build: (input: { model: string; prompt: string; userId?: string }) => string };
+  cacheKeyBuilder: { build: (input: Record<string, string | number | boolean>) => string };
   getAvailableModels: () => Promise<Array<{ id: string; provider: string }>>;
   withResponseCardFormatPolicy: (basePrompt: string | undefined) => Promise<string | undefined>;
   runAgent: (
@@ -125,6 +135,30 @@ export type SendMessageDeps = {
   recordModelOutcome: (modelId: string, providerId: string, latencyMs: number, success: boolean, errorMessage?: string) => void;
   safeParseJson: (text: string) => unknown;
   consentManager?: DurableConsentManager | null;
+  /** Phase 3 — record this turn's cache effectiveness into the live sink + durable rollup. */
+  recordCacheMetrics?: (turn: CacheTurnMetrics) => void;
+  /** Phase 4 — scoped embedding-similarity cache (from the runtime cache slot). */
+  semanticCache?: SemanticCache;
+  /** Phase 4 — resolve the DB-driven semantic cache config (60s cached). */
+  loadSemanticConfig?: () => Promise<SemanticConfig | null>;
+  /** Phase 5 — resolve the dynamic cache-key version token (60s cached). */
+  loadCacheVersion?: () => Promise<string>;
+  /** Phase 7 — process-wide singleflight to coalesce concurrent identical misses. */
+  singleflight?: import('@weaveintel/cache').Singleflight;
+  /** Phase 7 — resolve the DB-driven stampede config (enabled + negative TTL, 60s cached). */
+  loadStampedeConfig?: () => Promise<{ enabled: boolean; negativeTtlMs: number }>;
+};
+
+/** Per-turn cache outcome fed to the Phase 3 observability recorder. */
+export type CacheTurnMetrics = {
+  /** True when the response cache served this turn (no LLM call). */
+  responseHit: boolean;
+  /** True when a response-cache lookup occurred (an active policy applied). */
+  responseEligible: boolean;
+  promptCacheReadTokens: number;
+  promptCacheWriteTokens: number;
+  provider: string;
+  inputCostPer1M: number;
 };
 
 async function isAnalyticsAllowed(consentManager: DurableConsentManager | null | undefined, userId: string): Promise<boolean> {
@@ -448,64 +482,214 @@ export async function sendMessageImpl(
   let steps: AgentStep[] | undefined;
   let toolCallEvents: ToolCallObservableEvent[] | undefined;
   let cacheHit = false;
+  let semanticHit = false;
   let contractInfo: PromptContractValidationReport | undefined;
   let telemetry: AgentRunTelemetry | undefined;
+  let promptCacheInfo: { readTokens: number; writeTokens: number; applied: boolean; ttl: '5m' | '1h' } | undefined;
 
   const allowResponseCache = attachments.length === 0;
   const cachePolicy = allowResponseCache ? await resolveActiveCache(deps.db, settings.mode) : null;
-  // Include userId in the cache key so personalised answers (e.g. "what did I
-  // say earlier?") are never served to a different user from the cache.
-  const cacheKey = deps.cacheKeyBuilder.build({ model: modelId, prompt: processedContent, userId });
+  // Phase 0: scope-isolated, salted-SHA-256 key. cacheScopeKey folds the tenant
+  // id (cross-tenant isolation) and user id (no personalised answer is ever
+  // served to a different user) into the key; the builder hashes the whole set
+  // so the raw prompt never appears in the key (PII / log / collision safety).
+  // Phase 5: VISIBLE scope prefix + hashed prompt so a per-user/tenant prefix can
+  // be invalidated (GDPR erasure). The dynamic `_gv` version token (bumpable by an
+  // admin) is folded into the hash, so bumping it invalidates every key at once.
+  const scopePrefix = cacheScopeKeyString({
+    tenantId,
+    userId,
+    scope: cachePolicy?.scope,
+    tenantIsolation: cachePolicy?.tenantIsolation,
+  });
+  const cacheVersion = deps.loadCacheVersion ? await deps.loadCacheVersion() : 'v1';
+  const cacheKey = (scopePrefix ? scopePrefix + '||' : '') + deps.cacheKeyBuilder.build({
+    model: modelId,
+    prompt: processedContent,
+    _gv: cacheVersion,
+  });
+  // Phase 7 — resolve stampede config + effective negative-cache TTL once.
+  const stampedeCfg = (cachePolicy && deps.loadStampedeConfig) ? await deps.loadStampedeConfig() : { enabled: false, negativeTtlMs: 0 };
+  const swrMs = cachePolicy?.swrMs ?? 0;
+  const negativeTtlMs = cachePolicy?.negativeTtlMs || stampedeCfg.negativeTtlMs || 0;
+  let staleRefresh = false;
+  let negativeHit = false;
+
   if (cachePolicy && !shouldBypass(cachePolicy, processedContent)) {
-    const cached = await deps.responseCache.get(cacheKey);
-    if (cached) {
-      // M-16: cast through CachedResponse so the fields are validated at
-      // the type level. If the cache returns an unexpected shape the
-      // fallback (empty string / zero usage) prevents a runtime crash.
-      const cachedTyped = cached as CachedResponse;
-      assistantContent = typeof cachedTyped.content === 'string' ? cachedTyped.content : '';
-      usage = cachedTyped.usage ?? usage;
-      cacheHit = true;
-    }
-  }
-
-  if (!cacheHit) {
-    if (settings.mode === 'agent' || settings.mode === 'supervisor') {
-      telemetry = await deps.runAgent(ctx, model, userId, chatId, userPersona, messages, processedContent, memorySettings, attachments, tenantId);
-      assistantContent = telemetry.result.output ?? '';
-      // H-4: Propagate the true prompt/completion split from AgentResult.usage.
-      // Previously both were set to totalTokens (i.e. completionTokens = 0),
-      // which causes the cost dashboard to calculate cost using only the input
-      // token rate and under-reports actual spend on agent/supervisor calls.
-      usage = {
-        promptTokens: telemetry.result.usage.promptTokens,
-        completionTokens: telemetry.result.usage.completionTokens,
-        totalTokens: telemetry.result.usage.totalTokens,
-      };
-      steps = [...telemetry.result.steps];
-      toolCallEvents = telemetry.toolCallEvents;
+    // Phase 7 negative cache: if this exact request just failed, shield the
+    // backend from a retry storm (gated by negative_ttl_ms; default off).
+    if (negativeTtlMs > 0 && await readNegativeCache(deps.responseCache, cacheKey)) {
+      negativeHit = true;
     } else {
-      const request: ModelRequest = {
-        messages: augmentedPrompt
-          ? [{ role: 'system' as const, content: augmentedPrompt }, ...messages]
-          : messages,
-        maxTokens: opts?.maxTokens ?? 4096,
-        temperature: opts?.temperature,
-      };
-      // Phase 1: wrap in an OTel GenAI span so LLM calls are visible in
-      // any OTLP-compatible backend (Grafana Cloud, Honeycomb, Jaeger).
-      const { result: response } = await withLLMSpan(
-        ctx,
-        { provider, modelId, operation: 'chat', maxTokens: request.maxTokens, temperature: request.temperature },
-        () => model.generate(ctx, request),
-      );
-      assistantContent = response.content ?? '';
-      usage = { ...response.usage };
+      // Phase 7 SWR: serve fresh OR stale (within swr window); a stale hit also
+      // triggers a single-flighted background refresh below.
+      const swrRead = await readResponseWithSwr(deps.responseCache, cacheKey, { ttlMs: cachePolicy.ttlMs, swrMs });
+      if (swrRead.value) {
+        assistantContent = typeof swrRead.value.content === 'string' ? swrRead.value.content : '';
+        usage = swrRead.value.usage ?? usage;
+        cacheHit = true;
+        staleRefresh = swrRead.state === 'stale';
+      }
     }
   }
 
-  if (!cacheHit && cachePolicy && !assistantContent.includes('[Execution guard failure]')) {
-    await deps.responseCache.set(cacheKey, { content: assistantContent, usage }, cachePolicy.ttlMs);
+  // Phase 4: on an exact-match miss, try the scoped semantic cache (paraphrase
+  // match). Time-sensitive prompts are bypassed; scope isolates tenants/users.
+  // Phase 7 negative cache: an identical request that recently failed is
+  // shielded — surface a graceful retry notice without re-calling the backend.
+  if (negativeHit) {
+    assistantContent = 'This request recently failed and is being rate-limited briefly to protect the service. Please try again shortly.';
+    usage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+  }
+
+  const semanticCfg = (!cacheHit && !negativeHit && deps.semanticCache && deps.loadSemanticConfig)
+    ? await deps.loadSemanticConfig()
+    : null;
+  if (!cacheHit && !negativeHit) {
+    const semHit = await semanticLookup(deps.semanticCache, semanticCfg, processedContent, tenantId, userId);
+    if (semHit) {
+      assistantContent = semHit.content;
+      usage = semHit.usage ?? usage;
+      semanticHit = true;
+    }
+  }
+
+  // Phase 7: the model/agent computation, extracted into a closure so it can be
+  // (a) coalesced across concurrent identical requests via singleflight and
+  // (b) reused for an SWR background refresh of a stale entry.
+  type ProduceSide = {
+    telemetry?: AgentRunTelemetry;
+    steps?: AgentStep[];
+    toolCallEvents?: ToolCallObservableEvent[];
+    promptCacheInfo?: { readTokens: number; writeTokens: number; applied: boolean; ttl: '5m' | '1h' };
+  };
+  const produce = async (): Promise<{ content: string; usage: typeof usage; side: ProduceSide }> => {
+    if (settings.mode === 'agent' || settings.mode === 'supervisor') {
+      const tel = await deps.runAgent(ctx, model, userId, chatId, userPersona, messages, processedContent, memorySettings, attachments, tenantId);
+      // H-4: Propagate the true prompt/completion split from AgentResult.usage.
+      return {
+        content: tel.result.output ?? '',
+        usage: {
+          promptTokens: tel.result.usage.promptTokens,
+          completionTokens: tel.result.usage.completionTokens,
+          totalTokens: tel.result.usage.totalTokens,
+        },
+        side: { telemetry: tel, steps: [...tel.result.steps], toolCallEvents: tel.toolCallEvents },
+      };
+    }
+    // Phase 2: provider-native prompt caching — cache the stable prefix
+    // (system prompt) so repeated turns pay the discounted cache-read rate.
+    const planPricing = (await deps.loadPricing()).get(modelId);
+    const cachePlan = planPromptCacheBreakpoints({
+      systemText: augmentedPrompt ?? '',
+      minTokens: planPricing?.promptCacheMinTokens ?? 1024,
+      ttl: planPricing?.promptCacheTtl ?? '5m',
+      enabled: planPricing?.promptCacheEnabled ?? true,
+      providerSupported: provider === 'anthropic',
+    });
+    // Reasoning request (m92) — same gating as the streaming path.
+    const baseMaxTokens = opts?.maxTokens ?? 4096;
+    let reasoningMeta: ReasoningRequestMetadata | undefined;
+    if (settings.reasoningEnabled) {
+      const caps = await deps.db.listCapabilityScores({ provider, modelId }).catch(() => []);
+      reasoningMeta = buildReasoningRequestMetadata({
+        provider,
+        supportsThinking: caps.some((c) => c.supports_thinking === 1),
+        enabled: true,
+        effort: settings.reasoningEffort ?? null,
+        budgetTokens: settings.reasoningBudgetTokens ?? null,
+        maxTokens: baseMaxTokens,
+      });
+    }
+    const sendMetadata: Record<string, unknown> = {};
+    if (provider === 'openai') sendMetadata['promptCacheKey'] = `gw:${tenantId ?? 'global'}:${chatId}`;
+    if (reasoningMeta?.thinking) sendMetadata['thinking'] = reasoningMeta.thinking;
+    if (reasoningMeta?.reasoningEffort) sendMetadata['reasoningEffort'] = reasoningMeta.reasoningEffort;
+
+    const request: ModelRequest = {
+      messages: augmentedPrompt
+        ? [{ role: 'system' as const, content: augmentedPrompt }, ...messages]
+        : messages,
+      maxTokens: reasoningAdjustedMaxTokens(reasoningMeta, baseMaxTokens),
+      temperature: reasoningAdjustedTemperature(reasoningMeta, opts?.temperature),
+      ...(cachePlan.enabled ? { promptCache: { ttl: cachePlan.ttl } } : {}),
+      ...(Object.keys(sendMetadata).length ? { metadata: sendMetadata } : {}),
+    };
+    // Phase 1: wrap in an OTel GenAI span so LLM calls are visible in any
+    // OTLP-compatible backend (Grafana Cloud, Honeycomb, Jaeger).
+    const { result: response } = await withLLMSpan(
+      ctx,
+      { provider, modelId, operation: 'chat', maxTokens: request.maxTokens, temperature: request.temperature },
+      () => model.generate(ctx, request),
+    );
+    return {
+      content: response.content ?? '',
+      usage: { ...response.usage },
+      side: {
+        promptCacheInfo: {
+          readTokens: response.usage.cacheReadTokens ?? 0,
+          writeTokens: response.usage.cacheWriteTokens ?? 0,
+          applied: cachePlan.enabled || provider === 'openai',
+          ttl: cachePlan.ttl,
+        },
+      },
+    };
+  };
+
+  if (!cacheHit && !semanticHit && !negativeHit) {
+    // Phase 7 stampede protection: coalesce concurrent identical misses so only
+    // ONE model call runs; followers replay the leader's result.
+    const useSingleflight = !!(deps.singleflight && stampedeCfg.enabled && cachePolicy);
+    let produced: { content: string; usage: typeof usage; side: ProduceSide };
+    try {
+      produced = useSingleflight
+        ? (await deps.singleflight!.run(cacheKey, produce)).value
+        : await produce();
+    } catch (err) {
+      // Phase 7 negative cache: remember the failure briefly to shield the backend.
+      if (negativeTtlMs > 0) await writeNegativeCache(deps.responseCache, cacheKey, negativeTtlMs);
+      throw err;
+    }
+    assistantContent = produced.content;
+    usage = produced.usage;
+    if (produced.side.telemetry) telemetry = produced.side.telemetry;
+    if (produced.side.steps) steps = produced.side.steps;
+    if (produced.side.toolCallEvents) toolCallEvents = produced.side.toolCallEvents;
+    if (produced.side.promptCacheInfo) promptCacheInfo = produced.side.promptCacheInfo;
+  }
+
+  // Phase 7 SWR: a stale entry was served above — refresh it in the background
+  // (single-flighted) so the next caller gets a fresh value without waiting.
+  if (staleRefresh && cachePolicy && deps.singleflight) {
+    const sf = deps.singleflight, ck = cacheKey, ttl = cachePolicy.ttlMs;
+    void sf.run('swr-refresh::' + ck, produce)
+      .then((r) => writeResponseWithSwr(deps.responseCache, ck, { content: r.value.content, usage: r.value.usage }, { ttlMs: ttl, swrMs }))
+      .catch(() => { /* background refresh is best-effort */ });
+  }
+
+  // Phase 0 write gating:
+  //  - determinism gate: only cache when the effective temperature is within
+  //    the policy's temperatureGate (default 0 → deterministic responses only),
+  //    so a high-temperature creative answer is not frozen and replayed;
+  //  - output bypass: never cache a response that matches the policy's
+  //    bypass / output-bypass patterns (e.g. a leaked secret in the answer);
+  //  - never cache an execution-guard failure.
+  const responseStoreOk =
+    !cacheHit &&
+    !negativeHit &&
+    cachePolicy != null &&
+    isCacheableTemperature(cachePolicy, opts?.temperature) &&
+    !assistantContent.includes('[Execution guard failure]') &&
+    !shouldBypassResponse(cachePolicy, assistantContent);
+  if (responseStoreOk) {
+    // Phase 7: SWR-aware write (sidecar timestamp + extended TTL when swr_ms>0).
+    await writeResponseWithSwr(deps.responseCache, cacheKey, { content: assistantContent, usage }, { ttlMs: cachePolicy!.ttlMs, swrMs });
+  }
+  // Phase 4: also persist to the semantic cache on a genuine LLM miss (not a
+  // semantic replay), under the same determinism/secret gating so a paraphrase
+  // can hit next time. Best-effort.
+  if (responseStoreOk && !semanticHit) {
+    await semanticStore(deps.semanticCache, semanticCfg, processedContent, { content: assistantContent, usage }, tenantId, userId);
   }
 
   contractInfo = await validatePromptContractsAgainstDb(assistantContent, deps.db);
@@ -515,6 +699,18 @@ export async function sendMessageImpl(
   const cost = calculateCost(modelId, usage.promptTokens, usage.completionTokens, dbPricing.get(modelId));
 
   deps.recordModelOutcome(modelId, provider, latencyMs, true);
+
+  // Phase 3: record this turn's cache effectiveness (response hit/miss + prompt-
+  // cache token savings) into the live metrics sink and the durable rollup.
+  deps.recordCacheMetrics?.({
+    // A semantic hit also avoids the LLM call — count it as a cache hit.
+    responseHit: cacheHit || semanticHit,
+    responseEligible: !!cachePolicy || semanticHit,
+    promptCacheReadTokens: promptCacheInfo?.readTokens ?? 0,
+    promptCacheWriteTokens: promptCacheInfo?.writeTokens ?? 0,
+    provider,
+    inputCostPer1M: dbPricing.get(modelId)?.input ?? 0,
+  });
 
   // Phase 3: record observed cost into the runtime ledger for future budget checks.
   if (deps.config.runtime?.cost && cost > 0) {
@@ -639,6 +835,9 @@ export async function sendMessageImpl(
     usage,
     cost,
     latencyMs,
+    cached: cacheHit || semanticHit,
+    semantic: semanticHit,
+    promptCache: promptCacheInfo,
     redaction: redactionInfo,
     eval: evalInfo,
     steps,

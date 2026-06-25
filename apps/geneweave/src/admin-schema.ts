@@ -121,6 +121,12 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
   { label: 'Infrastructure', icon: '\u2699\uFE0F', tabs: [
     { key: 'tenant-configs', label: 'Tenants' },
     { key: 'cache-policies', label: 'Cache' },
+    { key: 'cache-settings', label: 'Cache Settings' },
+    { key: 'semantic-cache-config', label: 'Semantic Cache' },
+    { key: 'agent-plan-cache-config', label: 'Plan Cache' },
+    { key: 'cache-invalidation-rules', label: 'Cache Invalidation' },
+    { key: 'tool-cache-policies', label: 'Tool Cache' },
+    { key: 'run-stream-config', label: 'Run Stream' },
     { key: 'reliability-policies', label: 'Reliability' },
     { key: 'sandbox-policies', label: 'Sandbox' },
   ]},
@@ -128,6 +134,7 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
     { key: 'workflow-runs', label: 'Runs' },
     { key: 'guardrail-evals', label: 'Evals' },
     { key: 'memory-extraction-events', label: 'Memory Extraction' },
+    { key: 'cache-metrics', label: 'Cache Metrics' },
   ]},
   { label: 'Live Agents', icon: '\uD83E\uDDEC', tabs: [
     { key: 'live-mesh-definitions', label: 'Mesh Definitions' },

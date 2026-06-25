@@ -8,6 +8,11 @@
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./redis": {
+      "import": "./dist/redis.js",
+      "types": "./dist/redis.d.ts",
+      "default": "./dist/redis.js"
     }
   },
   "main": "./dist/index.js",

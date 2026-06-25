@@ -218,6 +218,7 @@ function parseResponseResult(raw: Record<string, unknown>): ResponseResult {
       completionTokens: Number(usage?.['output_tokens'] ?? 0),
       totalTokens: Number(usage?.['total_tokens'] ?? 0),
       reasoningTokens: outputDetails?.['reasoning_tokens'],
+      cacheReadTokens: Number(inputDetails?.['cached_tokens'] ?? 0),
     },
     model: String(raw['model'] ?? ''),
     error: raw['error']

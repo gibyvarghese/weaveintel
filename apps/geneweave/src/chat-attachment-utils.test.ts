@@ -239,6 +239,8 @@ describe('streamMessageImpl — socket timeout disabled for SSE', () => {
         blockProvider: vi.fn(),
         recordOutcome: vi.fn(),
       },
+      responseCache: { get: vi.fn().mockResolvedValue(null), set: vi.fn().mockResolvedValue(undefined) },
+      cacheKeyBuilder: { build: vi.fn().mockReturnValue('gw-chat:v1:streamkey') },
       getAvailableModels: vi.fn().mockResolvedValue([]),
       withResponseCardFormatPolicy: vi.fn().mockResolvedValue(undefined),
       streamAgent: vi.fn().mockResolvedValue({ promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0, latencyMs: 0, steps: [] }),

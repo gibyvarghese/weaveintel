@@ -58,6 +58,25 @@ export interface ChatEngineConfig {
    * capabilities. Optional for back-compat.
    */
   runtime?: WeaveRuntime;
+  /**
+   * Phase 1 — cache key version segment, sourced from the `cache_settings`
+   * global_version_token. Bumping it invalidates every response-cache entry at
+   * once. Falls back to `'v1'` when unset.
+   */
+  cacheKeyVersion?: string;
+  /**
+   * Cache Phase 6 — tool-result caching wiring. `store` is the shared cache
+   * store (same underlying store as the response cache, so a global clear /
+   * version bump busts tool entries too); `metrics` is a DEDICATED sink kept
+   * separate from the response-cache counters; `version` is the key prefix.
+   * When set, the engine enables opt-in per-tool result caching driven by
+   * `tool_cache_policies`.
+   */
+  toolCache?: {
+    store: import('@weaveintel/core').CacheStore;
+    metrics: import('@weaveintel/core').CacheMetrics;
+    version?: string;
+  };
 }
 
 // ── M-15: Typed provider module interfaces ───────────────────────────────────
@@ -223,6 +242,10 @@ export interface ChatSettings {
   complianceEnforceConsent?: boolean;
   // P6-5 — Vision loop browser agent
   visionLoopEnabled?: boolean;
+  // Reasoning request (m92) — request provider reasoning for reasoning-capable models.
+  reasoningEnabled?: boolean;
+  reasoningEffort?: 'low' | 'medium' | 'high';
+  reasoningBudgetTokens?: number;
 }
 
 export interface WorkerDef {
@@ -331,5 +354,9 @@ export function settingsFromRow(row: ChatSettingsRow | null): ChatSettings {
     complianceEnforceConsent: row.compliance_enforce_consent !== 0,
     // P6-5 — Vision loop (default: disabled)
     visionLoopEnabled: row.vision_loop_enabled !== 0,
+    // Reasoning request (m92) — default: disabled.
+    reasoningEnabled: !!row.reasoning_enabled,
+    reasoningEffort: (row.reasoning_effort === 'low' || row.reasoning_effort === 'medium' || row.reasoning_effort === 'high') ? row.reasoning_effort : undefined,
+    reasoningBudgetTokens: row.reasoning_budget_tokens || undefined,
   };
 }

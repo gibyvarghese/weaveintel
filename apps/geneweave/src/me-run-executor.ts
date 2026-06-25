@@ -25,21 +25,18 @@
  */
 
 import { newUUIDv7, createLogger, weaveContext } from '@weaveintel/core';
-import type { ExecutionContext } from '@weaveintel/core';
+import type { ExecutionContext, RunEventEnvelope, RunStep, RunUsage, RunCitation, RunArtifactRef, RunFilePart } from '@weaveintel/core';
 
 const logger = createLogger('me-run-executor');
 import type { ServerResponse } from 'node:http';
 import type { DatabaseAdapter } from './db-types.js';
+import { runApprovals } from './me-run-approvals.js';
 
-// ─── Envelope (mirrors @weaveintel/client RunEventEnvelope) ─────────────────
-
-export interface RunEventEnvelope {
-  runId: string;
-  sequence: number;
-  kind: string;
-  payload: Record<string, unknown>;
-  timestamp: number;
-}
+// ─── Envelope ───────────────────────────────────────────────────────────────
+// Canonical contract from @weaveintel/core (Client Phase 0) — the same type the
+// browser client reducer consumes, so producer and consumer can never drift.
+// Re-exported so existing `from './me-run-executor.js'` import sites keep working.
+export type { RunEventEnvelope };
 
 /** Event kinds that close a run. */
 const TERMINAL_EVENT_KINDS = new Set(['run.completed', 'run.failed', 'run.cancelled']);
@@ -59,10 +56,35 @@ export function isTerminalRunStatus(status: string): boolean {
  */
 export interface MeRunEmitter {
   text(delta: string, role?: string): Promise<void>;
-  toolInvoked(tool: string, args?: Record<string, unknown>): Promise<void>;
-  toolCompleted(tool: string, result: unknown): Promise<void>;
-  toolErrored(tool: string, error: string): Promise<void>;
+  toolInvoked(tool: string, args?: Record<string, unknown>, toolCallId?: string): Promise<void>;
+  toolCompleted(tool: string, result: unknown, toolCallId?: string): Promise<void>;
+  toolErrored(tool: string, error: string, toolCallId?: string): Promise<void>;
   widget(id: string, payload: Record<string, unknown>, schemaVersion?: number): Promise<void>;
+  // Phase 2 — streaming partial tool input (per-part state machine).
+  /** A tool call's input args begin streaming. */
+  toolInputStart(toolCallId: string, tool: string): Promise<void>;
+  /** A partial chunk of a tool call's input args (JSON text). */
+  toolInputDelta(toolCallId: string, delta: string): Promise<void>;
+  // Phase 1 — parity: previously these channels were dropped by the bridge.
+  /** Model thinking, as a DISTINCT channel (not folded into `text`). */
+  reasoning(delta: string): Promise<void>;
+  /** An agent / supervisor plan step. */
+  step(step: RunStep): Promise<void>;
+  /** Token usage / cost / latency / model for the run (from the chat `done` frame). */
+  usage(usage: RunUsage): Promise<void>;
+  /** A source / citation surfaced during the run. */
+  citation(citation: RunCitation): Promise<void>;
+  /** An artifact reference produced by the run. */
+  artifact(artifact: RunArtifactRef): Promise<void>;
+  /** A non-output diagnostic (guardrail / policy / eval / cognitive / ensemble). */
+  diagnostic(channel: string, data?: unknown): Promise<void>;
+  // Phase 7 — structured object streaming + multimodal file parts.
+  /** An incremental chunk of a streamed structured (JSON) object. */
+  objectDelta(delta: string): Promise<void>;
+  /** The structured object finished (carries the final value, when parsed). */
+  objectComplete(value?: unknown): Promise<void>;
+  /** A multimodal file part (image / document) in/out of the run. */
+  file(part: RunFilePart): Promise<void>;
 }
 
 export interface MeRunAgentArgs {
@@ -279,6 +301,7 @@ export class MeRunExecutor {
     void this.#execute(args, controller).finally(() => {
       this.#active.delete(args.runId);
       this.#locks.delete(args.runId);
+      runApprovals.unregisterRun(args.runId);
     });
   }
 
@@ -318,6 +341,10 @@ export class MeRunExecutor {
         ...(args.surface !== undefined ? { surface: args.surface } : {}),
       });
 
+      // Phase 4: register the run for HITL approvals so a gated tool can pause
+      // it (emit approval.request + persist) and a posted decision can resume it.
+      runApprovals.registerRun(runId, async (kind, payload) => { await this.appendEvent(runId, kind, payload); }, this.#db);
+
       const emit: MeRunEmitter = {
         text: async (delta, role) => {
           if (controller.signal.aborted) return;
@@ -326,20 +353,29 @@ export class MeRunExecutor {
             ...(role !== undefined ? { role } : {}),
           });
         },
-        toolInvoked: async (tool, toolArgs) => {
+        toolInvoked: async (tool, toolArgs, toolCallId) => {
           if (controller.signal.aborted) return;
           await this.appendEvent(runId, 'tool.invoked', {
             tool,
             ...(toolArgs !== undefined ? { args: toolArgs } : {}),
+            ...(toolCallId !== undefined ? { toolCallId } : {}),
           });
         },
-        toolCompleted: async (tool, result) => {
+        toolCompleted: async (tool, result, toolCallId) => {
           if (controller.signal.aborted) return;
-          await this.appendEvent(runId, 'tool.completed', { tool, result });
+          await this.appendEvent(runId, 'tool.completed', { tool, result, ...(toolCallId !== undefined ? { toolCallId } : {}) });
         },
-        toolErrored: async (tool, error) => {
+        toolErrored: async (tool, error, toolCallId) => {
           if (controller.signal.aborted) return;
-          await this.appendEvent(runId, 'tool.errored', { tool, error });
+          await this.appendEvent(runId, 'tool.errored', { tool, error, ...(toolCallId !== undefined ? { toolCallId } : {}) });
+        },
+        toolInputStart: async (toolCallId, tool) => {
+          if (controller.signal.aborted) return;
+          await this.appendEvent(runId, 'tool.input.start', { toolCallId, tool });
+        },
+        toolInputDelta: async (toolCallId, delta) => {
+          if (controller.signal.aborted) return;
+          await this.appendEvent(runId, 'tool.input.delta', { toolCallId, delta });
         },
         widget: async (id, payload, schemaVersion) => {
           if (controller.signal.aborted) return;
@@ -348,6 +384,42 @@ export class MeRunExecutor {
             payload,
             ...(schemaVersion !== undefined ? { schemaVersion } : {}),
           });
+        },
+        reasoning: async (delta) => {
+          if (controller.signal.aborted) return;
+          await this.appendEvent(runId, 'reasoning.delta', { delta });
+        },
+        step: async (step) => {
+          if (controller.signal.aborted) return;
+          await this.appendEvent(runId, 'step.update', { ...step });
+        },
+        usage: async (usage) => {
+          if (controller.signal.aborted) return;
+          await this.appendEvent(runId, 'usage.update', { ...usage });
+        },
+        citation: async (citation) => {
+          if (controller.signal.aborted) return;
+          await this.appendEvent(runId, 'citation.add', { ...citation });
+        },
+        artifact: async (artifact) => {
+          if (controller.signal.aborted) return;
+          await this.appendEvent(runId, 'artifact.update', { ...artifact });
+        },
+        diagnostic: async (channel, data) => {
+          if (controller.signal.aborted) return;
+          await this.appendEvent(runId, 'diagnostic', { channel, ...(data !== undefined ? { data } : {}) });
+        },
+        objectDelta: async (delta) => {
+          if (controller.signal.aborted) return;
+          await this.appendEvent(runId, 'object.delta', { delta });
+        },
+        objectComplete: async (value) => {
+          if (controller.signal.aborted) return;
+          await this.appendEvent(runId, 'object.complete', { ...(value !== undefined ? { value } : {}) });
+        },
+        file: async (part) => {
+          if (controller.signal.aborted) return;
+          await this.appendEvent(runId, 'file.part', { ...part });
         },
       };
 

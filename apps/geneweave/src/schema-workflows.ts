@@ -72,10 +72,65 @@ CREATE TABLE IF NOT EXISTS cache_policies (
   scope TEXT NOT NULL DEFAULT 'global',
   ttl_ms INTEGER NOT NULL DEFAULT 300000,
   max_entries INTEGER NOT NULL DEFAULT 1000,
+  max_bytes INTEGER NOT NULL DEFAULT 0,
   bypass_patterns TEXT,
+  output_bypass_patterns TEXT,
   invalidate_on TEXT,
+  key_hashing TEXT NOT NULL DEFAULT 'sha256',
+  tenant_isolation INTEGER NOT NULL DEFAULT 1,
+  cache_temperature_gate REAL NOT NULL DEFAULT 0,
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS cache_settings (
+  id TEXT PRIMARY KEY DEFAULT 'global',
+  l2_enabled INTEGER NOT NULL DEFAULT 0,
+  l2_provider TEXT NOT NULL DEFAULT 'none',
+  l1_max_entries INTEGER NOT NULL DEFAULT 5000,
+  l1_max_bytes INTEGER NOT NULL DEFAULT 0,
+  l1_ttl_ms INTEGER NOT NULL DEFAULT 30000,
+  key_namespace TEXT NOT NULL DEFAULT 'weave:cache',
+  global_version_token TEXT NOT NULL DEFAULT 'v1',
+  stampede_protection INTEGER NOT NULL DEFAULT 0,
+  metrics_enabled INTEGER NOT NULL DEFAULT 1,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS cache_metrics (
+  window_start TEXT PRIMARY KEY,
+  response_hits INTEGER NOT NULL DEFAULT 0,
+  response_misses INTEGER NOT NULL DEFAULT 0,
+  prompt_cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+  prompt_cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+  cost_saved_usd REAL NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS cache_invalidation_rules (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  trigger TEXT NOT NULL,
+  pattern TEXT,
+  config TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS semantic_cache_config (
+  id TEXT PRIMARY KEY DEFAULT 'global',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  embedding_model TEXT NOT NULL DEFAULT 'text-embedding-3-small',
+  embedding_version TEXT NOT NULL DEFAULT 'v1',
+  similarity_threshold REAL NOT NULL DEFAULT 0.92,
+  invalidation_radius REAL NOT NULL DEFAULT 0.95,
+  max_entries INTEGER NOT NULL DEFAULT 1000,
+  ttl_ms INTEGER NOT NULL DEFAULT 600000,
+  scope TEXT NOT NULL DEFAULT 'user',
+  bypass_patterns TEXT,
+  verified_bounds INTEGER NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

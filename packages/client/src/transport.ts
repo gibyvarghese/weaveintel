@@ -3,11 +3,18 @@
  * in tests or non-browser environments.
  *
  * NOTE: No Node.js imports — this module must stay browser-safe.
+ *
+ * Phase 0: `sseTransport` is now the single, rich SSE reader for the platform.
+ * It exposes a lifecycle seam (`onOpen` / `onClose` / `onError`), a stall
+ * timeout, and a permanent-vs-transient close signal so `run-client.attach()`
+ * can actually reconnect, and so `@geneweave/api-client` can delegate to it
+ * instead of hand-rolling its own reader.
  */
 // no-raw-fetch: allow (reason: browser-safe client SDK transport — uses the browser
 // fetch + ReadableStream for SSE; exempt like ui-client.ts / ui/api.ts)
 
-import type { RunEventEnvelope } from './run-client.js';
+import { RUN_STREAM_CONFIG_DEFAULTS, type RunEventEnvelope } from '@weaveintel/core';
+import { parseSseStream } from './sse-parser.js';
 
 /** Auth token or header factory, injected by the host app. */
 export type AuthProvider =
@@ -39,30 +46,70 @@ export interface StreamEvent {
  */
 export type StreamHandler = (event: StreamEvent) => boolean | void;
 
+/** Information about why a stream closed. */
+export interface StreamCloseInfo {
+  /**
+   * `true` when the open failed with a permanent client error (4xx) — the
+   * caller MUST NOT reconnect. `false` for graceful end / network drop / stall,
+   * where the caller MAY reconnect.
+   */
+  permanent: boolean;
+}
+
+/** Lifecycle callbacks for a single `openStream` call. */
+export interface StreamLifecycle {
+  /** Per parsed SSE event. Return `true` to stop reading. */
+  onEvent: StreamHandler;
+  /** Fired once when the response is open and readable. */
+  onOpen?: () => void;
+  /** Fired exactly once when the stream ends (any reason). */
+  onClose?: (info: StreamCloseInfo) => void;
+  /** Fired when opening or reading throws (before `onClose`). */
+  onError?: (err: Error) => void;
+}
+
 export interface EventTransport {
   /**
    * Open an SSE stream to `url`.
    * @param url    Full URL to connect to.
-   * @param onEvent  Called with each parsed SSE event.
-   * @param signal   AbortSignal to cancel the stream.
+   * @param life   Lifecycle callbacks (`onEvent` required).
+   * @param signal AbortSignal to cancel the stream.
    */
-  openStream(url: string, onEvent: StreamHandler, signal?: AbortSignal): void;
+  openStream(url: string, life: StreamLifecycle, signal?: AbortSignal): void;
+}
+
+export interface SseTransportOptions {
+  auth?: AuthProvider;
+  extraHeaders?: Record<string, string>;
+  /**
+   * Tear down a stream that delivers no bytes within this window (ms) so the
+   * caller can reconnect rather than hang forever. 0 disables the timeout.
+   * Defaults to the platform stall timeout.
+   */
+  stallTimeoutMs?: number;
 }
 
 /**
  * Production SSE transport using the browser `fetch` + `ReadableStream`.
  *
- * Auto-reconnects on disconnect, resuming from the last-seen sequence via
- * the `after` query parameter.  The caller drives reconnect logic by
- * calling `openStream` again with an updated URL.
+ * Single read pass; reconnection is the caller's responsibility (driven by the
+ * `onClose` signal). On a 4xx open failure `onClose` reports `permanent: true`
+ * so the caller stops retrying; on network drop / stall / graceful end it
+ * reports `permanent: false`.
  */
-export function sseTransport(opts: {
-  auth?: AuthProvider;
-  extraHeaders?: Record<string, string>;
-}): EventTransport {
+export function sseTransport(opts: SseTransportOptions): EventTransport {
+  const stallTimeoutMs = opts.stallTimeoutMs ?? RUN_STREAM_CONFIG_DEFAULTS.stallTimeoutMs;
+
   return {
-    openStream(url, onEvent, signal) {
+    openStream(url, life, signal) {
       void (async () => {
+        let closed = false;
+        const close = (permanent: boolean) => {
+          if (closed) return;
+          closed = true;
+          life.onClose?.({ permanent });
+        };
+
         const token = await resolveAuth(opts.auth);
         const headers: Record<string, string> = {
           Accept: 'text/event-stream',
@@ -74,43 +121,35 @@ export function sseTransport(opts: {
         let resp: Response;
         try {
           resp = await fetch(url, { headers, signal });
-        } catch {
-          return; // network error / aborted
+        } catch (err) {
+          if (!signal?.aborted) life.onError?.(err instanceof Error ? err : new Error(String(err)));
+          close(false); // network error / aborted ⇒ transient
+          return;
         }
-        if (!resp.ok || !resp.body) return;
 
-        const reader = resp.body.getReader();
-        const decoder = new TextDecoder();
-        let buf = '';
+        if (!resp.ok || !resp.body) {
+          life.onError?.(new Error(`stream open failed → ${resp.status}`));
+          // 4xx ⇒ permanent (endpoint gone / forbidden): do not reconnect.
+          // 5xx / no-body ⇒ transient: caller may reconnect.
+          close(resp.status >= 400 && resp.status < 500);
+          return;
+        }
 
-        // Parse SSE line-by-line
-        while (!signal?.aborted) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, { stream: true });
-          const lines = buf.split('\n');
-          buf = lines.pop() ?? '';
+        life.onOpen?.();
 
-          let dataLines: string[] = [];
-          let currentEvent: string | undefined;
-
-          for (const line of lines) {
-            if (line.startsWith('event:')) {
-              currentEvent = line.slice(6).trim();
-            } else if (line.startsWith('data:')) {
-              dataLines.push(line.slice(5).trim());
-            } else if (line === '') {
-              if (dataLines.length > 0) {
-                const stop = onEvent({
-                  data: dataLines.join('\n'),
-                  ...(currentEvent !== undefined ? { event: currentEvent } : {}),
-                });
-                if (stop) { reader.cancel(); return; }
-              }
-              dataLines = [];
-              currentEvent = undefined;
-            }
+        // Single SSE byte→event decoder (shared with apps/geneweave-ui). The
+        // generator owns the reader + buffering + stall timeout; we apply the
+        // run-transport policy (early-stop on `onEvent` → true) by breaking the
+        // loop, which cancels the reader via the generator's `return` path.
+        try {
+          for await (const ev of parseSseStream(resp.body, { signal, stallTimeoutMs })) {
+            const stop = life.onEvent(ev);
+            if (stop === true) break;
           }
+        } catch (err) {
+          if (!signal?.aborted) life.onError?.(err instanceof Error ? err : new Error(String(err)));
+        } finally {
+          close(false); // graceful end / drop / stall / early-stop ⇒ transient
         }
       })();
     },
@@ -186,12 +225,14 @@ export function fetchJsonTransport(opts: {
 
 export function mockSseTransport(events: StreamEvent[]): EventTransport {
   return {
-    openStream(_, onEvent, signal) {
+    openStream(_, life, signal) {
+      life.onOpen?.();
       for (const ev of events) {
         if (signal?.aborted) break;
-        const stop = onEvent(ev);
-        if (stop) break;
+        const stop = life.onEvent(ev);
+        if (stop === true) break;
       }
+      life.onClose?.({ permanent: false });
     },
   };
 }

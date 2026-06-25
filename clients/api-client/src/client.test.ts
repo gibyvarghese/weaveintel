@@ -451,8 +451,8 @@ describe('per-tenant isolation', () => {
     const bPending = await tenantB.outbox.pending();
     expect(aPending).toHaveLength(1);
     expect(bPending).toHaveLength(1);
-    expect(aPending[0]!.input.idempotencyKey).toBe('a-1');
-    expect(bPending[0]!.input.idempotencyKey).toBe('b-1');
+    expect(aPending[0]!.input!.idempotencyKey).toBe('a-1');
+    expect(bPending[0]!.input!.idempotencyKey).toBe('b-1');
     // Raw storage holds both tenants' keys, each under its own namespace prefix.
     const rawKeys = sharedStorage.keys();
     expect(rawKeys.some((k) => k.startsWith('tenant-a::'))).toBe(true);

@@ -41,6 +41,7 @@ import {
   buildAnthropicMessages,
   buildAnthropicTools,
   buildToolChoice,
+  applySystemCacheControl,
   parseResponse,
   parseStreamEvent,
 } from './anthropic-format.js';
@@ -114,7 +115,14 @@ export function weaveAnthropicModel(
         max_tokens: request.maxTokens ?? 4096,
       };
 
-      const systemPrompt = meta.systemPrompt ?? system;
+      // Provider-native prompt caching: place a cache_control breakpoint on the
+      // system block so the stable prefix (tools + system) is cached. Honour the
+      // explicit request.promptCache hint, or a metadata.cacheControl override.
+      let systemPrompt = meta.systemPrompt ?? system;
+      const genCacheTtl = request.promptCache?.ttl ?? (meta.cacheControl ? (meta.cacheControl.ttl === '1h' ? '1h' : '5m') : undefined);
+      if (genCacheTtl) {
+        systemPrompt = applySystemCacheControl(systemPrompt, genCacheTtl);
+      }
       if (systemPrompt) body['system'] = systemPrompt;
 
       // Merge standard function-calling tools with CUA native tools
@@ -131,7 +139,9 @@ export function weaveAnthropicModel(
 
       if (meta.thinking) body['thinking'] = meta.thinking;
       if (meta.citations) body['citations'] = meta.citations;
-      if (meta.cacheControl) body['cache_control'] = meta.cacheControl;
+      // Note: prompt caching is applied to the system content block above (the
+      // only effective placement) — a top-level `cache_control` is ignored by
+      // the Anthropic API and must not be set here.
 
       if (request.responseFormat) {
         if (request.responseFormat.type === 'json_schema') {
@@ -175,7 +185,11 @@ export function weaveAnthropicModel(
         stream: true,
       };
 
-      const systemPrompt = meta.systemPrompt ?? system;
+      let systemPrompt = meta.systemPrompt ?? system;
+      const streamCacheTtl = request.promptCache?.ttl ?? (meta.cacheControl ? (meta.cacheControl.ttl === '1h' ? '1h' : '5m') : undefined);
+      if (streamCacheTtl) {
+        systemPrompt = applySystemCacheControl(systemPrompt, streamCacheTtl);
+      }
       if (systemPrompt) body['system'] = systemPrompt;
       const standardToolsStream = buildAnthropicTools(request.tools) ?? [];
       const allToolsStream = [...standardToolsStream, ...cuaToolsStream];
@@ -188,7 +202,7 @@ export function weaveAnthropicModel(
       if (request.stop) body['stop_sequences'] = request.stop;
       if (meta.thinking) body['thinking'] = meta.thinking;
       if (meta.citations) body['citations'] = meta.citations;
-      if (meta.cacheControl) body['cache_control'] = meta.cacheControl;
+      // Prompt caching applied to the system block above (effective placement).
 
       const signal = deadlineSignal(ctx);
 

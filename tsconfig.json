@@ -80,6 +80,7 @@
     { "path": "packages/live-agents-runtime" },
     { "path": "packages/live-agents-trace-tools" },
     { "path": "packages/client" },
+    { "path": "packages/react-client" },
     { "path": "packages/weaveintel" },
     { "path": "apps/geneweave" },
     { "path": "apps/geneweave-ui" },

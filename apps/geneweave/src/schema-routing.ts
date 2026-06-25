@@ -37,6 +37,9 @@ CREATE TABLE IF NOT EXISTS model_pricing (
   source TEXT NOT NULL DEFAULT 'manual',
   last_synced_at TEXT,
   enabled INTEGER NOT NULL DEFAULT 1,
+  prompt_cache_enabled INTEGER NOT NULL DEFAULT 1,
+  prompt_cache_min_tokens INTEGER NOT NULL DEFAULT 1024,
+  prompt_cache_ttl TEXT NOT NULL DEFAULT '5m',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(model_id, provider)

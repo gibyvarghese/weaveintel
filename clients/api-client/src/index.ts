@@ -76,13 +76,46 @@ export {
   MemoryStorage,
   streamReducer,
   emptyRunViewModel,
+  // Phase 5 — UX primitives: the framework-agnostic run-session controller and
+  // the single SSE parser, surfaced so hosts (mobile, web-React via
+  // @weaveintel/react-client) configure them without importing @weaveintel/client.
+  createRunSession,
+  RUN_SESSION_SCHEMA_VERSION,
+  RunResumeExpiredError,
+  parseSseStream,
+  SseStallError,
+  // Phase 6 — refresh-proof resume, run metrics, outbox v2.
+  createRunCursorStore,
+  isCursorResumable,
+  createRunMetrics,
+  createRunOutbox,
+  // Phase 7 — structured object streaming, multimodal, AG-UI interop.
+  parsePartialJson,
+  toAGUIEvents,
   type OutboxStorage,
   type RunOutbox,
   type OutboxFlushResult,
+  type OutboxItem,
   type RunViewModel,
   type StreamItem,
   type ToolCallView,
   type StartRunInput,
+  type RunSession,
+  type RunSessionOptions,
+  type RunSessionState,
+  type RunSessionStatus,
+  type RunSessionStartInput,
+  type SseEvent,
+  type RunCursor,
+  type RunCursorStore,
+  type RunMetrics,
+  type RunMetricsSnapshot,
+  type ObjectView,
+  type FileView,
+  type ObjectPart,
+  type FilePart,
+  type PartialJsonResult,
+  type AGUIEvent,
 } from '@weaveintel/client';
 
 // Surface schemas + inferred types

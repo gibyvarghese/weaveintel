@@ -150,6 +150,10 @@ export interface ChatSettingsRow {
   // W5 — Ensemble (m40)
   ensemble_agents: string | null;
   ensemble_resolver: string | null;
+  // Reasoning request (m92)
+  reasoning_enabled: number;
+  reasoning_effort: string | null;
+  reasoning_budget_tokens: number;
   // P2-1 — Parallel tool execution (m63)
   parallel_tool_calls: number;
   // P2-3 — Context window management (m63)

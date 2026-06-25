@@ -61,6 +61,18 @@ import { applyM78ArtifactTypeSettings } from './m78-artifact-type-settings.js';
 import { applyM79ArtifactStreaming } from './m79-artifact-streaming.js';
 import { applyM80LiveArtifacts } from './m80-live-artifacts.js';
 import { applyM81ArtifactTenant } from './m81-artifact-tenant.js';
+import { applyM82CachePhase0 } from './m82-cache-phase0.js';
+import { applyM83CacheSettings } from './m83-cache-settings.js';
+import { applyM84PromptCachePricing } from './m84-prompt-cache-pricing.js';
+import { applyM85CacheMetrics } from './m85-cache-metrics.js';
+import { applyM86SemanticCacheConfig } from './m86-semantic-cache-config.js';
+import { applyM87CacheInvalidationRules } from './m87-cache-invalidation-rules.js';
+import { applyM88ToolCachePolicies } from './m88-tool-cache-policies.js';
+import { applyM89CachePhase7 } from './m89-cache-phase7.js';
+import { applyM90AgentPlanCacheConfig } from './m90-agent-plan-cache-config.js';
+import { applyM91RunStreamConfig } from './m91-run-stream-config.js';
+import { applyM92ReasoningSettings } from './m92-reasoning-settings.js';
+import { applyM93HitlRunScope } from './m93-hitl-run-scope.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -130,6 +142,18 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm79-artifact-streaming', description: 'Artifact Streaming Status (Phase 4): streaming_status + streaming_progress columns on artifacts; partial index idx_artifacts_streaming for active streams', run: applyM79ArtifactStreaming },
   { id: 'm80-live-artifacts', description: 'Live Artifact Configs (Phase 6): live_artifact_configs table with MCP tool + refresh interval + cache TTL for auto-refreshing artifacts', run: applyM80LiveArtifacts },
   { id: 'm81-artifact-tenant', description: 'Add tenant_id to artifacts table for multi-tenant isolation', run: applyM81ArtifactTenant },
+  { id: 'm82-cache-phase0', description: 'Cache Phase 0 hardening: ADD max_bytes + key_hashing + tenant_isolation + cache_temperature_gate + output_bypass_patterns columns to cache_policies; backfill secure defaults; seed output-bypass secret patterns on Global Default policy', run: applyM82CachePhase0 },
+  { id: 'm83-cache-settings', description: 'Cache Phase 1: cache_settings single-row table (l2_enabled/l2_provider, l1_max_entries/l1_max_bytes/l1_ttl_ms, key_namespace, global_version_token, stampede_protection, metrics_enabled) controlling multi-tier/distributed cache topology from the DB; seeds the global row', run: applyM83CacheSettings },
+  { id: 'm84-prompt-cache-pricing', description: 'Cache Phase 2: ADD prompt_cache_enabled + prompt_cache_min_tokens + prompt_cache_ttl columns to model_pricing for per-model provider-native prompt caching (Anthropic cache_control / OpenAI implicit)', run: applyM84PromptCachePricing },
+  { id: 'm85-cache-metrics', description: 'Cache Phase 3: cache_metrics hourly rollup table (response hits/misses + prompt-cache read/write tokens + cost saved) for the admin Cache Metrics dashboard; enables cache_settings.metrics_enabled', run: applyM85CacheMetrics },
+  { id: 'm86-semantic-cache-config', description: 'Cache Phase 4: semantic_cache_config single-row table (embedding_model/version, similarity_threshold, invalidation_radius, max_entries, ttl_ms, scope, bypass_patterns, verified_bounds) gating the embedding-similarity cache; seeds enabled global row', run: applyM86SemanticCacheConfig },
+  { id: 'm87-cache-invalidation-rules', description: 'Cache Phase 5: cache_invalidation_rules table (trigger + config JSON) driving the event-driven invalidation engine; seeds model_change/prompt_update/knowledge_update/session_end/preference_change rules', run: applyM87CacheInvalidationRules },
+  { id: 'm88-tool-cache-policies', description: 'Cache Phase 6: tool_cache_policies table (tool_name, cacheable, ttl_ms, enabled) — opt-in per-tool result caching tunable from the DB; seeds read-only tools (web_search/news_search/market_data/http_request/calculator/datetime/unit_convert)', run: applyM88ToolCachePolicies },
+  { id: 'm89-cache-phase7', description: 'Cache Phase 7: ADD swr_ms/negative_ttl_ms/eviction_policy to cache_policies + l1_eviction_policy/l1_negative_ttl_ms to cache_settings (stampede protection, SWR, negative caching, cost-aware eviction); enables stampede_protection by default', run: applyM89CachePhase7 },
+  { id: 'm90-agent-plan-cache-config', description: 'Cache Phase 8: agent_plan_cache_config single-row table (enabled, similarity_threshold, min_steps, max_entries, ttl_ms, scope) gating Agentic Plan Caching — reuse structured plan templates across similar agent/supervisor tasks; seeds enabled global row', run: applyM90AgentPlanCacheConfig },
+  { id: 'm91-run-stream-config', description: 'Client Phase 0: run_stream_config single-row table (heartbeat_ms, max_reconnects, backoff_ms, stall_timeout_ms, throttle_ms, journal_retention_hours, journal_max_events, resume_window_seconds) — moves run-event SSE streaming tuning + journal retention into the DB; seeds defaults from RUN_STREAM_CONFIG_DEFAULTS', run: applyM91RunStreamConfig },
+  { id: 'm92-reasoning-settings', description: 'Reasoning request: chat_settings.reasoning_enabled/reasoning_effort/reasoning_budget_tokens — request provider reasoning (Anthropic thinking / OpenAI effort) for reasoning-capable models so reasoning frames surface', run: applyM92ReasoningSettings },
+  { id: 'm93-hitl-run-scope', description: 'HITL Phase 4: add run_id to hitl_interrupt_requests so /api/me/runs approvals are run-scoped + persisted (survive restart)', run: applyM93HitlRunScope },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

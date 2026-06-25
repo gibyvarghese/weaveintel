@@ -59,6 +59,10 @@ export interface ModelPricingRow {
   enabled: number;
   /** Phase 1 anyWeave routing — 'text' | 'image' | 'audio' | 'video' | 'embedding' | 'multimodal'. */
   output_modality?: string;
+  // Phase 2 — provider-native prompt caching policy (per model).
+  prompt_cache_enabled?: number;     // 1 = request caching of the stable prefix
+  prompt_cache_min_tokens?: number;  // min stable-prefix size to cache (≈1024)
+  prompt_cache_ttl?: string;         // '5m' | '1h'
   created_at: string;
   updated_at: string;
 }

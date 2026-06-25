@@ -71,10 +71,16 @@ export function registerModelPricingRoutes(
     if (body['output_cost_per_1m'] !== undefined) fields['output_cost_per_1m'] = body['output_cost_per_1m'];
     if (body['quality_score'] !== undefined) fields['quality_score'] = body['quality_score'];
     if (body['source'] !== undefined) fields['source'] = body['source'];
+    if (body['prompt_cache_enabled'] !== undefined) fields['prompt_cache_enabled'] = body['prompt_cache_enabled'] ? 1 : 0;
+    if (body['prompt_cache_min_tokens'] !== undefined) fields['prompt_cache_min_tokens'] = body['prompt_cache_min_tokens'];
+    if (body['prompt_cache_ttl'] !== undefined) fields['prompt_cache_ttl'] = body['prompt_cache_ttl'] === '1h' ? '1h' : '5m';
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
     await db.updateModelPricing(params['id']!, fields as Partial<Omit<ModelPricingRow, 'id' | 'created_at' | 'updated_at'>>);
     const pricing = await db.getModelPricing(params['id']!);
     getCapabilityMatrixCache().invalidateModelPricing();
+    // Phase 5: a model-pricing change invalidates cached responses (event-driven).
+    const { emitCacheEvent } = await import('../../cache-invalidator.js');
+    await emitCacheEvent('model_change', { modelId: pricing?.model_id });
     json(res, 200, { pricing });
   }, { auth: true, csrf: true });
 

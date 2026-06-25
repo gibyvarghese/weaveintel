@@ -471,6 +471,8 @@ export function weaveOpenAIModel(
             promptTokens: usage?.['prompt_tokens'] ?? 0,
             completionTokens: usage?.['completion_tokens'] ?? 0,
             totalTokens: usage?.['total_tokens'] ?? 0,
+            // OpenAI prompt caching is automatic; surface the cached portion.
+            cacheReadTokens: Number((usage?.['prompt_tokens_details'] as Record<string, number> | undefined)?.['cached_tokens'] ?? 0),
           },
           model: String(raw['model']),
         };
@@ -536,6 +538,7 @@ export function weaveOpenAIModel(
                 promptTokens: usage['prompt_tokens'] ?? 0,
                 completionTokens: usage['completion_tokens'] ?? 0,
                 totalTokens: usage['total_tokens'] ?? 0,
+                cacheReadTokens: Number((usage['prompt_tokens_details'] as unknown as Record<string, number> | undefined)?.['cached_tokens'] ?? 0),
               },
             };
           }

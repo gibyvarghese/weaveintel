@@ -83,6 +83,13 @@ export interface IMeStore {
   // Run events
   appendUserRunEvent(event: Pick<UserRunEventRow, 'id' | 'run_id' | 'sequence' | 'kind' | 'payload'>): Promise<void>;
   listUserRunEvents(runId: string, afterSequence?: number): Promise<UserRunEventRow[]>;
+  /**
+   * Prune the run-event journal (Client Phase 0). Removes events for terminal
+   * runs older than `olderThanHours`, and trims any run whose event count
+   * exceeds `maxEventsPerRun` to its most recent `maxEventsPerRun` rows.
+   * Returns the number of rows deleted. Driven by `run_stream_config`.
+   */
+  pruneUserRunEvents(opts: { olderThanHours: number; maxEventsPerRun: number }): Promise<number>;
 
   // Devices
   registerDevice(device: Pick<UserDeviceRow, 'id' | 'user_id' | 'channel' | 'token'> & {

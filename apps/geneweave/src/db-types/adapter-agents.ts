@@ -44,4 +44,16 @@ export interface IAgentStore {
   getAgentStrategySettings(id: string): Promise<AgentStrategySettingsRow | null>;
   updateAgentStrategySettings(id: string, patch: Partial<Omit<AgentStrategySettingsRow, 'id' | 'updated_at'>>): Promise<void>;
   listAgentStrategySettings(): Promise<AgentStrategySettingsRow[]>;
+
+  // HITL approvals (m64 table; m93 run-scoped). The run path writes a pending
+  // row when a gated tool needs approval; resolution records the decision so it
+  // is persisted + queryable (survives restart).
+  createHitlInterrupt(row: {
+    id: string; chat_id: string; run_id?: string | null; agent_name: string; agent_step?: number;
+    tool_name: string; tool_args_json?: string; interrupt_type?: string; reason?: string; expires_at?: string | null;
+  }): Promise<void>;
+  resolveHitlInterrupt(id: string, fields: {
+    status: string; decision_action?: string; modified_args_json?: string | null; feedback?: string | null; decided_by?: string | null;
+  }): Promise<void>;
+  listPendingHitlInterruptsByRun(runId: string): Promise<Array<{ id: string; tool_name: string; status: string; tool_args_json: string }>>;
 }

@@ -55,6 +55,8 @@ import type { NotificationsHub } from '../notifications-wiring.js';
 import { meTaskRepo as taskRepo, meTriggerStore as triggerStore } from './me-stores.js';
 import { safePageInt } from './index.js';
 import { MeRunExecutor, isTerminalRunStatus } from '../me-run-executor.js';
+import { loadRunStreamConfig, clientStreamConfig } from '../chat-run-stream-utils.js';
+import { runApprovals } from '../me-run-approvals.js';
 
 /**
  * Register all /api/me routes on the provided router.
@@ -164,6 +166,17 @@ export function registerMeRoutes(
     res.end(JSON.stringify({ runs }));
   }, { auth: true });
 
+  // Client run/stream tuning (sourced from the `run_stream_config` DB row).
+  // Registered BEFORE `/:runId` so the literal path wins over the param route.
+  // Clients (@weaveintel/client / geneweave-ui) fetch this and apply the
+  // reconnect backoff / throttle so DB changes drive client behaviour.
+  router.get('/api/me/runs/config', async (_req, res, _params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const cfg = await loadRunStreamConfig(db);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(clientStreamConfig(cfg)));
+  }, { auth: true });
+
   router.get('/api/me/runs/:runId', async (_req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
     const run = await db.getUserRun(params['runId']!, auth.userId);
@@ -180,6 +193,9 @@ export function registerMeRoutes(
 
     const url = new URL(req.url ?? '/', 'http://x');
     const afterSeq = safePageInt(url.searchParams.get('after'), -1, -1, Number.MAX_SAFE_INTEGER);
+
+    // Keepalive cadence comes from `run_stream_config` (DB), not a hardcoded 15s.
+    const streamCfg = await loadRunStreamConfig(db);
 
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -220,7 +236,7 @@ export function registerMeRoutes(
         if (res.writableEnded) { clearInterval(keepalive); return; }
         res.write(': keepalive\n\n');
       } catch { clearInterval(keepalive); }
-    }, 15_000);
+    }, Math.max(1000, streamCfg.heartbeatMs));
     req.socket?.on('close', () => { clearInterval(keepalive); detach(); });
   }, { auth: true });
 
@@ -230,12 +246,31 @@ export function registerMeRoutes(
     if (!run) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
     const body = JSON.parse(await readBody(req)) as Record<string, unknown>;
 
-    // Append + broadcast through the executor so client-originated events are
-    // serialized with executor writes (gap-free sequence) and fanned out live.
     const kind = typeof body['kind'] === 'string' ? body['kind'] : 'client.event';
     const payload = (typeof body['payload'] === 'object' && body['payload'] !== null)
       ? (body['payload'] as Record<string, unknown>)
       : body;
+
+    // Phase 4: an approval decision resolves a pending HITL approval (resumes or
+    // denies the paused run) rather than being recorded as a plain client event.
+    if (kind === 'approval.decision') {
+      const taskId = typeof payload['taskId'] === 'string' ? payload['taskId'] : '';
+      const rawAction = payload['action'];
+      const action = rawAction === 'approve' || rawAction === 'reject' || rawAction === 'modify' ? rawAction : 'reject';
+      const resolved = taskId
+        ? await runApprovals.resolve(taskId, action, {
+            ...(typeof payload['feedback'] === 'string' ? { feedback: payload['feedback'] } : {}),
+            ...(payload['modifiedArgs'] && typeof payload['modifiedArgs'] === 'object' ? { modifiedArgs: payload['modifiedArgs'] as Record<string, unknown> } : {}),
+            decidedBy: auth.userId,
+          })
+        : false;
+      res.writeHead(resolved ? 200 : 404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ resolved }));
+      return;
+    }
+
+    // Append + broadcast through the executor so client-originated events are
+    // serialized with executor writes (gap-free sequence) and fanned out live.
     const sequence = await runExecutor.appendEvent(run.id, kind, payload);
     res.writeHead(201, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ sequence }));

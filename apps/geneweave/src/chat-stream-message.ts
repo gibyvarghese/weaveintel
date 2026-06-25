@@ -8,6 +8,7 @@ import { applySkillsToPrompt } from '@weaveintel/skills';
 import type { DurableConsentManager } from '@weaveintel/compliance';
 import type { DatabaseAdapter } from './db.js';
 import { normalizePersona } from './rbac.js';
+import { buildReasoningRequestMetadata, reasoningAdjustedTemperature, reasoningAdjustedMaxTokens, type ReasoningRequestMetadata } from './chat-reasoning-utils.js';
 import {
   calculateCost,
   getOrCreateModel,
@@ -31,9 +32,15 @@ import { discoverSkillsForInput } from './chat-skills-utils.js';
 import { applyRedaction, runPostEval, SUPERVISOR_INTERNAL_TOOLS } from './chat-eval-utils.js';
 import { historyToMessages, extractToolEvidence } from './chat-message-utils.js';
 import { recordTraceSpans, withLLMSpan, type ToolCallObservableEvent, type AgentRunTelemetry } from './chat-trace-utils.js';
+import type { CacheTurnMetrics } from './chat-send-message.js';
 import { evaluateGuardrails, evaluateTaskPolicies } from './chat-guardrail-eval-utils.js';
 import { resolveSystemPrompt, buildCapabilityTelemetrySnapshots } from './chat-system-prompt-utils.js';
-import { routeModel } from './chat-routing-utils.js';
+import { routeModel, resolveActiveCache } from './chat-routing-utils.js';
+import { shouldBypass, shouldBypassResponse, isCacheableTemperature, cacheScopeKey, cacheScopeKeyString, planPromptCacheBreakpoints } from '@weaveintel/cache';
+import type { CachePolicy, SemanticCache } from '@weaveintel/core';
+import { semanticLookup, semanticStore, type SemanticConfig } from './chat-semantic-utils.js';
+import { readResponseWithSwr, writeResponseWithSwr, readNegativeCache, writeNegativeCache } from './cache-stampede.js';
+import type { LeaderHandle } from '@weaveintel/cache';
 import { recordThroughput, getP50MsPerToken, ADAPTIVE_BUDGET_SAFETY_FACTOR, ADAPTIVE_BUDGET_MIN_MS } from '@weaveintel/resilience';
 import {
   buildMemoryContext,
@@ -49,6 +56,13 @@ type StreamMessageDeps = {
   config: ChatEngineConfig;
   db: DatabaseAdapter;
   healthTracker: RuntimeRoutingSlot;
+  // Phase 1: shared response cache + key builder (same instances as the
+  // non-streaming send path) so streamed turns also read/write the response cache.
+  responseCache: {
+    get: (key: string) => Promise<unknown>;
+    set: (key: string, value: unknown, ttlMs: number) => Promise<void>;
+  };
+  cacheKeyBuilder: { build: (input: Record<string, string | number | boolean>) => string };
   getAvailableModels: () => Promise<Array<{ id: string; provider: string }>>;
   withResponseCardFormatPolicy: (basePrompt: string | undefined) => Promise<string | undefined>;
   streamAgent: (
@@ -72,6 +86,18 @@ type StreamMessageDeps = {
   /** Optional hook: called after policy checks are evaluated (best-effort, never blocks the stream). */
   onPolicyChecks?: (userId: string, checks: Array<{ tool: string; policy: string; taskType: string; priority: string }>) => Promise<void>;
   consentManager?: DurableConsentManager | null;
+  /** Phase 3 — record this turn's cache effectiveness into the live sink + durable rollup. */
+  recordCacheMetrics?: (turn: CacheTurnMetrics) => void;
+  /** Phase 4 — scoped embedding-similarity cache (from the runtime cache slot). */
+  semanticCache?: SemanticCache;
+  /** Phase 4 — resolve the DB-driven semantic cache config (60s cached). */
+  loadSemanticConfig?: () => Promise<SemanticConfig | null>;
+  /** Phase 5 — resolve the dynamic cache-key version token (60s cached). */
+  loadCacheVersion?: () => Promise<string>;
+  /** Phase 7 — process-wide singleflight to coalesce concurrent identical misses. */
+  singleflight?: import('@weaveintel/cache').Singleflight;
+  /** Phase 7 — resolve the DB-driven stampede config (enabled + negative TTL, 60s cached). */
+  loadStampedeConfig?: () => Promise<{ enabled: boolean; negativeTtlMs: number }>;
 };
 
 async function isAnalyticsAllowed(consentManager: DurableConsentManager | null | undefined, userId: string): Promise<boolean> {
@@ -296,7 +322,10 @@ export async function streamMessageImpl(
   let providerCfg = deps.config.providers[provider];
 
   const blocked = deps.healthTracker.getBlockedProviders();
-  const routed = await routeModel(deps.db, await deps.getAvailableModels(), deps.healthTracker.listHealth(), { ...opts, prompt: content }, blocked);
+  // An explicit model override PINS the model and bypasses the router (e.g. a
+  // run that wants a specific reasoning model). Otherwise the router decides.
+  const pinned = typeof opts?.model === 'string' && opts.model.length > 0;
+  const routed = pinned ? null : await routeModel(deps.db, await deps.getAvailableModels(), deps.healthTracker.listHealth(), { ...opts, prompt: content }, blocked);
   if (routed && deps.config.providers[routed.provider]) {
     provider = routed.provider;
     modelId = routed.modelId;
@@ -547,6 +576,133 @@ export async function streamMessageImpl(
     return;
   }
 
+  // ── Phase 1: response cache (streaming path) ──────────────────────────────
+  // Mirror the non-streaming send path: resolve the active cache policy, build a
+  // scope-isolated salted-SHA-256 key, and on a hit replay the cached answer as
+  // SSE instead of calling the model. Multimodal turns are never cached.
+  const streamAllowCache = attachments.length === 0;
+  const streamCachePolicy: CachePolicy | null = streamAllowCache
+    ? await resolveActiveCache(deps.db, settings.mode)
+    : null;
+  // Phase 5: visible scope prefix + hashed prompt + dynamic version (same as send).
+  const streamScopePrefix = cacheScopeKeyString({
+    tenantId,
+    userId,
+    scope: streamCachePolicy?.scope,
+    tenantIsolation: streamCachePolicy?.tenantIsolation,
+  });
+  const streamCacheVersion = deps.loadCacheVersion ? await deps.loadCacheVersion() : 'v1';
+  const streamCacheKey = (streamScopePrefix ? streamScopePrefix + '||' : '') + deps.cacheKeyBuilder.build({
+    model: modelId,
+    prompt: processedContent,
+    _gv: streamCacheVersion,
+  });
+  // Phase 7 — stampede config + effective SWR / negative-cache windows.
+  const streamStampedeCfg = (streamCachePolicy && deps.loadStampedeConfig) ? await deps.loadStampedeConfig() : { enabled: false, negativeTtlMs: 0 };
+  const streamSwrMs = streamCachePolicy?.swrMs ?? 0;
+  const streamNegTtlMs = streamCachePolicy?.negativeTtlMs || streamStampedeCfg.negativeTtlMs || 0;
+
+  /** Replay a fully-formed answer as SSE (cache hit / SWR-stale / coalesced / negative). */
+  const emitCachedSse = async (
+    content: string,
+    usage: { promptTokens: number; completionTokens: number; totalTokens: number },
+    extra: { semantic?: boolean; coalesced?: boolean; stale?: boolean; negative?: boolean },
+  ): Promise<void> => {
+    const cacheLatencyMs = Date.now() - requestStartMs;
+    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no' });
+    if (redactionInfo) await deps.writeSseEvent(res, { type: 'redaction', ...redactionInfo });
+    await deps.writeSseEvent(res, { type: 'text', text: content });
+    await deps.writeSseEvent(res, {
+      type: 'done', usage, cost: 0, latencyMs: cacheLatencyMs,
+      model: modelId, provider, mode: settings.mode, cached: true, traceId, ...extra,
+    });
+    await deps.db.addMessage({
+      id: newUUIDv7(), chatId, role: 'assistant', content,
+      metadata: JSON.stringify({ model: modelId, provider, streamed: true, mode: settings.mode, cached: true, traceId, ...extra }),
+      tokensUsed: usage.totalTokens, cost: 0, latencyMs: cacheLatencyMs,
+    });
+    if (!extra.negative) {
+      try { await saveToMemory(deps.db, ctx, model, userId, chatId, processedContent, content, tenantId ?? undefined); } catch { /* best-effort */ }
+    }
+    deps.recordCacheMetrics?.({ responseHit: true, responseEligible: true, promptCacheReadTokens: 0, promptCacheWriteTokens: 0, provider, inputCostPer1M: 0 });
+    deps.endSse(res);
+  };
+
+  if (streamCachePolicy && !shouldBypass(streamCachePolicy, processedContent)) {
+    // Phase 7 negative cache: an identical request that recently failed is shielded.
+    if (streamNegTtlMs > 0 && await readNegativeCache(deps.responseCache, streamCacheKey)) {
+      await emitCachedSse('This request recently failed and is being rate-limited briefly to protect the service. Please try again shortly.', { promptTokens: 0, completionTokens: 0, totalTokens: 0 }, { negative: true });
+      return;
+    }
+    // Phase 7 SWR: serve fresh OR stale (within the swr window) from cache.
+    const swrRead = await readResponseWithSwr(deps.responseCache, streamCacheKey, { ttlMs: streamCachePolicy.ttlMs, swrMs: streamSwrMs });
+    if (swrRead.value) {
+      await emitCachedSse(swrRead.value.content, swrRead.value.usage ?? { promptTokens: 0, completionTokens: 0, totalTokens: 0 }, { stale: swrRead.state === 'stale' });
+      return;
+    }
+  }
+
+  // Phase 4: on an exact-match miss, try the scoped semantic cache (paraphrase
+  // match). On a hit, replay the cached answer as SSE — no LLM call.
+  const streamSemanticCfg = (deps.semanticCache && deps.loadSemanticConfig)
+    ? await deps.loadSemanticConfig()
+    : null;
+  if (streamSemanticCfg) {
+    const semHit = await semanticLookup(deps.semanticCache, streamSemanticCfg, processedContent, tenantId, userId);
+    if (semHit) {
+      const semLatencyMs = Date.now() - requestStartMs;
+      const semUsage = semHit.usage ?? { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+      res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no' });
+      if (redactionInfo) await deps.writeSseEvent(res, { type: 'redaction', ...redactionInfo });
+      await deps.writeSseEvent(res, { type: 'text', text: semHit.content });
+      await deps.writeSseEvent(res, {
+        type: 'done', usage: semUsage, cost: 0, latencyMs: semLatencyMs,
+        model: modelId, provider, mode: settings.mode, cached: true, semantic: true, traceId,
+      });
+      await deps.db.addMessage({
+        id: newUUIDv7(), chatId, role: 'assistant', content: semHit.content,
+        metadata: JSON.stringify({ model: modelId, provider, streamed: true, mode: settings.mode, cached: true, semantic: true, traceId }),
+        tokensUsed: semUsage.totalTokens, cost: 0, latencyMs: semLatencyMs,
+      });
+      try {
+        await saveToMemory(deps.db, ctx, model, userId, chatId, processedContent, semHit.content, tenantId ?? undefined);
+      } catch { /* episodic capture is best-effort */ }
+      deps.recordCacheMetrics?.({ responseHit: true, responseEligible: true, promptCacheReadTokens: 0, promptCacheWriteTokens: 0, provider, inputCostPer1M: 0 });
+      deps.endSse(res);
+      return;
+    }
+  }
+
+  // Phase 7 stampede protection (streaming): if an identical turn is already in
+  // flight, this request becomes a FOLLOWER — it waits for the leader's result
+  // and replays it (one model call serves both). Otherwise it is the LEADER and
+  // resolves the in-flight promise once its answer is final (see below). The res
+  // 'finish'/'close' events guarantee the leader always settles, so a follower
+  // never hangs — on leader failure the follower simply recomputes.
+  let sfLeader: LeaderHandle<string> | undefined;
+  if (deps.singleflight && streamStampedeCfg.enabled && streamCachePolicy && !shouldBypass(streamCachePolicy, processedContent)) {
+    const handle = deps.singleflight.beginOrJoin<string>(streamCacheKey);
+    if (!handle.leader) {
+      const leaderText = await handle.join.catch(() => null);
+      if (typeof leaderText === 'string' && leaderText.trim().length > 0) {
+        await emitCachedSse(leaderText, { promptTokens: 0, completionTokens: 0, totalTokens: 0 }, { coalesced: true });
+        return;
+      }
+      // Leader failed / produced nothing → become the leader for our own compute.
+      const retry = deps.singleflight.beginOrJoin<string>(streamCacheKey);
+      if (retry.leader) sfLeader = retry;
+    } else {
+      sfLeader = handle;
+    }
+    if (sfLeader) {
+      const L = sfLeader;
+      // Guaranteed settle: if the stream ends/aborts without an explicit resolve,
+      // reject so any followers fall through and recompute (never hang).
+      res.once('finish', () => L.reject(new Error('stream ended without result')));
+      res.once('close', () => L.reject(new Error('stream closed')));
+    }
+  }
+
   const messages = historyToMessages(history);
   patchLatestUserMessage(messages, processedContent);
 
@@ -588,6 +744,7 @@ export async function streamMessageImpl(
   const startMs = Date.now();
   let fullText = '';
   let finalUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+  let streamPromptCache: { readTokens: number; writeTokens: number; applied: boolean; ttl: '5m' | '1h' } | undefined;
   let steps: AgentStep[] = [];
   let toolCallEvents: ToolCallObservableEvent[] = [];
   let streamContractInfo: PromptContractValidationReport | undefined;
@@ -622,13 +779,51 @@ export async function streamMessageImpl(
         await deps.writeSseEvent(res, { type: 'ensemble_result', ...ensembleMeta });
       }
     } else {
+      // Phase 2: provider-native prompt caching on the streaming path — cache the
+      // stable prefix (system prompt). Anthropic needs the explicit breakpoint;
+      // OpenAI/Gemini cache implicitly and surface cached_tokens without a hint.
+      const streamPlanPricing = (await deps.loadPricing()).get(modelId);
+      const streamCachePlan = planPromptCacheBreakpoints({
+        systemText: streamAugmentedPrompt ?? '',
+        minTokens: streamPlanPricing?.promptCacheMinTokens ?? 1024,
+        ttl: streamPlanPricing?.promptCacheTtl ?? '5m',
+        enabled: streamPlanPricing?.promptCacheEnabled ?? true,
+        providerSupported: provider === 'anthropic',
+      });
+      streamPromptCache = { readTokens: 0, writeTokens: 0, applied: streamCachePlan.enabled || provider === 'openai', ttl: streamCachePlan.ttl };
+
+      // Reasoning request (m92): when the chat enabled reasoning AND the model is
+      // reasoning-capable, ask the provider for reasoning (Anthropic thinking /
+      // OpenAI effort). Gated on `supports_thinking` so we never send `thinking`
+      // to a model that rejects it. The capability lookup only runs when enabled.
+      const baseMaxTokens = opts?.maxTokens ?? 4096;
+      let streamReasoningMeta: ReasoningRequestMetadata | undefined;
+      if (settings.reasoningEnabled) {
+        const caps = await deps.db.listCapabilityScores({ provider, modelId }).catch(() => []);
+        streamReasoningMeta = buildReasoningRequestMetadata({
+          provider,
+          supportsThinking: caps.some((c) => c.supports_thinking === 1),
+          enabled: true,
+          effort: settings.reasoningEffort ?? null,
+          budgetTokens: settings.reasoningBudgetTokens ?? null,
+          maxTokens: baseMaxTokens,
+        });
+      }
+      const streamMetadata: Record<string, unknown> = {};
+      if (provider === 'openai') streamMetadata['promptCacheKey'] = `gw:${tenantId ?? 'global'}:${chatId}`;
+      if (streamReasoningMeta?.thinking) streamMetadata['thinking'] = streamReasoningMeta.thinking;
+      if (streamReasoningMeta?.reasoningEffort) streamMetadata['reasoningEffort'] = streamReasoningMeta.reasoningEffort;
+
       const request: ModelRequest = {
         messages: streamAugmentedPrompt
           ? [{ role: 'system' as const, content: streamAugmentedPrompt }, ...messages]
           : messages,
-        maxTokens: opts?.maxTokens ?? 4096,
-        temperature: opts?.temperature,
+        maxTokens: reasoningAdjustedMaxTokens(streamReasoningMeta, baseMaxTokens),
+        // Anthropic rejects a pinned temperature when thinking is enabled.
+        temperature: reasoningAdjustedTemperature(streamReasoningMeta, opts?.temperature),
         stream: true,
+        ...(streamCachePlan.enabled ? { promptCache: { ttl: streamCachePlan.ttl } } : {}),
+        ...(Object.keys(streamMetadata).length ? { metadata: streamMetadata } : {}),
       };
 
       // Phase 1: OTel GenAI span covering the entire model interaction (streaming
@@ -678,11 +873,20 @@ export async function streamMessageImpl(
               }
             } else if (chunk.type === 'usage' && chunk.usage) {
               finalUsage = { promptTokens: chunk.usage.promptTokens, completionTokens: chunk.usage.completionTokens, totalTokens: chunk.usage.totalTokens };
+              // Phase 2: accumulate provider prompt-cache token counts.
+              if (streamPromptCache) {
+                if (chunk.usage.cacheReadTokens) streamPromptCache.readTokens = chunk.usage.cacheReadTokens;
+                if (chunk.usage.cacheWriteTokens) streamPromptCache.writeTokens = chunk.usage.cacheWriteTokens;
+              }
               // Attach token counts to the OTel span once we have them
               llmSpan?.setAttribute('gen_ai.usage.input_tokens', finalUsage.promptTokens);
               llmSpan?.setAttribute('gen_ai.usage.output_tokens', finalUsage.completionTokens);
             } else if (chunk.type === 'done') {
-              break;
+              // Do NOT break here: some providers (OpenAI) emit the final usage
+              // chunk *after* the finish-reason `done`. Breaking would drop the
+              // token counts (and prompt-cache tokens). The generator ends on its
+              // own when the provider closes the stream, so we drain to the end.
+              continue;
             }
           }
         } finally {
@@ -698,6 +902,10 @@ export async function streamMessageImpl(
         llmSpan?.end(); // end the outer span too
         fullText = response.content;
         finalUsage = { ...response.usage };
+        if (streamPromptCache) {
+          streamPromptCache.readTokens = response.usage.cacheReadTokens ?? 0;
+          streamPromptCache.writeTokens = response.usage.cacheWriteTokens ?? 0;
+        }
         await deps.writeSseEvent(res, { type: 'text', text: response.content });
       }
     }
@@ -709,6 +917,11 @@ export async function streamMessageImpl(
     if (!clientDisconnected) {
       await deps.writeSseEvent(res, { type: 'error', error: streamErrorMessage });
     }
+    // Phase 7 negative cache: remember the failure briefly so an immediate retry
+    // storm of the identical request is shielded from the backend.
+    if (streamNegTtlMs > 0) await writeNegativeCache(deps.responseCache, streamCacheKey, streamNegTtlMs);
+    // Leader failed → let any followers fall through and recompute.
+    sfLeader?.reject(err);
   }
 
   const latencyMs = Date.now() - startMs;
@@ -903,10 +1116,38 @@ export async function streamMessageImpl(
     streamInterrupted: streamErrored || undefined,
     title: autoTitle ?? undefined,
     traceId,
+    cached: false,
+    promptCache: streamPromptCache,
     ensembleCandidates: ensembleMeta?.candidates,
     ensembleWinner: ensembleMeta?.winner,
     artifactRefs: artifactRefs.length ? artifactRefs : undefined,
   });
+
+  // Phase 7 stampede: the turn produced a final answer — resolve the in-flight
+  // promise so any waiting followers replay it instead of calling the model.
+  if (!streamErrored && fullText.trim().length > 0) sfLeader?.resolve(fullText);
+
+  // Phase 1: write-through to the response cache so a subsequent identical turn
+  // (this replica or another, when L2/Redis is enabled) is served from cache.
+  // Same gates as the non-streaming path: determinism, output-secret bypass,
+  // allow-only guardrail decision, and a non-empty, non-guard-failure answer.
+  const streamCacheWritable =
+    !!streamCachePolicy &&
+    streamAllowCache &&
+    !streamErrored &&
+    postGuardrail.decision !== 'deny' &&
+    isCacheableTemperature(streamCachePolicy!, opts?.temperature) &&
+    fullText.trim().length > 0 &&
+    !fullText.includes('[Execution guard failure]') &&
+    !shouldBypassResponse(streamCachePolicy!, fullText);
+  if (streamCacheWritable) {
+    try {
+      // Phase 7: SWR-aware write (sidecar timestamp + extended TTL when swr_ms>0).
+      await writeResponseWithSwr(deps.responseCache, streamCacheKey, { content: fullText, usage: finalUsage }, { ttlMs: streamCachePolicy!.ttlMs, swrMs: streamSwrMs });
+    } catch { /* cache write is best-effort — never fail the turn on a cache error */ }
+    // Phase 4: also persist to the semantic cache so a paraphrase hits next time.
+    await semanticStore(deps.semanticCache, streamSemanticCfg, processedContent, { content: fullText, usage: finalUsage }, tenantId, userId);
+  }
 
   const assistMsgId = newUUIDv7();
   await deps.db.addMessage({
@@ -958,6 +1199,17 @@ export async function streamMessageImpl(
       totalTokens: finalUsage.totalTokens, cost, latencyMs,
     });
   }
+
+  // Phase 3: a response-cache miss (the LLM ran) on the streaming path, plus any
+  // provider prompt-cache token savings observed on this turn.
+  deps.recordCacheMetrics?.({
+    responseHit: false,
+    responseEligible: !!streamCachePolicy,
+    promptCacheReadTokens: streamPromptCache?.readTokens ?? 0,
+    promptCacheWriteTokens: streamPromptCache?.writeTokens ?? 0,
+    provider,
+    inputCostPer1M: streamDbPricing.get(modelId)?.input ?? 0,
+  });
 
   await recordTraceSpans(
     deps.db,

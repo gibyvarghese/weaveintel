@@ -805,6 +805,8 @@ export interface ToolRegistryOptions {
   temporalStore?: TemporalStore;
   currentUserId?: string;
   currentChatId?: string;
+  /** Run id (set on the /api/me/runs path) so emitted artifacts are run-scoped. */
+  currentRunId?: string;
   currentAttachments?: RuntimeAttachment[];
   actorPersona?: string;
   memoryRecall?: (args: { userId: string; query: string; limit?: number }) => Promise<{
@@ -900,6 +902,13 @@ export interface ToolRegistryOptions {
    * per-worker in buildWorkersFromDb() to the worker's agentic_scope value.
    */
   scopeGuard?: import('./scope-guard-registry.js').ScopeGuardCallbacks;
+  /**
+   * Cache Phase 6 — opt-in tool-result caching. When set, each tool's result is
+   * cached per the DB-driven `tool_cache_policies` (per-tool TTL). Applied as the
+   * INNERMOST registry wrapper so authorization/scope/rate-limit checks still run
+   * on every call; only the underlying `invoke()` is skipped on a cache hit.
+   */
+  toolResultCache?: import('./tool-cache-registry.js').ToolResultCacheCallbacks;
   /**
    * Artifact persistence callback. When set, the `emit_artifact` built-in tool
    * is available to all agents. Called with the artifact payload; returns the
@@ -1523,6 +1532,7 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
                 data: '',
                 sessionId: opts.currentChatId,
                 userId: opts.currentUserId,
+                ...(opts.currentRunId ? { runId: opts.currentRunId } : {}),
                 tags: args.tags,
                 metadata: { ...baseMeta, streamingStatus: 'streaming', streamingProgress: 0 },
                 scope: 'session',
@@ -1570,6 +1580,7 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
               data: args.data,
               sessionId: opts.currentChatId,
               userId: opts.currentUserId,
+              ...(opts.currentRunId ? { runId: opts.currentRunId } : {}),
               tags: args.tags,
               metadata: baseMeta,
               scope: 'session',
@@ -1582,6 +1593,48 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
         tags: ['artifacts', 'output'],
       }),
     } : {}),
+    // F2: Generative-UI widget emission. The model calls this to render a typed
+    // widget inline; the run bridge maps the result onto a `widget.update` event
+    // (reusing the @weaveintel/ui-primitives builders for the payload).
+    emit_widget: weaveTool({
+      name: 'emit_widget',
+      description: 'Render a structured UI widget (table, chart, code block, etc.) inline. Use to present tabular data, a chart, or formatted code so the client renders an interactive component instead of plain text.',
+      parameters: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', enum: ['table', 'chart', 'code', 'form', 'image', 'map', 'timeline', 'custom'], description: 'Widget kind' },
+          title: { type: 'string', description: 'Optional widget title' },
+          data: { type: 'object', description: 'Widget data. table: {columns:string[], rows:any[][]}; chart: {chartType:"bar"|"line"|"pie"|"scatter", labels:string[], datasets:[{label:string,data:number[]}]}; code: {code:string, language?:string}; other: any object.' },
+        },
+        required: ['type', 'data'],
+      },
+      execute: async (args: { type: string; title?: string; data?: Record<string, unknown> }) => {
+        try {
+          const uip = await import('@weaveintel/ui-primitives');
+          const title = typeof args.title === 'string' ? args.title : '';
+          const d = (args.data && typeof args.data === 'object') ? args.data : {};
+          let widget: import('@weaveintel/core').WidgetPayload;
+          if (args.type === 'table') {
+            const columns = Array.isArray(d['columns']) ? (d['columns'] as unknown[]).map(String) : [];
+            const rows = Array.isArray(d['rows']) ? (d['rows'] as unknown[][]) : [];
+            widget = uip.tableWidget(title || 'Table', columns, rows);
+          } else if (args.type === 'chart') {
+            const chartType = (['bar', 'line', 'pie', 'scatter'] as const).find((c) => c === d['chartType']) ?? 'bar';
+            const labels = Array.isArray(d['labels']) ? (d['labels'] as unknown[]).map(String) : [];
+            const datasets = Array.isArray(d['datasets']) ? (d['datasets'] as Array<{ label: string; data: number[] }>) : [];
+            widget = uip.chartWidget(title || 'Chart', chartType, labels, datasets);
+          } else if (args.type === 'code') {
+            widget = uip.codeWidget(title || 'Code', typeof d['code'] === 'string' ? d['code'] as string : '', typeof d['language'] === 'string' ? d['language'] as string : undefined);
+          } else {
+            widget = uip.createWidget({ type: args.type as import('@weaveintel/core').WidgetType, ...(title ? { title } : {}), data: d, interactive: false });
+          }
+          return JSON.stringify({ ok: true, widget });
+        } catch (e) {
+          return JSON.stringify({ ok: false, error: e instanceof Error ? e.message : String(e) });
+        }
+      },
+      tags: ['ui', 'output'],
+    }),
   };
   for (const name of filterToolNamesByPersona(toolNames, actorPersona)) {
     // Skip tools disabled in the operator-managed tool catalog
@@ -1636,8 +1689,17 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
     }
   }
 
-  // Phase 2: wrap with policy enforcement when a resolver is provided.
   let finalRegistry: ToolRegistry = registry;
+
+  // Cache Phase 6: tool-result caching is the INNERMOST wrapper (closest to the
+  // real tool) so policy/scope/rate-limit checks below still run on every call;
+  // only the underlying invoke() is skipped on a hit.
+  if (opts?.toolResultCache) {
+    const { wrapWithToolResultCache } = await import('./tool-cache-registry.js');
+    finalRegistry = wrapWithToolResultCache(finalRegistry, opts.toolResultCache);
+  }
+
+  // Phase 2: wrap with policy enforcement when a resolver is provided.
   if (opts?.policyResolver) {
     finalRegistry = createPolicyEnforcedRegistry(finalRegistry, {
       resolver: opts.policyResolver,

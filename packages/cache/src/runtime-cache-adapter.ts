@@ -15,11 +15,12 @@
  */
 
 import type { RuntimeCacheSlot } from '@weaveintel/core';
-import type { CacheStore, SemanticCache } from '@weaveintel/core';
+import type { CacheStore, SemanticCache, CacheMetrics } from '@weaveintel/core';
 
 export function createRuntimeCacheAdapter(
   store: CacheStore,
   semanticCache?: SemanticCache,
+  metrics?: CacheMetrics,
 ): RuntimeCacheSlot {
   return {
     async get(key) {
@@ -34,16 +35,11 @@ export function createRuntimeCacheAdapter(
       return store.delete(key);
     },
 
-    async semanticGet(embedding, threshold) {
+    async semanticGet(query, semOpts) {
       if (!semanticCache) return null;
-      // SemanticCache.find() searches by query string, not raw embedding.
-      // We store the embedding as a JSON key so semantic lookup still works
-      // when the same embedding is passed again. This is a best-effort
-      // wrapper — callers with access to the original query string should use
-      // `semanticStore.find(query, threshold)` directly.
-      const embeddingKey = JSON.stringify(embedding.slice(0, 8)); // prefix key
       try {
-        return await semanticCache.find(embeddingKey, threshold ?? 0.92);
+        const hit = await semanticCache.find(query, { scope: semOpts?.scope, threshold: semOpts?.threshold });
+        return hit ? hit.response : null;
       } catch {
         return null;
       }
@@ -51,5 +47,6 @@ export function createRuntimeCacheAdapter(
 
     store,
     semanticStore: semanticCache,
+    metrics,
   };
 }

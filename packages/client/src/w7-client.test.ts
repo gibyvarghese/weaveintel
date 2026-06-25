@@ -98,7 +98,7 @@ describe('createRunOutbox', () => {
     await outbox.enqueue({ idempotencyKey: 'ik-2', input: { text: 'world' } });
     const pending = await outbox.pending();
     expect(pending).toHaveLength(2);
-    expect(pending[0]?.input['idempotencyKey']).toBe('ik-1');
+    expect(pending[0]?.input?.['idempotencyKey']).toBe('ik-1');
   });
 
   it('flushes successfully and removes from outbox', async () => {
