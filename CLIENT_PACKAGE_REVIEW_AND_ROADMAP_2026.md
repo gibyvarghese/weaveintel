@@ -288,7 +288,7 @@ Phase 0 ─► Phase 1 ─► Phase 2 ─► Phase 3 ─► Phase 4
 | Phase 3 — generative UI · citations · artifacts (run-scoped) | `800a08d` | ✅ |
 | Phase 4 — HITL tool approvals (pause → approve/deny → resume) | `ae207ca` | ✅ |
 | Phase 5 — UX primitives (`createRunSession`) + `@weaveintel/react-client` (`useRun`) + single `parseSseStream` | `62cd99a` | ✅ (G14 web‑UI convergence partial — raw‑ESM serving; see Phase 5 note) |
-| Phase 6 — refresh‑proof resume (cursor + `resume()`) + Outbox v2 (backoff/dead‑letter/online‑offline/events) + `createRunMetrics` | `PENDING6` | ✅ |
+| Phase 6 — refresh‑proof resume (cursor + `resume()`) + Outbox v2 (backoff/dead‑letter/online‑offline/events) + `createRunMetrics` | `81b1b3e` | ✅ |
 
 ## 12. Deferred follow-ups (scoped, with plans)
 
