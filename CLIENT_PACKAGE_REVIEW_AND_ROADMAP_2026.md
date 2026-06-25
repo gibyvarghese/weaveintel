@@ -298,7 +298,7 @@ Phase 0 ─► Phase 1 ─► Phase 2 ─► Phase 3 ─► Phase 4
 | Phase 4 — HITL tool approvals (pause → approve/deny → resume) | `ae207ca` | ✅ |
 | Phase 5 — UX primitives (`createRunSession`) + `@weaveintel/react-client` (`useRun`) + single `parseSseStream` | `62cd99a` | ✅ (G14 web‑UI convergence partial — raw‑ESM serving; see Phase 5 note) |
 | Phase 6 — refresh‑proof resume (cursor + `resume()`) + Outbox v2 (backoff/dead‑letter/online‑offline/events) + `createRunMetrics` | `81b1b3e` | ✅ |
-| Phase 7 — structured object streaming (`parsePartialJson` + `object.*`) + multimodal `file.part` + AG‑UI adapter | `PENDING7` | ✅ |
+| Phase 7 — structured object streaming (`parsePartialJson` + `object.*`) + multimodal `file.part` + AG‑UI adapter | `65a93ef` | ✅ |
 
 ## 12. Deferred follow-ups (scoped, with plans)
 
