@@ -24,6 +24,7 @@ import { getOrCreateModel } from './chat-runtime.js';
 import type { ChatEngine } from './chat.js';
 import type { DatabaseAdapter } from './db-types.js';
 import type { MeRunAgent, MeRunEmitter } from './me-run-executor.js';
+import { runApprovals } from './me-run-approvals.js';
 
 const DEFAULT_SYSTEM_PROMPT =
   'You are weaveIntel, a helpful, concise assistant. Answer the user clearly and directly.';
@@ -125,6 +126,22 @@ function resolveChatMode(metadata: Record<string, unknown> | undefined): string 
  * 'low'|'medium'|'high'`, or `metadata.reasoningBudgetTokens`. Applied to the
  * chat settings; honoured only when the model is reasoning-capable.
  */
+/**
+ * Resolve HITL intent from run metadata (Phase 4). `metadata.hitl: true`
+ * enables tool-approval gating; `metadata.hitlRequireAll` (default true when
+ * hitl is on) makes every tool call require approval; `metadata.hitlTimeoutMs`
+ * caps the wait (auto-reject on timeout).
+ */
+export function resolveHitl(metadata: Record<string, unknown> | undefined): {
+  hitlEnabled?: boolean; hitlRequireAll?: boolean; hitlTimeoutMs?: number;
+} {
+  if (!metadata || metadata['hitl'] !== true) return {};
+  const requireAll = metadata['hitlRequireAll'] !== false;
+  const timeout = typeof metadata['hitlTimeoutMs'] === 'number' && metadata['hitlTimeoutMs'] > 0
+    ? Math.trunc(metadata['hitlTimeoutMs']) : undefined;
+  return { hitlEnabled: true, hitlRequireAll: requireAll, ...(timeout !== undefined ? { hitlTimeoutMs: timeout } : {}) };
+}
+
 export function resolveReasoning(metadata: Record<string, unknown> | undefined): {
   reasoningEnabled?: boolean; reasoningEffort?: string; reasoningBudgetTokens?: number;
 } {
@@ -191,12 +208,14 @@ export function createChatPipelineMeRunAgent(chatEngine: ChatEngine, db: Databas
         provider: chatEngine.modelConfig.defaultProvider,
       });
     }
+    // Phase 4: associate the run with its chat for the HITL approval coordinator.
+    runApprovals.setRunChat(args.runId, chatId);
+
     // Keep the chat's mode in sync with the current selection (idempotent
     // upsert). With no enabled_tools override, the engine derives the tool set
-    // from the mode policy — identical to the web behaviour. Reasoning intent
-    // from the run metadata is applied here (honoured only for reasoning-capable
-    // models).
-    await db.saveChatSettings({ chatId, mode, ...resolveReasoning(args.metadata) });
+    // from the mode policy — identical to the web behaviour. Reasoning + HITL
+    // intent from the run metadata are applied here.
+    await db.saveChatSettings({ chatId, mode, ...resolveReasoning(args.metadata), ...resolveHitl(args.metadata) });
 
     const capture = new SseCaptureResponse(emit);
     const onAbort = (): void => capture.cancel();

@@ -731,6 +731,8 @@ export class SQLiteAdapter implements DatabaseAdapter {
     ensembleAgents?: string; ensembleResolver?: string;
     // Reasoning request (m92)
     reasoningEnabled?: boolean; reasoningEffort?: string; reasoningBudgetTokens?: number;
+    // HITL approvals (m64 toggles)
+    hitlEnabled?: boolean; hitlRequireAll?: boolean; hitlTimeoutMs?: number;
   }): Promise<void> {
     this.d.prepare(
       `INSERT INTO chat_settings
@@ -739,8 +741,9 @@ export class SQLiteAdapter implements DatabaseAdapter {
           verify_enabled, verify_min_score, verify_max_attempts,
           supervisor_replan_on_failure, supervisor_parallel_delegation,
           ensemble_agents, ensemble_resolver,
-          reasoning_enabled, reasoning_effort, reasoning_budget_tokens)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          reasoning_enabled, reasoning_effort, reasoning_budget_tokens,
+          hitl_enabled, hitl_require_all, hitl_timeout_ms)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(chat_id) DO UPDATE SET
          mode=excluded.mode, system_prompt=excluded.system_prompt, timezone=excluded.timezone,
          enabled_tools=excluded.enabled_tools, redaction_enabled=excluded.redaction_enabled,
@@ -754,6 +757,8 @@ export class SQLiteAdapter implements DatabaseAdapter {
          ensemble_agents=excluded.ensemble_agents, ensemble_resolver=excluded.ensemble_resolver,
          reasoning_enabled=excluded.reasoning_enabled, reasoning_effort=excluded.reasoning_effort,
          reasoning_budget_tokens=excluded.reasoning_budget_tokens,
+         hitl_enabled=excluded.hitl_enabled, hitl_require_all=excluded.hitl_require_all,
+         hitl_timeout_ms=excluded.hitl_timeout_ms,
          updated_at=datetime('now')`,
     ).run(
       s.chatId, s.mode, s.systemPrompt ?? null,
@@ -765,6 +770,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
       s.supervisorReplanOnFailure ? 1 : 0, s.supervisorParallelDelegation ? 1 : 0,
       s.ensembleAgents ?? null, s.ensembleResolver ?? null,
       s.reasoningEnabled ? 1 : 0, s.reasoningEffort ?? null, s.reasoningBudgetTokens ?? 0,
+      s.hitlEnabled ? 1 : 0, s.hitlRequireAll ? 1 : 0, s.hitlTimeoutMs ?? 300000,
     );
   }
 
@@ -8843,6 +8849,37 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async listUserRunEvents(runId: string, afterSequence = -1): Promise<import('./db-types/adapter-me.js').UserRunEventRow[]> {
     return this.d.prepare('SELECT * FROM user_run_events WHERE run_id = ? AND sequence > ? ORDER BY sequence ASC').all(runId, afterSequence) as import('./db-types/adapter-me.js').UserRunEventRow[];
+  }
+
+  // ── HITL approvals (m64 table, m93 run-scoped) ─────────────────────────────
+  async createHitlInterrupt(row: {
+    id: string; chat_id: string; run_id?: string | null; agent_name: string; agent_step?: number;
+    tool_name: string; tool_args_json?: string; interrupt_type?: string; reason?: string; expires_at?: string | null;
+  }): Promise<void> {
+    this.d.prepare(
+      `INSERT OR IGNORE INTO hitl_interrupt_requests
+         (id, chat_id, run_id, agent_name, agent_step, tool_name, tool_args_json, interrupt_type, reason, status, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+    ).run(
+      row.id, row.chat_id, row.run_id ?? null, row.agent_name, row.agent_step ?? 0,
+      row.tool_name, row.tool_args_json ?? '{}', row.interrupt_type ?? 'tool_approval', row.reason ?? '', row.expires_at ?? null,
+    );
+  }
+
+  async resolveHitlInterrupt(id: string, fields: {
+    status: string; decision_action?: string; modified_args_json?: string | null; feedback?: string | null; decided_by?: string | null;
+  }): Promise<void> {
+    this.d.prepare(
+      `UPDATE hitl_interrupt_requests
+         SET status = ?, decision_action = ?, modified_args_json = ?, feedback = ?, decided_by = ?, decided_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+       WHERE id = ?`,
+    ).run(fields.status, fields.decision_action ?? null, fields.modified_args_json ?? null, fields.feedback ?? null, fields.decided_by ?? null, id);
+  }
+
+  async listPendingHitlInterruptsByRun(runId: string): Promise<Array<{ id: string; tool_name: string; status: string; tool_args_json: string }>> {
+    return this.d.prepare(
+      `SELECT id, tool_name, status, tool_args_json FROM hitl_interrupt_requests WHERE run_id = ? AND status = 'pending' ORDER BY created_at ASC`,
+    ).all(runId) as Array<{ id: string; tool_name: string; status: string; tool_args_json: string }>;
   }
 
   async pruneUserRunEvents(opts: { olderThanHours: number; maxEventsPerRun: number }): Promise<number> {

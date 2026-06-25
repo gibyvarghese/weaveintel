@@ -39,6 +39,7 @@ import { weaveCostGovernor, createInMemoryCostLedger } from '@weaveintel/cost-go
 import type { CostPolicy } from '@weaveintel/cost-governor';
 import { createSQLiteCheckpointStoreForChat } from './checkpoint-store.js';
 import { InMemoryTaskQueue } from '@weaveintel/human-tasks';
+import { runApprovals } from './me-run-approvals.js';
 import {
   weaveInMemoryTracer,
   weaveUsageTracker,
@@ -1249,9 +1250,13 @@ export class ChatEngine {
         // P3-1: HITL interrupt — uses an in-process queue backed by geneWeave's
         // hitl_interrupt_requests table (via the shared human task queue).
         ...(settings.hitlEnabled && {
-          onInterrupt: createHumanTaskInterruptHandler(new InMemoryTaskQueue(), {
-            timeoutMs: settings.hitlTimeoutMs,
-          }),
+          // On the /api/me/runs path the run-aware queue emits approval.request +
+          // persists + resumes via postEvent; off-run (web chat) falls back to
+          // an in-process queue.
+          onInterrupt: createHumanTaskInterruptHandler(
+            (typeof ctx.metadata?.['runId'] === 'string' ? runApprovals.queueFor(ctx.metadata['runId'] as string) : null) ?? new InMemoryTaskQueue(),
+            { timeoutMs: settings.hitlTimeoutMs },
+          ),
           requireApproval: settings.hitlRequireAll,
         }),
         ...(settings.reflectEnabled && {
@@ -1348,9 +1353,12 @@ export class ChatEngine {
           }),
           // P3-1: HITL interrupt
           ...(settings.hitlEnabled && {
-            onInterrupt: createHumanTaskInterruptHandler(new InMemoryTaskQueue(), {
-              timeoutMs: settings.hitlTimeoutMs,
-            }),
+            // Run-aware approval queue on the run path (emit + persist + resume);
+            // in-process fallback for web chat.
+            onInterrupt: createHumanTaskInterruptHandler(
+              (typeof ctx.metadata?.['runId'] === 'string' ? runApprovals.queueFor(ctx.metadata['runId'] as string) : null) ?? new InMemoryTaskQueue(),
+              { timeoutMs: settings.hitlTimeoutMs },
+            ),
             requireApproval: settings.hitlRequireAll,
           }),
           ...(settings.reflectEnabled && {

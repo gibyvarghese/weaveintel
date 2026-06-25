@@ -67,6 +67,8 @@ export interface IChatStore {
     ensembleAgents?: string; ensembleResolver?: string;
     // Reasoning request (m92)
     reasoningEnabled?: boolean; reasoningEffort?: string; reasoningBudgetTokens?: number;
+    // HITL approvals (m64 toggles)
+    hitlEnabled?: boolean; hitlRequireAll?: boolean; hitlTimeoutMs?: number;
   }): Promise<void>;
 
   // Traces

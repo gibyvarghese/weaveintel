@@ -49,6 +49,9 @@ export const RUN_EVENT_KINDS = [
   // Phase 2 — streaming partial tool input (per-part state machine).
   'tool.input.start', // a tool call's input args begin streaming
   'tool.input.delta', // a partial chunk of the tool's input args (JSON text)
+  // Phase 4 — human-in-the-loop tool approval (the run pauses awaiting a decision).
+  'approval.request',  // a gated tool needs a human approve/deny decision
+  'approval.resolved', // the decision arrived (approved / denied / modified)
 ] as const;
 
 export type RunEventKind = (typeof RUN_EVENT_KINDS)[number];
@@ -101,6 +104,27 @@ export interface RunCitation {
 export interface RunDiagnostic {
   channel: string;
   data?: unknown;
+}
+
+/** A human-in-the-loop approval request emitted when a gated tool needs a decision. */
+export interface RunApprovalRequest {
+  /** Correlates the request with the client's `approval.decision` reply. */
+  taskId: string;
+  toolName: string;
+  args?: Record<string, unknown>;
+  title?: string;
+  description?: string;
+  riskLevel?: string;
+  /** Available decisions (e.g. Approve / Deny). */
+  actions?: Array<{ label: string; value: string; style?: string }>;
+}
+
+/** Resolution of a prior approval request. */
+export interface RunApprovalResolution {
+  taskId: string;
+  /** 'approve' | 'reject' | 'modify'. */
+  action: string;
+  feedback?: string;
 }
 
 /** Kinds that close a run — exactly one is emitted per run. */

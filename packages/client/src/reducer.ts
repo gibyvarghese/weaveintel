@@ -105,9 +105,24 @@ export type DiagnosticView = {
   data?: unknown;
 };
 
+// ─── Phase 4 — human-in-the-loop approval ────────────────────
+
+export type ApprovalStatus = 'pending' | 'approved' | 'denied' | 'modified';
+
+export type ApprovalView = {
+  kind: 'approval';
+  taskId: string;
+  toolName?: string;
+  title?: string;
+  description?: string;
+  riskLevel?: string;
+  actions?: Array<{ label: string; value: string; style?: string }>;
+  status: ApprovalStatus;
+};
+
 export type StreamItem =
   | TextChunk | WidgetView | StatusView | ToolCallView | ErrorView
-  | ReasoningChunk | UsageView | StepView | CitationView | ArtifactView | DiagnosticView;
+  | ReasoningChunk | UsageView | StepView | CitationView | ArtifactView | DiagnosticView | ApprovalView;
 
 // ─── Phase 2 — ordered typed parts with per-part streaming state ──────────────
 // `parts[]` is the modern message model (cf. Vercel AI SDK UIMessage.parts):
@@ -139,8 +154,18 @@ export interface StepPart { type: 'step'; id: string; state: 'done'; index?: num
 export interface WidgetPart { type: 'widget'; id: string; state: 'done'; widgetId: string; payload: Record<string, unknown>; schemaVersion?: number }
 export interface ArtifactPart { type: 'artifact'; id: string; state: 'done'; artifactId: string; title?: string; mimeType?: string; url?: string }
 export interface CitationPart { type: 'citation'; id: string; state: 'done'; citationId: string; source?: string; url?: string; text?: string }
+/** A human-in-the-loop approval: `requires-action` until the user decides. */
+export interface ApprovalPart {
+  type: 'approval';
+  id: string;
+  taskId: string;
+  state: 'requires-action' | 'approved' | 'denied' | 'modified';
+  toolName?: string;
+  title?: string;
+  riskLevel?: string;
+}
 
-export type RunPart = TextPart | ReasoningPart | ToolPart | StepPart | WidgetPart | ArtifactPart | CitationPart;
+export type RunPart = TextPart | ReasoningPart | ToolPart | StepPart | WidgetPart | ArtifactPart | CitationPart | ApprovalPart;
 
 // ---------------------------------------------------------------------------
 // The accumulated view model
@@ -176,6 +201,8 @@ export interface RunViewModel {
   artifacts: Map<string, ArtifactView>;
   /** Non-output diagnostics (guardrail / policy / eval / cognitive / ensemble). */
   diagnostics: DiagnosticView[];
+  /** Phase 4 — human-in-the-loop approvals, upserted by taskId. */
+  approvals: ApprovalView[];
   /** Phase 2 — ordered typed parts with per-part streaming state. */
   parts: RunPart[];
   /** All items in event order (for a linear render). */
@@ -196,6 +223,7 @@ export function emptyRunViewModel(): RunViewModel {
     citations: [],
     artifacts: new Map(),
     diagnostics: [],
+    approvals: [],
     parts: [],
     items: [],
   };
@@ -341,6 +369,25 @@ function updateParts(next: RunViewModel, env: RunEventEnvelope): void {
       break;
     }
 
+    case 'approval.request': {
+      const taskId = strField(p, 'taskId') ?? `approval-${seq}`;
+      parts.push({
+        type: 'approval', id: `approval-${seq}`, taskId, state: 'requires-action',
+        ...(strField(p, 'toolName') !== undefined ? { toolName: strField(p, 'toolName') } : {}),
+        ...(strField(p, 'title') !== undefined ? { title: strField(p, 'title') } : {}),
+        ...(strField(p, 'riskLevel') !== undefined ? { riskLevel: strField(p, 'riskLevel') } : {}),
+      });
+      break;
+    }
+    case 'approval.resolved': {
+      const taskId = strField(p, 'taskId');
+      const action = strField(p, 'action') ?? 'reject';
+      const state = action === 'approve' ? 'approved' : action === 'modify' ? 'modified' : 'denied';
+      const i = parts.findIndex((pt) => pt.type === 'approval' && pt.taskId === taskId);
+      if (i >= 0) parts[i] = { ...(parts[i] as ApprovalPart), state };
+      break;
+    }
+
     case 'run.completed':
     case 'run.failed':
     case 'run.cancelled':
@@ -376,6 +423,7 @@ export function streamReducer(state: RunViewModel, envelope: RunEventEnvelope): 
     citations: [...state.citations],
     artifacts: new Map(state.artifacts),
     diagnostics: [...state.diagnostics],
+    approvals: [...state.approvals],
     parts: [...state.parts],
     items: [...state.items],
   };
@@ -562,6 +610,33 @@ export function streamReducer(state: RunViewModel, envelope: RunEventEnvelope): 
       const dv: DiagnosticView = { kind: 'diagnostic', channel, data: p['data'] };
       next.diagnostics.push(dv);
       next.items.push(dv);
+      break;
+    }
+
+    // ── Phase 4 — human-in-the-loop approval ──
+
+    case 'approval.request': {
+      const taskId = typeof p['taskId'] === 'string' ? p['taskId'] : `approval-${envelope.sequence}`;
+      const av: ApprovalView = {
+        kind: 'approval', taskId, status: 'pending',
+        ...(typeof p['toolName'] === 'string' ? { toolName: p['toolName'] as string } : {}),
+        ...(typeof p['title'] === 'string' ? { title: p['title'] as string } : {}),
+        ...(typeof p['description'] === 'string' ? { description: p['description'] as string } : {}),
+        ...(typeof p['riskLevel'] === 'string' ? { riskLevel: p['riskLevel'] as string } : {}),
+        ...(Array.isArray(p['actions']) ? { actions: p['actions'] as ApprovalView['actions'] } : {}),
+      };
+      const idx = next.approvals.findIndex((a) => a.taskId === taskId);
+      if (idx >= 0) next.approvals[idx] = av; else next.approvals.push(av);
+      next.items.push(av);
+      break;
+    }
+
+    case 'approval.resolved': {
+      const taskId = typeof p['taskId'] === 'string' ? p['taskId'] : '';
+      const action = typeof p['action'] === 'string' ? p['action'] : 'reject';
+      const status: ApprovalStatus = action === 'approve' ? 'approved' : action === 'modify' ? 'modified' : 'denied';
+      const idx = next.approvals.findIndex((a) => a.taskId === taskId);
+      if (idx >= 0) next.approvals[idx] = { ...next.approvals[idx]!, status };
       break;
     }
 

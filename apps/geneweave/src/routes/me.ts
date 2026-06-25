@@ -56,6 +56,7 @@ import { meTaskRepo as taskRepo, meTriggerStore as triggerStore } from './me-sto
 import { safePageInt } from './index.js';
 import { MeRunExecutor, isTerminalRunStatus } from '../me-run-executor.js';
 import { loadRunStreamConfig, clientStreamConfig } from '../chat-run-stream-utils.js';
+import { runApprovals } from '../me-run-approvals.js';
 
 /**
  * Register all /api/me routes on the provided router.
@@ -245,12 +246,31 @@ export function registerMeRoutes(
     if (!run) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
     const body = JSON.parse(await readBody(req)) as Record<string, unknown>;
 
-    // Append + broadcast through the executor so client-originated events are
-    // serialized with executor writes (gap-free sequence) and fanned out live.
     const kind = typeof body['kind'] === 'string' ? body['kind'] : 'client.event';
     const payload = (typeof body['payload'] === 'object' && body['payload'] !== null)
       ? (body['payload'] as Record<string, unknown>)
       : body;
+
+    // Phase 4: an approval decision resolves a pending HITL approval (resumes or
+    // denies the paused run) rather than being recorded as a plain client event.
+    if (kind === 'approval.decision') {
+      const taskId = typeof payload['taskId'] === 'string' ? payload['taskId'] : '';
+      const rawAction = payload['action'];
+      const action = rawAction === 'approve' || rawAction === 'reject' || rawAction === 'modify' ? rawAction : 'reject';
+      const resolved = taskId
+        ? await runApprovals.resolve(taskId, action, {
+            ...(typeof payload['feedback'] === 'string' ? { feedback: payload['feedback'] } : {}),
+            ...(payload['modifiedArgs'] && typeof payload['modifiedArgs'] === 'object' ? { modifiedArgs: payload['modifiedArgs'] as Record<string, unknown> } : {}),
+            decidedBy: auth.userId,
+          })
+        : false;
+      res.writeHead(resolved ? 200 : 404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ resolved }));
+      return;
+    }
+
+    // Append + broadcast through the executor so client-originated events are
+    // serialized with executor writes (gap-free sequence) and fanned out live.
     const sequence = await runExecutor.appendEvent(run.id, kind, payload);
     res.writeHead(201, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ sequence }));

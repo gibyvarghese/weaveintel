@@ -22,6 +22,8 @@ export {
   type RunArtifactRef,
   type RunCitation,
   type RunDiagnostic,
+  type RunApprovalRequest,
+  type RunApprovalResolution,
   RUN_EVENT_KINDS,
   TERMINAL_RUN_EVENT_KINDS,
   RUN_STREAM_CONFIG_DEFAULTS,

@@ -30,6 +30,7 @@ import type { ExecutionContext, RunEventEnvelope, RunStep, RunUsage, RunCitation
 const logger = createLogger('me-run-executor');
 import type { ServerResponse } from 'node:http';
 import type { DatabaseAdapter } from './db-types.js';
+import { runApprovals } from './me-run-approvals.js';
 
 // ─── Envelope ───────────────────────────────────────────────────────────────
 // Canonical contract from @weaveintel/core (Client Phase 0) — the same type the
@@ -293,6 +294,7 @@ export class MeRunExecutor {
     void this.#execute(args, controller).finally(() => {
       this.#active.delete(args.runId);
       this.#locks.delete(args.runId);
+      runApprovals.unregisterRun(args.runId);
     });
   }
 
@@ -331,6 +333,10 @@ export class MeRunExecutor {
       await this.appendEvent(runId, 'run.started', {
         ...(args.surface !== undefined ? { surface: args.surface } : {}),
       });
+
+      // Phase 4: register the run for HITL approvals so a gated tool can pause
+      // it (emit approval.request + persist) and a posted decision can resume it.
+      runApprovals.registerRun(runId, async (kind, payload) => { await this.appendEvent(runId, kind, payload); }, this.#db);
 
       const emit: MeRunEmitter = {
         text: async (delta, role) => {
