@@ -221,11 +221,20 @@ Each phase is independently shippable, extends existing code, and ends with acce
 - Add `approval` kind + `requires-action` part state; persist to `run_approvals` (7.3); client answers via `postEvent` (the `Command(resume)` analog).
 - **Acceptance:** a tool gated by approval pauses the run; client `postEvent` approve/deny resumes or aborts; state survives a server restart.
 
-### Phase 5 — Client UX primitives + React hooks + web‑UI convergence
+### Phase 5 — Client UX primitives + React hooks + web‑UI convergence  ✅ delivered
 **Goal:** kill duplication; ship ergonomic hooks.
 - **New** `@weaveintel/react-client` *extending* `@weaveintel/client`: `useRun`, `useRunStream`, `useOutbox`; status enum (`submitted/streaming/ready/error`), `stop`, `regenerate`, edit‑resubmit, branching, `experimental_throttle`, smooth streaming.
 - **Fix G14:** migrate `apps/geneweave-ui` onto the shared reducer/transport (retire `ui-client.ts`'s hand‑rolled SSE), or at minimum share one SSE parser.
 - **Acceptance:** geneweave‑ui renders chat via the shared client; the third SSE parser is deleted; mobile keeps working through api‑client.
+
+**What shipped:**
+- **`createRunSession`** (`packages/client/src/run-session.ts`) — the framework‑agnostic, single‑run UX controller: status state machine (`idle→submitted→streaming→ready|error`), `start`/`stop`(cancel)/`regenerate`/`approve`·`reject`(HITL)/`sendEvent`/`reset`/`done`, `getState`/`subscribe`, and `throttleMs` (smooth‑streaming coalescing; status transitions always flush). This is the canonical primitive the mobile `chat-session` and the new hook both build on (kills the hand‑rolled‑store duplication called out in G12/G14). 40 unit tests (positive/negative/stress/security).
+- **`@weaveintel/react-client`** — `useRun` binds the controller with `useSyncExternalStore` (stable `start`/`stop`/… callbacks + `isStreaming`/`isLoading`), matching mobile's `useChatSession` convention. React 18/19 peer dep; typechecked against real React types.
+- **One SSE parser** — extracted `parseSseStream` (`packages/client/src/sse-parser.ts`); `sseTransport` now consumes it (single byte→event decoder for the run/transport surface → api‑client → mobile → `createRunSession`). 23 unit tests.
+- **App‑layer reuse** — `@geneweave/api-client` re‑exports `createRunSession` + `parseSseStream` + session types, so hosts configure the primitive through the SDK they already use.
+- **Real‑LLM e2e** — `apps/geneweave/src/run-session-phase5.e2e.ts` drives the live `createRunSession` against the geneweave Run API across **direct/agent/supervisor/ensemble** (lifecycle → `ready`), plus `stop()`/`regenerate()`/concurrent‑start‑guard, plus the web‑UI streaming regression.
+
+**G14 — partial / documented constraint:** `apps/geneweave-ui` is served as **raw ES modules** (no bundler, no import map; the bootstrap is CSP‑sha256‑hashed) and its browser source imports only relative `./` paths. A bare `@weaveintel/client` import would not resolve in the browser, and an import‑map/bundling step would have to map the whole `client→core` chain and re‑hash CSP — out of scope here. The single parser is therefore shared across every surface that *can* share a module graph; retiring geneweave‑ui's chat POST‑stream parser is tracked as a follow‑up requiring a UI build/bundle step. The web‑UI streaming path is covered by the regression test and is unchanged.
 
 ### Phase 6 — Resumable‑stream hardening + Outbox v2 + observability
 **Goal:** refresh‑proof streams, robust offline, cost visibility.
@@ -270,6 +279,7 @@ Phase 0 ─► Phase 1 ─► Phase 2 ─► Phase 3 ─► Phase 4
 | Reasoning request flag (m92) — Anthropic thinking / OpenAI effort, gated | `c4f5de9` | ✅ wired + unit-tested; reasoning *text* needs a producer (see follow-ups) |
 | Phase 3 — generative UI · citations · artifacts (run-scoped) | `800a08d` | ✅ |
 | Phase 4 — HITL tool approvals (pause → approve/deny → resume) | `ae207ca` | ✅ |
+| Phase 5 — UX primitives (`createRunSession`) + `@weaveintel/react-client` (`useRun`) + single `parseSseStream` | `a768133` | ✅ (G14 web‑UI convergence partial — raw‑ESM serving; see Phase 5 note) |
 
 ## 12. Deferred follow-ups (scoped, with plans)
 

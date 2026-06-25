@@ -14,6 +14,7 @@
 // fetch + ReadableStream for SSE; exempt like ui-client.ts / ui/api.ts)
 
 import { RUN_STREAM_CONFIG_DEFAULTS, type RunEventEnvelope } from '@weaveintel/core';
+import { parseSseStream } from './sse-parser.js';
 
 /** Auth token or header factory, injected by the host app. */
 export type AuthProvider =
@@ -136,61 +137,19 @@ export function sseTransport(opts: SseTransportOptions): EventTransport {
 
         life.onOpen?.();
 
-        const reader = resp.body.getReader();
-        const decoder = new TextDecoder();
-        let buf = '';
-        let dataLines: string[] = [];
-        let currentEvent: string | undefined;
-
-        const dispatch = (): boolean => {
-          if (dataLines.length === 0) { currentEvent = undefined; return false; }
-          const data = dataLines.join('\n');
-          dataLines = [];
-          const evName = currentEvent;
-          currentEvent = undefined;
-          const stop = life.onEvent({ data, ...(evName !== undefined ? { event: evName } : {}) });
-          return stop === true;
-        };
-
+        // Single SSE byte→event decoder (shared with apps/geneweave-ui). The
+        // generator owns the reader + buffering + stall timeout; we apply the
+        // run-transport policy (early-stop on `onEvent` → true) by breaking the
+        // loop, which cancels the reader via the generator's `return` path.
         try {
-          while (!signal?.aborted) {
-            let timer: ReturnType<typeof setTimeout> | undefined;
-            let chunk: ReadableStreamReadResult<Uint8Array>;
-            if (stallTimeoutMs > 0) {
-              const stall = new Promise<never>((_, reject) => {
-                timer = setTimeout(() => reject(new Error('SSE stream stalled — no data within timeout')), stallTimeoutMs);
-              });
-              try {
-                chunk = await Promise.race([reader.read(), stall]);
-              } finally {
-                clearTimeout(timer);
-              }
-            } else {
-              chunk = await reader.read();
-            }
-
-            if (chunk.done) break;
-            buf += decoder.decode(chunk.value, { stream: true });
-            const lines = buf.split('\n');
-            buf = lines.pop() ?? '';
-
-            for (const line of lines) {
-              if (line.startsWith('event:')) {
-                currentEvent = line.slice(6).trim();
-              } else if (line.startsWith('data:')) {
-                dataLines.push(line.slice(5).trim());
-              } else if (line === '') {
-                if (dispatch()) { close(false); try { await reader.cancel(); } catch { /* closed */ } return; }
-              }
-              // `id:` / `:comment` (keepalive) lines are ignored.
-            }
+          for await (const ev of parseSseStream(resp.body, { signal, stallTimeoutMs })) {
+            const stop = life.onEvent(ev);
+            if (stop === true) break;
           }
-          dispatch();
         } catch (err) {
           if (!signal?.aborted) life.onError?.(err instanceof Error ? err : new Error(String(err)));
         } finally {
-          try { await reader.cancel(); } catch { /* already closed */ }
-          close(false); // graceful end / drop / stall ⇒ transient
+          close(false); // graceful end / drop / stall / early-stop ⇒ transient
         }
       })();
     },
