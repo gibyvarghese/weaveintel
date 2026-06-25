@@ -46,6 +46,9 @@ export const RUN_EVENT_KINDS = [
   'citation.add',     // source/citation (forward-compatible; no producer yet)
   'artifact.update',  // artifact reference produced by the run
   'diagnostic',       // guardrail / policy / eval / cognitive / ensemble metadata
+  // Phase 2 — streaming partial tool input (per-part state machine).
+  'tool.input.start', // a tool call's input args begin streaming
+  'tool.input.delta', // a partial chunk of the tool's input args (JSON text)
 ] as const;
 
 export type RunEventKind = (typeof RUN_EVENT_KINDS)[number];

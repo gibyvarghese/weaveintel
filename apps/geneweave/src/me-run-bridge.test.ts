@@ -14,9 +14,11 @@ import type { RunStep, RunUsage, RunArtifactRef } from '@weaveintel/core';
 interface Recorded {
   text: Array<{ delta: string; role?: string }>;
   reasoning: string[];
-  toolInvoked: Array<{ tool: string; args?: Record<string, unknown> }>;
-  toolCompleted: Array<{ tool: string; result: unknown }>;
-  toolErrored: Array<{ tool: string; error: string }>;
+  toolInvoked: Array<{ tool: string; args?: Record<string, unknown>; toolCallId?: string }>;
+  toolCompleted: Array<{ tool: string; result: unknown; toolCallId?: string }>;
+  toolErrored: Array<{ tool: string; error: string; toolCallId?: string }>;
+  toolInputStart: Array<{ toolCallId: string; tool: string }>;
+  toolInputDelta: Array<{ toolCallId: string; delta: string }>;
   step: RunStep[];
   usage: RunUsage[];
   citation: unknown[];
@@ -26,12 +28,12 @@ interface Recorded {
 }
 
 function recorder(): { emitter: MeRunEmitter; rec: Recorded } {
-  const rec: Recorded = { text: [], reasoning: [], toolInvoked: [], toolCompleted: [], toolErrored: [], step: [], usage: [], citation: [], artifact: [], diagnostic: [], widget: [] };
+  const rec: Recorded = { text: [], reasoning: [], toolInvoked: [], toolCompleted: [], toolErrored: [], toolInputStart: [], toolInputDelta: [], step: [], usage: [], citation: [], artifact: [], diagnostic: [], widget: [] };
   const emitter: MeRunEmitter = {
     text: async (delta, role) => { rec.text.push({ delta, ...(role ? { role } : {}) }); },
-    toolInvoked: async (tool, args) => { rec.toolInvoked.push({ tool, ...(args ? { args } : {}) }); },
-    toolCompleted: async (tool, result) => { rec.toolCompleted.push({ tool, result }); },
-    toolErrored: async (tool, error) => { rec.toolErrored.push({ tool, error }); },
+    toolInvoked: async (tool, args, toolCallId) => { rec.toolInvoked.push({ tool, ...(args ? { args } : {}), ...(toolCallId ? { toolCallId } : {}) }); },
+    toolCompleted: async (tool, result, toolCallId) => { rec.toolCompleted.push({ tool, result, ...(toolCallId ? { toolCallId } : {}) }); },
+    toolErrored: async (tool, error, toolCallId) => { rec.toolErrored.push({ tool, error, ...(toolCallId ? { toolCallId } : {}) }); },
     widget: async (id) => { rec.widget.push(id); },
     reasoning: async (delta) => { rec.reasoning.push(delta); },
     step: async (step) => { rec.step.push(step); },
@@ -39,6 +41,8 @@ function recorder(): { emitter: MeRunEmitter; rec: Recorded } {
     citation: async (c) => { rec.citation.push(c); },
     artifact: async (a) => { rec.artifact.push(a); },
     diagnostic: async (channel, data) => { rec.diagnostic.push({ channel, data }); },
+    toolInputStart: async (toolCallId, tool) => { rec.toolInputStart.push({ toolCallId, tool }); },
+    toolInputDelta: async (toolCallId, delta) => { rec.toolInputDelta.push({ toolCallId, delta }); },
   };
   return { emitter, rec };
 }
@@ -111,7 +115,9 @@ describe('bridge — lossless mapping (positive)', () => {
 describe('bridge — real tool.errored path', () => {
   it('routes a tool_end whose result carries an error to toolErrored', async () => {
     const rec = await feed([{ type: 'tool_end', name: 'http', result: { error: 'timeout' } }]);
-    expect(rec.toolErrored).toEqual([{ tool: 'http', error: 'timeout' }]);
+    expect(rec.toolErrored).toHaveLength(1);
+    expect(rec.toolErrored[0]).toMatchObject({ tool: 'http', error: 'timeout' });
+    expect(rec.toolErrored[0]!.toolCallId).toBeDefined();
     expect(rec.toolCompleted).toHaveLength(0);
   });
 
@@ -119,6 +125,40 @@ describe('bridge — real tool.errored path', () => {
     const rec = await feed([{ type: 'tool_end', name: 'http', result: { status: 200 } }]);
     expect(rec.toolCompleted).toHaveLength(1);
     expect(rec.toolErrored).toHaveLength(0);
+  });
+});
+
+// ─── Phase 2 — tool-call id correlation ──────────────────────
+
+describe('bridge — toolCallId correlation (Phase 2)', () => {
+  it('assigns a stable id on tool_start and reuses it on tool_end', async () => {
+    const rec = await feed([
+      { type: 'tool_start', name: 'calc', arguments: { a: 1 } },
+      { type: 'tool_end', name: 'calc', result: 2 },
+    ]);
+    expect(rec.toolInvoked[0]!.toolCallId).toBeDefined();
+    expect(rec.toolCompleted[0]!.toolCallId).toBe(rec.toolInvoked[0]!.toolCallId);
+  });
+
+  it('correlates interleaved same-name calls LIFO (no id crosstalk)', async () => {
+    const rec = await feed([
+      { type: 'tool_start', name: 'calc', arguments: { n: 1 } }, // id A
+      { type: 'tool_start', name: 'calc', arguments: { n: 2 } }, // id B
+      { type: 'tool_end', name: 'calc', result: 2 },             // pops B
+      { type: 'tool_end', name: 'calc', result: 1 },             // pops A
+    ]);
+    const [a, b] = rec.toolInvoked.map((t) => t.toolCallId);
+    expect(a).not.toBe(b);
+    expect(rec.toolCompleted[0]!.toolCallId).toBe(b);
+    expect(rec.toolCompleted[1]!.toolCallId).toBe(a);
+  });
+
+  it('distinct tool names get distinct ids', async () => {
+    const rec = await feed([
+      { type: 'tool_start', name: 'calc', arguments: {} },
+      { type: 'tool_start', name: 'search', arguments: {} },
+    ]);
+    expect(rec.toolInvoked[0]!.toolCallId).not.toBe(rec.toolInvoked[1]!.toolCallId);
   });
 });
 

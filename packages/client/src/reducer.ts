@@ -109,6 +109,39 @@ export type StreamItem =
   | TextChunk | WidgetView | StatusView | ToolCallView | ErrorView
   | ReasoningChunk | UsageView | StepView | CitationView | ArtifactView | DiagnosticView;
 
+// ─── Phase 2 — ordered typed parts with per-part streaming state ──────────────
+// `parts[]` is the modern message model (cf. Vercel AI SDK UIMessage.parts):
+// an ordered list of typed parts, each carrying a streaming `state`, derived
+// from the same event stream that feeds the legacy view fields above. UI layers
+// render `parts` directly and switch on `part.state` (e.g. a tool part renders
+// a spinner at `input-available`, a result at `output-available`, an error at
+// `output-error`). The legacy fields (`fullText`, `toolCalls`, …) are retained
+// for back-compat.
+
+/** Tool-part lifecycle (Vercel-style): input streams → available → output/err. */
+export type ToolPartState = 'input-streaming' | 'input-available' | 'output-available' | 'output-error';
+
+export interface TextPart { type: 'text'; id: string; state: 'streaming' | 'done'; text: string }
+export interface ReasoningPart { type: 'reasoning'; id: string; state: 'streaming' | 'done'; text: string }
+export interface ToolPart {
+  type: 'tool';
+  id: string;
+  toolCallId: string;
+  toolName: string;
+  state: ToolPartState;
+  /** Partial input JSON accumulated while `state === 'input-streaming'`. */
+  inputText?: string;
+  args?: Record<string, unknown>;
+  result?: unknown;
+  error?: string;
+}
+export interface StepPart { type: 'step'; id: string; state: 'done'; index?: number; stepType?: string; toolName?: string; phase?: 'step_start' | 'step_end' }
+export interface WidgetPart { type: 'widget'; id: string; state: 'done'; widgetId: string; payload: Record<string, unknown>; schemaVersion?: number }
+export interface ArtifactPart { type: 'artifact'; id: string; state: 'done'; artifactId: string; title?: string; mimeType?: string; url?: string }
+export interface CitationPart { type: 'citation'; id: string; state: 'done'; citationId: string; source?: string; url?: string; text?: string }
+
+export type RunPart = TextPart | ReasoningPart | ToolPart | StepPart | WidgetPart | ArtifactPart | CitationPart;
+
 // ---------------------------------------------------------------------------
 // The accumulated view model
 // ---------------------------------------------------------------------------
@@ -143,6 +176,8 @@ export interface RunViewModel {
   artifacts: Map<string, ArtifactView>;
   /** Non-output diagnostics (guardrail / policy / eval / cognitive / ensemble). */
   diagnostics: DiagnosticView[];
+  /** Phase 2 — ordered typed parts with per-part streaming state. */
+  parts: RunPart[];
   /** All items in event order (for a linear render). */
   items: StreamItem[];
 }
@@ -161,6 +196,7 @@ export function emptyRunViewModel(): RunViewModel {
     citations: [],
     artifacts: new Map(),
     diagnostics: [],
+    parts: [],
     items: [],
   };
 }
@@ -173,6 +209,148 @@ export function emptyRunViewModel(): RunViewModel {
 // ---------------------------------------------------------------------------
 
 export type { RunEventEnvelope };
+
+// ---------------------------------------------------------------------------
+// Phase 2 — parts state machine (pure helpers over a cloned parts array)
+// ---------------------------------------------------------------------------
+
+function strField(p: Record<string, unknown>, k: string): string | undefined {
+  return typeof p[k] === 'string' ? p[k] as string : undefined;
+}
+
+/** Append a text/reasoning delta, coalescing into the current open part. */
+function appendStreamPart(parts: RunPart[], type: 'text' | 'reasoning', delta: string, seq: number): void {
+  const last = parts[parts.length - 1];
+  if (last && last.type === type && last.state === 'streaming') {
+    parts[parts.length - 1] = { ...last, text: last.text + delta };
+  } else if (type === 'text') {
+    parts.push({ type: 'text', id: `text-${seq}`, state: 'streaming', text: delta });
+  } else {
+    parts.push({ type: 'reasoning', id: `reasoning-${seq}`, state: 'streaming', text: delta });
+  }
+}
+
+/** Locate a tool part by toolCallId (any state), else by name among `openStates`. */
+function findToolPartIdx(parts: RunPart[], toolCallId: string | undefined, toolName: string | undefined, openStates: ToolPartState[]): number {
+  if (toolCallId) {
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const pt = parts[i]!;
+      if (pt.type === 'tool' && pt.toolCallId === toolCallId) return i;
+    }
+  }
+  if (toolName) {
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const pt = parts[i]!;
+      if (pt.type === 'tool' && pt.toolName === toolName && openStates.includes(pt.state)) return i;
+    }
+  }
+  return -1;
+}
+
+/** Finalize any still-streaming text/reasoning parts to `done` (run terminal). */
+function finalizeStreamingParts(parts: RunPart[]): void {
+  for (let i = 0; i < parts.length; i++) {
+    const pt = parts[i]!;
+    if ((pt.type === 'text' || pt.type === 'reasoning') && pt.state === 'streaming') {
+      parts[i] = { ...pt, state: 'done' };
+    }
+  }
+}
+
+/** Apply an envelope to the (already-cloned) `next.parts` array. */
+function updateParts(next: RunViewModel, env: RunEventEnvelope): void {
+  const p = env.payload;
+  const seq = env.sequence;
+  const parts = next.parts;
+
+  switch (env.kind) {
+    case 'text.delta':
+      appendStreamPart(parts, 'text', typeof p['delta'] === 'string' ? p['delta'] : '', seq);
+      break;
+    case 'reasoning.delta':
+      appendStreamPart(parts, 'reasoning', typeof p['delta'] === 'string' ? p['delta'] : (typeof p['text'] === 'string' ? p['text'] : ''), seq);
+      break;
+
+    case 'tool.input.start': {
+      const toolCallId = strField(p, 'toolCallId') ?? `tc-${seq}`;
+      parts.push({ type: 'tool', id: `tool-${seq}`, toolCallId, toolName: strField(p, 'tool') ?? 'unknown', state: 'input-streaming', inputText: '' });
+      break;
+    }
+    case 'tool.input.delta': {
+      const i = findToolPartIdx(parts, strField(p, 'toolCallId'), strField(p, 'tool'), ['input-streaming']);
+      if (i >= 0) {
+        const pt = parts[i] as ToolPart;
+        parts[i] = { ...pt, inputText: (pt.inputText ?? '') + (typeof p['delta'] === 'string' ? p['delta'] : '') };
+      }
+      break;
+    }
+    case 'tool.invoked': {
+      const toolCallId = strField(p, 'toolCallId');
+      const toolName = strField(p, 'tool') ?? 'unknown';
+      const args = (typeof p['args'] === 'object' && p['args'] !== null) ? p['args'] as Record<string, unknown> : undefined;
+      const i = findToolPartIdx(parts, toolCallId, toolName, ['input-streaming']);
+      if (i >= 0) {
+        const pt = parts[i] as ToolPart;
+        parts[i] = { ...pt, state: 'input-available', ...(args ? { args } : {}) };
+      } else {
+        parts.push({ type: 'tool', id: `tool-${seq}`, toolCallId: toolCallId ?? `tc-${seq}`, toolName, state: 'input-available', ...(args ? { args } : {}) });
+      }
+      break;
+    }
+    case 'tool.completed': {
+      const i = findToolPartIdx(parts, strField(p, 'toolCallId'), strField(p, 'tool') ?? 'unknown', ['input-available', 'input-streaming']);
+      if (i >= 0) parts[i] = { ...(parts[i] as ToolPart), state: 'output-available', result: p['result'] };
+      break;
+    }
+    case 'tool.errored': {
+      const i = findToolPartIdx(parts, strField(p, 'toolCallId'), strField(p, 'tool') ?? 'unknown', ['input-available', 'input-streaming']);
+      if (i >= 0) parts[i] = { ...(parts[i] as ToolPart), state: 'output-error', error: typeof p['error'] === 'string' ? p['error'] : 'Tool error' };
+      break;
+    }
+
+    case 'step.update':
+      parts.push({
+        type: 'step', id: `step-${seq}`, state: 'done',
+        ...(typeof p['index'] === 'number' ? { index: p['index'] as number } : {}),
+        ...(strField(p, 'type') !== undefined ? { stepType: strField(p, 'type') } : {}),
+        ...(strField(p, 'toolName') !== undefined ? { toolName: strField(p, 'toolName') } : {}),
+        ...(p['phase'] === 'step_start' || p['phase'] === 'step_end' ? { phase: p['phase'] as 'step_start' | 'step_end' } : {}),
+      });
+      break;
+
+    case 'widget.update': {
+      const widgetId = strField(p, 'id') ?? `widget-${seq}`;
+      const payload = (typeof p['payload'] === 'object' && p['payload'] !== null) ? p['payload'] as Record<string, unknown> : p;
+      const wp: WidgetPart = { type: 'widget', id: `widget-${seq}`, state: 'done', widgetId, payload, ...(typeof p['schemaVersion'] === 'number' ? { schemaVersion: p['schemaVersion'] as number } : {}) };
+      const i = parts.findIndex((pt) => pt.type === 'widget' && pt.widgetId === widgetId);
+      if (i >= 0) parts[i] = wp; else parts.push(wp);
+      break;
+    }
+    case 'artifact.update': {
+      const artifactId = strField(p, 'id') ?? `artifact-${seq}`;
+      const ap: ArtifactPart = { type: 'artifact', id: `artifact-${seq}`, state: 'done', artifactId, ...(strField(p, 'title') !== undefined ? { title: strField(p, 'title') } : {}), ...(strField(p, 'mimeType') !== undefined ? { mimeType: strField(p, 'mimeType') } : {}), ...(strField(p, 'url') !== undefined ? { url: strField(p, 'url') } : {}) };
+      const i = parts.findIndex((pt) => pt.type === 'artifact' && pt.artifactId === artifactId);
+      if (i >= 0) parts[i] = ap; else parts.push(ap);
+      break;
+    }
+    case 'citation.add': {
+      const citationId = strField(p, 'id') ?? `citation-${seq}`;
+      if (!parts.some((pt) => pt.type === 'citation' && pt.citationId === citationId)) {
+        parts.push({ type: 'citation', id: `citation-${seq}`, state: 'done', citationId, ...(strField(p, 'source') !== undefined ? { source: strField(p, 'source') } : {}), ...(strField(p, 'url') !== undefined ? { url: strField(p, 'url') } : {}), ...(strField(p, 'text') !== undefined ? { text: strField(p, 'text') } : {}) });
+      }
+      break;
+    }
+
+    case 'run.completed':
+    case 'run.failed':
+    case 'run.cancelled':
+      finalizeStreamingParts(parts);
+      break;
+
+    default:
+      break;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Pure reducer
@@ -198,6 +376,7 @@ export function streamReducer(state: RunViewModel, envelope: RunEventEnvelope): 
     citations: [...state.citations],
     artifacts: new Map(state.artifacts),
     diagnostics: [...state.diagnostics],
+    parts: [...state.parts],
     items: [...state.items],
   };
 
@@ -390,6 +569,9 @@ export function streamReducer(state: RunViewModel, envelope: RunEventEnvelope): 
       // Unknown event — just advance sequence, no view change
       break;
   }
+
+  // Phase 2 — maintain the ordered typed `parts[]` from the same event.
+  updateParts(next, envelope);
 
   return next;
 }

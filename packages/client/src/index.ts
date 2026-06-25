@@ -36,6 +36,15 @@ export type {
   CitationView,
   ArtifactView,
   DiagnosticView,
+  RunPart,
+  TextPart,
+  ReasoningPart,
+  ToolPart,
+  ToolPartState,
+  StepPart,
+  WidgetPart,
+  ArtifactPart,
+  CitationPart,
   RunEventEnvelope,
 } from './reducer.js';
 export { streamReducer, emptyRunViewModel } from './reducer.js';

@@ -55,10 +55,15 @@ export function isTerminalRunStatus(status: string): boolean {
  */
 export interface MeRunEmitter {
   text(delta: string, role?: string): Promise<void>;
-  toolInvoked(tool: string, args?: Record<string, unknown>): Promise<void>;
-  toolCompleted(tool: string, result: unknown): Promise<void>;
-  toolErrored(tool: string, error: string): Promise<void>;
+  toolInvoked(tool: string, args?: Record<string, unknown>, toolCallId?: string): Promise<void>;
+  toolCompleted(tool: string, result: unknown, toolCallId?: string): Promise<void>;
+  toolErrored(tool: string, error: string, toolCallId?: string): Promise<void>;
   widget(id: string, payload: Record<string, unknown>, schemaVersion?: number): Promise<void>;
+  // Phase 2 — streaming partial tool input (per-part state machine).
+  /** A tool call's input args begin streaming. */
+  toolInputStart(toolCallId: string, tool: string): Promise<void>;
+  /** A partial chunk of a tool call's input args (JSON text). */
+  toolInputDelta(toolCallId: string, delta: string): Promise<void>;
   // Phase 1 — parity: previously these channels were dropped by the bridge.
   /** Model thinking, as a DISTINCT channel (not folded into `text`). */
   reasoning(delta: string): Promise<void>;
@@ -335,20 +340,29 @@ export class MeRunExecutor {
             ...(role !== undefined ? { role } : {}),
           });
         },
-        toolInvoked: async (tool, toolArgs) => {
+        toolInvoked: async (tool, toolArgs, toolCallId) => {
           if (controller.signal.aborted) return;
           await this.appendEvent(runId, 'tool.invoked', {
             tool,
             ...(toolArgs !== undefined ? { args: toolArgs } : {}),
+            ...(toolCallId !== undefined ? { toolCallId } : {}),
           });
         },
-        toolCompleted: async (tool, result) => {
+        toolCompleted: async (tool, result, toolCallId) => {
           if (controller.signal.aborted) return;
-          await this.appendEvent(runId, 'tool.completed', { tool, result });
+          await this.appendEvent(runId, 'tool.completed', { tool, result, ...(toolCallId !== undefined ? { toolCallId } : {}) });
         },
-        toolErrored: async (tool, error) => {
+        toolErrored: async (tool, error, toolCallId) => {
           if (controller.signal.aborted) return;
-          await this.appendEvent(runId, 'tool.errored', { tool, error });
+          await this.appendEvent(runId, 'tool.errored', { tool, error, ...(toolCallId !== undefined ? { toolCallId } : {}) });
+        },
+        toolInputStart: async (toolCallId, tool) => {
+          if (controller.signal.aborted) return;
+          await this.appendEvent(runId, 'tool.input.start', { toolCallId, tool });
+        },
+        toolInputDelta: async (toolCallId, delta) => {
+          if (controller.signal.aborted) return;
+          await this.appendEvent(runId, 'tool.input.delta', { toolCallId, delta });
         },
         widget: async (id, payload, schemaVersion) => {
           if (controller.signal.aborted) return;

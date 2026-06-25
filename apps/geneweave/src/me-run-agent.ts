@@ -218,6 +218,11 @@ export class SseCaptureResponse extends EventEmitter {
   readonly #out: MeRunEmitter;
   #buf = '';
   #tail: Promise<void> = Promise.resolve();
+  // Phase 2 — correlate tool_start ↔ tool_end. The chat frames carry only the
+  // tool `name` (no id), so we assign a stable toolCallId on start and pop it on
+  // end via a per-name stack (handles nested/parallel same-name calls in order).
+  #toolSeq = 0;
+  readonly #toolStack = new Map<string, string[]>();
 
   constructor(out: MeRunEmitter) {
     super();
@@ -285,21 +290,28 @@ export class SseCaptureResponse extends EventEmitter {
         const toolArgs = (rawArgs && typeof rawArgs === 'object')
           ? rawArgs as Record<string, unknown>
           : undefined;
-        if (name) this.#enqueue(() => this.#out.toolInvoked(name, toolArgs));
+        if (!name) break;
+        const id = `tc_${this.#toolSeq++}`;
+        const stack = this.#toolStack.get(name) ?? [];
+        stack.push(id);
+        this.#toolStack.set(name, stack);
+        // Args arrive complete here (no provider-level partial streaming yet) →
+        // the tool part lands directly in `input-available`.
+        this.#enqueue(() => this.#out.toolInvoked(name, toolArgs, id));
         break;
       }
       case 'tool_end': {
         const name = typeof payload['name'] === 'string' ? payload['name'] as string : '';
         if (!name) break;
+        const id = this.#toolStack.get(name)?.pop() ?? `tc_${this.#toolSeq++}`;
         const result = payload['result'];
         // A real tool.errored path: a tool result shaped `{ error: <string> }`
-        // (or carrying an `error` field) is surfaced as a tool failure rather
-        // than a successful completion.
+        // is surfaced as a tool failure rather than a successful completion.
         const errText = (result && typeof result === 'object' && typeof (result as Record<string, unknown>)['error'] === 'string')
           ? (result as Record<string, string>)['error']
           : undefined;
-        if (errText) this.#enqueue(() => this.#out.toolErrored(name, errText));
-        else this.#enqueue(() => this.#out.toolCompleted(name, result));
+        if (errText) this.#enqueue(() => this.#out.toolErrored(name, errText, id));
+        else this.#enqueue(() => this.#out.toolCompleted(name, result, id));
         break;
       }
       case 'step': {
