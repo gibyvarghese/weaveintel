@@ -1,0 +1,6 @@
+# gitleaks allowlist — false positives (fingerprint format: <commit>:<file>:<rule>:<line>)
+#
+# Cache-settings admin UI schema field "L1 Max Entries" (a numeric cache config
+# field, default 5000). gitleaks' generic-api-key entropy heuristic misfires on
+# the field/label text — there is no secret on this line.
+60039285b915705417259629e70c89750fd9d49c:apps/geneweave/src/admin/schema/platform-capability-tabs.ts:generic-api-key:459
