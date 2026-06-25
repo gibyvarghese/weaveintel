@@ -112,10 +112,14 @@ describe('parts — tool lifecycle', () => {
     expect(tool(vm.parts).result).toBe(9);
   });
 
-  it('ignores a completion for an unknown tool id without crashing (security/robustness)', () => {
+  it('surfaces an orphan completion (no prior invoke) as a finished tool part (HITL-gated tools)', () => {
     let vm = fresh();
-    vm = apply(vm, 'tool.completed', { tool: 'ghost', result: 1, toolCallId: 'nope' });
-    expect(vm.parts.filter((p) => p.type === 'tool')).toHaveLength(0);
+    vm = apply(vm, 'tool.completed', { tool: 'calculator', result: 42, toolCallId: 'tc-x' });
+    const t = vm.parts.filter((p) => p.type === 'tool') as ToolPart[];
+    expect(t).toHaveLength(1);
+    expect(t[0]!.state).toBe('output-available');
+    expect(t[0]!.result).toBe(42);
+    expect(vm.toolCalls).toHaveLength(1); // also reflected in the legacy view
   });
 });
 

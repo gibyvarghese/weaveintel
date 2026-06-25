@@ -326,13 +326,21 @@ function updateParts(next: RunViewModel, env: RunEventEnvelope): void {
       break;
     }
     case 'tool.completed': {
-      const i = findToolPartIdx(parts, strField(p, 'toolCallId'), strField(p, 'tool') ?? 'unknown', ['input-available', 'input-streaming']);
+      const tcId = strField(p, 'toolCallId');
+      const toolName = strField(p, 'tool') ?? 'unknown';
+      const i = findToolPartIdx(parts, tcId, toolName, ['input-available', 'input-streaming']);
       if (i >= 0) parts[i] = { ...(parts[i] as ToolPart), state: 'output-available', result: p['result'] };
+      // Orphan completion (no prior tool.invoked — e.g. a HITL-gated tool whose
+      // start frame was suppressed): still surface the tool as a finished part.
+      else parts.push({ type: 'tool', id: `tool-${seq}`, toolCallId: tcId ?? `tc-${seq}`, toolName, state: 'output-available', result: p['result'] });
       break;
     }
     case 'tool.errored': {
-      const i = findToolPartIdx(parts, strField(p, 'toolCallId'), strField(p, 'tool') ?? 'unknown', ['input-available', 'input-streaming']);
+      const tcId = strField(p, 'toolCallId');
+      const toolName = strField(p, 'tool') ?? 'unknown';
+      const i = findToolPartIdx(parts, tcId, toolName, ['input-available', 'input-streaming']);
       if (i >= 0) parts[i] = { ...(parts[i] as ToolPart), state: 'output-error', error: typeof p['error'] === 'string' ? p['error'] : 'Tool error' };
+      else parts.push({ type: 'tool', id: `tool-${seq}`, toolCallId: tcId ?? `tc-${seq}`, toolName, state: 'output-error', error: typeof p['error'] === 'string' ? p['error'] : 'Tool error' });
       break;
     }
 
@@ -514,6 +522,12 @@ export function streamReducer(state: RunViewModel, envelope: RunEventEnvelope): 
       if (lastIdx !== -1) {
         const realIdx = next.toolCalls.length - 1 - lastIdx;
         next.toolCalls[realIdx] = { ...next.toolCalls[realIdx]!, result };
+      } else {
+        // Orphan completion (no prior tool.invoked — e.g. a HITL-approved tool
+        // whose start frame was suppressed): record the call as completed.
+        const tv: ToolCallView = { kind: 'tool-call', toolName, result };
+        next.toolCalls.push(tv);
+        next.items.push(tv);
       }
       break;
     }
@@ -525,6 +539,10 @@ export function streamReducer(state: RunViewModel, envelope: RunEventEnvelope): 
       if (lastIdx !== -1) {
         const realIdx = next.toolCalls.length - 1 - lastIdx;
         next.toolCalls[realIdx] = { ...next.toolCalls[realIdx]!, error: errorMsg };
+      } else {
+        const tv: ToolCallView = { kind: 'tool-call', toolName, error: errorMsg };
+        next.toolCalls.push(tv);
+        next.items.push(tv);
       }
       break;
     }

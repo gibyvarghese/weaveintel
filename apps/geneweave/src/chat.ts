@@ -1254,7 +1254,7 @@ export class ChatEngine {
           // persists + resumes via postEvent; off-run (web chat) falls back to
           // an in-process queue.
           onInterrupt: createHumanTaskInterruptHandler(
-            (typeof ctx.metadata?.['runId'] === 'string' ? runApprovals.queueFor(ctx.metadata['runId'] as string) : null) ?? new InMemoryTaskQueue(),
+            runApprovals.queueForChat(chatId) ?? new InMemoryTaskQueue(),
             { timeoutMs: settings.hitlTimeoutMs },
           ),
           requireApproval: settings.hitlRequireAll,
@@ -1356,7 +1356,7 @@ export class ChatEngine {
             // Run-aware approval queue on the run path (emit + persist + resume);
             // in-process fallback for web chat.
             onInterrupt: createHumanTaskInterruptHandler(
-              (typeof ctx.metadata?.['runId'] === 'string' ? runApprovals.queueFor(ctx.metadata['runId'] as string) : null) ?? new InMemoryTaskQueue(),
+              runApprovals.queueForChat(chatId) ?? new InMemoryTaskQueue(),
               { timeoutMs: settings.hitlTimeoutMs },
             ),
             requireApproval: settings.hitlRequireAll,

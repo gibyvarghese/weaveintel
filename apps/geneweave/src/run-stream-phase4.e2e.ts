@@ -99,8 +99,9 @@ async function startHitlRun(page: Page, mode: string): Promise<string> {
   const headers = { 'x-csrf-token': await csrf(page), 'content-type': 'application/json' };
   const res = await page.request.post('/api/me/runs', {
     headers,
-    // gpt-4o (full) reliably calls tools, which we need to trigger the HITL gate.
-    data: { surface: 'web', input: { text: 'Use the calculator tool to compute 487263 multiplied by 918254. You must call the calculator tool — do not compute it yourself. Then state the result.' }, metadata: { mode, provider: 'openai', model: 'gpt-4o', hitl: true } },
+    // A natural hard-math prompt the model answers via the calculator tool.
+    // (Forceful "you MUST call the tool" phrasing trips the injection guardrail.)
+    data: { surface: 'web', input: { text: 'What is the exact product of 738291 and 654982?' }, metadata: { mode, provider: 'openai', model: 'gpt-4o', hitl: true } },
   });
   expect(res.status()).toBe(201);
   return ((await res.json()) as { id: string }).id;
@@ -123,9 +124,11 @@ for (const mode of ['agent', 'supervisor'] as const) {
     if (!taskId) {
       // Diagnostic: did the run call a tool at all (HITL wiring vs model behaviour)?
       await pollTerminal(page.request, runId, 30_000);
-      const kinds = (await readJournal(page.request, runId)).map((e) => e.kind);
+      const j = await readJournal(page.request, runId);
+      const vm0 = reconstruct(j);
+      const diag = j.filter((e) => e.kind === 'diagnostic').map((e) => (e.payload as { channel?: string }).channel);
       // eslint-disable-next-line no-console
-      console.log(`[phase4][${mode}] no-approval kinds=${[...new Set(kinds)].join(',')}`);
+      console.log(`[phase4][${mode}] no-approval kinds=${[...new Set(j.map((e) => e.kind))].join(',')} diag=${diag.join('|')} text="${vm0.fullText.slice(0, 200)}"`);
       test.skip(true, `model did not call a tool in ${mode} mode — no approval to exercise`);
       return;
     }
@@ -145,14 +148,19 @@ for (const mode of ['agent', 'supervisor'] as const) {
     console.log(`[phase4][${mode}] terminal=${terminal}`);
     expect(terminal).toBe('completed');
 
-    const vm = reconstruct(await readJournal(page.request, runId));
+    const journal = await readJournal(page.request, runId);
+    const vm = reconstruct(journal);
+    // eslint-disable-next-line no-console
+    console.log(`[phase4][${mode}] kinds=${[...new Set(journal.map((e) => e.kind))].join(',')} tools=${vm.toolCalls.length} approvals=${vm.approvals.length}`);
+    // HITL proof: the approval reconstructs as approved, on both the list + the part.
     const ap = vm.approvals.find((a) => a.taskId === taskId)!;
     expect(ap.status).toBe('approved');
     expect(vm.parts.some((p): p is ApprovalPart => p.type === 'approval' && p.taskId === taskId && p.state === 'approved')).toBe(true);
-    // The gated tool ran after approval.
+    // The approval was raised for a real tool the model chose to call, and the
+    // gated tool RAN after approval (reconstructed as a finished tool call/part).
+    expect(typeof ap.toolName === 'string' && ap.toolName.length > 0).toBe(true);
     expect(vm.toolCalls.length).toBeGreaterThan(0);
-    // eslint-disable-next-line no-console
-    console.log(`[phase4][${mode}] approved task=${taskId} tools=${vm.toolCalls.length} approvals=${vm.approvals.length}`);
+    expect(vm.parts.some((p) => p.type === 'tool' && p.state === 'output-available')).toBe(true);
   });
 }
 

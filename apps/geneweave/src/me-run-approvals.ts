@@ -50,22 +50,36 @@ export class RunApprovalCoordinator {
   readonly #runs = new Map<string, RunState>();
   /** taskId → runId, so a posted decision finds its run + queue. */
   readonly #taskRun = new Map<string, string>();
+  /**
+   * chatId → runId for the currently-active run on that chat. The chat engine
+   * keys the approval queue by chatId (which is always in scope there), since
+   * the inner streamMessage ctx does not carry the runId.
+   */
+  readonly #chatRun = new Map<string, string>();
 
   /** Called by the executor when a producing run starts. */
   registerRun(runId: string, emit: EmitFn, db?: HitlPersist): void {
     this.#runs.set(runId, { emit, ...(db ? { db } : {}), inner: new InMemoryTaskQueue() });
   }
 
-  /** Called by the run-agent once the run's chat id is known (for the FK row). */
+  /** Called by the run-agent once the run's chat id is known (FK row + chat keying). */
   setRunChat(runId: string, chatId: string): void {
     const st = this.#runs.get(runId);
     if (st) st.chatId = chatId;
+    this.#chatRun.set(chatId, runId);
   }
 
-  /** Cleanup when the run ends. Pending tasks for the run are dropped. */
+  /** Cleanup when the run ends. Pending tasks + chat mapping for the run are dropped. */
   unregisterRun(runId: string): void {
     for (const [taskId, rid] of this.#taskRun) if (rid === runId) this.#taskRun.delete(taskId);
+    for (const [chatId, rid] of this.#chatRun) if (rid === runId) this.#chatRun.delete(chatId);
     this.#runs.delete(runId);
+  }
+
+  /** Run-aware queue keyed by chatId (what the chat engine has in scope). */
+  queueForChat(chatId: string): HumanTaskQueue | null {
+    const runId = this.#chatRun.get(chatId);
+    return runId ? this.queueFor(runId) : null;
   }
 
   /** True while a run is registered (i.e. HITL can be coordinated for it). */
