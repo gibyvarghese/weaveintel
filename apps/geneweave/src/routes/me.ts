@@ -61,7 +61,9 @@ import { createSqlRunJournal } from '../run-substrate-sql.js';
 import { createSqlPresenceManager, withAgentPeer } from '../presence-sql.js';
 import { loadCollaborationConfig, clientCollabConfig } from '../collab-config.js';
 import { resolveRunAccess, createSqlSessionManager, mintShareToken, hashShareToken, annotatePresenceRoles } from '../shared-session-sql.js';
-import { roleAtLeast, type SessionRole } from '@weaveintel/collaboration';
+import { roleAtLeast, type SessionRole, type SubscriptionChannel } from '@weaveintel/collaboration';
+import { createSqlSubscriptionManager, createSqlFeedStore } from '../run-subscription-sql.js';
+import { enqueueRunTerminalNotifications, isSafeWebhookUrl } from '../run-notifications-outbox.js';
 
 /**
  * Register all /api/me routes on the provided router.
@@ -81,11 +83,14 @@ export function registerMeRoutes(
     catalogResolver?: SurfaceCatalogResolver;
     notifications?: NotificationsHub;
     runExecutor?: MeRunExecutor;
+    /** Phase 3 — the durable notification relay (lets endpoints drain immediately). */
+    notificationRelay?: { drainOnce(): Promise<number> };
   } = {},
 ): void {
 
   const catalogResolver = opts.catalogResolver ?? createMeCatalogResolver(db);
   const notifications = opts.notifications;
+  const notificationRelay = opts.notificationRelay;
   // A no-producing executor still provides the per-run SSE bus + serialized
   // append path, so the live-tail + resumable contract holds even when no
   // agent is wired (e.g. unit tests, embedded callers).
@@ -224,7 +229,7 @@ export function registerMeRoutes(
     // Subscribe FIRST so any event appended during the replay window is
     // buffered (not lost). The subscriber dedups by sequence, so the
     // replay→live handoff is gap-free and duplicate-free.
-    const { subscriber, detach } = runExecutor.subscribe(run.id, res, afterSeq);
+    const { subscriber, detach } = runExecutor.subscribe(run.id, res, afterSeq, auth.userId);
 
     // Replay all persisted events after the cursor — THROUGH the core RunJournal
     // port (Collaboration Phase 0). `createSqlRunJournal` is the SQL adapter over
@@ -271,11 +276,26 @@ export function registerMeRoutes(
     // Flush buffered live events, then live-tail until the client disconnects
     // or a terminal event closes the stream.
     subscriber.activate();
+    // Keepalive AND continuous re-authorization (CVE-2026-53843, defense in
+    // depth). An SSE read is authorized once at connect; a viewer removed from
+    // the shared session mid-stream is force-disconnected immediately by the
+    // mutating endpoint (see /members/remove, /share/end), but we ALSO re-check
+    // access on every keepalive tick so that ANY revocation path — including a
+    // future one, or a cross-process removal on another node — eventually closes
+    // a now-unauthorized stream rather than streaming to it forever. The owner
+    // always retains access, so this never closes the owner's own stream.
+    let reauthInFlight = false;
     const keepalive = setInterval(() => {
-      try {
-        if (res.writableEnded) { clearInterval(keepalive); return; }
-        res.write(': keepalive\n\n');
-      } catch { clearInterval(keepalive); }
+      if (res.writableEnded) { clearInterval(keepalive); return; }
+      try { res.write(': keepalive\n\n'); } catch { clearInterval(keepalive); return; }
+      if (reauthInFlight) return;
+      reauthInFlight = true;
+      void resolveRunAccess(db, run.id, auth.userId)
+        .then((acc) => {
+          if (!acc) { subscriber.revoke('access revoked'); detach(); clearInterval(keepalive); }
+        })
+        .catch(() => { /* transient DB error — keep the stream, re-check next tick */ })
+        .finally(() => { reauthInFlight = false; });
     }, Math.max(1000, streamCfg.heartbeatMs));
     req.socket?.on('close', () => { clearInterval(keepalive); detach(); });
   }, { auth: true });
@@ -490,6 +510,173 @@ export function registerMeRoutes(
     await db.revokeShareToken(tokenId, Date.now());
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ revoked: true }));
+  }, { auth: true });
+
+  // Remove a member from the shared run (OWNER-only). CVE-2026-53843: removing a
+  // member must IMMEDIATELY force-close any live SSE stream they hold — an SSE
+  // read is authorized only at connect, so without this a removed viewer keeps
+  // receiving events until they happen to reconnect. We drop the membership row
+  // first, then disconnect every live stream whose viewer no longer resolves to
+  // access, then broadcast a fresh presence snapshot so the avatars update.
+  router.post('/api/me/runs/:runId/members/remove', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveRunAccess(db, params['runId']!, auth.userId);
+    if (!access || access.role !== 'owner') { res.writeHead(access ? 403 : 404); res.end(JSON.stringify({ error: access ? 'Forbidden: only the owner can remove members' : 'Not found' })); return; }
+    const run = access.run;
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* */ }
+    const targetUserId = typeof body['userId'] === 'string' ? body['userId'] : '';
+    if (!targetUserId) { res.writeHead(400); res.end(JSON.stringify({ error: 'Missing userId' })); return; }
+    if (targetUserId === auth.userId) { res.writeHead(400); res.end(JSON.stringify({ error: 'The owner cannot remove themselves' })); return; }
+
+    const sessions = createSqlSessionManager(db);
+    const session = await sessions.getByRun(run.id);
+    if (session) {
+      await sessions.removeParticipant(session.id, auth.userId, targetUserId).catch(() => { /* idempotent */ });
+    }
+    // Force-close the removed user's live stream(s) right now. `resolveRunAccess`
+    // is the single source of truth for who may watch, so we close any stream
+    // whose user no longer resolves to access (the removed user, specifically).
+    const closed = runExecutor.disconnectUnauthorized(run.id, (uid) => uid !== targetUserId, 'removed from shared run');
+    // Drop their presence + push a refreshed snapshot to remaining watchers.
+    const cfg = await loadCollaborationConfig(db);
+    try {
+      const presence = createSqlPresenceManager(db, { ttlMs: cfg.presenceTtlMs });
+      const humans = await presence.leave({ runId: run.id, tenantId: run.tenant_id ?? '__default__' }, targetUserId);
+      const participants = await annotatePresenceRoles(withAgentPeer(humans, run.status, cfg.showAgentPresence), db, run);
+      runExecutor.broadcastEphemeral(run.id, 'presence.update', { participants });
+    } catch { /* presence refresh is best-effort */ }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ removed: true, streamsClosed: closed }));
+  }, { auth: true });
+
+  // End sharing entirely (OWNER-only): marks the session ended, revokes all
+  // tokens, and force-closes every non-owner live stream (CVE-2026-53843).
+  router.post('/api/me/runs/:runId/share/end', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveRunAccess(db, params['runId']!, auth.userId);
+    if (!access || access.role !== 'owner') { res.writeHead(access ? 403 : 404); res.end(JSON.stringify({ error: access ? 'Forbidden' : 'Not found' })); return; }
+    const run = access.run;
+    const sessions = createSqlSessionManager(db);
+    const session = await sessions.getByRun(run.id);
+    if (session) await sessions.endSession(session.id, auth.userId).catch(() => {});
+    // After endSession only the owner still resolves to access; close the rest.
+    const closed = runExecutor.disconnectUnauthorized(run.id, (uid) => uid === auth.userId, 'sharing ended by owner');
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ended: true, streamsClosed: closed }));
+  }, { auth: true });
+
+  // ── Durable subscriptions + offline notifications (Collaboration Phase 3) ────
+  // Subscribe to a run: "notify me when it finishes, even if I close the tab."
+  // Any participant (owner / collaborator / viewer) may subscribe to a run they
+  // can access. Identity is server-derived. Channels default to `inapp` (always
+  // included); `webhook`/`push`/`email` are opt-in.
+  router.post('/api/me/runs/:runId/subscribe', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveRunAccess(db, params['runId']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    const run = access.run;
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* default inapp */ }
+    const allowed: SubscriptionChannel[] = ['inapp', 'email', 'push', 'webhook'];
+    const channels = Array.isArray(body['channels'])
+      ? (body['channels'] as unknown[]).filter((c): c is SubscriptionChannel => typeof c === 'string' && (allowed as string[]).includes(c))
+      : undefined;
+    const subs = createSqlSubscriptionManager(db);
+    const sub = await subs.subscribe({ runId: run.id, tenantId: run.tenant_id ?? '__global__', userId: auth.userId, ...(channels ? { channels } : {}) });
+    // If the run is ALREADY terminal at subscribe time, enqueue immediately so a
+    // late subscriber still gets the "it's done" notification (no lost edge).
+    if (isTerminalRunStatus(run.status)) {
+      await enqueueRunTerminalNotifications(db, run).catch(() => {});
+      await notificationRelay?.drainOnce().catch(() => {});
+    }
+    res.writeHead(201, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ subscribed: true, runId: run.id, channels: sub.channels }));
+  }, { auth: true });
+
+  // Unsubscribe (idempotent).
+  router.post('/api/me/runs/:runId/unsubscribe', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveRunAccess(db, params['runId']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    await createSqlSubscriptionManager(db).unsubscribe(access.run.id, auth.userId);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ subscribed: false }));
+  }, { auth: true });
+
+  // Am I subscribed to this run? (drives the bell toggle in the UI)
+  router.get('/api/me/runs/:runId/subscription', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveRunAccess(db, params['runId']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    const sub = await createSqlSubscriptionManager(db).get(access.run.id, auth.userId);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ subscribed: sub !== null, channels: sub?.channels ?? [] }));
+  }, { auth: true });
+
+  // The in-app notification feed (the 🔔 bell inbox). `?unread=1` filters; the
+  // feed is strictly the caller's own (server-derived principal) — no cross-user
+  // access. `unreadCount` powers the badge.
+  router.get('/api/me/notifications', async (req, res, _params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const url = new URL(req.url ?? '/', 'http://x');
+    const unreadOnly = url.searchParams.get('unread') === '1';
+    const limit = safePageInt(url.searchParams.get('limit'), 50, 1, 200);
+    const tenantId = auth.tenantId ?? '__global__';
+    const feed = createSqlFeedStore(db);
+    const items = await feed.list(tenantId, auth.userId, { limit, unreadOnly });
+    const unreadCount = await feed.unreadCount(tenantId, auth.userId);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ items, unreadCount }));
+  }, { auth: true });
+
+  // Mark one notification read.
+  router.post('/api/me/notifications/:id/read', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const changed = await createSqlFeedStore(db).markRead(auth.tenantId ?? '__global__', auth.userId, params['id']!);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ read: changed }));
+  }, { auth: true });
+
+  // Mark all read (single UPDATE).
+  router.post('/api/me/notifications/read-all', async (_req, res, _params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const count = await createSqlFeedStore(db).markAllRead(auth.tenantId ?? '__global__', auth.userId);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ read: count }));
+  }, { auth: true });
+
+  // Register an outbound webhook endpoint (so `webhook`-channel subscriptions can
+  // fire). SECURITY: the URL is validated here (https + not a private/link-local
+  // host) AND again at dial time by the SSRF-hardened fetch in the relay. A
+  // per-endpoint signing secret is generated server-side and returned ONCE.
+  router.post('/api/me/webhooks', async (req, res, _params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* */ }
+    const rawUrl = typeof body['url'] === 'string' ? body['url'].trim() : '';
+    if (!isSafeWebhookUrl(rawUrl)) { res.writeHead(400); res.end(JSON.stringify({ error: 'URL must be https and not a private/loopback/link-local host' })); return; }
+    const secret = `whsec_${mintShareToken().token}`;
+    const id = newUUIDv7();
+    await db.createWebhookEndpoint({ id, tenant_id: auth.tenantId ?? null, user_id: auth.userId, url: rawUrl, signing_secret: secret, created_at: Date.now() });
+    res.writeHead(201, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ id, url: rawUrl, signingSecret: secret })); // secret shown once
+  }, { auth: true });
+
+  // List my registered webhook endpoints (secrets never returned).
+  router.get('/api/me/webhooks', async (_req, res, _params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const eps = (await db.listWebhookEndpoints(auth.userId)).map((e) => ({ id: e.id, url: e.url, createdAt: e.created_at }));
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ endpoints: eps }));
+  }, { auth: true });
+
+  // Revoke a webhook endpoint.
+  router.post('/api/me/webhooks/:id/revoke', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const changed = await db.revokeWebhookEndpoint(params['id']!, auth.userId, Date.now());
+    res.writeHead(changed ? 200 : 404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ revoked: changed > 0 }));
   }, { auth: true });
 
   // ─── Catalog ────────────────────────────────────────────────────────────

@@ -27,6 +27,7 @@ import { authenticateRequest, verifyCSRF } from './auth.js';
 import { createNotificationsHub } from './notifications-wiring.js';
 import { MeRunExecutor } from './me-run-executor.js';
 import { startPresenceSweeper } from './presence-sql.js';
+import { createNotificationRelay, enqueueRunTerminalNotifications } from './run-notifications-outbox.js';
 import { createChatPipelineMeRunAgent } from './me-run-agent.js';
 import { type TriggerDispatcherHandle } from './admin/api/triggers.js';
 import { type LoadedGatewayConfig } from './mcp-gateway.js';
@@ -230,18 +231,36 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   registerMemoryRoutes(router, db);
   registerLiveAgentRoutes(router, db);
   registerAdminLiveRunStreamRoute(router, db);
+  // Collaboration Phase 3: the durable notification relay (transactional outbox
+  // → in-app feed + signed webhooks). Crash-safe and restart-safe.
+  const notificationRelay = createNotificationRelay({ db });
   const meRunExecutor = new MeRunExecutor({
     db,
     runAgent: createChatPipelineMeRunAgent(chatEngine, db),
+    // On terminal: enqueue one outbox row per subscriber, then nudge the relay
+    // to drain immediately (it also drains on its own interval). Fire-and-forget.
+    onTerminal: (runId) => {
+      void (async () => {
+        const run = await db.getUserRunById(runId);
+        if (run) await enqueueRunTerminalNotifications(db, run);
+        await notificationRelay.drainOnce();
+      })().catch(() => { /* relay retries on its interval */ });
+    },
   });
   registerMeRoutes(router, db, {
     notifications: createNotificationsHub({ db }),
     runExecutor: meRunExecutor,
+    notificationRelay,
   });
   // Collaboration Phase 1: start the presence TTL sweeper (reaps participants
   // who stopped heartbeating, e.g. closed a tab without a clean leave, and
   // re-broadcasts the updated "who's watching" snapshot).
   startPresenceSweeper(db, meRunExecutor);
+  // Collaboration Phase 3: start the relay loop and run a one-shot reconcile so
+  // any notification owed before a restart (run finished while the process was
+  // down, or a crash between terminal + enqueue) is delivered on boot.
+  notificationRelay.start();
+  void notificationRelay.reconcile();
   registerMeConversationsRoutes(router, db);
   // M5-3: pass consent manager so isGranted() is called on every memory write path.
   registerMeMemoryRoutes(router, db, { consentManager: config.runtime ? createDurableConsentManager({ runtime: config.runtime, namespace: 'consent' }) : undefined });

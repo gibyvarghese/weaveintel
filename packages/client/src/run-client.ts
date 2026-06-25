@@ -109,6 +109,27 @@ export interface RunClient {
   shareRun(runId: string, body?: { role?: 'viewer' | 'collaborator'; expiresInMs?: number; maxUses?: number }): Promise<{ sessionId: string; token: string; tokenId: string; role: string; url: string; expiresAt: number | null }>;
   /** Collaboration Phase 2 — join a shared run via an invite token. */
   joinSession(token: string): Promise<{ runId: string; sessionId: string; role: string }>;
+  /**
+   * Collaboration Phase 2 / CVE-2026-53843 — remove a member from a shared run
+   * (owner only). The server immediately force-closes the removed member's live
+   * stream(s). Returns how many streams were closed.
+   */
+  removeMember(runId: string, userId: string): Promise<{ removed: boolean; streamsClosed: number }>;
+  /** Collaboration Phase 2 — end sharing entirely (owner only); closes all guest streams. */
+  endShare(runId: string): Promise<{ ended: boolean; streamsClosed: number }>;
+  /**
+   * Collaboration Phase 3 — durably subscribe to a run ("notify me when it
+   * finishes, even if I close the tab"). `inapp` is always included. Idempotent.
+   */
+  subscribeRun(runId: string, channels?: Array<'inapp' | 'email' | 'push' | 'webhook'>): Promise<{ subscribed: boolean; runId: string; channels: string[] }>;
+  /** Collaboration Phase 3 — cancel a run subscription (idempotent). */
+  unsubscribeRun(runId: string): Promise<{ subscribed: boolean }>;
+  /** Collaboration Phase 3 — am I subscribed to this run? (drives the bell toggle). */
+  getSubscription(runId: string): Promise<{ subscribed: boolean; channels: string[] }>;
+  /** Collaboration Phase 3 — the in-app notification feed + unread badge count. */
+  listNotifications(opts?: { unreadOnly?: boolean; limit?: number }): Promise<{ items: unknown[]; unreadCount: number }>;
+  /** Collaboration Phase 3 — mark every in-app notification read. */
+  markAllNotificationsRead(): Promise<{ read: number }>;
 }
 
 export interface CreateRunClientOptions {
@@ -220,7 +241,21 @@ export function createRunClient(opts: CreateRunClientOptions): RunClient {
                 // `sequence: -1` — they are NOT journaled and must bypass the
                 // resume-overlap dedup (which would always drop a negative
                 // sequence). Deliver them without advancing the resume cursor.
-                if (envelope.sequence < 0) { reconnectCount = 0; onEvent(envelope); return false; }
+                if (envelope.sequence < 0) {
+                  reconnectCount = 0;
+                  onEvent(envelope);
+                  // CVE-2026-53843 — the server force-closed us because access
+                  // was revoked. Treat like a terminal stop: do NOT reconnect
+                  // (every retry would just 404), and surface completion so the
+                  // consumer can show "no longer have access".
+                  if (envelope.kind === 'access.revoked') {
+                    terminal = true;
+                    onComplete?.();
+                    controller.abort();
+                    return true; // stop
+                  }
+                  return false;
+                }
                 if (envelope.sequence <= lastSeq) return false; // dedup (resume overlap)
                 lastSeq = envelope.sequence;
                 reconnectCount = 0; // forward progress resets the backoff budget
@@ -278,6 +313,34 @@ export function createRunClient(opts: CreateRunClientOptions): RunClient {
 
     async joinSession(token) {
       return json.post('/api/me/sessions/join', { token });
+    },
+
+    async removeMember(runId, userId) {
+      return json.post(`/api/me/runs/${runId}/members/remove`, { userId });
+    },
+
+    async endShare(runId) {
+      return json.post(`/api/me/runs/${runId}/share/end`, {});
+    },
+
+    async subscribeRun(runId, channels) {
+      return json.post(`/api/me/runs/${runId}/subscribe`, channels ? { channels } : {});
+    },
+    async unsubscribeRun(runId) {
+      return json.post(`/api/me/runs/${runId}/unsubscribe`, {});
+    },
+    async getSubscription(runId) {
+      return (await json.get<{ subscribed: boolean; channels: string[] }>(`/api/me/runs/${runId}/subscription`)) ?? { subscribed: false, channels: [] };
+    },
+    async listNotifications(listOpts) {
+      const qs = new URLSearchParams();
+      if (listOpts?.unreadOnly) qs.set('unread', '1');
+      if (typeof listOpts?.limit === 'number') qs.set('limit', String(listOpts.limit));
+      const suffix = qs.toString() ? `?${qs.toString()}` : '';
+      return (await json.get<{ items: unknown[]; unreadCount: number }>(`/api/me/notifications${suffix}`)) ?? { items: [], unreadCount: 0 };
+    },
+    async markAllNotificationsRead() {
+      return json.post('/api/me/notifications/read-all', {});
     },
   };
 }

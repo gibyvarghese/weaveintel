@@ -263,6 +263,13 @@ export interface RunViewModel {
    * derived from the journal). Empty until the first presence event arrives.
    */
   presence: RunPresenceParticipant[];
+  /**
+   * Collaboration Phase 2 / CVE-2026-53843 — set when the server force-closed
+   * this stream because the viewer's access was REVOKED mid-watch (removed from
+   * the shared run, or sharing ended). The UI should stop auto-reconnecting and
+   * show "you no longer have access" rather than silently retrying forever.
+   */
+  accessRevoked?: { reason: string };
   /** Phase 2 — ordered typed parts with per-part streaming state. */
   parts: RunPart[];
   /** All items in event order (for a linear render). */
@@ -533,6 +540,16 @@ export function streamReducer(state: RunViewModel, envelope: RunEventEnvelope): 
     const raw = (envelope.payload as { participants?: unknown }).participants;
     const participants = Array.isArray(raw) ? (raw as RunPresenceParticipant[]) : [];
     return { ...state, presence: participants };
+  }
+
+  // CVE-2026-53843 — the server force-closed this stream because access was
+  // revoked. Also ephemeral (`sequence: -1`); record it so the consumer can stop
+  // reconnecting and surface a clear message. Never throws, never advances seq.
+  if (envelope.kind === 'access.revoked') {
+    const reason = typeof (envelope.payload as { reason?: unknown }).reason === 'string'
+      ? (envelope.payload as { reason: string }).reason
+      : 'access revoked';
+    return { ...state, accessRevoked: { reason } };
   }
 
   // Skip already-seen or out-of-order events (idempotent)

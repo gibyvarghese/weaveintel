@@ -15,7 +15,8 @@ here"), live run subscriptions, and user handoff.
 | `createInMemoryPresenceManager()` | **Presence** ("who else is here"): a heartbeat-driven, TTL-expiring set of participants watching a run. The PORT + an in-memory reference adapter; geneWeave provides a SQL adapter over `run_presence`. Both pass `presenceManagerContract`. |
 | `createInMemorySessionManager()` | **Shared sessions** (Phase 2): turn a single-owner run into a multi-user one — members join with a **role** (owner / collaborator / viewer). The PORT + in-memory adapter; geneWeave's SQL adapter + invite-link tokens layer on top. Both pass `sessionManagerContract`. |
 | `createSharedSessionManager()` | (legacy in-memory prototype) a shared "room" with presence state. |
-| `createRunSubscriptionManager()` | Track who is **subscribed** to a run and broadcast status/progress changes to all of them. |
+| `createInMemorySubscriptionManager()` | **Durable subscriptions** (Phase 3): "notify me when this run finishes, even if I close the tab." The PORT + in-memory adapter; geneWeave's SQL adapter (over `run_subscriptions`) makes it survive restarts. Both pass `subscriptionManagerContract`. Delivery is `@weaveintel/notifications`' job — this only records WHO is interested and over WHICH channels. |
+| `createRunSubscriptionManager()` | (legacy in-memory prototype) live status/progress broadcast room — superseded by the durable `SubscriptionManager` above. |
 | `createHandoffManager()` | The **handoff** lifecycle — request → accept / reject / cancel / complete — for passing a session from one user to another. |
 
 ### Presence (Phase 1) — how it works
@@ -77,6 +78,41 @@ sessions.join(room.id, { userId: 'bob', displayName: 'Bob', role: 'collaborator'
 sessions.updatePresence(room.id, 'bob', 'typing');
 ```
 
+> **Security note (CVE-2026-53843).** An SSE read stream is authorized once, at
+> connect. So when you remove someone from a shared run (or end sharing),
+> geneWeave **force-closes their live stream immediately** (an `access.revoked`
+> event) AND re-checks access on every keepalive tick — a removed viewer can
+> neither act nor keep watching. Fixed end-to-end in Phase 3.
+
+### Durable subscriptions + offline notifications (Phase 3) — how it works
+
+> New to this? Presence (Phase 1) is "who's watching RIGHT NOW" and vanishes when
+> you leave. A **subscription** is the opposite: you click "Notify me", close the
+> tab, and later — when the run finishes — you get a notification (a 🔔 inbox
+> entry, and optionally a webhook/push). It has to survive the server restarting,
+> because a notification you're owed must not live only in memory.
+
+```ts
+import { createInMemorySubscriptionManager } from '@weaveintel/collaboration';
+
+const subs = createInMemorySubscriptionManager();
+await subs.subscribe({ runId, tenantId, userId: 'alice', channels: ['inapp', 'webhook'] });
+await subs.listSubscribers(runId); // [{ userId: 'alice', channels: ['inapp','webhook'], ... }]
+```
+
+How geneWeave makes it reliable (mid-2026 research — the **transactional outbox**
+pattern from Temporal/Restate/DBOS + the **Standard Webhooks** spec): the moment a
+run reaches a terminal state, one durable `notification_outbox` row is written per
+subscriber **in the database**. A leased relay then drains those rows — writing
+the in-app feed entry (`@weaveintel/notifications`' `NotificationFeedStore`) and
+firing signed webhooks — and only marks each `sent` once delivery succeeds. If the
+process crashes mid-send, the row is still there on restart and is retried
+(at-least-once); a stable idempotency key + the feed's dedupe collapse any
+duplicate (effectively-once). Webhooks are HMAC-signed per Standard Webhooks
+(`webhook-id`/`webhook-timestamp`/`webhook-signature`), CloudEvents-shaped, sent
+only to **registered** endpoints over the SSRF-hardened fetch (private/link-local
+ranges blocked, validated at dial time).
+
 ## What this package is NOT (read this first)
 
 It is **not** where runs are stored or streamed. In **Collaboration Phase 0** the
@@ -108,7 +144,7 @@ are still **in-memory prototypes** that later phases make durable. See
 
 - **Phase 1 ✅** — Presence persisted (`run_presence`) + SSE broadcast + agent-as-peer.
 - **Phase 2 ✅** — Shared sessions + invite links (`shared_sessions`/`session_participants`) + role-gated multi-user access.
-- **Phase 3** — Durable subscriptions + offline notifications.
+- **Phase 3 ✅** — Durable subscriptions (`run_subscriptions`) + offline notifications (transactional `notification_outbox` → in-app feed + signed webhooks), restart-safe. Plus the CVE-2026-53843 force-disconnect.
 - **Phase 4** — Collaborative run comments / annotations.
 - **Phase 5** — Unified handoff (built on `@weaveintel/human-tasks` + `@weaveintel/a2a`).
 

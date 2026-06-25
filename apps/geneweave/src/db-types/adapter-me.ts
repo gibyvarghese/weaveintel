@@ -90,6 +90,62 @@ export interface ShareTokenRow {
   created_at: number;
 }
 
+/** m96 (Collaboration Phase 3) — a durable run subscription ("notify me"). */
+export interface RunSubscriptionRow {
+  id: string;
+  run_id: string;
+  tenant_id: string | null;
+  user_id: string;
+  /** JSON array of channel ids, e.g. `["inapp","webhook"]`. */
+  channels: string;
+  created_at: number;
+}
+
+/** m96 — a row in the per-user in-app notification feed (the bell inbox). */
+export interface NotificationFeedRow {
+  id: string;
+  tenant_id: string | null;
+  principal_id: string;
+  category: string;
+  title: string;
+  body: string | null;
+  deep_link: string | null;
+  priority: 'low' | 'normal' | 'high';
+  dedupe_key: string | null;
+  created_at: number;
+  read_at: number | null;
+}
+
+/** m96 — a transactional-outbox delivery job (crash-safe at-least-once). */
+export interface NotificationOutboxRow {
+  id: string;
+  run_id: string;
+  tenant_id: string | null;
+  user_id: string;
+  channels: string;          // JSON array
+  payload: string;           // JSON NotificationMessage
+  idempotency_key: string;   // webhook-id + feed dedupe key
+  status: 'pending' | 'sending' | 'sent' | 'failed';
+  attempts: number;
+  lease_until: number | null;
+  next_attempt_at: number;
+  last_error: string | null;
+  created_at: number;
+  sent_at: number | null;
+}
+
+/** m96 — a registered outbound webhook endpoint (referenced by id, never inline). */
+export interface WebhookEndpointRow {
+  id: string;
+  tenant_id: string | null;
+  user_id: string;
+  url: string;
+  signing_secret: string;
+  enabled: number;
+  created_at: number;
+  revoked_at: number | null;
+}
+
 export interface UserDeviceRow {
   id: string;
   user_id: string;
@@ -142,6 +198,8 @@ export interface IMeStore {
     tenant_id?: string; surface?: string; metadata?: string;
   }): Promise<void>;
   getUserRun(id: string, userId: string): Promise<UserRunRow | null>;
+  /** Owner-agnostic run lookup (Phase 3 notification outbox). NOT an access path. */
+  getUserRunById(id: string): Promise<UserRunRow | null>;
   listUserRuns(userId: string, filter?: {
     status?: UserRunRow['status']; limit?: number; offset?: number;
   }): Promise<UserRunRow[]>;
@@ -171,6 +229,32 @@ export interface IMeStore {
   getShareTokenByHash(tokenHash: string): Promise<ShareTokenRow | null>;
   incrementShareTokenUses(id: string): Promise<void>;
   revokeShareToken(id: string, revokedAt: number): Promise<void>;
+  // ── Durable subscriptions + notifications (m96, Collaboration Phase 3) ──────
+  upsertRunSubscription(row: { id: string; run_id: string; tenant_id?: string | null; user_id: string; channels: string; created_at: number }): Promise<RunSubscriptionRow>;
+  deleteRunSubscription(runId: string, userId: string): Promise<number>;
+  getRunSubscription(runId: string, userId: string): Promise<RunSubscriptionRow | null>;
+  listRunSubscribers(runId: string): Promise<RunSubscriptionRow[]>;
+  listSubscriptionsForUser(userId: string): Promise<RunSubscriptionRow[]>;
+  // Notification feed (in-app inbox)
+  appendNotificationFeed(row: NotificationFeedRow): Promise<NotificationFeedRow>;
+  listNotificationFeed(tenantId: string, principalId: string, opts?: { limit?: number; unreadOnly?: boolean }): Promise<NotificationFeedRow[]>;
+  countUnreadNotificationFeed(tenantId: string, principalId: string): Promise<number>;
+  markNotificationFeedRead(tenantId: string, principalId: string, id: string, now: number): Promise<boolean>;
+  markAllNotificationFeedRead(tenantId: string, principalId: string, now: number): Promise<number>;
+  // Transactional outbox (crash-safe delivery)
+  enqueueNotificationOutbox(row: { id: string; run_id: string; tenant_id?: string | null; user_id: string; channels: string; payload: string; idempotency_key: string; next_attempt_at: number; created_at: number }): Promise<boolean>;
+  /** Atomically claim up to `limit` due rows (status pending/failed, next_attempt_at<=now), leasing them to `sending` until `leaseUntil`. Also reclaims `sending` rows whose lease expired. */
+  claimNotificationOutbox(now: number, leaseUntil: number, limit: number): Promise<NotificationOutboxRow[]>;
+  markNotificationOutboxSent(id: string, sentAt: number): Promise<void>;
+  rescheduleNotificationOutbox(id: string, nextAttemptAt: number, attempts: number, lastError: string, failed: boolean): Promise<void>;
+  /** Run ids that already have an outbox row (so a reconciler doesn't double-enqueue). */
+  hasNotificationOutboxForRun(runId: string): Promise<boolean>;
+  /** Terminal runs that have at least one subscriber (the reconciler backfill scan). */
+  listTerminalRunsWithSubscribers(limit: number): Promise<UserRunRow[]>;
+  // Registered outbound webhook endpoints
+  createWebhookEndpoint(row: { id: string; tenant_id?: string | null; user_id: string; url: string; signing_secret: string; created_at: number }): Promise<void>;
+  listWebhookEndpoints(userId: string): Promise<WebhookEndpointRow[]>;
+  revokeWebhookEndpoint(id: string, userId: string, revokedAt: number): Promise<number>;
   /**
    * Prune the run-event journal (Client Phase 0). Removes events for terminal
    * runs older than `olderThanHours`, and trims any run whose event count

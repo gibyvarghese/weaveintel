@@ -25,7 +25,10 @@ export {
 
 export {
   type RunStatus,
-  type RunSubscription,
+  // Legacy in-memory prototype (the "live status broadcast" room model). Phase 3
+  // supersedes it with the durable SubscriptionManager below; aliased to avoid a
+  // name collision with the Phase 3 `RunSubscription`.
+  type RunSubscription as LegacyRunSubscription,
   type RunSubscriptionManager,
   createRunSubscriptionManager,
 } from './subscription.js';
@@ -70,3 +73,21 @@ export {
   type ContractTestApi as SessionContractTestApi,
   sessionManagerContract,
 } from './shared-session-contract.js';
+
+// Phase 3 — Durable run subscriptions ("notify me when this run finishes, even
+// if I close the tab"). The PORT + in-memory reference adapter; geneWeave
+// provides the SQL adapter over `run_subscriptions`. Both pass
+// `subscriptionManagerContract`. Delivery is handled by `@weaveintel/notifications`
+// (this only records WHO is interested and over WHICH channels).
+export {
+  type SubscriptionChannel,
+  type RunSubscription,
+  type SubscribeInput,
+  type SubscriptionManager,
+  type InMemorySubscriptionManagerOptions,
+  createInMemorySubscriptionManager,
+  normalizeChannels,
+} from './run-subscription.js';
+export {
+  subscriptionManagerContract,
+} from './run-subscription-contract.js';

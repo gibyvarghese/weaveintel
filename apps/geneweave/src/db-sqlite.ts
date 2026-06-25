@@ -8828,6 +8828,15 @@ export class SQLiteAdapter implements DatabaseAdapter {
     return (this.d.prepare('SELECT * FROM user_runs WHERE id = ? AND user_id = ?').get(id, userId) as import('./db-types/adapter-me.js').UserRunRow | undefined) ?? null;
   }
 
+  /**
+   * Owner-agnostic run lookup by id (Collaboration Phase 3). Used by the
+   * notification outbox, where we have a runId from a terminal event but not the
+   * owner. NOT an access-control path — callers must authorize separately.
+   */
+  async getUserRunById(id: string): Promise<import('./db-types/adapter-me.js').UserRunRow | null> {
+    return (this.d.prepare('SELECT * FROM user_runs WHERE id = ?').get(id) as import('./db-types/adapter-me.js').UserRunRow | undefined) ?? null;
+  }
+
   async listUserRuns(userId: string, filter: { status?: 'pending'|'running'|'completed'|'failed'|'cancelled'; limit?: number; offset?: number } = {}): Promise<import('./db-types/adapter-me.js').UserRunRow[]> {
     const limit = filter.limit ?? 50;
     const offset = filter.offset ?? 0;
@@ -8950,6 +8959,121 @@ export class SQLiteAdapter implements DatabaseAdapter {
   }
   async revokeShareToken(id: string, revokedAt: number): Promise<void> {
     this.d.prepare('UPDATE session_share_tokens SET revoked_at = ? WHERE id = ?').run(revokedAt, id);
+  }
+
+  // ── Durable subscriptions + notifications (m96, Collaboration Phase 3) ──────
+  async upsertRunSubscription(row: { id: string; run_id: string; tenant_id?: string | null; user_id: string; channels: string; created_at: number }): Promise<import('./db-types/adapter-me.js').RunSubscriptionRow> {
+    // Idempotent per (run, user): re-subscribing updates the channel set but
+    // preserves the original created_at and the existing row id.
+    this.d.prepare(
+      `INSERT INTO run_subscriptions (id, run_id, tenant_id, user_id, channels, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(run_id, user_id) DO UPDATE SET channels = excluded.channels`,
+    ).run(row.id, row.run_id, row.tenant_id ?? null, row.user_id, row.channels, row.created_at);
+    return this.d.prepare('SELECT * FROM run_subscriptions WHERE run_id = ? AND user_id = ?').get(row.run_id, row.user_id) as import('./db-types/adapter-me.js').RunSubscriptionRow;
+  }
+  async deleteRunSubscription(runId: string, userId: string): Promise<number> {
+    return this.d.prepare('DELETE FROM run_subscriptions WHERE run_id = ? AND user_id = ?').run(runId, userId).changes;
+  }
+  async getRunSubscription(runId: string, userId: string): Promise<import('./db-types/adapter-me.js').RunSubscriptionRow | null> {
+    return (this.d.prepare('SELECT * FROM run_subscriptions WHERE run_id = ? AND user_id = ?').get(runId, userId) ?? null) as import('./db-types/adapter-me.js').RunSubscriptionRow | null;
+  }
+  async listRunSubscribers(runId: string): Promise<import('./db-types/adapter-me.js').RunSubscriptionRow[]> {
+    return this.d.prepare('SELECT * FROM run_subscriptions WHERE run_id = ? ORDER BY created_at ASC').all(runId) as import('./db-types/adapter-me.js').RunSubscriptionRow[];
+  }
+  async listSubscriptionsForUser(userId: string): Promise<import('./db-types/adapter-me.js').RunSubscriptionRow[]> {
+    return this.d.prepare('SELECT * FROM run_subscriptions WHERE user_id = ? ORDER BY created_at DESC').all(userId) as import('./db-types/adapter-me.js').RunSubscriptionRow[];
+  }
+
+  // Notification feed (in-app inbox) — fan-out-on-write, dedupe per principal.
+  async appendNotificationFeed(row: import('./db-types/adapter-me.js').NotificationFeedRow): Promise<import('./db-types/adapter-me.js').NotificationFeedRow> {
+    // Idempotent on (principal_id, dedupe_key): the partial UNIQUE index means a
+    // duplicate insert is ignored; we then return the surviving row.
+    this.d.prepare(
+      `INSERT OR IGNORE INTO notification_feed (id, tenant_id, principal_id, category, title, body, deep_link, priority, dedupe_key, created_at, read_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(row.id, row.tenant_id ?? null, row.principal_id, row.category, row.title, row.body ?? null, row.deep_link ?? null, row.priority, row.dedupe_key ?? null, row.created_at, row.read_at ?? null);
+    if (row.dedupe_key) {
+      const existing = this.d.prepare('SELECT * FROM notification_feed WHERE principal_id = ? AND dedupe_key = ?').get(row.principal_id, row.dedupe_key);
+      if (existing) return existing as import('./db-types/adapter-me.js').NotificationFeedRow;
+    }
+    return (this.d.prepare('SELECT * FROM notification_feed WHERE id = ?').get(row.id) ?? row) as import('./db-types/adapter-me.js').NotificationFeedRow;
+  }
+  async listNotificationFeed(tenantId: string, principalId: string, opts?: { limit?: number; unreadOnly?: boolean }): Promise<import('./db-types/adapter-me.js').NotificationFeedRow[]> {
+    const unread = opts?.unreadOnly ? 'AND read_at IS NULL' : '';
+    const limit = typeof opts?.limit === 'number' ? `LIMIT ${Math.max(0, Math.floor(opts.limit))}` : '';
+    return this.d.prepare(
+      `SELECT * FROM notification_feed WHERE tenant_id IS ? AND principal_id = ? ${unread} ORDER BY created_at DESC ${limit}`,
+    ).all(tenantId === '__global__' ? null : tenantId, principalId) as import('./db-types/adapter-me.js').NotificationFeedRow[];
+  }
+  async countUnreadNotificationFeed(tenantId: string, principalId: string): Promise<number> {
+    const r = this.d.prepare('SELECT COUNT(*) AS n FROM notification_feed WHERE tenant_id IS ? AND principal_id = ? AND read_at IS NULL').get(tenantId === '__global__' ? null : tenantId, principalId) as { n: number };
+    return r.n;
+  }
+  async markNotificationFeedRead(tenantId: string, principalId: string, id: string, now: number): Promise<boolean> {
+    return this.d.prepare('UPDATE notification_feed SET read_at = ? WHERE id = ? AND tenant_id IS ? AND principal_id = ? AND read_at IS NULL').run(now, id, tenantId === '__global__' ? null : tenantId, principalId).changes > 0;
+  }
+  async markAllNotificationFeedRead(tenantId: string, principalId: string, now: number): Promise<number> {
+    return this.d.prepare('UPDATE notification_feed SET read_at = ? WHERE tenant_id IS ? AND principal_id = ? AND read_at IS NULL').run(now, tenantId === '__global__' ? null : tenantId, principalId).changes;
+  }
+
+  // Transactional outbox — crash-safe at-least-once delivery.
+  async enqueueNotificationOutbox(row: { id: string; run_id: string; tenant_id?: string | null; user_id: string; channels: string; payload: string; idempotency_key: string; next_attempt_at: number; created_at: number }): Promise<boolean> {
+    // UNIQUE(run_id, user_id): exactly one delivery per subscriber per run terminal.
+    return this.d.prepare(
+      `INSERT OR IGNORE INTO notification_outbox (id, run_id, tenant_id, user_id, channels, payload, idempotency_key, status, attempts, next_attempt_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
+    ).run(row.id, row.run_id, row.tenant_id ?? null, row.user_id, row.channels, row.payload, row.idempotency_key, row.next_attempt_at, row.created_at).changes > 0;
+  }
+  async claimNotificationOutbox(now: number, leaseUntil: number, limit: number): Promise<import('./db-types/adapter-me.js').NotificationOutboxRow[]> {
+    // Atomically lease due rows. A row is claimable when it is pending/failed and
+    // due, OR stuck in 'sending' past its lease (the previous worker crashed).
+    const claim = this.d.transaction((n: number, lease: number, lim: number) => {
+      const rows = this.d.prepare(
+        `SELECT * FROM notification_outbox
+          WHERE ((status = 'pending' AND next_attempt_at <= ?)
+                 OR (status = 'sending' AND lease_until IS NOT NULL AND lease_until <= ?))
+          ORDER BY next_attempt_at ASC LIMIT ?`,
+      ).all(n, n, lim) as import('./db-types/adapter-me.js').NotificationOutboxRow[];
+      const upd = this.d.prepare(`UPDATE notification_outbox SET status = 'sending', lease_until = ?, attempts = attempts + 1 WHERE id = ?`);
+      for (const r of rows) upd.run(lease, r.id);
+      return rows;
+    });
+    return claim(now, leaseUntil, Math.max(1, Math.floor(limit)));
+  }
+  async markNotificationOutboxSent(id: string, sentAt: number): Promise<void> {
+    this.d.prepare(`UPDATE notification_outbox SET status = 'sent', sent_at = ?, lease_until = NULL, last_error = NULL WHERE id = ?`).run(sentAt, id);
+  }
+  async rescheduleNotificationOutbox(id: string, nextAttemptAt: number, attempts: number, lastError: string, failed: boolean): Promise<void> {
+    // `failed` = exhausted the retry budget → dead-letter (status 'failed', not retried).
+    this.d.prepare(`UPDATE notification_outbox SET status = ?, next_attempt_at = ?, last_error = ?, lease_until = NULL WHERE id = ?`)
+      .run(failed ? 'failed' : 'pending', nextAttemptAt, lastError.slice(0, 500), id);
+    void attempts; // attempts already incremented at claim time
+  }
+  async hasNotificationOutboxForRun(runId: string): Promise<boolean> {
+    return this.d.prepare('SELECT 1 FROM notification_outbox WHERE run_id = ? LIMIT 1').get(runId) !== undefined;
+  }
+  async listTerminalRunsWithSubscribers(limit: number): Promise<import('./db-types/adapter-me.js').UserRunRow[]> {
+    return this.d.prepare(
+      `SELECT r.* FROM user_runs r
+        WHERE r.status IN ('completed','failed','cancelled')
+          AND EXISTS (SELECT 1 FROM run_subscriptions s WHERE s.run_id = r.id)
+        ORDER BY r.created_at DESC LIMIT ?`,
+    ).all(Math.max(1, Math.floor(limit))) as import('./db-types/adapter-me.js').UserRunRow[];
+  }
+
+  // Registered outbound webhook endpoints.
+  async createWebhookEndpoint(row: { id: string; tenant_id?: string | null; user_id: string; url: string; signing_secret: string; created_at: number }): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO webhook_endpoints (id, tenant_id, user_id, url, signing_secret, enabled, created_at)
+       VALUES (?, ?, ?, ?, ?, 1, ?)`,
+    ).run(row.id, row.tenant_id ?? null, row.user_id, row.url, row.signing_secret, row.created_at);
+  }
+  async listWebhookEndpoints(userId: string): Promise<import('./db-types/adapter-me.js').WebhookEndpointRow[]> {
+    return this.d.prepare('SELECT * FROM webhook_endpoints WHERE user_id = ? AND revoked_at IS NULL AND enabled = 1 ORDER BY created_at ASC').all(userId) as import('./db-types/adapter-me.js').WebhookEndpointRow[];
+  }
+  async revokeWebhookEndpoint(id: string, userId: string, revokedAt: number): Promise<number> {
+    return this.d.prepare('UPDATE webhook_endpoints SET revoked_at = ?, enabled = 0 WHERE id = ? AND user_id = ?').run(revokedAt, id, userId).changes;
   }
 
   // ── HITL approvals (m64 table, m93 run-scoped) ─────────────────────────────

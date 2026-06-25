@@ -68,6 +68,13 @@ function harness(): Harness {
       async setPresence() { return { participants: [] }; },
       async shareRun() { return { sessionId: 's', token: 't', tokenId: 'tid', role: 'viewer', url: '/shared/t', expiresAt: null }; },
       async joinSession() { return { runId: 'run-1', sessionId: 's', role: 'viewer' }; },
+      async removeMember() { return { removed: true, streamsClosed: 0 }; },
+      async endShare() { return { ended: true, streamsClosed: 0 }; },
+      async subscribeRun() { return { subscribed: true, runId: 'run-1', channels: ['inapp'] }; },
+      async unsubscribeRun() { return { subscribed: false }; },
+      async getSubscription() { return { subscribed: false, channels: [] }; },
+      async listNotifications() { return { items: [], unreadCount: 0 }; },
+      async markAllNotificationsRead() { return { read: 0 }; },
     },
   };
   return h;
