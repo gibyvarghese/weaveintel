@@ -24,21 +24,23 @@ interface Recorded {
   citation: unknown[];
   artifact: RunArtifactRef[];
   diagnostic: Array<{ channel: string; data?: unknown }>;
-  widget: unknown[];
+  citationFull: CitationLike[];
+  widget: Array<{ id: string; payload: Record<string, unknown>; schemaVersion?: number }>;
 }
+interface CitationLike { id: string; text?: string; source?: string; url?: string }
 
 function recorder(): { emitter: MeRunEmitter; rec: Recorded } {
-  const rec: Recorded = { text: [], reasoning: [], toolInvoked: [], toolCompleted: [], toolErrored: [], toolInputStart: [], toolInputDelta: [], step: [], usage: [], citation: [], artifact: [], diagnostic: [], widget: [] };
+  const rec: Recorded = { text: [], reasoning: [], toolInvoked: [], toolCompleted: [], toolErrored: [], toolInputStart: [], toolInputDelta: [], step: [], usage: [], citation: [], artifact: [], diagnostic: [], citationFull: [], widget: [] };
   const emitter: MeRunEmitter = {
     text: async (delta, role) => { rec.text.push({ delta, ...(role ? { role } : {}) }); },
     toolInvoked: async (tool, args, toolCallId) => { rec.toolInvoked.push({ tool, ...(args ? { args } : {}), ...(toolCallId ? { toolCallId } : {}) }); },
     toolCompleted: async (tool, result, toolCallId) => { rec.toolCompleted.push({ tool, result, ...(toolCallId ? { toolCallId } : {}) }); },
     toolErrored: async (tool, error, toolCallId) => { rec.toolErrored.push({ tool, error, ...(toolCallId ? { toolCallId } : {}) }); },
-    widget: async (id) => { rec.widget.push(id); },
+    widget: async (id, payload, schemaVersion) => { rec.widget.push({ id, payload, ...(schemaVersion !== undefined ? { schemaVersion } : {}) }); },
     reasoning: async (delta) => { rec.reasoning.push(delta); },
     step: async (step) => { rec.step.push(step); },
     usage: async (usage) => { rec.usage.push(usage); },
-    citation: async (c) => { rec.citation.push(c); },
+    citation: async (c) => { rec.citation.push(c); rec.citationFull.push(c as CitationLike); },
     artifact: async (a) => { rec.artifact.push(a); },
     diagnostic: async (channel, data) => { rec.diagnostic.push({ channel, data }); },
     toolInputStart: async (toolCallId, tool) => { rec.toolInputStart.push({ toolCallId, tool }); },
@@ -210,6 +212,84 @@ describe('bridge — robustness (negative/security)', () => {
     await cap.drain();
     expect(rec.reasoning).toEqual(['AB']);
     expect(rec.text).toEqual([{ delta: 'CD' }]);
+  });
+});
+
+// ─── Phase 3 — citations + generative-UI widget from search ──
+
+const searchFrame = (query: string, results: Array<Record<string, unknown>>): Record<string, unknown> =>
+  ({ type: 'tool_end', name: 'web_search', result: { query, provider: 'test', resultCount: results.length, results } });
+
+describe('bridge — search derivatives (Phase 3, positive)', () => {
+  it('emits a citation per result and a results table widget', async () => {
+    const rec = await feed([searchFrame('weaveintel docs', [
+      { title: 'A', url: 'https://a.example/x', snippet: 'about a', source: 'a.example' },
+      { title: 'B', url: 'https://b.example/y', snippet: 'about b', source: 'b.example' },
+    ])]);
+    expect(rec.citationFull).toHaveLength(2);
+    expect(rec.citationFull[0]).toMatchObject({ url: 'https://a.example/x', text: 'about a' });
+    expect(rec.widget).toHaveLength(1);
+    const w = rec.widget[0]!.payload as Record<string, unknown>;
+    expect(w['type']).toBe('table');
+    expect((w['data'] as { rows: unknown[][] }).rows).toHaveLength(2);
+    expect((w['data'] as { columns: string[] }).columns).toEqual(['Title', 'Source', 'URL']);
+    // The tool completion still fires alongside the derivatives.
+    expect(rec.toolCompleted).toHaveLength(1);
+  });
+
+  it('dedupes citations that point at the same source/text', async () => {
+    const rec = await feed([searchFrame('dup', [
+      { title: 'A', url: 'https://a.example/x', snippet: 'same', source: 'a.example' },
+      { title: 'A2', url: 'https://a.example/x', snippet: 'same', source: 'a.example' },
+      { title: 'C', url: 'https://c.example/z', snippet: 'other', source: 'c.example' },
+    ])]);
+    expect(rec.citationFull.length).toBe(2); // a.example deduped
+  });
+
+  it('parses a stringified JSON tool result', async () => {
+    const rec = await feed([{ type: 'tool_end', name: 'web_search', result: JSON.stringify({ query: 'q', results: [{ title: 'A', url: 'https://a.example', snippet: 's', source: 'a.example' }] }) }]);
+    expect(rec.citationFull).toHaveLength(1);
+    expect(rec.widget).toHaveLength(1);
+  });
+});
+
+describe('bridge — search derivatives (negative/security)', () => {
+  it('emits nothing for a non-search tool', async () => {
+    const rec = await feed([{ type: 'tool_end', name: 'calculator', result: { value: 42 } }]);
+    expect(rec.citationFull).toHaveLength(0);
+    expect(rec.widget).toHaveLength(0);
+  });
+
+  it('emits nothing when there are no results', async () => {
+    const rec = await feed([searchFrame('empty', [])]);
+    expect(rec.citationFull).toHaveLength(0);
+    expect(rec.widget).toHaveLength(0);
+  });
+
+  it('skips only URL-less results and never throws on odd URLs', async () => {
+    const rec = await feed([searchFrame('mixed', [
+      { title: 'good', url: 'https://good.example', snippet: 'g', source: 'good.example' },
+      { title: 'odd', url: 'not a url', snippet: 'b', source: 'bad' }, // kept (source given)
+      { title: 'noUrl', snippet: 'n', source: 'n' }, // no url → skipped
+    ])]);
+    expect(rec.citationFull).toHaveLength(2); // url-less result dropped; odd url kept
+    expect(rec.citationFull.map((c) => c.url)).toContain('https://good.example');
+    expect(rec.widget).toHaveLength(1);
+  });
+
+  it('ignores non-object results entries without crashing', async () => {
+    const rec = await feed([{ type: 'tool_end', name: 'web_search', result: { query: 'x', results: [null, 'str', 42, { title: 'A', url: 'https://a.example', source: 'a.example' }] } }]);
+    expect(rec.citationFull).toHaveLength(1);
+  });
+});
+
+describe('bridge — search derivatives (stress)', () => {
+  it('caps the widget at 10 rows for a large result set', async () => {
+    const results = Array.from({ length: 50 }, (_, i) => ({ title: `T${i}`, url: `https://s${i}.example/p`, snippet: `snip ${i}`, source: `s${i}.example` }));
+    const rec = await feed([searchFrame('big', results)]);
+    expect(rec.citationFull.length).toBe(50); // all unique
+    const rows = (rec.widget[0]!.payload as { data: { rows: unknown[][] } }).data.rows;
+    expect(rows).toHaveLength(10); // capped
   });
 });
 

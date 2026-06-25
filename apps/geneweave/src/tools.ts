@@ -805,6 +805,8 @@ export interface ToolRegistryOptions {
   temporalStore?: TemporalStore;
   currentUserId?: string;
   currentChatId?: string;
+  /** Run id (set on the /api/me/runs path) so emitted artifacts are run-scoped. */
+  currentRunId?: string;
   currentAttachments?: RuntimeAttachment[];
   actorPersona?: string;
   memoryRecall?: (args: { userId: string; query: string; limit?: number }) => Promise<{
@@ -1530,6 +1532,7 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
                 data: '',
                 sessionId: opts.currentChatId,
                 userId: opts.currentUserId,
+                ...(opts.currentRunId ? { runId: opts.currentRunId } : {}),
                 tags: args.tags,
                 metadata: { ...baseMeta, streamingStatus: 'streaming', streamingProgress: 0 },
                 scope: 'session',
@@ -1577,6 +1580,7 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
               data: args.data,
               sessionId: opts.currentChatId,
               userId: opts.currentUserId,
+              ...(opts.currentRunId ? { runId: opts.currentRunId } : {}),
               tags: args.tags,
               metadata: baseMeta,
               scope: 'session',

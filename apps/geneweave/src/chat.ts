@@ -1095,6 +1095,9 @@ export class ChatEngine {
       defaultTimezone: settings.timezone,
       currentUserId: userId,
       currentChatId: chatId,
+      // Phase 3: run-scope artifacts produced via /api/me/runs (the executor
+      // stamps ctx.metadata.runId) so `artifacts.run_id` is populated.
+      currentRunId: typeof ctx.metadata?.['runId'] === 'string' ? ctx.metadata['runId'] as string : undefined,
       currentAttachments: attachments,
       actorPersona: userPersona,
       ...this.buildMemoryToolCallbacks(ctx),

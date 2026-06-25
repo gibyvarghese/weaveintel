@@ -16,8 +16,9 @@ import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import type { ServerResponse } from 'node:http';
 import { weaveAgent } from '@weaveintel/agents';
-import type { Message } from '@weaveintel/core';
+import type { Message, CitationPayload } from '@weaveintel/core';
 import { newUUIDv7 } from '@weaveintel/core';
+import { webCitation, deduplicateCitations, tableWidget } from '@weaveintel/ui-primitives';
 import type { ChatEngineConfig } from './chat-runtime.js';
 import { getOrCreateModel } from './chat-runtime.js';
 import type { ChatEngine } from './chat.js';
@@ -340,6 +341,8 @@ export class SseCaptureResponse extends EventEmitter {
           : undefined;
         if (errText) this.#enqueue(() => this.#out.toolErrored(name, errText, id));
         else this.#enqueue(() => this.#out.toolCompleted(name, result, id));
+        // Phase 3: derive citations + a results widget from search tool output.
+        this.#emitSearchDerivatives(name, result);
         break;
       }
       case 'step': {
@@ -418,5 +421,48 @@ export class SseCaptureResponse extends EventEmitter {
     this.#tail = this.#tail.then(fn).catch(() => {
       // Emitter writes are best-effort; a failed append must not break the run.
     });
+  }
+
+  /**
+   * Phase 3 — generative UI + citations from a search tool result. `web_search`
+   * returns `{ query, results: [{ title, url, snippet, source }] }`; we surface
+   * each result as a citation (deduped) and the whole set as a table widget,
+   * reusing the `@weaveintel/ui-primitives` builders. Bridge-only: no chat-
+   * pipeline change, fully reconstructable by the client reducer.
+   */
+  #emitSearchDerivatives(toolName: string, rawResult: unknown): void {
+    if (toolName !== 'web_search') return;
+    let parsed: Record<string, unknown> | undefined;
+    if (rawResult && typeof rawResult === 'object') parsed = rawResult as Record<string, unknown>;
+    else if (typeof rawResult === 'string') { try { parsed = JSON.parse(rawResult) as Record<string, unknown>; } catch { return; } }
+    if (!parsed) return;
+    const results = parsed['results'];
+    if (!Array.isArray(results) || results.length === 0) return;
+
+    // ── Citations ──
+    const citations: CitationPayload[] = [];
+    for (const raw of results) {
+      if (!raw || typeof raw !== 'object') continue;
+      const r = raw as Record<string, unknown>;
+      const url = typeof r['url'] === 'string' ? r['url'] : '';
+      if (!url) continue;
+      const source = typeof r['source'] === 'string' && r['source'] ? r['source'] : (typeof r['title'] === 'string' ? r['title'] as string : 'web');
+      const text = typeof r['snippet'] === 'string' && r['snippet'] ? r['snippet'] as string : source;
+      try { citations.push(webCitation(text, url, source)); } catch { /* malformed url — skip */ }
+    }
+    for (const c of deduplicateCitations(citations)) {
+      const citation = { id: c.id, ...(c.text ? { text: c.text } : {}), ...(c.source ? { source: c.source } : {}), ...(c.url ? { url: c.url } : {}) };
+      this.#enqueue(() => this.#out.citation(citation));
+    }
+
+    // ── Generative UI: a table widget of the results ──
+    const rows = results.slice(0, 10)
+      .filter((r): r is Record<string, unknown> => !!r && typeof r === 'object')
+      .map((r) => [String(r['title'] ?? ''), String(r['source'] ?? ''), String(r['url'] ?? '')]);
+    if (rows.length > 0) {
+      const query = typeof parsed['query'] === 'string' ? parsed['query'] as string : '';
+      const widget = tableWidget(`Search results${query ? `: ${query}` : ''}`.slice(0, 80), ['Title', 'Source', 'URL'], rows, { a11ySummary: `${rows.length} web search results` });
+      this.#enqueue(() => this.#out.widget(widget.id, widget as unknown as Record<string, unknown>, widget.schemaVersion));
+    }
   }
 }
