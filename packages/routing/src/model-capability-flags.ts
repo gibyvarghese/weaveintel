@@ -28,11 +28,16 @@ export interface ModelCapabilityFlags {
  * Models known to support extended thinking / chain-of-thought reasoning.
  */
 const THINKING_MODELS = new Set([
+  'claude-sonnet-4-6',
+  'claude-haiku-4-5-20251001',
   'claude-opus-4-7',
   'claude-opus-4-8',
   'claude-fable-5',
   'o3',
+  'o3-mini',
   'o4-mini',
+  'gpt-5',
+  'gpt-5-mini',
   'deepseek-r1',
   'deepseek-r1-api',
   'gemini-2.5-pro',

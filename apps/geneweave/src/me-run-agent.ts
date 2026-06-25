@@ -119,6 +119,24 @@ function resolveChatMode(metadata: Record<string, unknown> | undefined): string 
 }
 
 /**
+ * Resolve reasoning-request intent from run metadata (m92). A run can ask for
+ * provider reasoning via `metadata.reasoning: true`, `metadata.reasoningEffort:
+ * 'low'|'medium'|'high'`, or `metadata.reasoningBudgetTokens`. Applied to the
+ * chat settings; honoured only when the model is reasoning-capable.
+ */
+export function resolveReasoning(metadata: Record<string, unknown> | undefined): {
+  reasoningEnabled?: boolean; reasoningEffort?: string; reasoningBudgetTokens?: number;
+} {
+  if (!metadata) return {};
+  const effortRaw = metadata['reasoningEffort'];
+  const effort = (effortRaw === 'low' || effortRaw === 'medium' || effortRaw === 'high') ? effortRaw : undefined;
+  const budget = typeof metadata['reasoningBudgetTokens'] === 'number' ? Math.max(0, Math.trunc(metadata['reasoningBudgetTokens'])) : undefined;
+  const enabled = metadata['reasoning'] === true || metadata['reasoningEnabled'] === true || effort !== undefined || (budget !== undefined && budget > 0);
+  if (!enabled) return {};
+  return { reasoningEnabled: true, ...(effort ? { reasoningEffort: effort } : {}), ...(budget !== undefined ? { reasoningBudgetTokens: budget } : {}) };
+}
+
+/**
  * Derive a stable, per-user chat id for conversation continuity. When the
  * client supplies an opaque conversation token we hash it together with the
  * user id so the same conversation maps to the same server-side chat across
@@ -174,20 +192,30 @@ export function createChatPipelineMeRunAgent(chatEngine: ChatEngine, db: Databas
     }
     // Keep the chat's mode in sync with the current selection (idempotent
     // upsert). With no enabled_tools override, the engine derives the tool set
-    // from the mode policy — identical to the web behaviour.
-    await db.saveChatSettings({ chatId, mode });
+    // from the mode policy — identical to the web behaviour. Reasoning intent
+    // from the run metadata is applied here (honoured only for reasoning-capable
+    // models).
+    await db.saveChatSettings({ chatId, mode, ...resolveReasoning(args.metadata) });
 
     const capture = new SseCaptureResponse(emit);
     const onAbort = (): void => capture.cancel();
     if (args.signal.aborted) onAbort();
     else args.signal.addEventListener('abort', onAbort, { once: true });
 
+    // A run may pin a specific model/provider (e.g. to force a reasoning model);
+    // this bypasses the router inside the chat engine.
+    const modelPin = typeof args.metadata?.['model'] === 'string' ? args.metadata['model'] as string : undefined;
+    const providerPin = typeof args.metadata?.['provider'] === 'string' ? args.metadata['provider'] as string : undefined;
     try {
       await chatEngine.streamMessage(
         capture as unknown as ServerResponse,
         args.userId,
         chatId,
         prompt,
+        {
+          ...(modelPin ? { model: modelPin } : {}),
+          ...(providerPin ? { provider: providerPin } : {}),
+        },
       );
       // Flush any queued emitter writes before the executor marks completion.
       await capture.drain();

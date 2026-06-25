@@ -65,6 +65,8 @@ export interface IChatStore {
     supervisorReplanOnFailure?: boolean; supervisorParallelDelegation?: boolean;
     // W5
     ensembleAgents?: string; ensembleResolver?: string;
+    // Reasoning request (m92)
+    reasoningEnabled?: boolean; reasoningEffort?: string; reasoningBudgetTokens?: number;
   }): Promise<void>;
 
   // Traces

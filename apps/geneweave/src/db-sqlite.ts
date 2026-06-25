@@ -729,6 +729,8 @@ export class SQLiteAdapter implements DatabaseAdapter {
     supervisorReplanOnFailure?: boolean; supervisorParallelDelegation?: boolean;
     // W5
     ensembleAgents?: string; ensembleResolver?: string;
+    // Reasoning request (m92)
+    reasoningEnabled?: boolean; reasoningEffort?: string; reasoningBudgetTokens?: number;
   }): Promise<void> {
     this.d.prepare(
       `INSERT INTO chat_settings
@@ -736,8 +738,9 @@ export class SQLiteAdapter implements DatabaseAdapter {
           reflect_enabled, reflect_max_revisions, reflect_criteria,
           verify_enabled, verify_min_score, verify_max_attempts,
           supervisor_replan_on_failure, supervisor_parallel_delegation,
-          ensemble_agents, ensemble_resolver)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ensemble_agents, ensemble_resolver,
+          reasoning_enabled, reasoning_effort, reasoning_budget_tokens)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(chat_id) DO UPDATE SET
          mode=excluded.mode, system_prompt=excluded.system_prompt, timezone=excluded.timezone,
          enabled_tools=excluded.enabled_tools, redaction_enabled=excluded.redaction_enabled,
@@ -749,6 +752,8 @@ export class SQLiteAdapter implements DatabaseAdapter {
          supervisor_replan_on_failure=excluded.supervisor_replan_on_failure,
          supervisor_parallel_delegation=excluded.supervisor_parallel_delegation,
          ensemble_agents=excluded.ensemble_agents, ensemble_resolver=excluded.ensemble_resolver,
+         reasoning_enabled=excluded.reasoning_enabled, reasoning_effort=excluded.reasoning_effort,
+         reasoning_budget_tokens=excluded.reasoning_budget_tokens,
          updated_at=datetime('now')`,
     ).run(
       s.chatId, s.mode, s.systemPrompt ?? null,
@@ -759,6 +764,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
       s.verifyEnabled ? 1 : 0, s.verifyMinScore ?? 0.7, s.verifyMaxAttempts ?? 1,
       s.supervisorReplanOnFailure ? 1 : 0, s.supervisorParallelDelegation ? 1 : 0,
       s.ensembleAgents ?? null, s.ensembleResolver ?? null,
+      s.reasoningEnabled ? 1 : 0, s.reasoningEffort ?? null, s.reasoningBudgetTokens ?? 0,
     );
   }
 

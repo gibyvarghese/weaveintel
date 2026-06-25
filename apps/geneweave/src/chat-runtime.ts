@@ -242,6 +242,10 @@ export interface ChatSettings {
   complianceEnforceConsent?: boolean;
   // P6-5 — Vision loop browser agent
   visionLoopEnabled?: boolean;
+  // Reasoning request (m92) — request provider reasoning for reasoning-capable models.
+  reasoningEnabled?: boolean;
+  reasoningEffort?: 'low' | 'medium' | 'high';
+  reasoningBudgetTokens?: number;
 }
 
 export interface WorkerDef {
@@ -350,5 +354,9 @@ export function settingsFromRow(row: ChatSettingsRow | null): ChatSettings {
     complianceEnforceConsent: row.compliance_enforce_consent !== 0,
     // P6-5 — Vision loop (default: disabled)
     visionLoopEnabled: row.vision_loop_enabled !== 0,
+    // Reasoning request (m92) — default: disabled.
+    reasoningEnabled: !!row.reasoning_enabled,
+    reasoningEffort: (row.reasoning_effort === 'low' || row.reasoning_effort === 'medium' || row.reasoning_effort === 'high') ? row.reasoning_effort : undefined,
+    reasoningBudgetTokens: row.reasoning_budget_tokens || undefined,
   };
 }

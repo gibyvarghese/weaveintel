@@ -13,6 +13,7 @@ import type { RuntimeRoutingSlot } from '@weaveintel/core';
 import type { DurableConsentManager } from '@weaveintel/compliance';
 import type { DatabaseAdapter } from './db.js';
 import { normalizePersona } from './rbac.js';
+import { buildReasoningRequestMetadata, reasoningAdjustedTemperature, reasoningAdjustedMaxTokens, type ReasoningRequestMetadata } from './chat-reasoning-utils.js';
 import {
   calculateCost,
   getOrCreateModel,
@@ -586,16 +587,33 @@ export async function sendMessageImpl(
       enabled: planPricing?.promptCacheEnabled ?? true,
       providerSupported: provider === 'anthropic',
     });
+    // Reasoning request (m92) — same gating as the streaming path.
+    const baseMaxTokens = opts?.maxTokens ?? 4096;
+    let reasoningMeta: ReasoningRequestMetadata | undefined;
+    if (settings.reasoningEnabled) {
+      const caps = await deps.db.listCapabilityScores({ provider, modelId }).catch(() => []);
+      reasoningMeta = buildReasoningRequestMetadata({
+        provider,
+        supportsThinking: caps.some((c) => c.supports_thinking === 1),
+        enabled: true,
+        effort: settings.reasoningEffort ?? null,
+        budgetTokens: settings.reasoningBudgetTokens ?? null,
+        maxTokens: baseMaxTokens,
+      });
+    }
+    const sendMetadata: Record<string, unknown> = {};
+    if (provider === 'openai') sendMetadata['promptCacheKey'] = `gw:${tenantId ?? 'global'}:${chatId}`;
+    if (reasoningMeta?.thinking) sendMetadata['thinking'] = reasoningMeta.thinking;
+    if (reasoningMeta?.reasoningEffort) sendMetadata['reasoningEffort'] = reasoningMeta.reasoningEffort;
+
     const request: ModelRequest = {
       messages: augmentedPrompt
         ? [{ role: 'system' as const, content: augmentedPrompt }, ...messages]
         : messages,
-      maxTokens: opts?.maxTokens ?? 4096,
-      temperature: opts?.temperature,
+      maxTokens: reasoningAdjustedMaxTokens(reasoningMeta, baseMaxTokens),
+      temperature: reasoningAdjustedTemperature(reasoningMeta, opts?.temperature),
       ...(cachePlan.enabled ? { promptCache: { ttl: cachePlan.ttl } } : {}),
-      // OpenAI caches implicitly; a stable prompt_cache_key keeps same-chat
-      // turns (which share the system prefix) routed to the same cache.
-      ...(provider === 'openai' ? { metadata: { promptCacheKey: `gw:${tenantId ?? 'global'}:${chatId}` } } : {}),
+      ...(Object.keys(sendMetadata).length ? { metadata: sendMetadata } : {}),
     };
     // Phase 1: wrap in an OTel GenAI span so LLM calls are visible in any
     // OTLP-compatible backend (Grafana Cloud, Honeycomb, Jaeger).

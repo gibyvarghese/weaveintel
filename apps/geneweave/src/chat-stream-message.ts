@@ -8,6 +8,7 @@ import { applySkillsToPrompt } from '@weaveintel/skills';
 import type { DurableConsentManager } from '@weaveintel/compliance';
 import type { DatabaseAdapter } from './db.js';
 import { normalizePersona } from './rbac.js';
+import { buildReasoningRequestMetadata, reasoningAdjustedTemperature, reasoningAdjustedMaxTokens, type ReasoningRequestMetadata } from './chat-reasoning-utils.js';
 import {
   calculateCost,
   getOrCreateModel,
@@ -321,7 +322,10 @@ export async function streamMessageImpl(
   let providerCfg = deps.config.providers[provider];
 
   const blocked = deps.healthTracker.getBlockedProviders();
-  const routed = await routeModel(deps.db, await deps.getAvailableModels(), deps.healthTracker.listHealth(), { ...opts, prompt: content }, blocked);
+  // An explicit model override PINS the model and bypasses the router (e.g. a
+  // run that wants a specific reasoning model). Otherwise the router decides.
+  const pinned = typeof opts?.model === 'string' && opts.model.length > 0;
+  const routed = pinned ? null : await routeModel(deps.db, await deps.getAvailableModels(), deps.healthTracker.listHealth(), { ...opts, prompt: content }, blocked);
   if (routed && deps.config.providers[routed.provider]) {
     provider = routed.provider;
     modelId = routed.modelId;
@@ -787,17 +791,39 @@ export async function streamMessageImpl(
         providerSupported: provider === 'anthropic',
       });
       streamPromptCache = { readTokens: 0, writeTokens: 0, applied: streamCachePlan.enabled || provider === 'openai', ttl: streamCachePlan.ttl };
+
+      // Reasoning request (m92): when the chat enabled reasoning AND the model is
+      // reasoning-capable, ask the provider for reasoning (Anthropic thinking /
+      // OpenAI effort). Gated on `supports_thinking` so we never send `thinking`
+      // to a model that rejects it. The capability lookup only runs when enabled.
+      const baseMaxTokens = opts?.maxTokens ?? 4096;
+      let streamReasoningMeta: ReasoningRequestMetadata | undefined;
+      if (settings.reasoningEnabled) {
+        const caps = await deps.db.listCapabilityScores({ provider, modelId }).catch(() => []);
+        streamReasoningMeta = buildReasoningRequestMetadata({
+          provider,
+          supportsThinking: caps.some((c) => c.supports_thinking === 1),
+          enabled: true,
+          effort: settings.reasoningEffort ?? null,
+          budgetTokens: settings.reasoningBudgetTokens ?? null,
+          maxTokens: baseMaxTokens,
+        });
+      }
+      const streamMetadata: Record<string, unknown> = {};
+      if (provider === 'openai') streamMetadata['promptCacheKey'] = `gw:${tenantId ?? 'global'}:${chatId}`;
+      if (streamReasoningMeta?.thinking) streamMetadata['thinking'] = streamReasoningMeta.thinking;
+      if (streamReasoningMeta?.reasoningEffort) streamMetadata['reasoningEffort'] = streamReasoningMeta.reasoningEffort;
+
       const request: ModelRequest = {
         messages: streamAugmentedPrompt
           ? [{ role: 'system' as const, content: streamAugmentedPrompt }, ...messages]
           : messages,
-        maxTokens: opts?.maxTokens ?? 4096,
-        temperature: opts?.temperature,
+        maxTokens: reasoningAdjustedMaxTokens(streamReasoningMeta, baseMaxTokens),
+        // Anthropic rejects a pinned temperature when thinking is enabled.
+        temperature: reasoningAdjustedTemperature(streamReasoningMeta, opts?.temperature),
         stream: true,
         ...(streamCachePlan.enabled ? { promptCache: { ttl: streamCachePlan.ttl } } : {}),
-        // OpenAI caches implicitly; a stable prompt_cache_key keeps same-chat
-        // turns (which share the system prefix) routed to the same cache.
-        ...(provider === 'openai' ? { metadata: { promptCacheKey: `gw:${tenantId ?? 'global'}:${chatId}` } } : {}),
+        ...(Object.keys(streamMetadata).length ? { metadata: streamMetadata } : {}),
       };
 
       // Phase 1: OTel GenAI span covering the entire model interaction (streaming

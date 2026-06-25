@@ -110,6 +110,10 @@ export function registerSettingsRoutes(
       // W5 — ensemble
       ensembleAgents: body['ensembleAgents'] ? JSON.stringify(body['ensembleAgents']) : undefined,
       ensembleResolver: (body['ensembleResolver'] as string) ?? undefined,
+      // Reasoning request (m92) — applies only to reasoning-capable models.
+      reasoningEnabled: body['reasoningEnabled'] != null ? !!body['reasoningEnabled'] : undefined,
+      reasoningEffort: ['low', 'medium', 'high'].includes(String(body['reasoningEffort'])) ? String(body['reasoningEffort']) : undefined,
+      reasoningBudgetTokens: body['reasoningBudgetTokens'] != null ? Math.max(0, Math.min(60000, Math.trunc(Number(body['reasoningBudgetTokens'])))) : undefined,
     });
 
     json(res, 200, { ok: true });
