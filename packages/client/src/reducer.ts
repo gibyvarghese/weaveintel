@@ -7,6 +7,7 @@
  */
 
 import type { RunEventEnvelope } from '@weaveintel/core';
+import { parsePartialJson, extractJsonCandidate } from './partial-json.js';
 
 // ---------------------------------------------------------------------------
 // Run status mirrors @weaveintel/core RunStatus
@@ -122,7 +123,8 @@ export type ApprovalView = {
 
 export type StreamItem =
   | TextChunk | WidgetView | StatusView | ToolCallView | ErrorView
-  | ReasoningChunk | UsageView | StepView | CitationView | ArtifactView | DiagnosticView | ApprovalView;
+  | ReasoningChunk | UsageView | StepView | CitationView | ArtifactView | DiagnosticView | ApprovalView
+  | ObjectView | FileView;
 
 // ─── Phase 2 — ordered typed parts with per-part streaming state ──────────────
 // `parts[]` is the modern message model (cf. Vercel AI SDK UIMessage.parts):
@@ -165,7 +167,53 @@ export interface ApprovalPart {
   riskLevel?: string;
 }
 
-export type RunPart = TextPart | ReasoningPart | ToolPart | StepPart | WidgetPart | ArtifactPart | CitationPart | ApprovalPart;
+/** Phase 7 — a progressively-streamed structured (JSON) object. */
+export interface ObjectPart {
+  type: 'object';
+  id: string;
+  state: 'streaming' | 'done';
+  /** Raw accumulated JSON text. */
+  text: string;
+  /** Best-effort parsed value (partial while streaming, final when done). */
+  partial?: unknown;
+  /** The fully-parsed value (only when `state === 'done'`). */
+  value?: unknown;
+}
+
+/** Phase 7 — a multimodal file part (image / document) on the run. */
+export interface FilePart {
+  type: 'file';
+  id: string;
+  mediaType: string;
+  name?: string;
+  url?: string;
+  dataBase64?: string;
+  size?: number;
+  direction?: 'input' | 'output';
+}
+
+export type RunPart = TextPart | ReasoningPart | ToolPart | StepPart | WidgetPart | ArtifactPart | CitationPart | ApprovalPart | ObjectPart | FilePart;
+
+/** Phase 7 — view of the streamed structured object. */
+export interface ObjectView {
+  kind: 'object';
+  text: string;
+  partial: unknown;
+  complete: boolean;
+  value?: unknown;
+}
+
+/** Phase 7 — view of a multimodal file part. */
+export interface FileView {
+  kind: 'file';
+  id: string;
+  mediaType: string;
+  name?: string;
+  url?: string;
+  dataBase64?: string;
+  size?: number;
+  direction?: 'input' | 'output';
+}
 
 // ---------------------------------------------------------------------------
 // The accumulated view model
@@ -203,6 +251,10 @@ export interface RunViewModel {
   diagnostics: DiagnosticView[];
   /** Phase 4 — human-in-the-loop approvals, upserted by taskId. */
   approvals: ApprovalView[];
+  /** Phase 7 — the progressively-streamed structured object (if any). */
+  object?: ObjectView;
+  /** Phase 7 — multimodal file parts (image / document), in order. */
+  files: FileView[];
   /** Phase 2 — ordered typed parts with per-part streaming state. */
   parts: RunPart[];
   /** All items in event order (for a linear render). */
@@ -224,6 +276,7 @@ export function emptyRunViewModel(): RunViewModel {
     artifacts: new Map(),
     diagnostics: [],
     approvals: [],
+    files: [],
     parts: [],
     items: [],
   };
@@ -281,6 +334,10 @@ function finalizeStreamingParts(parts: RunPart[]): void {
     const pt = parts[i]!;
     if ((pt.type === 'text' || pt.type === 'reasoning') && pt.state === 'streaming') {
       parts[i] = { ...pt, state: 'done' };
+    } else if (pt.type === 'object' && pt.state === 'streaming') {
+      // A run that ended without an explicit object.complete: finalize the
+      // object from its accumulated text (best-effort parse becomes the value).
+      parts[i] = { ...pt, state: 'done', value: pt.partial };
     }
   }
 }
@@ -396,6 +453,43 @@ function updateParts(next: RunViewModel, env: RunEventEnvelope): void {
       break;
     }
 
+    case 'object.delta': {
+      const delta = typeof p['delta'] === 'string' ? p['delta'] : '';
+      const last = parts[parts.length - 1];
+      if (last && last.type === 'object' && last.state === 'streaming') {
+        const text = last.text + delta;
+        parts[parts.length - 1] = { ...last, text, partial: parsePartialJson(extractJsonCandidate(text)).value };
+      } else {
+        const text = delta;
+        parts.push({ type: 'object', id: `object-${seq}`, state: 'streaming', text, partial: parsePartialJson(extractJsonCandidate(text)).value });
+      }
+      break;
+    }
+    case 'object.complete': {
+      const i = lastIndex(parts, (pt) => pt.type === 'object');
+      if (i >= 0) {
+        const obj = parts[i] as ObjectPart;
+        const value = 'value' in p ? p['value'] : parsePartialJson(extractJsonCandidate(obj.text)).value;
+        parts[i] = { ...obj, state: 'done', value, partial: value };
+      } else {
+        const value = 'value' in p ? p['value'] : undefined;
+        parts.push({ type: 'object', id: `object-${seq}`, state: 'done', text: '', value, partial: value });
+      }
+      break;
+    }
+    case 'file.part': {
+      parts.push({
+        type: 'file', id: strField(p, 'id') ?? `file-${seq}`,
+        mediaType: strField(p, 'mediaType') ?? 'application/octet-stream',
+        ...(strField(p, 'name') !== undefined ? { name: strField(p, 'name') } : {}),
+        ...(strField(p, 'url') !== undefined ? { url: strField(p, 'url') } : {}),
+        ...(strField(p, 'dataBase64') !== undefined ? { dataBase64: strField(p, 'dataBase64') } : {}),
+        ...(typeof p['size'] === 'number' ? { size: p['size'] } : {}),
+        ...(p['direction'] === 'input' || p['direction'] === 'output' ? { direction: p['direction'] } : {}),
+      });
+      break;
+    }
+
     case 'run.completed':
     case 'run.failed':
     case 'run.cancelled':
@@ -405,6 +499,12 @@ function updateParts(next: RunViewModel, env: RunEventEnvelope): void {
     default:
       break;
   }
+}
+
+/** Index of the last part matching a predicate, or -1. */
+function lastIndex(parts: RunPart[], pred: (p: RunPart) => boolean): number {
+  for (let i = parts.length - 1; i >= 0; i--) if (pred(parts[i]!)) return i;
+  return -1;
 }
 
 // ---------------------------------------------------------------------------
@@ -432,6 +532,7 @@ export function streamReducer(state: RunViewModel, envelope: RunEventEnvelope): 
     artifacts: new Map(state.artifacts),
     diagnostics: [...state.diagnostics],
     approvals: [...state.approvals],
+    files: [...state.files],
     parts: [...state.parts],
     items: [...state.items],
   };
@@ -655,6 +756,38 @@ export function streamReducer(state: RunViewModel, envelope: RunEventEnvelope): 
       const status: ApprovalStatus = action === 'approve' ? 'approved' : action === 'modify' ? 'modified' : 'denied';
       const idx = next.approvals.findIndex((a) => a.taskId === taskId);
       if (idx >= 0) next.approvals[idx] = { ...next.approvals[idx]!, status };
+      break;
+    }
+
+    case 'object.delta': {
+      const delta = typeof p['delta'] === 'string' ? p['delta'] : '';
+      const text = (state.object?.text ?? '') + delta;
+      const parsed = parsePartialJson(extractJsonCandidate(text));
+      next.object = { kind: 'object', text, partial: parsed.value, complete: false };
+      break;
+    }
+
+    case 'object.complete': {
+      const text = state.object?.text ?? '';
+      // Prefer an explicit server-parsed value; else parse the accumulated text.
+      const value = 'value' in p ? p['value'] : parsePartialJson(extractJsonCandidate(text)).value;
+      next.object = { kind: 'object', text, partial: value, complete: true, value };
+      break;
+    }
+
+    case 'file.part': {
+      const id = typeof p['id'] === 'string' ? p['id'] : `file-${envelope.sequence}`;
+      const fv: FileView = {
+        kind: 'file', id,
+        mediaType: typeof p['mediaType'] === 'string' ? p['mediaType'] : 'application/octet-stream',
+        ...(typeof p['name'] === 'string' ? { name: p['name'] } : {}),
+        ...(typeof p['url'] === 'string' ? { url: p['url'] } : {}),
+        ...(typeof p['dataBase64'] === 'string' ? { dataBase64: p['dataBase64'] } : {}),
+        ...(typeof p['size'] === 'number' ? { size: p['size'] } : {}),
+        ...(p['direction'] === 'input' || p['direction'] === 'output' ? { direction: p['direction'] } : {}),
+      };
+      next.files.push(fv);
+      next.items.push(fv);
       break;
     }
 

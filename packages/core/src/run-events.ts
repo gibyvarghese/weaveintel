@@ -52,6 +52,10 @@ export const RUN_EVENT_KINDS = [
   // Phase 4 — human-in-the-loop tool approval (the run pauses awaiting a decision).
   'approval.request',  // a gated tool needs a human approve/deny decision
   'approval.resolved', // the decision arrived (approved / denied / modified)
+  // Phase 7 — structured object streaming + multimodal file parts.
+  'object.delta',     // an incremental chunk of a streamed structured (JSON) object
+  'object.complete',  // the structured object finished (carries the final value)
+  'file.part',        // a multimodal file part (image / document) in/out of the run
 ] as const;
 
 export type RunEventKind = (typeof RUN_EVENT_KINDS)[number];
@@ -125,6 +129,33 @@ export interface RunApprovalResolution {
   /** 'approve' | 'reject' | 'modify'. */
   action: string;
   feedback?: string;
+}
+
+/** Phase 7 — an incremental chunk of a streamed structured (JSON) object. */
+export interface RunObjectDelta {
+  /** Raw JSON text fragment to append to the object buffer. */
+  delta: string;
+}
+
+/** Phase 7 — the structured object finished; carries the final parsed value. */
+export interface RunObjectComplete {
+  /** The fully-parsed object (when the server could parse it). */
+  value?: unknown;
+}
+
+/** Phase 7 — a multimodal file part (image / document) attached to a run. */
+export interface RunFilePart {
+  id: string;
+  /** MIME type, e.g. `image/png`. */
+  mediaType: string;
+  name?: string;
+  /** A URL the client can fetch (mutually exclusive with `dataBase64`). */
+  url?: string;
+  /** Inline base64 payload (no `data:` prefix). */
+  dataBase64?: string;
+  size?: number;
+  /** `'input'` (sent to the model) or `'output'` (produced by the run). */
+  direction?: 'input' | 'output';
 }
 
 /** Kinds that close a run — exactly one is emitted per run. */

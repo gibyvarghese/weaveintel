@@ -19,8 +19,9 @@ import { weaveAgent } from '@weaveintel/agents';
 import type { Message, CitationPayload } from '@weaveintel/core';
 import { newUUIDv7 } from '@weaveintel/core';
 import { webCitation, deduplicateCitations, tableWidget } from '@weaveintel/ui-primitives';
-import type { ChatEngineConfig } from './chat-runtime.js';
+import type { ChatEngineConfig, ChatAttachment } from './chat-runtime.js';
 import { getOrCreateModel } from './chat-runtime.js';
+import type { RunFilePart } from '@weaveintel/core';
 import type { ChatEngine } from './chat.js';
 import type { DatabaseAdapter } from './db-types.js';
 import type { MeRunAgent, MeRunEmitter } from './me-run-executor.js';
@@ -36,6 +37,36 @@ function extractPrompt(input: Record<string, unknown>): string {
     if (typeof c === 'string' && c.trim().length > 0) return c;
   }
   return '';
+}
+
+/**
+ * Phase 7 — read multimodal attachments from the run input. Accepts
+ * `input.attachments` (or `input.files`) as `{ name, mediaType|mimeType,
+ * dataBase64, url?, size? }`. Returns both the run-event file parts (for the
+ * round-trip view model) and the `ChatAttachment[]` to hand the vision model.
+ */
+function extractAttachments(input: Record<string, unknown>): { fileParts: RunFilePart[]; attachments: ChatAttachment[] } {
+  const raw = Array.isArray(input['attachments']) ? input['attachments']
+    : Array.isArray(input['files']) ? input['files'] : [];
+  const fileParts: RunFilePart[] = [];
+  const attachments: ChatAttachment[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    const a = raw[i];
+    if (!a || typeof a !== 'object') continue;
+    const r = a as Record<string, unknown>;
+    const mediaType = typeof r['mediaType'] === 'string' ? r['mediaType'] as string
+      : typeof r['mimeType'] === 'string' ? r['mimeType'] as string : 'application/octet-stream';
+    const name = typeof r['name'] === 'string' ? r['name'] as string : `attachment-${i + 1}`;
+    const dataBase64 = typeof r['dataBase64'] === 'string' ? r['dataBase64'] as string : undefined;
+    const url = typeof r['url'] === 'string' ? r['url'] as string : undefined;
+    const size = typeof r['size'] === 'number' ? r['size'] as number
+      : dataBase64 ? Math.floor(dataBase64.length * 0.75) : 0;
+    const id = typeof r['id'] === 'string' ? r['id'] as string : `infile-${i + 1}`;
+    fileParts.push({ id, mediaType, name, direction: 'input', ...(dataBase64 ? { dataBase64 } : {}), ...(url ? { url } : {}), size });
+    // Only inline (base64) attachments can be handed to the vision model.
+    if (dataBase64) attachments.push({ name, mimeType: mediaType, size, dataBase64 });
+  }
+  return { fileParts, attachments };
 }
 
 export function createDefaultMeRunAgent(config: ChatEngineConfig): MeRunAgent {
@@ -217,7 +248,14 @@ export function createChatPipelineMeRunAgent(chatEngine: ChatEngine, db: Databas
     // intent from the run metadata are applied here.
     await db.saveChatSettings({ chatId, mode, ...resolveReasoning(args.metadata), ...resolveHitl(args.metadata) });
 
-    const capture = new SseCaptureResponse(emit);
+    // Phase 7 — structured object streaming + multimodal attachments.
+    const objectMode = args.metadata?.['objectMode'] === true;
+    const { fileParts, attachments } = extractAttachments(args.input);
+    // Echo input attachments into the run as file parts (the multimodal
+    // round-trip) before the model output streams.
+    for (const part of fileParts) await emit.file(part);
+
+    const capture = new SseCaptureResponse(emit, objectMode);
     const onAbort = (): void => capture.cancel();
     if (args.signal.aborted) onAbort();
     else args.signal.addEventListener('abort', onAbort, { once: true });
@@ -235,6 +273,7 @@ export function createChatPipelineMeRunAgent(chatEngine: ChatEngine, db: Databas
         {
           ...(modelPin ? { model: modelPin } : {}),
           ...(providerPin ? { provider: providerPin } : {}),
+          ...(attachments.length > 0 ? { attachments } : {}),
         },
       );
       // Flush any queued emitter writes before the executor marks completion.
@@ -271,10 +310,15 @@ export class SseCaptureResponse extends EventEmitter {
   // end via a per-name stack (handles nested/parallel same-name calls in order).
   #toolSeq = 0;
   readonly #toolStack = new Map<string, string[]>();
+  // Phase 7 — when objectMode is on, the assistant's text IS a streamed JSON
+  // object: mirror each text frame to `object.delta` and finalize on `done`.
+  readonly #objectMode: boolean;
+  #objectStarted = false;
 
-  constructor(out: MeRunEmitter) {
+  constructor(out: MeRunEmitter, objectMode = false) {
     super();
     this.#out = out;
+    this.#objectMode = objectMode;
   }
 
   writeHead(_status?: number, _headers?: unknown): this {
@@ -323,7 +367,11 @@ export class SseCaptureResponse extends EventEmitter {
     switch (type) {
       case 'text': {
         const text = typeof payload['text'] === 'string' ? payload['text'] as string : '';
-        if (text) this.#enqueue(() => this.#out.text(text));
+        if (text) {
+          this.#enqueue(() => this.#out.text(text));
+          // Phase 7: in object mode the text stream IS the JSON object.
+          if (this.#objectMode) { this.#objectStarted = true; this.#enqueue(() => this.#out.objectDelta(text)); }
+        }
         break;
       }
       case 'reasoning': {
@@ -414,6 +462,9 @@ export class SseCaptureResponse extends EventEmitter {
           };
           this.#enqueue(() => this.#out.artifact(artifact));
         }
+        // Phase 7: finalize the streamed structured object (reducer parses the
+        // accumulated object.delta text into the final value).
+        if (this.#objectMode && this.#objectStarted) this.#enqueue(() => this.#out.objectComplete());
         break;
       }
       case 'error': {

@@ -25,7 +25,7 @@
  */
 
 import { newUUIDv7, createLogger, weaveContext } from '@weaveintel/core';
-import type { ExecutionContext, RunEventEnvelope, RunStep, RunUsage, RunCitation, RunArtifactRef } from '@weaveintel/core';
+import type { ExecutionContext, RunEventEnvelope, RunStep, RunUsage, RunCitation, RunArtifactRef, RunFilePart } from '@weaveintel/core';
 
 const logger = createLogger('me-run-executor');
 import type { ServerResponse } from 'node:http';
@@ -78,6 +78,13 @@ export interface MeRunEmitter {
   artifact(artifact: RunArtifactRef): Promise<void>;
   /** A non-output diagnostic (guardrail / policy / eval / cognitive / ensemble). */
   diagnostic(channel: string, data?: unknown): Promise<void>;
+  // Phase 7 — structured object streaming + multimodal file parts.
+  /** An incremental chunk of a streamed structured (JSON) object. */
+  objectDelta(delta: string): Promise<void>;
+  /** The structured object finished (carries the final value, when parsed). */
+  objectComplete(value?: unknown): Promise<void>;
+  /** A multimodal file part (image / document) in/out of the run. */
+  file(part: RunFilePart): Promise<void>;
 }
 
 export interface MeRunAgentArgs {
@@ -401,6 +408,18 @@ export class MeRunExecutor {
         diagnostic: async (channel, data) => {
           if (controller.signal.aborted) return;
           await this.appendEvent(runId, 'diagnostic', { channel, ...(data !== undefined ? { data } : {}) });
+        },
+        objectDelta: async (delta) => {
+          if (controller.signal.aborted) return;
+          await this.appendEvent(runId, 'object.delta', { delta });
+        },
+        objectComplete: async (value) => {
+          if (controller.signal.aborted) return;
+          await this.appendEvent(runId, 'object.complete', { ...(value !== undefined ? { value } : {}) });
+        },
+        file: async (part) => {
+          if (controller.signal.aborted) return;
+          await this.appendEvent(runId, 'file.part', { ...part });
         },
       };
 

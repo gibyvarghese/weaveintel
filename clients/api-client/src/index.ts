@@ -89,6 +89,9 @@ export {
   isCursorResumable,
   createRunMetrics,
   createRunOutbox,
+  // Phase 7 — structured object streaming, multimodal, AG-UI interop.
+  parsePartialJson,
+  toAGUIEvents,
   type OutboxStorage,
   type RunOutbox,
   type OutboxFlushResult,
@@ -107,6 +110,12 @@ export {
   type RunCursorStore,
   type RunMetrics,
   type RunMetricsSnapshot,
+  type ObjectView,
+  type FileView,
+  type ObjectPart,
+  type FilePart,
+  type PartialJsonResult,
+  type AGUIEvent,
 } from '@weaveintel/client';
 
 // Surface schemas + inferred types

@@ -26,11 +26,14 @@ interface Recorded {
   diagnostic: Array<{ channel: string; data?: unknown }>;
   citationFull: CitationLike[];
   widget: Array<{ id: string; payload: Record<string, unknown>; schemaVersion?: number }>;
+  objectDelta: string[];
+  objectComplete: Array<unknown>;
+  file: Array<Record<string, unknown>>;
 }
 interface CitationLike { id: string; text?: string; source?: string; url?: string }
 
 function recorder(): { emitter: MeRunEmitter; rec: Recorded } {
-  const rec: Recorded = { text: [], reasoning: [], toolInvoked: [], toolCompleted: [], toolErrored: [], toolInputStart: [], toolInputDelta: [], step: [], usage: [], citation: [], artifact: [], diagnostic: [], citationFull: [], widget: [] };
+  const rec: Recorded = { text: [], reasoning: [], toolInvoked: [], toolCompleted: [], toolErrored: [], toolInputStart: [], toolInputDelta: [], step: [], usage: [], citation: [], artifact: [], diagnostic: [], citationFull: [], widget: [], objectDelta: [], objectComplete: [], file: [] };
   const emitter: MeRunEmitter = {
     text: async (delta, role) => { rec.text.push({ delta, ...(role ? { role } : {}) }); },
     toolInvoked: async (tool, args, toolCallId) => { rec.toolInvoked.push({ tool, ...(args ? { args } : {}), ...(toolCallId ? { toolCallId } : {}) }); },
@@ -45,8 +48,20 @@ function recorder(): { emitter: MeRunEmitter; rec: Recorded } {
     diagnostic: async (channel, data) => { rec.diagnostic.push({ channel, data }); },
     toolInputStart: async (toolCallId, tool) => { rec.toolInputStart.push({ toolCallId, tool }); },
     toolInputDelta: async (toolCallId, delta) => { rec.toolInputDelta.push({ toolCallId, delta }); },
+    objectDelta: async (delta) => { rec.objectDelta.push(delta); },
+    objectComplete: async (value) => { rec.objectComplete.push(value); },
+    file: async (part) => { rec.file.push(part as unknown as Record<string, unknown>); },
   };
   return { emitter, rec };
+}
+
+/** Feed frames with object-mode ON (text mirrored to object.delta). */
+async function feedObjectMode(frames: Array<Record<string, unknown>>): Promise<Recorded> {
+  const { emitter, rec } = recorder();
+  const cap = new SseCaptureResponse(emitter, true);
+  for (const f of frames) cap.write(frame(f));
+  await cap.drain();
+  return rec;
 }
 
 function frame(obj: Record<string, unknown>): string {
@@ -346,5 +361,33 @@ describe('bridge — stress', () => {
     expect(rec.reasoning).toHaveLength(500);
     expect(rec.step).toHaveLength(500);
     expect(rec.toolCompleted).toHaveLength(500);
+  });
+});
+
+// ─── Phase 7 — structured object streaming + multimodal ──────────
+
+describe('bridge — Phase 7 object mode', () => {
+  it('mirrors text frames to object.delta and finalizes on done', async () => {
+    const rec = await feedObjectMode([
+      { type: 'text', text: '{"a":1,' },
+      { type: 'text', text: '"b":2}' },
+      { type: 'done', usage: { totalTokens: 3 } },
+    ]);
+    // Text is still emitted (back-compat) AND mirrored to object.delta.
+    expect(rec.text.map((t) => t.delta)).toEqual(['{"a":1,', '"b":2}']);
+    expect(rec.objectDelta).toEqual(['{"a":1,', '"b":2}']);
+    expect(rec.objectComplete).toHaveLength(1);
+  });
+
+  it('does NOT emit object events when object mode is off', async () => {
+    const rec = await feed([{ type: 'text', text: '{"a":1}' }, { type: 'done' }]);
+    expect(rec.objectDelta).toEqual([]);
+    expect(rec.objectComplete).toEqual([]);
+  });
+
+  it('does not finalize an object when no text streamed (objectStarted=false)', async () => {
+    const rec = await feedObjectMode([{ type: 'done' }]);
+    expect(rec.objectDelta).toEqual([]);
+    expect(rec.objectComplete).toEqual([]);
   });
 });

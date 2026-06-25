@@ -52,9 +52,21 @@ export type {
   WidgetPart,
   ArtifactPart,
   CitationPart,
+  ObjectPart,
+  FilePart,
+  ObjectView,
+  FileView,
   RunEventEnvelope,
 } from './reducer.js';
 export { streamReducer, emptyRunViewModel } from './reducer.js';
+
+// Partial-JSON parser (Phase 7 — structured object streaming)
+export type { PartialJsonResult, PartialJsonState } from './partial-json.js';
+export { parsePartialJson, extractJsonCandidate } from './partial-json.js';
+
+// AG-UI wire adapter (Phase 7, optional — ecosystem interop)
+export type { AGUIEvent, AGUIEventType } from './ag-ui.js';
+export { toAGUIEvents } from './ag-ui.js';
 
 // Run client
 export type {

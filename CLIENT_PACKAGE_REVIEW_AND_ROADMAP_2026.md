@@ -251,10 +251,19 @@ Each phase is independently shippable, extends existing code, and ends with acce
 - **App‑layer reuse** — `@geneweave/api-client` re‑exports `createRunCursorStore` / `createRunMetrics` / `createRunOutbox` + cursor/metrics types.
 - **Real‑LLM e2e** (`apps/geneweave/src/run-resume-phase6.e2e.ts`): a run streams, the tab "closes" mid‑stream, a **fresh** session `resume(runId)`s to `ready` (full model rebuilt) across **direct/agent/supervisor/ensemble**; usage/cost surfaces on the view model + folds into a metrics rollup; an outbox start enqueued offline replays on flush and reaches terminal; web‑UI streaming regression.
 
-### Phase 7 — Structured object streaming · multimodal · wire interop (optional)
+### Phase 7 — Structured object streaming · multimodal · wire interop (optional)  ✅ delivered
 **Goal:** round out the long tail.
 - `streamObject`‑style partial‑object events + reducer part; file parts (multimodal) round‑trip; **optional** wire adapter to UI‑Message‑Stream / AG‑UI for ecosystem interop.
 - **Acceptance:** partial structured object renders progressively; an image attachment round‑trips; (optional) an AG‑UI client can consume a run.
+
+**What shipped:**
+- **Event kinds** (`@weaveintel/core`): `object.delta` · `object.complete` · `file.part`, with `RunObjectDelta` / `RunObjectComplete` / `RunFilePart` payload contracts (producer ↔ consumer shared).
+- **Structured object streaming** — `parsePartialJson` (`packages/client/src/partial-json.ts`): a single‑pass tolerant JSON state machine that completes a truncated buffer (closes open strings/containers, drops dangling keys/separators, keeps complete trailing primitives, rejects structurally‑invalid input) — never throws, never `eval`s. The reducer accumulates `object.delta` into `vm.object` `{ text, partial, complete, value }` + an `ObjectPart` (streaming→done), parsing progressively. 24 parser + 24 reducer/Phase‑7 unit tests.
+- **Multimodal file parts** — reducer `FilePart` + `vm.files[]` from `file.part`. The geneweave bridge reads run‑input `attachments`, echoes each as an `input` `file.part` (the round‑trip) AND threads them to the vision model via `streamMessage({ attachments })` (the path the web chat already uses).
+- **Object mode wiring** — `metadata.objectMode: true` makes the bridge mirror the assistant's text stream to `object.delta` and finalize with `object.complete` on `done`; new `MeRunEmitter.objectDelta/objectComplete/file` → `appendEvent`. 3 new bridge tests (32 total).
+- **AG‑UI interop (optional)** — `toAGUIEvents(envelopes)` (`packages/client/src/ag-ui.ts`): a pure batch transform mapping a run journal to the AG‑UI protocol (RUN_STARTED, TEXT_MESSAGE_*, TOOL_CALL_*, THINKING_*, STATE_DELTA/SNAPSHOT, RUN_FINISHED/ERROR) with balanced message/tool lifecycles. 9 unit tests.
+- **App‑layer reuse** — `@weaveintel/client` + `@geneweave/api-client` export `parsePartialJson` / `toAGUIEvents` + object/file types.
+- **Real‑LLM e2e** (`apps/geneweave/src/run-multimodal-phase7.e2e.ts`): a structured object streams **progressively** and finalizes across **direct/agent/supervisor/ensemble**; an image attachment round‑trips as a `file.part` AND the vision model describes it (solid‑red PNG → "red") in agent + supervisor; the journal maps to a well‑formed AG‑UI stream; web‑UI streaming regression.
 
 ---
 
@@ -289,6 +298,7 @@ Phase 0 ─► Phase 1 ─► Phase 2 ─► Phase 3 ─► Phase 4
 | Phase 4 — HITL tool approvals (pause → approve/deny → resume) | `ae207ca` | ✅ |
 | Phase 5 — UX primitives (`createRunSession`) + `@weaveintel/react-client` (`useRun`) + single `parseSseStream` | `62cd99a` | ✅ (G14 web‑UI convergence partial — raw‑ESM serving; see Phase 5 note) |
 | Phase 6 — refresh‑proof resume (cursor + `resume()`) + Outbox v2 (backoff/dead‑letter/online‑offline/events) + `createRunMetrics` | `81b1b3e` | ✅ |
+| Phase 7 — structured object streaming (`parsePartialJson` + `object.*`) + multimodal `file.part` + AG‑UI adapter | `PENDING7` | ✅ |
 
 ## 12. Deferred follow-ups (scoped, with plans)
 
