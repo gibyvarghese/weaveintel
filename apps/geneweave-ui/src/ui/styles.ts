@@ -963,6 +963,21 @@ input{font-family:inherit;outline:none}
 .notes-search-bar{padding:0 12px 8px;flex-shrink:0}
 .notes-search-input{width:100%;padding:6px 10px;border:1px solid var(--bg4);border-radius:8px;background:var(--bg2);color:var(--fg1);font-size:12px;box-sizing:border-box}
 .notes-search-input:focus{outline:none;border-color:var(--accent)}
+/* weaveNotes Phase 7 — capture panel */
+.notes-capture-bar{padding:4px 12px 8px}
+.notes-capture-toggle{width:100%;padding:6px 10px;border:1px dashed var(--bg4);border-radius:8px;background:transparent;color:var(--fg2);font-size:12px;cursor:pointer}
+.notes-capture-toggle:hover{border-color:var(--accent);color:var(--accent)}
+.notes-capture-open{border:1px solid var(--bg4);border-radius:8px;background:var(--bg2);padding:8px}
+.notes-capture-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.notes-capture-title{font-size:12px;font-weight:600;color:var(--fg1)}
+.notes-capture-close{border:none;background:transparent;color:var(--fg3);font-size:16px;line-height:1;cursor:pointer}
+.notes-capture-row{display:flex;gap:6px;margin-bottom:6px}
+.notes-capture-jot{flex:1;resize:vertical;padding:6px 8px;border:1px solid var(--bg4);border-radius:6px;background:var(--bg1);color:var(--fg1);font-size:12px;font-family:inherit;box-sizing:border-box}
+.notes-capture-url{flex:1;padding:6px 8px;border:1px solid var(--bg4);border-radius:6px;background:var(--bg1);color:var(--fg1);font-size:12px;box-sizing:border-box}
+.notes-capture-jot:focus,.notes-capture-url:focus{outline:none;border-color:var(--accent)}
+.notes-capture-btn{padding:0 12px;border:none;border-radius:6px;background:var(--accent);color:#fff;font-size:12px;cursor:pointer;white-space:nowrap}
+.notes-capture-btn:hover{opacity:.9}
+.notes-capture-status{font-size:11px;color:var(--fg3);min-height:14px;margin-top:2px}
 .notes-loading{padding:16px;text-align:center;color:var(--fg3);font-size:12px}
 .notes-items{flex:1;overflow-y:auto;padding:0 8px 12px}
 .notes-section{margin-bottom:8px}

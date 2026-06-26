@@ -26,6 +26,7 @@ import { wireNoteCoedit, createNoteShareLink, type NoteCoeditSession } from './n
 import { wireNoteAi, type NoteAiPanel } from './notes-ai.js';
 import { wireNoteConnections, type NoteConnectionsPanel } from './notes-graph.js';
 import { renderDatabasesView } from './notes-database-view.js';
+import { renderCapturePanel } from './notes-capture.js';
 
 /** The live co-editing session for the currently-open note (Phase 2). */
 let _activeCoedit: NoteCoeditSession | null = null;
@@ -221,6 +222,8 @@ function renderNotesList(render: () => void): HTMLElement {
         },
       })
     ),
+    // weaveNotes Phase 7: the capture panel (quick jot + clip a web page).
+    renderCapturePanel(render, () => loadNotesList({ search: state.notesSearch as string })),
     loading
       ? h('div', { className: 'notes-loading' }, 'Loading…')
       : h('div', { className: 'notes-items' },

@@ -974,6 +974,12 @@ export interface ToolRegistryOptions {
    * row's context (the page + workspace + optionally the web), with citations. Owner-scoped.
    */
   dbAutofill?: (args: { userId: string; tenantId?: string | null; databaseId: string; propertyKey: string; useWeb?: boolean }) => Promise<{ ok: boolean; error?: string; filled?: number }>;
+  /**
+   * weaveNotes Phase 7: web capture. When set, the `capture_web_page` tool is available so the
+   * agent can clip a public web page into a new structured note (readable text + a provenance
+   * header + source link). SSRF-guarded (public http(s) only). Owner-scoped. Returns the note id.
+   */
+  captureWeb?: (args: { userId: string; tenantId?: string | null; url: string }) => Promise<{ ok: boolean; error?: string; noteId?: string }>;
 }
 
 export function filterToolNamesByPersona(toolNames: string[], persona: string | null | undefined): string[] {
@@ -1559,6 +1565,27 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
         tags: ['notes', 'database', 'output'],
       }),
     } : {}),
+    // weaveNotes Phase 7: web capture (clip a page → note) — available when captureWeb callback is set.
+    ...(opts?.captureWeb && opts.currentUserId ? {
+      capture_web_page: weaveTool({
+        name: 'capture_web_page',
+        description: 'Clip a public web page into a NEW note for the user: it fetches the page, extracts the readable article text, and saves a note with a provenance header (where it came from) and a source link. Use this when the user asks to "save/clip/capture this page", "read <url> and make a note", or "add this article to my notes". Only public http(s) URLs are allowed (private/localhost addresses are refused). Returns the new note id.',
+        parameters: {
+          type: 'object',
+          properties: {
+            url: { type: 'string', description: 'The public http(s) URL of the page to clip into a note.' },
+          },
+          required: ['url'],
+        },
+        execute: async (args: { url: string }) => {
+          if (!opts.captureWeb || !opts.currentUserId) return { content: 'Web capture is unavailable in this context.', isError: true };
+          const r = await opts.captureWeb({ userId: opts.currentUserId, tenantId: opts.currentTenantId ?? null, url: args.url });
+          if (!r.ok) return { content: `capture_web_page failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, noteId: r.noteId });
+        },
+        tags: ['notes', 'capture', 'output'],
+      }),
+    } : {}),
     // weaveNotes Phase 5: semantic note search — available when notesSearch callback is set.
     ...(opts?.notesSearch && opts.currentUserId ? {
       find_related_notes: weaveTool({
@@ -1800,7 +1827,7 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
   // tool selection: mode policies only apply when `enabled_tools` is empty, so a user with a
   // custom tool selection would otherwise never get them (and "create a note" would silently
   // fall back to emit_artifact). Skip any already registered from the selection above.
-  for (const noteTool of ['create_note', 'note_edit', 'note_publish', 'find_related_notes', 'autofill_database'] as const) {
+  for (const noteTool of ['create_note', 'note_edit', 'note_publish', 'find_related_notes', 'autofill_database', 'capture_web_page'] as const) {
     const t = scopedTools[noteTool];
     if (t && !registeredFromSelection.has(noteTool) && canUseTool(actorPersona, noteTool)) registry.register(t);
   }

@@ -35,6 +35,9 @@ shared contract pins every adapter to identical behaviour.
 | `noteRepositoryContract(make, t)` | The shared conformance test every adapter must pass (geneWeave's SQL adapter passes it too). |
 | `extractTaskItems(docJson)` | Pure helper: the text of every unchecked to-do in a ProseMirror doc (→ tasks). |
 | `extractPlainText(docJson)` | Pure helper: all text in a ProseMirror doc (search/preview). |
+| `parseWikiLinks` / `findUnlinkedMentions` / `titleKey` | Phase 5 knowledge-graph helpers: `[[wiki-link]]` parsing + unlinked-mention detection. |
+| `PropertyDef` / `parseSchema` / `coerceValue` / `validateRow` / `computeRollup` / `VIEW_TYPES` | Phase 6 typed-database model (columns, validation, rollups, view types). |
+| `parseEmail` / `buildCaptureNote` / `dailyNoteTitle` | Phase 7 capture helpers: parse an email (fields or raw RFC822 → text), assemble a provenance-stamped capture note, and the daily-jots inbox title. |
 
 ```ts
 import { createInMemoryNoteRepository, extractTaskItems } from '@weaveintel/notes';

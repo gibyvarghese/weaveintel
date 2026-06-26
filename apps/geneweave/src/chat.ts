@@ -58,6 +58,7 @@ import { createNoteAiService, createModelTextGenerator, agentCreateNote } from '
 import { createNotePublishService } from './note-publish-sql.js';
 import { createNoteGraphService } from './note-graph-sql.js';
 import { createNoteDbService } from './note-db-sql.js';
+import { createNoteCaptureService } from './note-capture-sql.js';
 import {
   applySkillsToPrompt,
   type SkillMatch,
@@ -405,6 +406,9 @@ export class ChatEngine {
       // weaveNotes Phase 6: wire the `autofill_database` tool (AI fills a table column w/ citations).
       dbAutofill: (a: { userId: string; tenantId?: string | null; databaseId: string; propertyKey: string; useWeb?: boolean }) =>
         createNoteDbService(db, { generate: createModelTextGenerator(config) }).agentAutofill(a),
+      // weaveNotes Phase 7: wire the `capture_web_page` tool (clip a public page → structured note).
+      captureWeb: (a: { userId: string; tenantId?: string | null; url: string }) =>
+        createNoteCaptureService(db).agentCaptureWeb(a),
     };
   }
 

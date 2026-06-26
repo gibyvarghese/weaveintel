@@ -56,6 +56,7 @@ import { createNoteAiService, type NoteAiGenerate, type AiAction } from '../note
 import { createNotePublishService, type PublishFormat } from '../note-publish-sql.js';
 import { createNoteGraphService } from '../note-graph-sql.js';
 import { createNoteDbService } from '../note-db-sql.js';
+import { createNoteCaptureService } from '../note-capture-sql.js';
 import { isViewType, type DatabaseViewType as DbViewType } from '@weaveintel/notes';
 import { meTaskRepo as taskRepo } from './me-stores.js';
 import { createActionItem } from '@weaveintel/human-tasks';
@@ -87,6 +88,8 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
   const noteGraph = createNoteGraphService(db, opts.aiGenerate ? { generate: opts.aiGenerate } : {});
   // weaveNotes Phase 6: the database service (typed views + rollups + AI column auto-fill).
   const noteDb = createNoteDbService(db, opts.aiGenerate ? { generate: opts.aiGenerate } : {});
+  // weaveNotes Phase 7: the capture service (run→note, web clip, email→note, daily jot).
+  const noteCapture = createNoteCaptureService(db);
 
   // ── Notes list ─────────────────────────────────────────────────────────────
 
@@ -746,6 +749,65 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     await notes.deleteDatabase(params['id']!, auth.userId);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ deleted: true }));
+  }, { auth: true });
+
+  // ── weaveNotes Phase 7: CAPTURE — get content INTO notes ──────────────────────
+  //
+  //   POST /api/me/notes/capture/run    { runId }                  a chat run → structured note
+  //   POST /api/me/notes/capture/web    { url } or { url, html }   a web page → readable note (SSRF-guarded)
+  //   POST /api/me/notes/capture/email  { raw } or { from, subject, body, date }
+  //   POST /api/me/notes/jot            { text }                   quick thought → today's daily inbox
+  //
+  // Every capture lands a note with a provenance header. All are owner-scoped + tenant-isolated.
+  router.post('/api/me/notes/capture/run', async (req, res, _params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    if (typeof body['runId'] !== 'string' || !body['runId']) { res.writeHead(400); res.end(JSON.stringify({ error: 'runId required' })); return; }
+    const result = await noteCapture.captureRun({ runId: body['runId'], userId: auth.userId, tenantId: auth.tenantId ?? null });
+    res.writeHead(result.ok ? 201 : (result.code ?? 400), { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
+  }, { auth: true });
+
+  router.post('/api/me/notes/capture/web', async (req, res, _params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    if (typeof body['url'] !== 'string' || !body['url']) { res.writeHead(400); res.end(JSON.stringify({ error: 'url required' })); return; }
+    const result = await noteCapture.captureWeb({
+      url: body['url'], userId: auth.userId, tenantId: auth.tenantId ?? null,
+      ...(typeof body['html'] === 'string' ? { html: body['html'] } : {}),
+    });
+    res.writeHead(result.ok ? 201 : (result.code ?? 400), { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
+  }, { auth: true });
+
+  router.post('/api/me/notes/capture/email', async (req, res, _params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    const email = typeof body['raw'] === 'string'
+      ? body['raw']
+      : {
+          ...(typeof body['from'] === 'string' ? { from: body['from'] } : {}),
+          ...(typeof body['subject'] === 'string' ? { subject: body['subject'] } : {}),
+          ...(typeof body['date'] === 'string' ? { date: body['date'] } : {}),
+          ...(typeof body['body'] === 'string' ? { body: body['body'] } : {}),
+        };
+    if (typeof email !== 'string' && !email.body && !email.subject) { res.writeHead(400); res.end(JSON.stringify({ error: 'raw, or subject/body, required' })); return; }
+    const result = await noteCapture.captureEmail({ email, userId: auth.userId, tenantId: auth.tenantId ?? null });
+    res.writeHead(result.ok ? 201 : (result.code ?? 400), { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
+  }, { auth: true });
+
+  router.post('/api/me/notes/jot', async (req, res, _params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    if (typeof body['text'] !== 'string' || !body['text'].trim()) { res.writeHead(400); res.end(JSON.stringify({ error: 'text required' })); return; }
+    const result = await noteCapture.jot({ text: body['text'], userId: auth.userId, tenantId: auth.tenantId ?? null });
+    res.writeHead(result.ok ? 201 : (result.code ?? 400), { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
   }, { auth: true });
 
   // ── Note database rows ─────────────────────────────────────────────────────

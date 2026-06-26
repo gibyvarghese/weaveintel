@@ -568,10 +568,32 @@ helper** (Track D, Phase 11) as enhancements that talk to the same server/CRDT.
   a column via `autofill_database` across agent/supervisor/ensemble**; and a **web-UI** test
   (Databases → table → ✨ Fill populates the column). *Acceptance: a view renders; AI auto-fills a
   column with citations — all met.*
-- **Phase 7 — Capture & integrations.** Emit run→note; web clipper (`tools-browser`);
-  email-to-notes (`tools-gmail`); calendar/file context (`tools-gcal`/`gdrive`/`onedrive`/
-  `slack`); daily-jots inbox; scheduled "keep-this-note-fresh" agent (`triggers`).
-  *Acceptance:* a chat run + a clipped page + an email all land as structured notes.
+- **Phase 7 — Capture & integrations.** ✅ **delivered.** Get content INTO notes from the
+  outside world as structured, provenance-stamped pages ("capture then process"). **Package
+  primitives**: `@weaveintel/notes` gains a pure `capture.ts` — `parseEmail` (structured fields
+  OR a raw RFC822 message; HTML body → text), `buildCaptureNote` (title + a provenance
+  blockquote header — source icon/label/date + a clickable source link — + a bounded body), and
+  `dailyNoteTitle`. Web extraction REUSES `@weaveintel/tools-browser` (`fetchPage` SSRF-safe +
+  `readability`/`extractContent`, both pure regex — no browser). **geneWeave**: `note-capture-
+  sql.ts` (`createNoteCaptureService`) — `captureRun` (`resolveRunAccess` + `listUserRunEvents`
+  → concat `text.delta` → note + a `note_link` back to the run), `captureWeb` (own
+  `isSafePublicUrl` SSRF guard → fetch/readability → note with source link), `captureEmail`,
+  and `jot` (find-or-create today's "Daily Jots — <date>" note and append a timestamped bullet).
+  Endpoints `POST /api/me/notes/capture/{run,web,email}` + `POST /api/me/notes/jot` (all
+  owner-scoped + tenant-isolated), and a **`capture_web_page` agent tool** (always-on note tools
+  + policies across agent/supervisor/ensemble + chat wiring) so the agent can clip a page when
+  asked. **UI**: a ✚ **Capture** panel in the notes list — a quick-jot box and a clip-URL box,
+  with status feedback. *Tested:* package units (6: email parse structured/raw, note assembly,
+  daily title) + a deterministic SQLite **integration suite (11)** (run→note + provenance link,
+  metadata-title preference, html clip + source link, **SSRF rejection** of localhost/private/
+  link-local/non-http, email structured+raw, jot find-or-create + append, empty-jot reject,
+  owner-scoping) + **real-LLM Playwright e2e**: a real chat run → note; a page clipped (html
+  override + a live `example.com` fetch); an email (fields + raw) → notes; two jots into one
+  daily note; **SSRF refused (400)**; a stranger cannot capture another user's run (404); the
+  **agent clips a page via `capture_web_page` across agent/supervisor/ensemble**; and a **web-UI**
+  jot test. *Acceptance: a chat run + a clipped page + an email all land as structured notes — met.*
+  (Deferred to later phases: live Gmail/Calendar/Drive/Slack OAuth ingestion + the scheduled
+  "keep-this-note-fresh" trigger; the capture core + run/web/email/jot on-ramps are in place.)
 - **Phase 8 — Workspace RAG search + chat-with-workspace + version history + comments +
   synced blocks.** `retrieval`+`memory` over all notes/runs/files with citations; per-note
   version timeline (op log) + restore; block comments (Phase 4-collab); synced blocks/

@@ -61,3 +61,13 @@ export {
   validateRow,
   computeRollup,
 } from './note-database.js';
+
+// weaveNotes Phase 7 — capture helpers (email parsing + provenance note assembly).
+export {
+  type CaptureSource,
+  type EmailFields,
+  type ParsedEmail,
+  parseEmail,
+  buildCaptureNote,
+  dailyNoteTitle,
+} from './capture.js';

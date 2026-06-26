@@ -206,6 +206,21 @@ value & citations) — behind `GET /api/me/note-databases/:id/view`, `POST /:id/
 `autofill_database` agent tool. The 🗃 **Databases** UI renders table/gallery/board with per-column
 ✨ Fill buttons and 🔖 citation chips.
 
+## Capture & integrations (weaveNotes Phase 7)
+
+Get content **into** notes from the outside world as structured, provenance-stamped pages. The
+pure helpers live in [`@weaveintel/notes`](../notes) `capture.ts`: `parseEmail` (structured fields
+**or** a raw RFC822 message; HTML → text), `buildCaptureNote` (title + a provenance header — where
+it came from, when, and a source link — + a bounded body), and `dailyNoteTitle`. Web-page
+extraction reuses [`@weaveintel/tools-browser`](../tools-browser) (`fetchPage` SSRF-safe +
+`readability`/`extractContent`, both pure regex). geneWeave's `note-capture-sql.ts` wires four
+on-ramps: `captureRun` (a chat run's output → a note + a `note_link` back to the run), `captureWeb`
+(SSRF-guarded clip → readable note), `captureEmail`, and `jot` (find-or-create today's
+"Daily Jots — &lt;date&gt;" note and append). They sit behind `POST /api/me/notes/capture/{run,web,email}`
++ `POST /api/me/notes/jot`, a `capture_web_page` agent tool, and a ✚ **Capture** panel (quick-jot
+box + clip-URL box) in the notes list. Every capture is owner-scoped + tenant-isolated, and web
+clips reject localhost/private/link-local/metadata/non-http targets.
+
 ## Security (trusted relay)
 
 CRDTs converge but are **not** Byzantine-tolerant — so the server validates every
