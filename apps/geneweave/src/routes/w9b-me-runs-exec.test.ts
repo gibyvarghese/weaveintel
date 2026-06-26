@@ -51,11 +51,20 @@ function buildResponse() {
     get written() { return writes; },
     get writableEnded() { return ended; },
     get destroyed() { return false; },
-    /** Parse the SSE data frames into envelopes. */
+    /** Parse the SSE data frames into envelopes. A frame may carry `id:`/`retry:`
+     *  lines before its `data:` line (Collaboration Phase 6 resumable SSE), so
+     *  scan every line of each write rather than assuming `data:` is first. */
     envelopes() {
-      return writes
-        .filter((w) => w.startsWith('data: '))
-        .map((w) => JSON.parse(w.slice('data: '.length).trim()));
+      const out: unknown[] = [];
+      for (const w of writes) {
+        for (const line of w.split('\n')) {
+          if (line.startsWith('data: ')) {
+            const payload = line.slice('data: '.length).trim();
+            if (payload) out.push(JSON.parse(payload));
+          }
+        }
+      }
+      return out;
     },
   };
 }

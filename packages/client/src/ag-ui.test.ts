@@ -94,3 +94,62 @@ describe('toAGUIEvents', () => {
     expect(out.find((e) => e.type === 'TEXT_MESSAGE_START')!['messageId']).toBe('msg-run-7');
   });
 });
+
+import { applyJsonPatch } from '@weaveintel/core';
+
+describe('toAGUIEvents — collaboration as shared STATE (Phase 6)', () => {
+  it('emits STATE_SNAPSHOT once, then STATE_DELTA + CUSTOM for presence', () => {
+    reset();
+    const out = toAGUIEvents([
+      ev('run.started'),
+      ev('presence.update', { participants: [{ userId: 'a', presence: 'online' }] }),
+    ]);
+    expect(types(out)).toContain('STATE_SNAPSHOT');
+    expect(types(out)).toContain('STATE_DELTA');
+    const custom = out.find((e) => e.type === 'CUSTOM');
+    expect(custom!['name']).toBe('presence');
+    // Exactly one snapshot even across multiple state changes.
+    expect(types(out).filter((t) => t === 'STATE_SNAPSHOT').length).toBe(1);
+  });
+
+  it('STATE_DELTA is a valid JSON Patch that reconstructs the snapshot state', () => {
+    reset();
+    const out = toAGUIEvents([
+      ev('run.started'),
+      ev('presence.update', { participants: [{ userId: 'a' }] }),
+      ev('handoff.update', { handoff: { id: 'h1', state: 'requested' } }),
+    ]);
+    // Replay: start from the snapshot, apply each delta in order → final state.
+    const snapshot = out.find((e) => e.type === 'STATE_SNAPSHOT')!['snapshot'] as Record<string, unknown>;
+    let doc: unknown = snapshot;
+    for (const e of out) {
+      if (e.type === 'STATE_DELTA') {
+        const res = applyJsonPatch(doc, e['delta'] as never);
+        expect(res.ok).toBe(true);
+        doc = res.doc;
+      }
+    }
+    expect(doc).toMatchObject({ presence: [{ userId: 'a' }], handoffs: [{ id: 'h1', state: 'requested' }] });
+  });
+
+  it('emits a CUSTOM signal for handoff, comment add/delete, and access.revoked', () => {
+    reset();
+    const out = toAGUIEvents([
+      ev('run.started'),
+      ev('handoff.update', { handoff: { id: 'h1', state: 'accepted' } }),
+      ev('comment.added', { comment: { id: 'c1', threadId: 'c1' } }),
+      ev('comment.deleted', { id: 'c1' }),
+      ev('access.revoked', { reason: 'removed' }),
+    ]);
+    const customs = out.filter((e) => e.type === 'CUSTOM').map((e) => e['name']);
+    expect(customs).toEqual(['handoff', 'comment', 'comment', 'access.revoked']);
+  });
+
+  it('does not emit collaboration state for a plain text run (back-compat)', () => {
+    reset();
+    const out = toAGUIEvents([ev('run.started'), ev('text.delta', { delta: 'hi' }), ev('run.completed')]);
+    expect(types(out)).not.toContain('STATE_DELTA');
+    expect(types(out)).not.toContain('CUSTOM');
+    expect(types(out)).not.toContain('STATE_SNAPSHOT');
+  });
+});

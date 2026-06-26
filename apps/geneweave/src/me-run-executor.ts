@@ -24,7 +24,7 @@
  * Vocabulary: no "chat", "conversation", "message" (HTTP sense), "turn".
  */
 
-import { newUUIDv7, createLogger, weaveContext } from '@weaveintel/core';
+import { newUUIDv7, createLogger, weaveContext, formatSseFrame } from '@weaveintel/core';
 import type { ExecutionContext, RunEventEnvelope, RunStep, RunUsage, RunCitation, RunArtifactRef, RunFilePart } from '@weaveintel/core';
 
 const logger = createLogger('me-run-executor');
@@ -151,7 +151,7 @@ class SseSubscriber {
   revoke(reason: string): void {
     if (this.#closed || this.res.writableEnded) { this.#closed = true; return; }
     try {
-      this.res.write(`data: ${JSON.stringify({ runId: '', sequence: -1, kind: 'access.revoked', payload: { reason }, timestamp: Date.now() })}\n\n`);
+      this.res.write(formatSseFrame({ data: { runId: '', sequence: -1, kind: 'access.revoked', payload: { reason }, timestamp: Date.now() } }));
     } catch { /* best-effort */ }
     this.#closed = true;
     try { if (!this.res.writableEnded) this.res.end(); } catch { /* broken pipe */ }
@@ -191,7 +191,11 @@ class SseSubscriber {
     }
     try {
       if (!this.res.writableEnded) {
-        this.res.write(`data: ${JSON.stringify(env)}\n\n`);
+        // Collaboration Phase 6 — emit a resumable SSE frame via the canonical
+        // core writer. Journaled events carry `id: <sequence>` so a browser
+        // EventSource auto-resumes from `Last-Event-ID` after a drop; ephemeral
+        // events (sequence < 0) carry no id (they must not move the resume cursor).
+        this.res.write(formatSseFrame(env.sequence >= 0 ? { id: env.sequence, data: env } : { data: env }));
       }
       if (TERMINAL_EVENT_KINDS.has(env.kind) && !this.res.writableEnded) {
         this.#closed = true;

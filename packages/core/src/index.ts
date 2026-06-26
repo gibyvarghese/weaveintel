@@ -46,6 +46,31 @@ export {
   type ParseSseOptions,
 } from './sse-parser.js';
 
+// Canonical SSE WRITER — the emit half of the transport (Collaboration Phase 6).
+// One way to format resumable (`id:`/`retry:`) SSE frames + keepalives, shared by
+// the geneWeave run-stream route and the a2a server.
+export {
+  type SseSink,
+  type SseFrame,
+  SSE_RESPONSE_HEADERS,
+  formatSseFrame,
+  formatSseComment,
+  writeSseFrame,
+  writeSseComment,
+  resolveResumeCursor,
+} from './sse-writer.js';
+
+// JSON Patch (RFC 6902) + JSON Pointer (RFC 6901) — the wire format for AG-UI
+// `STATE_DELTA` collaborative-state updates (Collaboration Phase 6).
+export {
+  type JsonPatchOp,
+  type JsonPatch,
+  parsePointer,
+  toPointer,
+  applyJsonPatch,
+  diffJsonPatch,
+} from './json-patch.js';
+
 // Run-lifecycle substrate (Collaboration Phase 0 — relocated from
 // @weaveintel/collaboration). The PORTS (RunRegistry / RunJournal) + a reference
 // KV adapter; geneWeave's SQL tables are another adapter behind the same ports.

@@ -92,8 +92,10 @@ describe('parseSseStream — keepalive / noise / negative', () => {
     expect(await collect(streamOf([': keepalive\ndata: real\n\n']))).toEqual([{ data: 'real' }]);
   });
 
-  it('ignores id: and retry: fields (run protocol does not use them)', async () => {
-    expect(await collect(streamOf(['id: 7\nretry: 1000\ndata: ok\n\n']))).toEqual([{ data: 'ok' }]);
+  it('surfaces id: (for Last-Event-ID resume) and ignores retry:', async () => {
+    // Phase 6: `id:` is now surfaced so a Node consumer can drive its own resume
+    // cursor; `retry:` (a browser reconnect hint) is still ignored.
+    expect(await collect(streamOf(['id: 7\nretry: 1000\ndata: ok\n\n']))).toEqual([{ data: 'ok', id: '7' }]);
   });
 
   it('does not emit for a boundary with no data/event (pure keepalive block)', async () => {

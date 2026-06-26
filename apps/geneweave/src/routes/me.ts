@@ -42,7 +42,7 @@
  * in this file's public API surface.
  */
 
-import { newUUIDv7, weaveContext } from '@weaveintel/core';
+import { newUUIDv7, weaveContext, SSE_RESPONSE_HEADERS, resolveResumeCursor } from '@weaveintel/core';
 import { createActionItem, completeActionItem, cancelActionItem } from '@weaveintel/human-tasks';
 import { createReminderTrigger, rescheduleReminder } from '@weaveintel/triggers';
 import type { Router } from '../server-core.js';
@@ -208,7 +208,11 @@ export function registerMeRoutes(
     res.end(JSON.stringify({ ...access.run, role: access.role }));
   }, { auth: true });
 
-  // SSE event stream — resumable via ?after=<sequence>
+  // SSE event stream — resumable. Resume cursor precedence (Collaboration Phase 6):
+  // the standard `Last-Event-ID` header (sent automatically by a browser
+  // EventSource on reconnect) wins, then the explicit `?after=<sequence>` query,
+  // else from the start. Each journaled event is written with `id: <sequence>`,
+  // so a dropped browser stream re-attaches and replays only the gap.
   router.get('/api/me/runs/:runId/events', async (req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
     // Phase 2: any participant may READ the live stream (viewers watch).
@@ -217,17 +221,16 @@ export function registerMeRoutes(
     const run = access.run;
 
     const url = new URL(req.url ?? '/', 'http://x');
-    const afterSeq = safePageInt(url.searchParams.get('after'), -1, -1, Number.MAX_SAFE_INTEGER);
+    const lastEventId = (req.headers['last-event-id'] as string | undefined) ?? null;
+    const afterSeq = resolveResumeCursor({ lastEventId, afterParam: url.searchParams.get('after'), defaultAfter: -1 });
 
     // Keepalive cadence comes from `run_stream_config` (DB), not a hardcoded 15s.
     const streamCfg = await loadRunStreamConfig(db);
 
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    });
+    res.writeHead(200, { ...SSE_RESPONSE_HEADERS });
+    // Tell EventSource how long to wait before reconnecting (WHATWG `retry:`, ms).
+    const retryMs = Array.isArray(streamCfg.backoffMs) ? (streamCfg.backoffMs[0] ?? 3000) : 3000;
+    res.write(`retry: ${Math.max(1000, retryMs)}\n\n`);
 
     // Subscribe FIRST so any event appended during the replay window is
     // buffered (not lost). The subscriber dedups by sequence, so the

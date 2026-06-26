@@ -29,6 +29,7 @@ import { MeRunExecutor } from './me-run-executor.js';
 import { startPresenceSweeper } from './presence-sql.js';
 import { createNotificationRelay, enqueueRunTerminalNotifications } from './run-notifications-outbox.js';
 import { startHandoffSweeper } from './handoff-sql.js';
+import { matchRunControlPath, isAllowedWsOrigin, handleRunControlConnection, MAX_CONTROL_MESSAGE_BYTES } from './run-control-ws.js';
 import { createChatPipelineMeRunAgent } from './me-run-agent.js';
 import { type TriggerDispatcherHandle } from './admin/api/triggers.js';
 import { type LoadedGatewayConfig } from './mcp-gateway.js';
@@ -645,19 +646,31 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   server.maxHeadersCount = SERVER_MAX_HEADERS_COUNT;
   server.maxRequestsPerSocket = SERVER_MAX_REQUESTS_PER_SOCKET;
 
-  // ── WebSocket upgrade — voice sessions ─────────────────────────────────────
-  // Path: /api/voice/sessions/:sessionId/ws
-  // We use dynamic import so `ws` is only loaded when the upgrade event fires.
-  if (voiceEngine) {
+  // ── WebSocket upgrade — voice sessions + run control channel ───────────────
+  //   Voice:        /api/voice/sessions/:sessionId/ws   (gated on voiceEngine)
+  //   Run control:  /api/me/runs/:runId/control          (Collaboration Phase 6)
+  // One upgrade listener routes by path; `ws` is dynamically imported on demand.
+  {
     server.on('upgrade', async (req: IncomingMessage, socket, head: Buffer) => {
       const url = req.url ?? '';
-      const wsMatch = url.match(/^\/api\/voice\/sessions\/([^/?#]+)\/(ws|realtime)/);
-      if (!wsMatch) {
+      const controlMatch = matchRunControlPath(url);
+      const wsMatch = voiceEngine ? url.match(/^\/api\/voice\/sessions\/([^/?#]+)\/(ws|realtime)/) : null;
+      if (!controlMatch && !wsMatch) {
         socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
         socket.destroy();
         return;
       }
-      const sessionId = wsMatch[1]!;
+      // CSWSH defense (Phase 6): validate Origin against the host for the control
+      // channel — a browser cannot forge Origin, so this blocks cross-site hijack.
+      if (controlMatch) {
+        const allowed = (process.env['GENEWEAVE_WS_ALLOWED_ORIGINS'] ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+        if (!isAllowedWsOrigin(req.headers.origin, { allowed, host: req.headers.host })) {
+          socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
+          socket.destroy();
+          return;
+        }
+      }
+      const sessionId = wsMatch?.[1] ?? '';
 
       // L-6: Authenticate via an opaque short-lived ticket (preferred) or a
       // Bearer JWT (legacy fallback for clients not yet updated). The ticket path
@@ -709,22 +722,25 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
 
       try {
         const { WebSocketServer } = await import('ws');
-        const wss = new WebSocketServer({ noServer: true });
+        const wss = new WebSocketServer({ noServer: true, maxPayload: controlMatch ? MAX_CONTROL_MESSAGE_BYTES : undefined });
         const isRealtime = !!url.match(/\/realtime$/);
         wss.handleUpgrade(req, socket, head, async (ws) => {
           try {
-            if (isRealtime) {
+            if (controlMatch) {
+              // Collaboration Phase 6 — bidirectional run control plane.
+              await handleRunControlConnection(ws, controlMatch.runId, { userId: auth.userId, tenantId: auth.tenantId }, { db, runExecutor: meRunExecutor });
+            } else if (isRealtime) {
               await voiceEngine!.handleRealtimeWebSocket({ sessionId, userId: auth.userId, ws });
             } else {
               await voiceEngine!.handleWebSocket({ sessionId, userId: auth.userId, ws, req });
             }
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
-            logger.error(`voice-ws session error`, { sessionId, msg });
+            logger.error(`ws session error`, { sessionId, runId: controlMatch?.runId, msg });
           }
         });
       } catch (err) {
-        logger.error('voice-ws failed to handle upgrade', { err });
+        logger.error('ws failed to handle upgrade', { err });
         socket.write('HTTP/1.1 500 Internal Server Error\r\n\r\n');
         socket.destroy();
       }

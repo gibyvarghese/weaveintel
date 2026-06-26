@@ -38,6 +38,12 @@ export interface SseEvent {
   data: string;
   /** The `event:` field, when present. */
   event?: string;
+  /**
+   * The `id:` field, when present (Collaboration Phase 6). Browsers echo the last
+   * id back as `Last-Event-ID` on reconnect; a Node consumer can read it here to
+   * drive its own resume cursor.
+   */
+  id?: string;
 }
 
 export interface ParseSseOptions {
@@ -76,24 +82,32 @@ export async function* parseSseStream(
   let buf = '';
   let dataLines: string[] = [];
   let currentEvent: string | undefined;
+  let currentId: string | undefined;
 
   // Apply one already-CR-stripped line to the in-progress record.
   const applyLine = (line: string): void => {
     if (line.startsWith(':')) return; // comment / keepalive
     if (line.startsWith('event:')) currentEvent = line.slice(6).trim();
     else if (line.startsWith('data:')) dataLines.push(line.slice(5).replace(/^ /, ''));
-    // `id:` / `retry:` and any other field — ignored by the run protocol.
+    else if (line.startsWith('id:')) currentId = line.slice(3).replace(/^ /, ''); // Phase 6: surfaced for Last-Event-ID
+    // `retry:` and any other field — ignored by the run protocol.
   };
 
   // Drain a completed record (blank-line boundary or end-of-stream). A record
   // with no `data:` line and no `event:` is whitespace/keepalive — skipped.
   const take = (): SseEvent | null => {
-    if (dataLines.length === 0 && currentEvent === undefined) return null;
+    if (dataLines.length === 0 && currentEvent === undefined) { currentId = undefined; return null; }
     const data = dataLines.join('\n');
     const evName = currentEvent;
+    const evId = currentId;
     dataLines = [];
     currentEvent = undefined;
-    return evName !== undefined ? { data, event: evName } : { data };
+    currentId = undefined;
+    return {
+      data,
+      ...(evName !== undefined ? { event: evName } : {}),
+      ...(evId !== undefined ? { id: evId } : {}),
+    };
   };
 
   // Resolve abort as a clean end (not an error), racing it against read().
