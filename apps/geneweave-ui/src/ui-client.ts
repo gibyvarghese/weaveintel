@@ -1943,6 +1943,18 @@ export function initialize() {
         if (d.authenticated) {
         state.user = d.user;
         state.csrfToken = d.csrfToken;
+        // weaveNotes Phase 2: if we arrived via a note share link, redeem it and
+        // jump straight into that note's collaborative editor.
+        try {
+          const { maybeJoinNoteFromUrl } = await import('./ui/notes-coedit.js');
+          const joinedNoteId = await maybeJoinNoteFromUrl();
+          if (joinedNoteId) {
+            state.view = 'notes';
+            (state as { notesView?: string }).notesView = 'editor';
+            const { loadNote } = await import('./ui/notes-view.js');
+            await loadNote(joinedNoteId);
+          }
+        } catch { /* non-fatal */ }
         await loadChats();
         await Promise.all([loadModels(), loadActiveRoutingPolicy(), loadTools(), loadUserPreferences()]);
         // Load action feed + calendar data eagerly (they populate the right rail widgets)

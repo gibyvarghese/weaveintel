@@ -9186,6 +9186,72 @@ export class SQLiteAdapter implements DatabaseAdapter {
     return this.d.prepare('SELECT * FROM coedit_ops WHERE doc_id = ? ORDER BY rowid ASC').all(docId) as import('./db-types/adapter-me.js').CoeditOpRow[];
   }
 
+  // ── weaveNotes Phase 2 — collaborative NOTE co-editing (m100) ────────────────
+  async createNoteCoeditDoc(row: { id: string; note_id: string; tenant_id?: string | null; owner_id: string; snapshot_json: string; state_vector_json: string; created_at: number; updated_at: number }): Promise<boolean> {
+    // Idempotent per note via UNIQUE(note_id).
+    return this.d.prepare(
+      `INSERT OR IGNORE INTO note_coedit_docs (id, note_id, tenant_id, owner_id, snapshot_json, state_vector_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(row.id, row.note_id, row.tenant_id ?? null, row.owner_id, row.snapshot_json, row.state_vector_json, row.created_at, row.updated_at).changes > 0;
+  }
+  async getNoteCoeditDoc(id: string): Promise<import('./db-types/adapter-me.js').NoteCoeditDocRow | null> {
+    return (this.d.prepare('SELECT * FROM note_coedit_docs WHERE id = ?').get(id) ?? null) as import('./db-types/adapter-me.js').NoteCoeditDocRow | null;
+  }
+  async getNoteCoeditDocByNote(noteId: string): Promise<import('./db-types/adapter-me.js').NoteCoeditDocRow | null> {
+    return (this.d.prepare('SELECT * FROM note_coedit_docs WHERE note_id = ?').get(noteId) ?? null) as import('./db-types/adapter-me.js').NoteCoeditDocRow | null;
+  }
+  async updateNoteCoeditDoc(id: string, fields: { snapshot_json: string; state_vector_json: string; updated_at: number }): Promise<void> {
+    this.d.prepare('UPDATE note_coedit_docs SET snapshot_json = ?, state_vector_json = ?, updated_at = ? WHERE id = ?')
+      .run(fields.snapshot_json, fields.state_vector_json, fields.updated_at, id);
+  }
+  async appendNoteCoeditOp(row: import('./db-types/adapter-me.js').NoteCoeditOpRow): Promise<boolean> {
+    return this.d.prepare(
+      `INSERT OR IGNORE INTO note_coedit_ops (id, doc_id, op_site, op_counter, op_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(row.id, row.doc_id, row.op_site, row.op_counter, row.op_json, row.created_at).changes > 0;
+  }
+  async listNoteCoeditOps(docId: string): Promise<import('./db-types/adapter-me.js').NoteCoeditOpRow[]> {
+    return this.d.prepare('SELECT * FROM note_coedit_ops WHERE doc_id = ? ORDER BY rowid ASC').all(docId) as import('./db-types/adapter-me.js').NoteCoeditOpRow[];
+  }
+  // Note sharing — membership + invite tokens.
+  async getNoteForOwner(noteId: string, ownerId: string): Promise<{ id: string; owner_user_id: string; tenant_id: string | null } | null> {
+    return (this.d.prepare('SELECT id, owner_user_id, tenant_id FROM notes WHERE id = ? AND owner_user_id = ?').get(noteId, ownerId) ?? null) as { id: string; owner_user_id: string; tenant_id: string | null } | null;
+  }
+  async getNoteShare(noteId: string, userId: string): Promise<import('./db-types/adapter-me.js').NoteShareRow | null> {
+    return (this.d.prepare('SELECT * FROM note_shares WHERE note_id = ? AND user_id = ?').get(noteId, userId) ?? null) as import('./db-types/adapter-me.js').NoteShareRow | null;
+  }
+  async listNoteShares(noteId: string): Promise<import('./db-types/adapter-me.js').NoteShareRow[]> {
+    return this.d.prepare('SELECT * FROM note_shares WHERE note_id = ? ORDER BY joined_at ASC').all(noteId) as import('./db-types/adapter-me.js').NoteShareRow[];
+  }
+  async upsertNoteShare(row: import('./db-types/adapter-me.js').NoteShareRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO note_shares (id, note_id, tenant_id, owner_id, user_id, role, joined_at, invited_via_token_id)
+       VALUES (@id, @note_id, @tenant_id, @owner_id, @user_id, @role, @joined_at, @invited_via_token_id)
+       ON CONFLICT(note_id, user_id) DO UPDATE SET role = excluded.role, invited_via_token_id = excluded.invited_via_token_id`,
+    ).run(row);
+  }
+  async deleteNoteShare(noteId: string, userId: string): Promise<number> {
+    return this.d.prepare('DELETE FROM note_shares WHERE note_id = ? AND user_id = ?').run(noteId, userId).changes;
+  }
+  async createNoteShareToken(row: import('./db-types/adapter-me.js').NoteShareTokenRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO note_share_tokens (id, note_id, tenant_id, owner_id, role, token_hash, token_prefix, max_uses, uses, expires_at, revoked_at, created_by, created_at)
+       VALUES (@id, @note_id, @tenant_id, @owner_id, @role, @token_hash, @token_prefix, @max_uses, @uses, @expires_at, @revoked_at, @created_by, @created_at)`,
+    ).run(row);
+  }
+  async getNoteShareTokenByHash(hash: string): Promise<import('./db-types/adapter-me.js').NoteShareTokenRow | null> {
+    return (this.d.prepare('SELECT * FROM note_share_tokens WHERE token_hash = ?').get(hash) ?? null) as import('./db-types/adapter-me.js').NoteShareTokenRow | null;
+  }
+  async listNoteShareTokens(noteId: string): Promise<import('./db-types/adapter-me.js').NoteShareTokenRow[]> {
+    return this.d.prepare('SELECT * FROM note_share_tokens WHERE note_id = ? ORDER BY created_at DESC').all(noteId) as import('./db-types/adapter-me.js').NoteShareTokenRow[];
+  }
+  async incrementNoteShareTokenUses(id: string): Promise<void> {
+    this.d.prepare('UPDATE note_share_tokens SET uses = uses + 1 WHERE id = ?').run(id);
+  }
+  async revokeNoteShareToken(id: string, noteId: string, revokedAt: number): Promise<number> {
+    return this.d.prepare('UPDATE note_share_tokens SET revoked_at = ? WHERE id = ? AND note_id = ? AND revoked_at IS NULL').run(revokedAt, id, noteId).changes;
+  }
+
   // Registered outbound webhook endpoints.
   async createWebhookEndpoint(row: { id: string; tenant_id?: string | null; user_id: string; url: string; signing_secret: string; created_at: number }): Promise<void> {
     this.d.prepare(

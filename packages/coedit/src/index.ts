@@ -82,3 +82,14 @@ export {
   createBlockAgentPeer,
   type BlockAgentPeer,
 } from './block-agent.js';
+
+// weaveNotes Phase 2 — the TRUSTED-RELAY block-op validator (anti-forgery + caps
+// for BlockOps) and `diffBlocks` (turn a whole edited document into convergent
+// block ops for the "diff-on-save" client path). These power geneWeave's notes
+// co-editing relay + collaborative editor.
+export {
+  validateClientBlockOps,
+  type BlockOpValidationOptions,
+  type BlockOpValidationResult,
+} from './block-validation.js';
+export { diffBlocks } from './block-diff.js';

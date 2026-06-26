@@ -408,10 +408,36 @@ helper** (Track D, Phase 11) as enhancements that talk to the same server/CRDT.
   plus correct Markdown + sanitized HTML; owner-scoped security; malformed-note
   robustness; Notes-UI regression. *Acceptance: fuzz convergence + PM round-trip
   identity + adversarial-merge schema repair — all met.*
-- **Phase 2 — geneWeave relay + co-edit + sharing + presence (app).** `m100`; `note-coedit-sql`
-  relay; `/coedit/*` endpoints; note sharing (Phase 2-collab tokens); presence cursors; swap
-  the UI autosave for op sync. *Acceptance (real-LLM e2e, all modes):* two humans co-edit →
-  converge; reload mid-edit → no loss; offline reconcile; viewer 403; forged site rejected.
+- **Phase 2 — geneWeave relay + co-edit + sharing + presence (app).** ✅ **delivered.**
+  geneWeave is now the **trusted relay** for the Phase 1 `BlockDoc`: a note is co-editable
+  by two humans (and, in Phase 3, the agent) at once. **`m100`** adds `note_coedit_docs`
+  (canonical snapshot) + `note_coedit_ops` (append-only block-op log) + `note_shares`
+  (membership) + `note_share_tokens` (256-bit, SHA-256-hashed invite links). **`note-coedit-sql`**
+  holds the relay (`ensureDoc` seeds from the note's existing content, `submitOps` validates +
+  applies + persists, `opsSince` for offline reconcile, `syncFromProseMirror` for diff-on-save)
+  plus `resolveNoteAccess` (owner/collaborator/viewer) and the sharing manager. **`/coedit/*`
+  endpoints**: `POST/GET /coedit`, `POST /coedit/ops` (collaborator+; viewers 403), `GET
+  /coedit/ops?since=` (state-vector diff sync), `POST /coedit/sync` (diff-on-save), `POST
+  /coedit/awareness`, `GET /coedit/events` (per-note **SSE** live broadcast via `NoteCoeditHub`),
+  plus `POST /:id/share`, `GET /:id/share`, `POST /:id/share/revoke`, `POST /notes/join`. The
+  legacy single-user `PATCH doc_json` is preserved for un-coedited notes and routed through the
+  relay as a merge once a note is co-edited. **Package primitives** (reused, not app-specific):
+  `validateClientBlockOps` (anti-forgery + caps for block ops) and `diffBlocks` (whole-doc →
+  convergent ops). **UI**: the notes editor joins the live room, shows a "N editing" presence
+  badge + a collaborator-edit refresh nudge, a **🔗 Share** button (mints a `?joinNote=` link),
+  and routes saves through `/coedit/sync`; opening a share link auto-joins. *Tested:* a
+  deterministic SQLite **relay integration suite** (9 — convergence, sharing/idempotent-join,
+  revoke/expiry/exhaustion, offline reconcile, identity-forgery rejection, diff-on-save, a
+  3-editor × 6-round **stress fuzz** that always converges) + **package units** (`validateClientBlockOps`
+  positive/negative/security, `diffBlocks` structure + concurrent-no-clobber) + **real-LLM
+  Playwright e2e (all four modes)**: two humans co-edit one real-LLM note → **converge, both
+  edits survive**; viewer 403; forged site rejected; stranger 404; reload-no-loss + offline
+  reconcile; legacy save still works; synced PATCH merges; **presence live over SSE**; and a
+  **web-UI** test (Share button mints a link, saves route through the relay). *Acceptance: two
+  humans co-edit → converge; reload mid-edit → no loss; offline reconcile; viewer 403; forged
+  site rejected — all met.* (Known scope: live concurrent typing uses ops/`diffBlocks` from a
+  synced replica; per-keystroke ProseMirror-step → op binding inside the Tiptap island and a
+  Redis fan-out for multi-node SSE are documented follow-ups.)
 
 **Track B — AI in the document**
 - **Phase 3 — Agent-as-co-editor + AI actions + suggestions.** `note_edit` tool; agent peer

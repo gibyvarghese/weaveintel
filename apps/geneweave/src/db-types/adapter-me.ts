@@ -257,6 +257,59 @@ export interface CoeditOpRow {
   created_at: number;
 }
 
+// ── weaveNotes Phase 2 — collaborative NOTE co-editing (m100) ──────────────────
+
+/** m100 — the canonical `BlockDoc` CRDT replica for one co-edited note. */
+export interface NoteCoeditDocRow {
+  id: string;
+  note_id: string;
+  tenant_id: string | null;
+  owner_id: string;
+  snapshot_json: string;       // full BlockDoc state (elements + LWW attrs + marks)
+  state_vector_json: string;   // max op counter per author site
+  created_at: number;
+  updated_at: number;
+}
+
+/** m100 — one append-only block co-edit op (keyed by author site + counter). */
+export interface NoteCoeditOpRow {
+  id: string;
+  doc_id: string;
+  op_site: string;
+  op_counter: number;
+  op_json: string;
+  created_at: number;
+}
+
+/** m100 — durable note membership (the owner is implicit; only other people get rows). */
+export interface NoteShareRow {
+  id: string;
+  note_id: string;
+  tenant_id: string | null;
+  owner_id: string;
+  user_id: string;
+  role: 'collaborator' | 'viewer';
+  joined_at: number;
+  invited_via_token_id: string | null;
+}
+
+/** m100 — a note invite link (256-bit token, SHA-256-hashed at rest). */
+export interface NoteShareTokenRow {
+  id: string;
+  note_id: string;
+  tenant_id: string | null;
+  owner_id: string;
+  role: 'collaborator' | 'viewer';
+  token_hash: string;
+  token_prefix: string;
+  max_uses: number | null;
+  uses: number;
+  expires_at: number | null;
+  revoked_at: number | null;
+  created_by: string;
+  created_at: number;
+}
+
 export interface UserDeviceRow {
   id: string;
   user_id: string;
@@ -394,6 +447,24 @@ export interface IMeStore {
   updateCoeditDoc(id: string, fields: { snapshot_json: string; state_vector_json: string; agent_written: number; updated_at: number }): Promise<void>;
   appendCoeditOp(row: CoeditOpRow): Promise<boolean>;
   listCoeditOps(docId: string): Promise<CoeditOpRow[]>;
+  // ── weaveNotes Phase 2 — collaborative NOTE co-editing (m100) ────────────────
+  createNoteCoeditDoc(row: { id: string; note_id: string; tenant_id?: string | null; owner_id: string; snapshot_json: string; state_vector_json: string; created_at: number; updated_at: number }): Promise<boolean>;
+  getNoteCoeditDoc(id: string): Promise<NoteCoeditDocRow | null>;
+  getNoteCoeditDocByNote(noteId: string): Promise<NoteCoeditDocRow | null>;
+  updateNoteCoeditDoc(id: string, fields: { snapshot_json: string; state_vector_json: string; updated_at: number }): Promise<void>;
+  appendNoteCoeditOp(row: NoteCoeditOpRow): Promise<boolean>;
+  listNoteCoeditOps(docId: string): Promise<NoteCoeditOpRow[]>;
+  // Note sharing (membership + invite tokens)
+  getNoteForOwner(noteId: string, ownerId: string): Promise<{ id: string; owner_user_id: string; tenant_id: string | null } | null>;
+  getNoteShare(noteId: string, userId: string): Promise<NoteShareRow | null>;
+  listNoteShares(noteId: string): Promise<NoteShareRow[]>;
+  upsertNoteShare(row: NoteShareRow): Promise<void>;
+  deleteNoteShare(noteId: string, userId: string): Promise<number>;
+  createNoteShareToken(row: NoteShareTokenRow): Promise<void>;
+  getNoteShareTokenByHash(hash: string): Promise<NoteShareTokenRow | null>;
+  listNoteShareTokens(noteId: string): Promise<NoteShareTokenRow[]>;
+  incrementNoteShareTokenUses(id: string): Promise<void>;
+  revokeNoteShareToken(id: string, noteId: string, revokedAt: number): Promise<number>;
   // Registered outbound webhook endpoints
   createWebhookEndpoint(row: { id: string; tenant_id?: string | null; user_id: string; url: string; signing_secret: string; created_at: number }): Promise<void>;
   listWebhookEndpoints(userId: string): Promise<WebhookEndpointRow[]>;

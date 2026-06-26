@@ -21,6 +21,8 @@ awareness cursors and offline reconcile (Collaboration Phase 7).
 | `createAgentPeer` | The **agent as a co-editing peer** — a server-side replica with its own site id that streams its output as insert ops. `direct` or `suggest` (HITL) mode. |
 | `validateClientOps` | The **trusted-relay** op validator — anti-forgery (a peer can't author ops as another site), size/flood caps, shape checks. |
 | `BlockDoc` | The **rich-text / block-document CRDT** (weaveNotes Phase 1) — co-edit a *structured* note (headings, lists, to-dos, code, quotes) with inline marks, on the same RGA. `pmToBlocks`/`blocksToProseMirror` convert to/from Tiptap JSON; `blocksToMarkdown`/`blocksToHtml` serialize; `createBlockAgentPeer` lets the agent contribute Markdown as blocks. |
+| `validateClientBlockOps` | The **trusted-relay BLOCK-op validator** (weaveNotes Phase 2) — `validateClientOps` for `BlockDoc` ops: anti-forgery (a peer can't author ops as another site), size/flood caps, unknown block/mark rejection. |
+| `diffBlocks` | **Diff-on-save** (weaveNotes Phase 2) — turn a whole edited document (`pmToBlocks(editor.getJSON())`) into the block ops that transform a synced replica into it. Lets an editor that only hands you "the new whole doc" still co-edit convergently. |
 
 ## The algorithm (RGA)
 
@@ -114,6 +116,41 @@ lifted to blocks).
 In geneWeave, `GET /api/me/notes/:id/blocks?format=blocks|markdown|html` runs a real
 note through `BlockDoc` and renders it (the building block for the Phase 2 collaborative
 editor + the Phase 4 emit-as-artifact flow).
+
+## Collaborative notes — the trusted relay (weaveNotes Phase 2)
+
+Phase 1 gave us the note CRDT; Phase 2 makes a note co-editable by two people (and
+the agent) *at once*, with sharing, presence and offline reconcile. geneWeave is the
+**trusted relay**: it holds the canonical `BlockDoc`, and every client edit flows
+through two package primitives.
+
+```ts
+import { validateClientBlockOps, diffBlocks, BlockDoc } from '@weaveintel/coedit';
+
+// SERVER: before applying a client's block ops, verify them (anti-forgery + caps).
+const v = validateClientBlockOps(rawOps, { expectedSiteId: `u:${userId}` });
+if (!v.ok) throw new Error(v.error);        // e.g. "identity forgery", "too many ops"
+
+// CLIENT: an editor hands you the whole new document, not ops. Diff it against your
+// own replica (which already merged everyone else's ops from the live stream) → the
+// ops are exactly YOUR local changes, so submitting them converges, never clobbers.
+const ops = diffBlocks(myReplica, pmToBlocks(editor.getJSON()));
+await post(`/api/me/notes/${noteId}/coedit/ops`, { ops });
+```
+
+> Why `diffBlocks` is safe: it diffs against the *synced* replica, so it captures only
+> what THIS user changed — never a stale "make the whole doc look like my screen",
+> which would erase a collaborator. Two clients that each diff-against-their-synced-
+> replica converge, exactly like hand-authored ops. (A *stale* whole-document save can
+> only merge what it actually saw — which is why live concurrent typing uses ops, and
+> the legacy full-document save is the single-user fallback.)
+
+In geneWeave (Phase 2): `note_coedit_docs` (snapshot) + `note_coedit_ops` (op log) +
+`note_shares` / `note_share_tokens` (membership + invite links). Endpoints under
+`/api/me/notes/:id/coedit/*` (ensure / ops / sync / events-SSE / awareness) + sharing
+(`/share`, `/join`). The server validates every op, role-gates edits (viewers get
+403), broadcasts ops + presence live over per-note SSE, and keeps the note's rendered
+`doc_json` in sync so the legacy single-user editor still reads correctly.
 
 ## Security (trusted relay)
 

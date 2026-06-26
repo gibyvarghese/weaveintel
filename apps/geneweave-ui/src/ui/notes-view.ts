@@ -22,6 +22,11 @@ import { h } from './dom.js';
 import { state, type NoteListItem, type NoteDoc } from './state.js';
 import { api } from './api.js';
 import { mountNotesEditor, type EditorInstance } from './notes-editor.js';
+import { wireNoteCoedit, createNoteShareLink, type NoteCoeditSession } from './notes-coedit.js';
+
+/** The live co-editing session for the currently-open note (Phase 2). */
+let _activeCoedit: NoteCoeditSession | null = null;
+function teardownCoedit(): void { if (_activeCoedit) { _activeCoedit.close(); _activeCoedit = null; } }
 
 // ── Data loaders ──────────────────────────────────────────────────────────────
 
@@ -116,6 +121,7 @@ let _activeEditor: EditorInstance | null = null;
 function destroyActiveEditor(): void {
   _activeEditor?.destroy();
   _activeEditor = null;
+  teardownCoedit(); // also leave the live co-editing room (Phase 2)
 }
 
 // ── Note list panel ───────────────────────────────────────────────────────────
@@ -287,6 +293,35 @@ function renderEditorPanel(note: NoteDoc, render: () => void): HTMLElement {
 
   const editorContainer = h('div', { className: 'notes-editor-mount' });
 
+  // weaveNotes Phase 2 — collaborative co-editing UI bits.
+  // A live "N editing" badge, a "refresh" nudge shown when a collaborator edits
+  // while you're typing, and a Share button that mints an invite link.
+  let lastLocalEditTs = 0;
+  const presenceBadge = h('span', { className: 'notes-presence-badge', title: 'People editing this note', style: 'display:none' }) as HTMLElement;
+  const refreshNudge = h('button', {
+    className: 'notes-coedit-refresh', title: 'A collaborator edited — click to load the latest', style: 'display:none',
+    onClick: async () => { refreshNudge.style.display = 'none'; await loadNote(note.id); render(); },
+  }, '↻ Updated') as HTMLElement;
+  const updatePresence = (count: number): void => {
+    if (count > 1) { presenceBadge.textContent = `● ${count} editing`; presenceBadge.style.display = ''; }
+    else { presenceBadge.style.display = 'none'; }
+  };
+  // A remote edit arrived: if you're not actively typing, refresh silently; else nudge.
+  const onRemoteChange = (): void => {
+    const typingNow = editorContainer.contains(document.activeElement) && Date.now() - lastLocalEditTs < 2500;
+    if (typingNow) { refreshNudge.style.display = ''; }
+    else { void loadNote(note.id).then(render); }
+  };
+  const shareBtn = h('button', {
+    className: 'notes-share-btn', title: 'Share this note for co-editing',
+    onClick: async () => {
+      const link = await createNoteShareLink(note.id, 'collaborator');
+      if (!link) { alert('Could not create a share link.'); return; }
+      try { await navigator.clipboard.writeText(link.url); } catch { /* clipboard may be blocked */ }
+      prompt('Share this co-editing link (copied to clipboard):', link.url);
+    },
+  }, '🔗 Share') as HTMLElement;
+
   const iconEl = h('span', {
     className: 'notes-editor-icon',
     title: 'Set icon',
@@ -304,6 +339,9 @@ function renderEditorPanel(note: NoteDoc, render: () => void): HTMLElement {
     h('div', { className: 'notes-editor-top' },
       h('button', { className: 'notes-back-btn', onClick: () => { destroyActiveEditor(); state.notesView = 'list'; render(); } }, '← Notes'),
       h('div', { className: 'notes-editor-toolbar' },
+        presenceBadge,
+        refreshNudge,
+        shareBtn,
         h('button', {
           className: `notes-fav-btn${isFav ? ' active' : ''}`,
           title: isFav ? 'Unfavourite' : 'Favourite',
@@ -355,12 +393,22 @@ function renderEditorPanel(note: NoteDoc, render: () => void): HTMLElement {
   requestAnimationFrame(() => {
     if (editorMounted) return;
     editorMounted = true;
+    // Phase 2: join the note's live co-editing room (ensures the shared doc, opens
+    // the presence/op stream). Saves route through the relay's diff-on-save so two
+    // people editing the same note merge instead of clobbering.
+    teardownCoedit();
+    _activeCoedit = wireNoteCoedit({ noteId: note.id, onRemoteChange, onPresence: updatePresence });
+
     mountNotesEditor({
       container: editorContainer,
       initialDocJson: note.doc_json,
       placeholder: 'Start writing… type / for commands, @ to mention',
       onSave: async (docJson) => {
-        await saveNote(note.id, docJson);
+        lastLocalEditTs = Date.now();
+        let parsed: unknown; try { parsed = JSON.parse(docJson); } catch { parsed = undefined; }
+        // Prefer the convergent relay path; fall back to the legacy save if it's unavailable.
+        const merged = parsed !== undefined && _activeCoedit ? await _activeCoedit.save(parsed) : false;
+        if (!merged) await saveNote(note.id, docJson);
       },
     }).then((inst) => {
       _activeEditor = inst;

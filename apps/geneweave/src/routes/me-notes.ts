@@ -44,6 +44,14 @@ import {
 } from '@weaveintel/notes';
 import { createSqlNoteRepository } from '../note-repository-sql.js';
 import { BlockDoc, pmToBlocks, blocksToProseMirror, blocksToMarkdown, blocksToHtml } from '@weaveintel/coedit';
+import { roleAtLeast } from '@weaveintel/collaboration';
+import {
+  createNoteCoeditRepo,
+  createNoteSharing,
+  resolveNoteAccess,
+  userNoteSiteId,
+} from '../note-coedit-sql.js';
+import { noteCoeditHub } from '../note-coedit-hub.js';
 import { meTaskRepo as taskRepo } from './me-stores.js';
 import { createActionItem } from '@weaveintel/human-tasks';
 import { safePageInt } from './index.js';
@@ -122,6 +130,194 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     res.end(JSON.stringify({ blocks, prosemirror: blocksToProseMirror(blocks), stateVector: doc.stateVector() }));
   }, { auth: true });
 
+  // ── weaveNotes Phase 2: collaborative co-editing (relay + sharing + presence) ──
+  //
+  // geneWeave is the TRUSTED RELAY. A note becomes co-editable the first time a
+  // client opens `POST /coedit` (the canonical BlockDoc seeds from the note's
+  // current content). From then on, edits flow as validated BLOCK OPS through the
+  // relay, are broadcast live over `/coedit/events` (SSE), and the note's rendered
+  // `doc_json` is kept in sync so the legacy single-user path still reads correctly.
+  //
+  //   POST   /coedit            ensure the co-edit doc exists; return snapshot + my site id  (any participant)
+  //   GET    /coedit            current snapshot + state vector + my site id                 (any participant)
+  //   POST   /coedit/ops        submit block ops (validated, anti-forgery)                    (collaborator+; viewers 403)
+  //   GET    /coedit/ops?since= the ops a reconnecting peer is missing (offline reconcile)    (any participant)
+  //   POST   /coedit/sync       diff-on-save: send a whole ProseMirror doc → merge as ops     (collaborator+)
+  //   POST   /coedit/awareness  broadcast an ephemeral presence/cursor update                 (any participant)
+  //   GET    /coedit/events     SSE stream of remote ops + presence                           (any participant)
+  const coedit = createNoteCoeditRepo(db);
+  const sharing = createNoteSharing(db);
+
+  /** Resolve access + (best-effort) the note's owner-side content for seeding. */
+  async function loadForCoedit(noteId: string, userId: string): Promise<{ access: NonNullable<Awaited<ReturnType<typeof resolveNoteAccess>>>; seedPm: unknown } | null> {
+    const access = await resolveNoteAccess(db, noteId, userId);
+    if (!access) return null;
+    const owned = await notes.getNote(noteId, access.ownerId);
+    let seedPm: unknown = { type: 'doc', content: [] };
+    if (owned) { try { seedPm = JSON.parse(owned.doc_json); } catch { /* keep empty */ } }
+    return { access, seedPm };
+  }
+
+  /** Keep the note's stored `doc_json` in sync with the live co-edit doc (best-effort). */
+  async function writeBackDoc(noteId: string, ownerId: string, pm: { type: 'doc'; content: unknown[] }): Promise<void> {
+    try { await notes.updateNote(noteId, ownerId, { doc_json: JSON.stringify(pm) }); } catch { /* non-fatal */ }
+  }
+
+  router.post('/api/me/notes/:id/coedit', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const loaded = await loadForCoedit(params['id']!, auth.userId);
+    if (!loaded) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    const view = await coedit.ensureDoc({ noteId: params['id']!, tenantId: loaded.access.tenantId, ownerId: loaded.access.ownerId, seedPm: loaded.seedPm });
+    // A per-tab site id UNDER the user's namespace (unique replicas, provable authorship).
+    const siteId = `${userNoteSiteId(auth.userId)}:${newUUIDv7().slice(0, 8)}`;
+    res.writeHead(201, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ...view, siteId, role: loaded.access.role }));
+  }, { auth: true });
+
+  router.get('/api/me/notes/:id/coedit', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    const view = await coedit.getViewByNote(params['id']!);
+    if (!view) { res.writeHead(404); res.end(JSON.stringify({ error: 'co-edit not started' })); return; }
+    const siteId = `${userNoteSiteId(auth.userId)}:${newUUIDv7().slice(0, 8)}`;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ...view, siteId, role: access.role }));
+  }, { auth: true });
+
+  router.post('/api/me/notes/:id/coedit/ops', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    if (!roleAtLeast(access.role, 'collaborator')) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden: viewers cannot edit' })); return; }
+    const view0 = await coedit.getViewByNote(params['id']!);
+    if (!view0) { res.writeHead(409); res.end(JSON.stringify({ error: 'co-edit not started' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    // The op author must live inside this user's namespace (anti-forgery enforced in the relay).
+    const result = await coedit.submitOps(view0.docId, userNoteSiteId(auth.userId), body['ops']);
+    if (!result.ok) { res.writeHead(String(result.error).startsWith('forbidden') ? 403 : 400); res.end(JSON.stringify({ error: result.error })); return; }
+    if (result.applied.length > 0) {
+      noteCoeditHub.broadcast(params['id']!, 'coedit.op', { docId: view0.docId, ops: result.applied });
+      await writeBackDoc(params['id']!, access.ownerId, result.view.prosemirror);
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ applied: result.applied.length, stateVector: result.view.stateVector }));
+  }, { auth: true });
+
+  router.get('/api/me/notes/:id/coedit/ops', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    const view0 = await coedit.getViewByNote(params['id']!);
+    if (!view0) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ ops: [] })); return; }
+    let since: Record<string, number> = {};
+    const raw = new URL(req.url ?? '/', 'http://x').searchParams.get('since');
+    if (raw) { try { since = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as Record<string, number>; } catch { /* all */ } }
+    const ops = await coedit.opsSince(view0.docId, since);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ops }));
+  }, { auth: true });
+
+  router.post('/api/me/notes/:id/coedit/sync', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const loaded = await loadForCoedit(params['id']!, auth.userId);
+    if (!loaded) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    if (!roleAtLeast(loaded.access.role, 'collaborator')) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden: viewers cannot edit' })); return; }
+    // Ensure the doc exists (seed from current content) before diffing into it.
+    const ensured = await coedit.ensureDoc({ noteId: params['id']!, tenantId: loaded.access.tenantId, ownerId: loaded.access.ownerId, seedPm: loaded.seedPm });
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    const pm = (body['doc'] ?? body['doc_json']);
+    const result = await coedit.syncFromProseMirror(ensured.docId, userNoteSiteId(auth.userId), pm);
+    if (!result.ok) { res.writeHead(400); res.end(JSON.stringify({ error: result.error })); return; }
+    if (result.applied.length > 0) {
+      noteCoeditHub.broadcast(params['id']!, 'coedit.op', { docId: ensured.docId, ops: result.applied });
+      await writeBackDoc(params['id']!, loaded.access.ownerId, result.view.prosemirror);
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ applied: result.applied.length, stateVector: result.view.stateVector }));
+  }, { auth: true });
+
+  router.post('/api/me/notes/:id/coedit/awareness', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    const peerId = typeof body['siteId'] === 'string' && body['siteId'].startsWith(userNoteSiteId(auth.userId))
+      ? (body['siteId'] as string)
+      : userNoteSiteId(auth.userId);
+    const entry = (body['entry'] && typeof body['entry'] === 'object') ? body['entry'] : { state: null };
+    noteCoeditHub.broadcast(params['id']!, 'coedit.awareness', { peerId, entry });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true }));
+  }, { auth: true });
+
+  router.get('/api/me/notes/:id/coedit/events', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    const peerId = `${userNoteSiteId(auth.userId)}:${newUUIDv7().slice(0, 8)}`;
+    const { detach } = noteCoeditHub.subscribe(params['id']!, res, peerId);
+    const keepalive = setInterval(() => noteCoeditHub.keepAlive(params['id']!), 25_000);
+    req.on('close', () => { clearInterval(keepalive); detach(); });
+  }, { auth: true });
+
+  // ── weaveNotes Phase 2: note sharing (invite links + membership) ──────────────
+  //
+  //   POST   /api/me/notes/join                join a note via an invite token        (any user)
+  //   POST   /api/me/notes/:id/share           owner mints an invite link             (owner)
+  //   GET    /api/me/notes/:id/share           owner lists participants + invites     (owner)
+  //   POST   /api/me/notes/:id/share/revoke    owner revokes a member or an invite    (owner)
+  router.post('/api/me/notes/join', async (req, res, _params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    if (typeof body['token'] !== 'string' || !body['token']) { res.writeHead(400); res.end(JSON.stringify({ error: 'token required' })); return; }
+    const result = await sharing.join(body['token'], auth.userId);
+    if (!result.ok) { res.writeHead(400); res.end(JSON.stringify({ error: result.error })); return; }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ noteId: result.noteId, role: result.role }));
+  }, { auth: true });
+
+  router.post('/api/me/notes/:id/share', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    const role = body['role'] === 'collaborator' ? 'collaborator' : 'viewer';
+    const invite = await sharing.createInvite({
+      noteId: params['id']!, ownerId: auth.userId, tenantId: auth.tenantId ?? null, role,
+      maxUses: typeof body['maxUses'] === 'number' ? body['maxUses'] : null,
+      expiresAt: typeof body['expiresAt'] === 'number' ? body['expiresAt'] : null,
+    });
+    if (!invite) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; } // only the owner may share
+    res.writeHead(201, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(invite));
+  }, { auth: true });
+
+  router.get('/api/me/notes/:id/share', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const owned = await notes.getNote(params['id']!, auth.userId);
+    if (!owned || owned.owner_user_id !== auth.userId) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    const participants = await sharing.listParticipants(params['id']!, auth.userId);
+    const invites = (await sharing.listInvites(params['id']!, auth.userId)).map((t) => ({ id: t.id, role: t.role, prefix: t.token_prefix, uses: t.uses, maxUses: t.max_uses, expiresAt: t.expires_at, revokedAt: t.revoked_at }));
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ participants, invites }));
+  }, { auth: true });
+
+  router.post('/api/me/notes/:id/share/revoke', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    let ok = false;
+    if (typeof body['userId'] === 'string') ok = await sharing.revokeMember(params['id']!, auth.userId, body['userId']);
+    else if (typeof body['tokenId'] === 'string') ok = await sharing.revokeInvite(params['id']!, auth.userId, body['tokenId']);
+    else { res.writeHead(400); res.end(JSON.stringify({ error: 'userId or tokenId required' })); return; }
+    res.writeHead(ok ? 200 : 404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ revoked: ok }));
+  }, { auth: true });
+
   router.post('/api/me/notes', async (req, res, _params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
     const body = JSON.parse(await readBody(req)) as Record<string, unknown>;
@@ -167,6 +363,25 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     if (typeof body['doc_json'] === 'string') patch.doc_json = body['doc_json'];
     else if (body['doc_json'] && typeof body['doc_json'] === 'object') patch.doc_json = JSON.stringify(body['doc_json']);
     if (typeof body['favorite'] === 'number') patch.favorite = body['favorite'];
+
+    // weaveNotes Phase 2: if this note is already being co-edited, a full-document
+    // PATCH (the legacy single-user save) must NOT clobber concurrent edits — route
+    // the new content through the relay as a DIFF (merge), keeping everyone's work.
+    // Notes that never entered co-edit mode keep the exact legacy overwrite path.
+    if (patch.doc_json !== undefined) {
+      const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+      const existingDoc = access ? await coedit.getViewByNote(params['id']!) : null;
+      if (access && existingDoc && roleAtLeast(access.role, 'collaborator')) {
+        let pm: unknown; try { pm = JSON.parse(patch.doc_json); } catch { pm = undefined; }
+        if (pm !== undefined) {
+          const result = await coedit.syncFromProseMirror(existingDoc.docId, userNoteSiteId(auth.userId), pm);
+          if (result.ok) {
+            if (result.applied.length > 0) noteCoeditHub.broadcast(params['id']!, 'coedit.op', { docId: existingDoc.docId, ops: result.applied });
+            patch.doc_json = JSON.stringify(result.view.prosemirror); // persist the merged result, not the raw client doc
+          }
+        }
+      }
+    }
 
     await notes.updateNote(params['id']!, auth.userId, patch);
     const note = await notes.getNote(params['id']!, auth.userId);
