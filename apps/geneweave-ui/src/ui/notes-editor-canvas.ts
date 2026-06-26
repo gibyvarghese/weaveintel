@@ -26,15 +26,28 @@ export interface EditorCanvasOpts {
   titleInput: HTMLElement;
   editorContainer: HTMLElement;
   presenceBadge: HTMLElement;
-  refreshNudge: HTMLElement;
   inlinePanels: HTMLElement[];
   extractResult: string | null;
   /** Handlers. */
   onSetTheme: (t: 'pro' | 'creative') => void;
   onAskAi: () => void;
-  onInsert: () => void;
   format: { bold: () => void; italic: () => void; underline: () => void; highlight: (color: string) => void };
+  insert: OverflowItem[];
   overflow: OverflowItem[];
+}
+
+/** A small dropdown of items anchored under a trigger button (Insert / overflow ⋯). */
+function dropdown(trigger: HTMLElement, items: OverflowItem[], align: 'left' | 'right'): HTMLElement {
+  let open = false;
+  const menu = h('div', { className: `gw-menu gw-menu-${align}` },
+    ...items.map((it) => h('button', {
+      className: `gw-menu-item${it.danger ? ' danger' : ''}${it.active ? ' active' : ''}`, title: it.title,
+      onClick: () => { open = false; menu.style.display = 'none'; it.onClick(); },
+    }, it.label)),
+  ) as HTMLElement;
+  menu.style.display = 'none';
+  trigger.addEventListener('click', () => { open = !open; menu.style.display = open ? '' : 'none'; });
+  return h('div', { className: 'gw-menu-anchor' }, trigger, menu);
 }
 
 const HIGHLIGHTERS = ['var(--hl-amber)', 'var(--hl-pink)', 'var(--hl-teal)', 'var(--hl-blue)'];
@@ -57,20 +70,12 @@ export function renderEditorCanvas(opts: EditorCanvasOpts): HTMLElement {
     h('button', { className: `gw-theme-tab${opts.creative ? ' active' : ''}`, onClick: () => opts.onSetTheme('creative') }, 'Creative'),
   );
 
-  // — overflow (⋯) menu holding the secondary actions (share/publish/extract/fav/delete + panel toggles) —
-  let overflowOpen = false;
-  const overflowMenu = h('div', { className: 'gw-overflow-menu' },
-    ...opts.overflow.map((it) => h('button', {
-      className: `gw-overflow-item${it.danger ? ' danger' : ''}${it.active ? ' active' : ''}`,
-      title: it.title,
-      onClick: () => { overflowOpen = false; overflowMenu.style.display = 'none'; it.onClick(); },
-    }, it.label)),
-  ) as HTMLElement;
-  overflowMenu.style.display = 'none';
-  const overflowBtn = h('button', {
-    className: 'gw-icon-btn', title: 'More actions',
-    onClick: () => { overflowOpen = !overflowOpen; overflowMenu.style.display = overflowOpen ? '' : 'none'; },
-  }, '⋯');
+  // — "+ Insert" dropdown (new note / template / capture / ask / databases) —
+  const insertBtn = h('button', { className: 'gw-btn-emerald' }, h('span', { className: 'gw-plus' }, '+'), ' Insert');
+  const insertMenu = dropdown(insertBtn, opts.insert, 'right');
+  // — overflow (⋯) menu: secondary actions (share/publish/extract/fav/delete + panel toggles) —
+  const overflowBtn = h('button', { className: 'gw-icon-btn', title: 'More actions' }, '⋯');
+  const overflowMenu = dropdown(overflowBtn, opts.overflow, 'right');
 
   const topbar = h('header', { className: 'gw-topbar' },
     h('div', { className: 'gw-breadcrumb' },
@@ -81,8 +86,8 @@ export function renderEditorCanvas(opts: EditorCanvasOpts): HTMLElement {
     h('div', { className: 'gw-topbar-right' },
       presence,
       themeToggle,
-      h('button', { className: 'gw-btn-emerald', onClick: opts.onInsert }, h('span', { className: 'gw-plus' }, '+'), ' Insert'),
-      h('div', { className: 'gw-overflow' }, overflowBtn, overflowMenu),
+      insertMenu,
+      overflowMenu,
     ),
   );
 
@@ -125,5 +130,5 @@ export function renderEditorCanvas(opts: EditorCanvasOpts): HTMLElement {
     ),
   );
 
-  return h('main', { className: `gw-canvas${opts.creative ? ' creative' : ''}` }, topbar, opts.refreshNudge, toolstrip, page);
+  return h('main', { className: `gw-canvas${opts.creative ? ' creative' : ''}` }, topbar, toolstrip, page);
 }

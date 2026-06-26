@@ -1056,12 +1056,50 @@ input{font-family:inherit;outline:none}
 .gw-shell{display:grid;grid-template-columns:248px minmax(0,1fr) 300px;height:100%;overflow:hidden;background:var(--canvas)}
 .gw-scroll::-webkit-scrollbar{width:10px}
 .gw-scroll::-webkit-scrollbar-thumb{background:var(--bg4);border-radius:999px;border:3px solid transparent;background-clip:padding-box}
-/* — left notebooks rail — */
-.gw-left-rail{background:var(--surface);border-right:1px solid var(--hairline);overflow:hidden;display:flex;flex-direction:column;min-width:0}
-.gw-left-rail .notes-list-panel{height:100%}
-.gw-brand{display:flex;align-items:center;gap:10px;padding:16px 16px 8px}
+/* — full-bleed: Notes takes the whole viewport (its rail is the primary nav) — */
+.app-fullbleed{display:block;height:100vh;width:100vw;overflow:hidden}
+.app-fullbleed .gw-notes,.app-fullbleed .notes-full-view{height:100vh}
+/* — left notebooks rail (design handoff) — */
+.gw-leftrail{background:var(--surface);border-right:1px solid var(--hairline);overflow:hidden;display:flex;flex-direction:column;min-width:0;padding:16px 12px}
+.gw-brand{display:flex;align-items:center;gap:10px;padding:6px 8px 16px;background:none;border:none;cursor:pointer;width:100%}
+.gw-brand:hover{opacity:.85}
 .gw-brand-mark{display:inline-flex}
 .gw-brand-word{font-family:var(--font-display);font-size:15px;font-weight:700;letter-spacing:-0.02em}
+.gw-search{display:flex;align-items:center;gap:8px;background:var(--canvas);border:1px solid var(--hairline);border-radius:10px;padding:8px 11px;margin-bottom:18px}
+.gw-search-ic{display:inline-flex;color:var(--fg3)}
+.gw-search-input{flex:1;border:none;background:transparent;outline:none;font-size:13px;color:var(--ink)}
+.gw-search-input::placeholder{color:var(--fg3)}
+.gw-kbd{font-family:var(--mono);font-size:10px;color:var(--fg3);border:1px solid var(--hairline);border-radius:5px;padding:2px 5px}
+.gw-tree{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:2px}
+.gw-tree-label-row{font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--fg3);padding:8px 10px 6px}
+.gw-tree-row{display:flex;align-items:center;gap:9px;padding:7px 10px;font-size:13px;color:var(--fg2);border-radius:9px;cursor:pointer}
+.gw-tree-row:hover{background:var(--bg3)}
+.gw-tree-row.active{color:var(--accent2);background:var(--mint);font-weight:500}
+.gw-tree-icon{display:inline-flex;color:var(--fg3)}
+.gw-tree-row.active .gw-tree-icon{color:var(--accent)}
+.gw-tree-emoji{font-size:13px;line-height:1}
+.gw-tree-label{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gw-tree-fav{border:none;background:none;color:var(--fg3);cursor:pointer;font-size:12px;opacity:0}
+.gw-tree-row:hover .gw-tree-fav,.gw-tree-fav.on{opacity:1}
+.gw-tree-fav.on{color:var(--amber)}
+.gw-tree-empty,.gw-tree-loading{font-size:12px;color:var(--fg3);padding:8px 10px}
+.gw-newnote{display:flex;align-items:center;gap:9px;font-family:var(--font);font-size:13px;font-weight:600;color:var(--accent2);background:var(--surface);border:1px solid var(--mint-deep);border-radius:10px;padding:10px 12px;cursor:pointer;margin-top:8px}
+.gw-newnote:hover{background:var(--mint)}
+.gw-newnote-plus{font-size:15px;line-height:1}
+.gw-newnote-tmpl{margin-left:auto;font-size:11px;color:var(--fg3);font-weight:400}
+.gw-newnote-tmpl:hover{color:var(--accent2)}
+/* — dropdown menus (Insert / overflow) + modal — */
+.gw-menu-anchor{position:relative;display:inline-flex}
+.gw-menu{position:absolute;top:38px;z-index:40;background:var(--surface);border:1px solid var(--hairline);border-radius:12px;box-shadow:var(--shadow-pop);padding:6px;min-width:210px;display:flex;flex-direction:column;gap:2px}
+.gw-menu-right{right:0}.gw-menu-left{left:0}
+.gw-menu-item{text-align:left;font-size:13px;color:var(--fg);background:transparent;border:none;border-radius:8px;padding:8px 10px;cursor:pointer}
+.gw-menu-item:hover{background:var(--mint)}
+.gw-menu-item.danger{color:var(--danger-zone-fg)}
+.gw-menu-item.danger:hover{background:var(--danger-zone-bg)}
+.gw-modal-overlay{position:fixed;inset:0;z-index:100;background:rgba(20,32,27,.28);display:flex;align-items:flex-start;justify-content:center;padding-top:12vh}
+.gw-modal{background:var(--surface);border:1px solid var(--hairline);border-radius:16px;box-shadow:var(--shadow-pop);width:520px;max-width:90vw;padding:16px}
+.gw-modal-head{display:flex;align-items:center;justify-content:space-between;font-family:var(--font-display);font-weight:700;font-size:15px;margin-bottom:10px}
+.gw-modal-x{border:none;background:none;font-size:20px;color:var(--fg3);cursor:pointer;line-height:1}
 /* — centre canvas — */
 .gw-canvas{display:flex;flex-direction:column;min-width:0;overflow:hidden;background:var(--surface)}
 .gw-canvas.creative{background:var(--paper)}
@@ -1095,7 +1133,7 @@ input{font-family:inherit;outline:none}
 .gw-tool{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border-radius:7px;border:none;background:transparent;color:var(--fg2);cursor:pointer;font-size:14px}
 .gw-tool:hover{background:var(--bg3)}
 .gw-tool-b{font-weight:700}.gw-tool-i{font-style:italic;font-family:Georgia,serif}.gw-tool-u{text-decoration:underline}
-.gw-hl{width:18px;height:18px;border-radius:50%;cursor:pointer}
+.gw-hl{width:18px;height:18px;border-radius:50%;cursor:pointer;flex:none;box-shadow:inset 0 0 0 1px rgba(20,32,27,.10)}
 .gw-hl.active{box-shadow:0 0 0 2px var(--surface),0 0 0 3px var(--accent)}
 .gw-ask-ai{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:var(--accent2);background:var(--mint);border:1px solid var(--mint-deep);border-radius:8px;padding:6px 12px;cursor:pointer;margin-left:auto}
 .gw-ask-ai:hover{background:var(--mint-deep)}
@@ -1143,13 +1181,24 @@ input{font-family:inherit;outline:none}
 .gw-left-rail .notes-ws-ask-bar{flex-wrap:wrap}
 .gw-left-rail .notes-databases-btn{margin-top:4px}
 .gw-left-rail .notes-list-title{font-family:var(--font-display);font-weight:700;font-size:13px;color:var(--fg2)}
-/* right-rail Assistant: space out the AI co-author action buttons (design suggestion chips) */
-.gw-assistant-body .notes-ai-toolbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
-.gw-assistant-body .notes-ai-label{font-size:12px;font-weight:600;color:var(--accent2);width:100%}
-.gw-assistant-body .notes-ai-btn{font-size:12px;color:var(--accent2);background:var(--surface);border:1px solid var(--mint-deep);border-radius:10px;padding:7px 11px;cursor:pointer;text-align:left}
+/* right-rail Assistant — design: a mint AI greeting bubble, then full-width suggestion buttons */
+.gw-ai-msg{display:flex;gap:9px;align-items:flex-start}
+.gw-ai-msg-avatar{flex:none;width:26px;height:26px;border-radius:50%;background:var(--mint);display:inline-flex;align-items:center;justify-content:center}
+.gw-ai-msg-bubble{background:var(--mint);color:var(--ink);font-size:13px;line-height:1.6;padding:11px 14px;border-radius:14px;border-top-left-radius:5px}
+.gw-assistant-body .notes-ai-toolbar{display:flex;flex-direction:column;align-items:stretch;gap:8px;padding-left:35px}
+.gw-assistant-body .notes-ai-label{font-size:11px;font-weight:600;color:var(--fg3);text-transform:uppercase;letter-spacing:.04em}
+.gw-assistant-body .notes-ai-btn{font-size:13px;color:var(--accent2);background:var(--surface);border:1px solid var(--mint-deep);border-radius:10px;padding:9px 12px;cursor:pointer;text-align:left}
 .gw-assistant-body .notes-ai-btn:hover{background:var(--mint)}
-/* the co-edit "updated" nudge: a compact left-aligned pill, not a full-width centred bar */
-.gw-canvas>.notes-coedit-refresh{align-self:flex-start;margin:8px 28px 0;font-size:12px;font-weight:600;color:var(--accent2);background:var(--mint);border:1px solid var(--mint-deep);border-radius:999px;padding:5px 12px;cursor:pointer}
+.gw-assistant-body .notes-ai-status{padding-left:35px;font-size:12px;color:var(--fg3)}
+/* the co-edit "updated" nudge: a floating bottom-left pill (only shown for real collaborators) */
+.gw-canvas>.notes-coedit-refresh{position:absolute;left:28px;bottom:18px;z-index:15;font-size:12px;font-weight:600;color:var(--accent2);background:var(--mint);border:1px solid var(--mint-deep);border-radius:999px;padding:6px 13px;cursor:pointer;box-shadow:var(--shadow-soft)}
+.gw-canvas{position:relative}
+/* editor content — highlight mark (Pro soft fill ↔ Creative underline), per the design */
+.gw-canvas .notes-editor-mount mark,.gw-canvas .notes-editor-mount [data-color]{background:#FCEFCF;border-radius:3px;padding:0 3px;color:inherit}
+.gw-canvas.creative .notes-editor-mount mark,.gw-canvas.creative .notes-editor-mount [data-color]{background:linear-gradient(transparent 62%, var(--hl-amber) 62%);border-radius:0;padding:0 1px}
+/* AI-authored blocks (Phase 3 AI block, suggestions) — mint frame + byline, per the design */
+.gw-canvas .notes-ai-block,.gw-canvas .notes-suggestion{border:1.5px solid var(--mint-border);border-radius:16px;background:var(--mint-wash);overflow:hidden}
+.gw-canvas .notes-ai-block-byline,.gw-canvas .notes-suggestion-byline{display:flex;align-items:center;gap:7px;padding:10px 16px;border-bottom:1px solid var(--mint-deep);font-size:12px;font-weight:600;color:var(--accent2)}
 @media(max-width:1100px){.gw-shell{grid-template-columns:248px minmax(0,1fr)}.gw-rail{display:none}}
 @media(max-width:760px){.gw-shell{grid-template-columns:1fr}.gw-left-rail{display:none}}
 

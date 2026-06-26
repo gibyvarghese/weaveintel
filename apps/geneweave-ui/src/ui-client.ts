@@ -1724,6 +1724,14 @@ function renderHomeWorkspace() {
 
 function renderApp() {
   const wrap = h('div', {className:'app'});
+  // weaveNotes (design handoff): the Notes app is a FULL-BLEED 3-column surface — its own
+  // notebooks rail is the primary nav (the brand logo returns to the rest of the app), so we
+  // skip the global workspace nav + top-card header to match the standalone design exactly.
+  if (state.view === 'notes') {
+    wrap.classList.add('app-fullbleed');
+    wrap.appendChild(renderNotesView(render));
+    return wrap;
+  }
   wrap.appendChild(renderWorkspaceNav({
     render,
     openConnectorsView: () => { void openConnectorsView(render); },

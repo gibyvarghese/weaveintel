@@ -30,7 +30,8 @@ import { renderCapturePanel } from './notes-capture.js';
 import { wireNoteHistory, wireNoteComments, wireNoteSynced, renderWorkspaceAsk, type SimplePanel } from './notes-workspace-ui.js';
 import { renderEditorCanvas, type OverflowItem } from './notes-editor-canvas.js';
 import { renderRightRail } from './notes-right-rail.js';
-import { wovenMarkSvg, wordmarkHtml } from './notes-brand.js';
+import { renderLeftRail } from './notes-left-rail.js';
+import { wovenMarkSvg } from './notes-brand.js';
 
 /** The live co-editing session for the currently-open note (Phase 2). */
 let _activeCoedit: NoteCoeditSession | null = null;
@@ -147,134 +148,6 @@ function destroyActiveEditor(): void {
   teardownCoedit(); // also leave the live co-editing room (Phase 2)
 }
 
-// ── Note list panel ───────────────────────────────────────────────────────────
-
-function renderNoteRow(note: NoteListItem, render: () => void): HTMLElement {
-  const isFav = note.favorite === 1;
-  return h('div', {
-    className: `note-row${state.currentNoteId === note.id ? ' active' : ''}`,
-    onClick: async () => {
-      destroyActiveEditor();
-      await loadNote(note.id);
-      state.notesView = 'editor';
-      render();
-    },
-  },
-    h('span', { className: 'note-row-icon' }, note.icon ?? '📄'),
-    h('div', { className: 'note-row-body' },
-      h('div', { className: 'note-row-title' }, note.title || 'Untitled'),
-      h('div', { className: 'note-row-meta' },
-        new Date(note.updated_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
-        note.sensitivity !== 'normal' ? h('span', { className: 'note-sens-badge' }, note.sensitivity) : null,
-      ),
-    ),
-    h('button', {
-      className: `note-fav-btn${isFav ? ' active' : ''}`,
-      title: isFav ? 'Unfavourite' : 'Favourite',
-      onClick: async (e: Event) => {
-        e.stopPropagation();
-        await toggleFavorite(note);
-        await loadNotesList();
-        render();
-      },
-    }, isFav ? '★' : '☆'),
-  );
-}
-
-function renderNotesList(render: () => void): HTMLElement {
-  const notes: NoteListItem[] = state.notesItems ?? [];
-  const loading: boolean = state.notesLoading as boolean;
-
-  const favs = notes.filter((n) => n.favorite);
-  const others = notes.filter((n) => !n.favorite);
-
-  return h('div', { className: 'notes-list-panel' },
-    // geneWeave brand lockup (woven mark + wordmark) — the rail header per the design.
-    h('div', { className: 'gw-brand' },
-      h('span', { className: 'gw-brand-mark', innerHTML: wovenMarkSvg(24, 'duo') }),
-      h('span', { className: 'gw-brand-word', innerHTML: wordmarkHtml() }),
-    ),
-    h('div', { className: 'notes-list-header' },
-      h('div', { className: 'notes-list-title' }, 'Notes'),
-      h('div', { className: 'notes-list-actions' },
-        h('button', {
-          className: 'notes-new-btn',
-          title: 'New note',
-          onClick: async () => {
-            const note = await createNote();
-            if (note) {
-              state.notesItems = [note as NoteListItem, ...(state.notesItems as NoteListItem[])];
-              await loadNote(note.id);
-              state.notesView = 'editor';
-              render();
-            }
-          },
-        }, '+ New'),
-        h('button', {
-          className: 'notes-templates-btn',
-          title: 'Templates',
-          onClick: async () => {
-            await loadNoteTemplates();
-            state.notesView = 'templates';
-            render();
-          },
-        }, '⊞ Templates'),
-        h('button', {
-          className: 'notes-databases-btn',
-          title: 'Databases (tables, with AI auto-fill)',
-          onClick: () => { state.currentDatabaseId = null; state.notesView = 'databases'; render(); },
-        }, '🗃 Databases'),
-      ),
-    ),
-    h('div', { className: 'notes-search-bar' },
-      h('input', {
-        className: 'notes-search-input',
-        type: 'text',
-        placeholder: '🔍 Search notes…',
-        value: state.notesSearch as string,
-        onInput: (e: Event) => {
-          state.notesSearch = (e.target as HTMLInputElement).value;
-          void loadNotesList().then(render);
-        },
-      })
-    ),
-    // weaveNotes Phase 7: the capture panel (quick jot + clip a web page).
-    renderCapturePanel(render, () => loadNotesList({ search: state.notesSearch as string })),
-    // weaveNotes Phase 8: "Ask your workspace" — cited RAG search over notes + past chats.
-    renderWorkspaceAsk((id) => { void loadNote(id).then(() => { state.notesView = 'editor'; render(); }); }),
-    loading
-      ? h('div', { className: 'notes-loading' }, 'Loading…')
-      : h('div', { className: 'notes-items' },
-          favs.length > 0 ? h('div', { className: 'notes-section' },
-            h('div', { className: 'notes-section-label' }, '★ Favourites'),
-            ...favs.map((n) => renderNoteRow(n, render))
-          ) : null,
-          h('div', { className: 'notes-section' },
-            favs.length > 0 ? h('div', { className: 'notes-section-label' }, 'All notes') : null,
-            ...others.map((n) => renderNoteRow(n, render)),
-            others.length === 0 && favs.length === 0
-              ? h('div', { className: 'notes-empty' },
-                  h('div', null, '📄'),
-                  h('div', null, 'No notes yet'),
-                  h('button', {
-                    className: 'notes-new-btn-lg',
-                    onClick: async () => {
-                      const note = await createNote();
-                      if (note) {
-                        state.notesItems = [note as NoteListItem];
-                        await loadNote(note.id);
-                        state.notesView = 'editor';
-                        render();
-                      }
-                    },
-                  }, 'Create your first note')
-                )
-              : null,
-          )
-        )
-  );
-}
-
 // ── Templates gallery ─────────────────────────────────────────────────────────
 
 function renderTemplatesGallery(render: () => void): HTMLElement {
@@ -308,6 +181,37 @@ function renderTemplatesGallery(render: () => void): HTMLElement {
         : null,
     )
   );
+}
+
+// ── "+ Insert" menu (the secondary creators, kept out of the calm left rail) ──────
+
+/** A lightweight centred modal overlay holding an arbitrary widget. */
+function openCenterModal(title: string, body: HTMLElement): void {
+  const overlay = h('div', { className: 'gw-modal-overlay', onClick: (e: Event) => { if (e.target === overlay) overlay.remove(); } },
+    h('div', { className: 'gw-modal' },
+      h('div', { className: 'gw-modal-head' }, h('span', null, title), h('button', { className: 'gw-modal-x', onClick: () => overlay.remove() }, '×')),
+      body,
+    ),
+  ) as HTMLElement;
+  document.body.appendChild(overlay);
+}
+
+function buildInsertMenu(render: () => void): OverflowItem[] {
+  const openNote = async (id: string): Promise<void> => { await loadNote(id); state.notesView = 'editor'; render(); };
+  return [
+    { label: '📝 New note', title: 'Create a blank note', onClick: async () => { const n = await createNote(); if (n) { state.notesItems = [n as NoteListItem, ...(state.notesItems as NoteListItem[])]; await openNote(n.id); } } },
+    { label: '⊞ New from template', title: 'Start from a template', onClick: async () => { await loadNoteTemplates(); state.notesView = 'templates'; render(); } },
+    { label: '🌐 Capture a web page', title: 'Clip a public page into a note', onClick: async () => {
+        const url = prompt('Paste a public web page URL to clip into a note:'); if (!url) return;
+        const res = await api.post('/api/me/notes/capture/web', { url }).catch(() => null);
+        const data = res && res.ok ? await res.json().catch(() => ({})) as { noteId?: string } : null;
+        if (data?.noteId) { await loadNotesList(); await openNote(data.noteId); } else { alert('Could not clip that page.'); }
+      } },
+    { label: '✦ Ask your workspace', title: 'Search your notes + chats with citations', onClick: () => {
+        openCenterModal('Ask your workspace', renderWorkspaceAsk((id) => { void openNote(id); document.querySelector('.gw-modal-overlay')?.remove(); }));
+      } },
+    { label: '🗃 Databases', title: 'Tables with AI auto-fill', onClick: () => { state.currentDatabaseId = null; state.notesView = 'databases'; render(); } },
+  ];
 }
 
 // ── Editor panel ──────────────────────────────────────────────────────────────
@@ -361,22 +265,22 @@ function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLEle
   let lastLocalEditTs = 0;
   let mountTs = 0;
   const presenceBadge = h('span', { className: 'notes-presence-badge', title: 'People editing this note', style: 'display:none' }) as HTMLElement;
-  const refreshNudge = h('button', {
-    className: 'notes-coedit-refresh', title: 'A collaborator edited — click to load the latest', style: 'display:none',
-    onClick: async () => { refreshNudge.style.display = 'none'; await loadNote(note.id); render(); },
-  }, '↻ Updated') as HTMLElement;
+  let peerCount = 1;
   const updatePresence = (count: number): void => {
+    peerCount = count;
     if (count > 1) { presenceBadge.textContent = `● ${count} editing`; presenceBadge.style.display = ''; }
     else { presenceBadge.style.display = 'none'; }
   };
-  // A remote edit arrived: if you're not actively typing, refresh silently; else nudge.
-  // Ignore the first ~1.5s after mount — joining the co-edit room replays the seed op, which
-  // is not a real collaborator edit and would otherwise flash the nudge for a solo author.
+  // A remote edit arrived. Only surface the "updated" nudge when there is ACTUALLY another
+  // editor present — a solo author only ever sees their own op echoed back, which is not a
+  // collaborator edit. (Also ignore the first ~1.5s while the seed op replays on join.)
   const onRemoteChange = (): void => {
-    if (Date.now() - mountTs < 1500) return;
+    if (Date.now() - mountTs < 1500) return; // ignore the seed-op replay on join
     const typingNow = editorContainer.contains(document.activeElement) && Date.now() - lastLocalEditTs < 2500;
-    if (typingNow) { refreshNudge.style.display = ''; }
-    else { void loadNote(note.id).then(render); }
+    // Reconcile silently when idle; while you are mid-keystroke, defer until you pause (no
+    // intrusive banner — the design has none, and a solo author only sees their own echo).
+    if (!typingNow) { void loadNote(note.id).then(render); }
+    void peerCount;
   };
   const shareBtn = h('button', {
     className: 'notes-share-btn', title: 'Share this note for co-editing',
@@ -459,8 +363,16 @@ function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLEle
     } catch { /* editor not ready / command unavailable */ }
   };
 
-  // — the Assistant body (AI toolbar + pending-suggestion panel) for the right rail —
-  const assistantBody = h('div', { className: 'gw-assistant-body' }, aiToolbar, aiPanel);
+  // — the Assistant body for the right rail: a mint AI greeting bubble (design), then the
+  //   AI co-author actions (styled as suggestion buttons) + the pending-suggestion panel —
+  const assistantBody = h('div', { className: 'gw-assistant-body' },
+    h('div', { className: 'gw-ai-msg' },
+      h('span', { className: 'gw-ai-msg-avatar', innerHTML: wovenMarkSvg(14, 'ai') }),
+      h('div', { className: 'gw-ai-msg-bubble' }, 'I can help with this note — continue your writing, rewrite a passage, summarize the page, or turn it into something new.'),
+    ),
+    aiToolbar,
+    aiPanel,
+  );
 
   // — compute the outline from the note's headings (best-effort from doc_json) —
   const outline = computeOutline(note.doc_json);
@@ -471,13 +383,13 @@ function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLEle
     creative,
     metaText: 'Edited just now',
     isLive: true,
-    iconEl, titleInput, editorContainer, presenceBadge, refreshNudge,
+    iconEl, titleInput, editorContainer, presenceBadge,
     inlinePanels: [historyPanel, commentsPanel, syncedPanel],
     extractResult,
     onSetTheme: (t) => { state.notesTheme = t; render(); },
     onAskAi: () => { _railTab = 'assistant'; render(); },
-    onInsert: () => { editorContainer.querySelector<HTMLElement>('[contenteditable]')?.focus(); },
     format: { bold: () => fmt('toggleBold'), italic: () => fmt('toggleItalic'), underline: () => fmt('toggleUnderline'), highlight: (color) => fmt('toggleHighlight', { color }) },
+    insert: buildInsertMenu(render),
     overflow,
   });
 
@@ -582,12 +494,24 @@ export function renderNotesView(render: () => void): HTMLElement {
 
   const rightRail = composed ? composed.rail : renderEmptyAssistantRail();
 
+  const leftRail = renderLeftRail({
+    notes: (state.notesItems as NoteListItem[]) ?? [],
+    loading: state.notesLoading as boolean,
+    currentNoteId: state.currentNoteId as string | null,
+    search: (state.notesSearch as string) ?? '',
+    onSearch: (q) => { state.notesSearch = q; void loadNotesList().then(render); },
+    onOpenNote: async (id) => { destroyActiveEditor(); await loadNote(id); state.notesView = 'editor'; render(); },
+    onToggleFav: async (n) => { await toggleFavorite(n); await loadNotesList(); render(); },
+    onNewNote: async () => {
+      const note = await createNote();
+      if (note) { state.notesItems = [note as NoteListItem, ...(state.notesItems as NoteListItem[])]; await loadNote(note.id); state.notesView = 'editor'; render(); }
+    },
+    onTemplates: async () => { await loadNoteTemplates(); state.notesView = 'templates'; render(); },
+    onHome: () => { state.view = 'home'; render(); },
+  });
+
   return h('div', { className: 'gw-notes notes-full-view' },
-    h('div', { className: 'gw-shell' },
-      h('nav', { className: 'gw-left-rail' }, renderNotesList(render)),
-      centre,
-      rightRail,
-    ),
+    h('div', { className: 'gw-shell' }, leftRail, centre, rightRail),
   );
 }
 
