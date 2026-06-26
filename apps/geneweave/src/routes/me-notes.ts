@@ -53,6 +53,7 @@ import {
 } from '../note-coedit-sql.js';
 import { noteCoeditHub } from '../note-coedit-hub.js';
 import { createNoteAiService, type NoteAiGenerate, type AiAction } from '../note-ai-sql.js';
+import { createNotePublishService, type PublishFormat } from '../note-publish-sql.js';
 import { meTaskRepo as taskRepo } from './me-stores.js';
 import { createActionItem } from '@weaveintel/human-tasks';
 import { safePageInt } from './index.js';
@@ -70,11 +71,13 @@ void createInMemoryNoteRepository; // keep the import available to embedders wit
  * without changing this file. Tests/embedders may inject their own repository via
  * `opts.noteRepository`.
  */
-export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts: { noteRepository?: NoteRepository; aiGenerate?: NoteAiGenerate } = {}): void {
+export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts: { noteRepository?: NoteRepository; aiGenerate?: NoteAiGenerate; jwtSecret?: string; publicBaseUrl?: string } = {}): void {
   const notes = opts.noteRepository ?? createSqlNoteRepository(db);
   // weaveNotes Phase 3: the AI co-author service (suggestions, agent edits, AI blocks).
   // Only wired when the host provides an LLM generator (so unit/embedder setups stay LLM-free).
   const noteAi = opts.aiGenerate ? createNoteAiService(db, opts.aiGenerate) : null;
+  // weaveNotes Phase 4: the publish service (note → shareable artifact, sensitivity-gated).
+  const publish = createNotePublishService(db, { jwtSecret: opts.jwtSecret ?? process.env['JWT_SECRET'] ?? 'insecure-dev-secret', ...(opts.publicBaseUrl ? { publicBaseUrl: opts.publicBaseUrl } : {}) });
 
   // ── Notes list ─────────────────────────────────────────────────────────────
 
@@ -425,6 +428,32 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     const r = await noteAi.reject(params['sid']!, auth.userId, access);
     res.writeHead(r.ok ? 200 : 400, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(r));
+  }, { auth: true });
+
+  // ── weaveNotes Phase 4: publish a note as a shareable artifact ────────────────
+  //
+  //   POST /api/me/notes/:id/emit-artifact   note → Markdown/HTML artifact (+ optional
+  //                                          public share link). collaborator+. The note's
+  //                                          `sensitivity` gates it: `restricted` is refused
+  //                                          (403); content is redacted (secrets always,
+  //                                          PII for confidential) before it can be shared.
+  router.post('/api/me/notes/:id/emit-artifact', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    if (!db.saveArtifact) { res.writeHead(501); res.end(JSON.stringify({ error: 'artifact storage not available' })); return; }
+    const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    if (!roleAtLeast(access.role, 'collaborator')) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden: viewers cannot publish' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    const result = await publish.emit({
+      noteId: params['id']!, access, publishedBy: 'user',
+      format: (body['format'] === 'html' ? 'html' : 'markdown') as PublishFormat,
+      share: body['share'] !== false, // default: also mint a share link
+      ...(typeof body['password'] === 'string' && body['password'] ? { password: body['password'] } : {}),
+      ...(typeof body['expiresInDays'] === 'number' ? { expiresInDays: body['expiresInDays'] } : {}),
+    });
+    res.writeHead(result.ok ? 201 : (result.code ?? 400), { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
   }, { auth: true });
 
   router.post('/api/me/notes', async (req, res, _params, auth) => {

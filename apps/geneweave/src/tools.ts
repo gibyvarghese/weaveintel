@@ -944,6 +944,15 @@ export interface ToolRegistryOptions {
    * cannot, and viewers are refused.
    */
   noteEdit?: (args: { userId: string; noteId: string; markdown: string; mode: 'direct' | 'suggest' }) => Promise<{ ok: boolean; error?: string; applied?: number; suggestionId?: string }>;
+  /**
+   * weaveNotes Phase 4: note publish callback. When set, the `note_publish` built-in
+   * tool is available so the agent can turn one of the user's notes into a shareable
+   * artifact (Markdown/HTML). The callback resolves the user's note access + enforces
+   * the sensitivity gate (a `restricted` note is refused; secrets/PII are redacted), and
+   * — for safety — the agent creates the artifact PRIVATELY (it never auto-mints a public
+   * link; a human opts into public sharing).
+   */
+  notePublish?: (args: { userId: string; noteId: string; format?: 'markdown' | 'html' }) => Promise<{ ok: boolean; error?: string; artifactId?: string; redactions?: number; sourceSensitivity?: string }>;
 }
 
 export function filterToolNamesByPersona(toolNames: string[], persona: string | null | undefined): string[] {
@@ -1504,6 +1513,28 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
           return JSON.stringify({ ok: true, mode: args.mode === 'direct' ? 'direct' : 'suggest', applied: r.applied ?? 0, suggestionId: r.suggestionId ?? null });
         },
         tags: ['notes', 'output'],
+      }),
+    } : {}),
+    // weaveNotes Phase 4: note publish tool — available when notePublish callback is set.
+    ...(opts?.notePublish && opts.currentUserId ? {
+      note_publish: weaveTool({
+        name: 'note_publish',
+        description: 'Publish one of the user\'s notes as a shareable artifact (a typed, versioned document). Use when the user asks to "publish", "export", or "turn this note into a document/report". You only need the note id. A "restricted" note is refused; secrets and (for confidential notes) personal data are redacted automatically. For safety the artifact is created privately — a human chooses whether to make a public link.',
+        parameters: {
+          type: 'object',
+          properties: {
+            noteId: { type: 'string', description: 'The id of the note to publish (the user must own it or be a collaborator).' },
+            format: { type: 'string', enum: ['markdown', 'html'], description: 'Artifact format (default markdown).' },
+          },
+          required: ['noteId'],
+        },
+        execute: async (args: { noteId: string; format?: 'markdown' | 'html' }) => {
+          if (!opts.notePublish || !opts.currentUserId) return { content: 'Note publishing is unavailable in this context.', isError: true };
+          const r = await opts.notePublish({ userId: opts.currentUserId, noteId: args.noteId, ...(args.format ? { format: args.format } : {}) });
+          if (!r.ok) return { content: `note_publish failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, artifactId: r.artifactId, format: args.format ?? 'markdown', redactions: r.redactions ?? 0, sensitivity: r.sourceSensitivity });
+        },
+        tags: ['notes', 'artifacts', 'output'],
       }),
     } : {}),
     // m77: Artifact emission tool — available when artifactSave callback is set

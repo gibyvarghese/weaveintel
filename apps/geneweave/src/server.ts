@@ -285,7 +285,13 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   registerMeAgendaRoutes(router, db);
   // weaveNotes Phase 3: give the notes routes an LLM generator (built from the chat
   // engine's resolved providers + default model) so the AI co-author actions work.
-  registerMeNotesRoutes(router, db, { aiGenerate: createModelTextGenerator(chatEngine.modelConfig) });
+  // weaveNotes Phase 4: pass the share-token secret + public base url so a note can be
+  // published as a shareable artifact.
+  registerMeNotesRoutes(router, db, {
+    aiGenerate: createModelTextGenerator(chatEngine.modelConfig),
+    jwtSecret,
+    ...(publicBaseUrl ? { publicBaseUrl } : {}),
+  });
   registerMeComplianceRoutes(router, db, config.runtime);
   registerArtifactRoutes(router, db, { jwtSecret, publicBaseUrl });
   registerShareRoutes(router, db, { jwtSecret });

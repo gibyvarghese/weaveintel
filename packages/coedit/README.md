@@ -166,6 +166,18 @@ In geneWeave (Phase 2): `note_coedit_docs` (snapshot) + `note_coedit_ops` (op lo
 403), broadcasts ops + presence live over per-note SSE, and keeps the note's rendered
 `doc_json` in sync so the legacy single-user editor still reads correctly.
 
+## Publishing a note as an artifact (weaveNotes Phase 4)
+
+`blocksToMarkdown` / `blocksToHtml` (above) are also the bridge that turns a note into a
+**shareable artifact** with a public link. The safety layer lives in
+[`@weaveintel/artifacts`](../artifacts): `redactText(text, level)` scrubs secrets (API
+keys, JWTs, private keys, bearer tokens) — and, at `pii` level, emails/phones/SSNs/cards —
+before anything is published; `publishPolicyForSensitivity(sensitivity)` decides the rest
+(`restricted` → refused, `confidential` → redact PII + secrets, `normal` → scrub secrets).
+In geneWeave: `POST /api/me/notes/:id/emit-artifact` (and the `note_publish` agent tool)
+render → gate → redact → `saveArtifact` → optional public share token, so a stray key in a
+note never leaks the moment it is shared, and a `restricted` note can never be published.
+
 ## Security (trusted relay)
 
 CRDTs converge but are **not** Byzantine-tolerant — so the server validates every

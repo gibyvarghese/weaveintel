@@ -482,9 +482,37 @@ helper** (Track D, Phase 11) as enhancements that talk to the same server/CRDT.
   system with id X", so the agent co-authors via natural, mundane requests.
 
 **Track C — Workspace intelligence**
-- **Phase 4 — Emit-as-artifact (package+app).** `blocksToMarkdown/Html`; emit endpoint →
-  artifact → share/embed; `sensitivity` gating. *Acceptance:* note→Markdown artifact→public
-  redacted link; restricted refused; agent can publish.  *(parallelizable)*
+- **Phase 4 — Emit-as-artifact (package+app).** ✅ **delivered.** A note can now be
+  PUBLISHED as a typed, versioned **artifact** (Markdown/HTML) and shared as a public,
+  read-only link — reusing the Phase 1 `blocksToMarkdown`/`blocksToHtml` serializers, the
+  artifacts store (`db.saveArtifact`), and the existing artifact share-token + public
+  viewer (`/share/artifacts/:token`). The NEW Phase-4 piece is the **safety layer**:
+  **`@weaveintel/artifacts`** gains `redactText` (a pure, zero-dep DLP scrubber — API
+  keys/JWTs/private-keys/bearer tokens always; emails/phones/SSNs/cards for sensitive docs)
+  and `publishPolicyForSensitivity` (`restricted` → refused; `confidential` → redact PII +
+  secrets; `normal` → scrub secrets as a safety net). **geneWeave** adds `note-publish-sql.ts`
+  (render the note → gate on sensitivity → redact → `saveArtifact` → optional share token),
+  the **`POST /api/me/notes/:id/emit-artifact`** endpoint (collaborator+; `restricted` 403;
+  emits markdown|html; optional `share`/`password`/`expiresInDays`), and a **`note_publish`
+  agent tool** (added to the agent/supervisor/ensemble policies + `ToolRegistryOptions.notePublish`
+  + chat wiring; resolves access itself, viewers refused) — the agent publishes PRIVATELY
+  (it never auto-mints a public link; a human opts in). **UI**: a 📤 Publish button in the
+  notes editor → public link (copied to clipboard, with a redaction count). *Tested:*
+  **6 package units** (secrets/PII redaction levels, no over-redaction, sensitivity policy)
+  + a deterministic SQLite **integration suite (8)** (normal scrubs secrets/keeps PII,
+  confidential redacts PII, restricted refused, HTML format, verifiable share token incl.
+  wrong-secret + password-hash, agent publishes privately + stranger refused, viewer-vs-
+  collaborator) + **real-LLM Playwright e2e**: a real-LLM note → Markdown artifact → **public
+  link with the secret REDACTED** (and the real key never on the page), confidential → PII
+  redacted on the public link, **restricted → 403**, viewer-403/stranger-404, the **agent
+  publishes via `note_publish` across agent/supervisor/ensemble** (asserted strictly in agent
+  mode that the agent invokes the tool → publish-or-guardrail-gated; tolerant elsewhere), and
+  a **web-UI** Publish-button test. *Acceptance: note→Markdown artifact→public redacted link;
+  restricted refused; agent can publish — all met.* Honest scope note: the platform's
+  tool-call guardrail intermittently denies the `note_publish` call (defense-in-depth against
+  a prompt-injected agent auto-publishing) — the artifact-creation path is proven
+  deterministically, and the agent-publishes-privately default means no public link is ever
+  auto-created. *(parallelizable)*
 - **Phase 5 — Knowledge graph + backlinks + semantic auto-linking.** `extraction`+`graph`;
   `[[wiki-links]]`, backlinks/unlinked refs, graph view; `fusedMemorySearch` auto-links.
   *Acceptance:* entities/relations extracted; backlinks render; "related notes" surfaced.

@@ -333,6 +333,23 @@ function renderEditorPanel(note: NoteDoc, render: () => void): HTMLElement {
     },
   }, '🔗 Share') as HTMLElement;
 
+  // weaveNotes Phase 4 — publish the note as a shareable artifact (a public, read-only
+  // document link). A `restricted` note is refused; secrets/PII are redacted server-side.
+  const publishBtn = h('button', {
+    className: 'notes-publish-btn', title: 'Publish this note as a shareable document',
+    onClick: async () => {
+      publishBtn.setAttribute('disabled', 'true');
+      try {
+        const res = await api.post(`/api/me/notes/${note.id}/emit-artifact`, { format: 'markdown', share: true });
+        const data = await res.json().catch(() => ({})) as { ok?: boolean; shareUrl?: string; error?: string; redactions?: number };
+        if (!res.ok || !data.ok) { alert(`Could not publish: ${data.error ?? res.status}`); return; }
+        const redactionNote = data.redactions ? `\n\n(${data.redactions} sensitive item(s) were redacted before publishing.)` : '';
+        if (data.shareUrl) { try { await navigator.clipboard.writeText(data.shareUrl); } catch { /* blocked */ } }
+        prompt(`Published! Public link (copied to clipboard):${redactionNote}`, data.shareUrl ?? '(no link)');
+      } finally { publishBtn.removeAttribute('disabled'); }
+    },
+  }, '📤 Publish') as HTMLElement;
+
   const iconEl = h('span', {
     className: 'notes-editor-icon',
     title: 'Set icon',
@@ -353,6 +370,7 @@ function renderEditorPanel(note: NoteDoc, render: () => void): HTMLElement {
         presenceBadge,
         refreshNudge,
         shareBtn,
+        publishBtn,
         h('button', {
           className: `notes-fav-btn${isFav ? ' active' : ''}`,
           title: isFav ? 'Unfavourite' : 'Favourite',
