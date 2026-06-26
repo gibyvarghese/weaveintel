@@ -54,6 +54,7 @@ import {
 import { noteCoeditHub } from '../note-coedit-hub.js';
 import { createNoteAiService, type NoteAiGenerate, type AiAction } from '../note-ai-sql.js';
 import { createNotePublishService, type PublishFormat } from '../note-publish-sql.js';
+import { createNoteGraphService } from '../note-graph-sql.js';
 import { meTaskRepo as taskRepo } from './me-stores.js';
 import { createActionItem } from '@weaveintel/human-tasks';
 import { safePageInt } from './index.js';
@@ -78,6 +79,10 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
   const noteAi = opts.aiGenerate ? createNoteAiService(db, opts.aiGenerate) : null;
   // weaveNotes Phase 4: the publish service (note → shareable artifact, sensitivity-gated).
   const publish = createNotePublishService(db, { jwtSecret: opts.jwtSecret ?? process.env['JWT_SECRET'] ?? 'insecure-dev-secret', ...(opts.publicBaseUrl ? { publicBaseUrl: opts.publicBaseUrl } : {}) });
+  // weaveNotes Phase 5: the knowledge-graph service (wiki-links/backlinks, entity/relation
+  // extraction, unlinked mentions, semantic related notes). Entity extraction needs the LLM
+  // generator; the rest works without it.
+  const noteGraph = createNoteGraphService(db, opts.aiGenerate ? { generate: opts.aiGenerate } : {});
 
   // ── Notes list ─────────────────────────────────────────────────────────────
 
@@ -570,9 +575,53 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
 
   router.get('/api/me/notes/:id/backlinks', async (_req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
-    const backlinks = await notes.listBacklinks('note', params['id']!);
+    // weaveNotes Phase 5: resolve backlinks to {noteId, title} for the connections panel.
+    const backlinks = await noteGraph.backlinks(params['id']!, auth.userId);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ backlinks }));
+  }, { auth: true });
+
+  // ── weaveNotes Phase 5: knowledge graph (index + connections) ─────────────────
+  //
+  //   POST /api/me/notes/:id/index     (re)index a note: resolve [[wiki-links]] → note
+  //                                    links, extract entities/relations (LLM), embed for
+  //                                    semantic search. collaborator+.
+  //   GET  /api/me/notes/:id/unlinked  notes whose title this note mentions but hasn't linked
+  //   GET  /api/me/notes/:id/related   semantically related notes (cosine over embeddings)
+  //   GET  /api/me/notes/:id/graph     the local knowledge graph (nodes + edges) for the UI
+  router.post('/api/me/notes/:id/index', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    if (!roleAtLeast(access.role, 'collaborator')) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden: viewers cannot index' })); return; }
+    const result = await noteGraph.indexNote({ noteId: params['id']!, access });
+    res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
+  }, { auth: true });
+
+  router.get('/api/me/notes/:id/unlinked', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ unlinked: await noteGraph.unlinkedMentions(params['id']!, access) }));
+  }, { auth: true });
+
+  router.get('/api/me/notes/:id/related', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    const topK = safePageInt(new URL(req.url ?? '/', 'http://x').searchParams.get('limit'), 5, 1, 20);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ related: await noteGraph.relatedNotes(params['id']!, access, topK) }));
+  }, { auth: true });
+
+  router.get('/api/me/notes/:id/graph', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(await noteGraph.graph(params['id']!, access)));
   }, { auth: true });
 
   // ── WC8: Save-time extraction pipeline ────────────────────────────────────

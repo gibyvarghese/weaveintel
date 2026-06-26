@@ -178,6 +178,20 @@ In geneWeave: `POST /api/me/notes/:id/emit-artifact` (and the `note_publish` age
 render → gate → redact → `saveArtifact` → optional public share token, so a stray key in a
 note never leaks the moment it is shared, and a `restricted` note can never be published.
 
+## Knowledge graph (weaveNotes Phase 5)
+
+Notes connect into a browsable web of meaning. The pieces live in sibling packages so they
+stay reusable: [`@weaveintel/notes`](../notes) provides `parseWikiLinks` (`[[Title]]`) +
+`findUnlinkedMentions`; [`@weaveintel/extraction`](../extraction) provides
+`extractKnowledgeGraph(text, generate)` (model-agnostic LLM entity/relation extraction);
+[`@weaveintel/graph`](../graph) supplies the entity/edge shapes; and `@weaveintel/cache`'s
+`cosineSimilarity` ranks note embeddings for "related notes". geneWeave's `note-graph-sql.ts`
+`indexNote` ties them together — resolving `[[wiki-links]]` into the `note_links` table (so
+backlinks come for free), extracting entities/relations, and embedding the note — and exposes
+`GET /api/me/notes/:id/{backlinks,unlinked,related,graph}` plus a `find_related_notes` agent
+tool. The editor's 🔗 **Connections** panel renders backlinks, unlinked mentions, related notes,
+and a small knowledge-graph map.
+
 ## Security (trusted relay)
 
 CRDTs converge but are **not** Byzantine-tolerant — so the server validates every

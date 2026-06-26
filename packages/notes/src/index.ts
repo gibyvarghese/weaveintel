@@ -37,3 +37,13 @@ export {
   extractTaskItems,
   extractPlainText,
 } from './extract.js';
+
+// weaveNotes Phase 5 — knowledge graph: wiki-link parsing + unlinked-mention detection.
+export {
+  type WikiLink,
+  type UnlinkedMention,
+  type FindUnlinkedOptions,
+  parseWikiLinks,
+  findUnlinkedMentions,
+  titleKey,
+} from './wiki-links.js';

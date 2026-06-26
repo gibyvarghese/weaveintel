@@ -513,9 +513,33 @@ helper** (Track D, Phase 11) as enhancements that talk to the same server/CRDT.
   a prompt-injected agent auto-publishing) — the artifact-creation path is proven
   deterministically, and the agent-publishes-privately default means no public link is ever
   auto-created. *(parallelizable)*
-- **Phase 5 — Knowledge graph + backlinks + semantic auto-linking.** `extraction`+`graph`;
-  `[[wiki-links]]`, backlinks/unlinked refs, graph view; `fusedMemorySearch` auto-links.
-  *Acceptance:* entities/relations extracted; backlinks render; "related notes" surfaced.
+- **Phase 5 — Knowledge graph + backlinks + semantic auto-linking.** ✅ **delivered.**
+  Notes are now a connected web of meaning (the Obsidian/Tana idea). **Package primitives**:
+  `@weaveintel/notes` gains `parseWikiLinks` (`[[Title]]` / `[[Title|alias]]`) +
+  `findUnlinkedMentions` (titles mentioned in prose but not yet linked — no substring/short-
+  title false positives); `@weaveintel/extraction` gains `extractKnowledgeGraph(text, generate)`
+  — LLM-backed entity + relation extraction that is model-AGNOSTIC (takes a `generate` callback)
+  and strictly sanitizes the JSON (dedupe, type-clamp, drop malformed triples, connect relation
+  endpoints). Reuses `@weaveintel/graph` (entity/edge shapes) + `@weaveintel/cache` cosineSimilarity
+  + the m46 `note_links` table (so `[[wiki-links]]` give **backlinks** for free). **geneWeave**:
+  `m102` (`note_entities` + `note_relations` + `note_embeddings`); `note-graph-sql.ts` — `indexNote`
+  (resolve wiki-links → note links idempotently, extract entities/relations via the LLM, embed the
+  note with `text-embedding-3-small`) + reads `backlinks` / `unlinkedMentions` / `relatedNotes`
+  (cosine over embeddings) / `graph` (nodes + edges) / `searchNotes`. Endpoints `POST /:id/index`
+  (collaborator+) and `GET /:id/{backlinks,unlinked,related,graph}` (any participant). A
+  **`find_related_notes` agent tool** (added to the always-on note tools + policies + chat wiring)
+  lets the agent semantically navigate the user's notes. **UI**: a 🔗 **Connections** panel in the
+  editor — Backlinks, Unlinked mentions, Related notes (with % scores), and a small SVG **knowledge
+  graph**. *Tested:* package units (wiki-links 7, knowledge-graph extraction 5) + a deterministic
+  SQLite **integration suite (8)** (wiki-link→backlink resolution, idempotent re-index, entity/
+  relation extraction, unlinked mentions, semantic related + search via a deterministic embedder,
+  graph build, owner-scoping) + **real-LLM Playwright e2e**: a connected vault → **entities
+  extracted**, `[[wiki-links]]` → **backlinks render with titles**, unlinked mention found, **related
+  notes surfaced** (research-hub scored closer to the quantum note than the pasta note), the graph
+  endpoint, viewer-403/stranger-404, the **agent navigates via `find_related_notes` across agent/
+  supervisor/ensemble**, and a **web-UI** Connections-panel test. 135 unit/integration green;
+  typecheck + builds clean. *Acceptance: entities/relations extracted; backlinks render; "related
+  notes" surfaced — all met.*
 - **Phase 6 — Databases/views + AI auto-fill + typed objects.** Extend `note_databases` with
   table/board/calendar/timeline/gallery + relations/rollups; AI fills properties from
   page+workspace+web. *Acceptance:* a view renders; AI auto-fills a column with citations.

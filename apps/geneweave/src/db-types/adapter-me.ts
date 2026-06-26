@@ -329,6 +329,39 @@ export interface NoteSuggestionRow {
   resolved_by: string | null;
 }
 
+// ── weaveNotes Phase 5 — notes knowledge graph (m102) ─────────────────────────
+
+export interface NoteEntityRow {
+  id: string;
+  note_id: string;
+  user_id: string;
+  tenant_id: string | null;
+  name: string;
+  name_key: string;
+  type: string;
+  created_at: number;
+}
+export interface NoteRelationRow {
+  id: string;
+  note_id: string;
+  user_id: string;
+  tenant_id: string | null;
+  subject: string;
+  predicate: string;
+  object: string;
+  created_at: number;
+}
+export interface NoteEmbeddingRow {
+  note_id: string;
+  user_id: string;
+  tenant_id: string | null;
+  dim: number;
+  embedding_json: string;
+  content_hash: string;
+  title: string | null;
+  updated_at: number;
+}
+
 export interface UserDeviceRow {
   id: string;
   user_id: string;
@@ -489,6 +522,14 @@ export interface IMeStore {
   getNoteSuggestion(id: string): Promise<NoteSuggestionRow | null>;
   listNoteSuggestions(noteId: string, status?: 'pending' | 'accepted' | 'rejected'): Promise<NoteSuggestionRow[]>;
   resolveNoteSuggestion(id: string, status: 'accepted' | 'rejected', resolvedAt: number, resolvedBy: string): Promise<number>;
+  // weaveNotes Phase 5 — notes knowledge graph (entities / relations / embeddings)
+  replaceNoteEntities(noteId: string, rows: NoteEntityRow[]): Promise<void>;
+  listNoteEntities(noteId: string): Promise<NoteEntityRow[]>;
+  replaceNoteRelations(noteId: string, rows: NoteRelationRow[]): Promise<void>;
+  listNoteRelations(noteId: string): Promise<NoteRelationRow[]>;
+  upsertNoteEmbedding(row: NoteEmbeddingRow): Promise<void>;
+  getNoteEmbedding(noteId: string): Promise<NoteEmbeddingRow | null>;
+  listUserNoteEmbeddings(userId: string): Promise<NoteEmbeddingRow[]>;
   // Registered outbound webhook endpoints
   createWebhookEndpoint(row: { id: string; tenant_id?: string | null; user_id: string; url: string; signing_secret: string; created_at: number }): Promise<void>;
   listWebhookEndpoints(userId: string): Promise<WebhookEndpointRow[]>;

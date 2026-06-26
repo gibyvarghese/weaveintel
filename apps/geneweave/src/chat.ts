@@ -56,6 +56,7 @@ import { DbToolApprovalGate } from './tool-approval-gate.js';
 import { createTemporalStore } from './temporal-store.js';
 import { createNoteAiService, createModelTextGenerator, agentCreateNote } from './note-ai-sql.js';
 import { createNotePublishService } from './note-publish-sql.js';
+import { createNoteGraphService } from './note-graph-sql.js';
 import {
   applySkillsToPrompt,
   type SkillMatch,
@@ -397,6 +398,9 @@ export class ChatEngine {
       // note and fill it with content it produced (research / summary / plan / to-dos).
       createNote: (a: { userId: string; tenantId?: string | null; title: string; markdown?: string }) =>
         agentCreateNote(db, a),
+      // weaveNotes Phase 5: wire the `find_related_notes` tool (semantic note search).
+      notesSearch: (a: { userId: string; tenantId?: string | null; query: string; limit?: number }) =>
+        createNoteGraphService(db).searchNotes({ userId: a.userId, tenantId: a.tenantId ?? null }, a.query, a.limit ?? 5),
     };
   }
 

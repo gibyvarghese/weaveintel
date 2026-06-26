@@ -9274,6 +9274,37 @@ export class SQLiteAdapter implements DatabaseAdapter {
       .run(status, resolvedAt, resolvedBy, id).changes;
   }
 
+  // weaveNotes Phase 5 — notes knowledge graph.
+  async replaceNoteEntities(noteId: string, rows: import('./db-types/adapter-me.js').NoteEntityRow[]): Promise<void> {
+    const del = this.d.prepare('DELETE FROM note_entities WHERE note_id = ?');
+    const ins = this.d.prepare('INSERT INTO note_entities (id, note_id, user_id, tenant_id, name, name_key, type, created_at) VALUES (@id,@note_id,@user_id,@tenant_id,@name,@name_key,@type,@created_at)');
+    this.d.transaction(() => { del.run(noteId); for (const r of rows) ins.run(r); })();
+  }
+  async listNoteEntities(noteId: string): Promise<import('./db-types/adapter-me.js').NoteEntityRow[]> {
+    return this.d.prepare('SELECT * FROM note_entities WHERE note_id = ? ORDER BY created_at ASC').all(noteId) as import('./db-types/adapter-me.js').NoteEntityRow[];
+  }
+  async replaceNoteRelations(noteId: string, rows: import('./db-types/adapter-me.js').NoteRelationRow[]): Promise<void> {
+    const del = this.d.prepare('DELETE FROM note_relations WHERE note_id = ?');
+    const ins = this.d.prepare('INSERT INTO note_relations (id, note_id, user_id, tenant_id, subject, predicate, object, created_at) VALUES (@id,@note_id,@user_id,@tenant_id,@subject,@predicate,@object,@created_at)');
+    this.d.transaction(() => { del.run(noteId); for (const r of rows) ins.run(r); })();
+  }
+  async listNoteRelations(noteId: string): Promise<import('./db-types/adapter-me.js').NoteRelationRow[]> {
+    return this.d.prepare('SELECT * FROM note_relations WHERE note_id = ? ORDER BY created_at ASC').all(noteId) as import('./db-types/adapter-me.js').NoteRelationRow[];
+  }
+  async upsertNoteEmbedding(row: import('./db-types/adapter-me.js').NoteEmbeddingRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO note_embeddings (note_id, user_id, tenant_id, dim, embedding_json, content_hash, title, updated_at)
+       VALUES (@note_id,@user_id,@tenant_id,@dim,@embedding_json,@content_hash,@title,@updated_at)
+       ON CONFLICT(note_id) DO UPDATE SET embedding_json=excluded.embedding_json, dim=excluded.dim, content_hash=excluded.content_hash, title=excluded.title, updated_at=excluded.updated_at`,
+    ).run(row);
+  }
+  async getNoteEmbedding(noteId: string): Promise<import('./db-types/adapter-me.js').NoteEmbeddingRow | null> {
+    return (this.d.prepare('SELECT * FROM note_embeddings WHERE note_id = ?').get(noteId) ?? null) as import('./db-types/adapter-me.js').NoteEmbeddingRow | null;
+  }
+  async listUserNoteEmbeddings(userId: string): Promise<import('./db-types/adapter-me.js').NoteEmbeddingRow[]> {
+    return this.d.prepare('SELECT * FROM note_embeddings WHERE user_id = ?').all(userId) as import('./db-types/adapter-me.js').NoteEmbeddingRow[];
+  }
+
   // Registered outbound webhook endpoints.
   async createWebhookEndpoint(row: { id: string; tenant_id?: string | null; user_id: string; url: string; signing_secret: string; created_at: number }): Promise<void> {
     this.d.prepare(

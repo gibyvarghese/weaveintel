@@ -962,6 +962,12 @@ export interface ToolRegistryOptions {
    * new note id, which the agent can pass to `note_edit` / `note_publish`.
    */
   createNote?: (args: { userId: string; tenantId?: string | null; title: string; markdown?: string }) => Promise<{ ok: boolean; error?: string; noteId?: string }>;
+  /**
+   * weaveNotes Phase 5: semantic note search. When set, the `find_related_notes` tool is
+   * available so the agent can find the user's notes most relevant to a query (knowledge-
+   * graph navigation) before answering, editing, or linking. Owner-scoped.
+   */
+  notesSearch?: (args: { userId: string; tenantId?: string | null; query: string; limit?: number }) => Promise<Array<{ noteId: string; title: string; score: number }>>;
 }
 
 export function filterToolNamesByPersona(toolNames: string[], persona: string | null | undefined): string[] {
@@ -1524,6 +1530,28 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
         tags: ['notes', 'output'],
       }),
     } : {}),
+    // weaveNotes Phase 5: semantic note search — available when notesSearch callback is set.
+    ...(opts?.notesSearch && opts.currentUserId ? {
+      find_related_notes: weaveTool({
+        name: 'find_related_notes',
+        description: 'Search the user\'s notes for the ones most relevant to a query (semantic similarity over their knowledge base). Use this before answering questions about "my notes", to find a note to edit/link/publish, or to discover related material. Returns matching notes with id + title + a relevance score.',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: 'What to look for across the user\'s notes.' },
+            limit: { type: 'number', description: 'Max results (default 5, max 20).' },
+          },
+          required: ['query'],
+        },
+        execute: async (args: { query: string; limit?: number }) => {
+          if (!opts.notesSearch || !opts.currentUserId) return { content: 'Note search is unavailable in this context.', isError: true };
+          const limit = Math.max(1, Math.min(20, Number(args.limit ?? 5)));
+          const results = await opts.notesSearch({ userId: opts.currentUserId, tenantId: opts.currentTenantId ?? null, query: args.query, limit });
+          return JSON.stringify({ query: args.query, count: results.length, notes: results });
+        },
+        tags: ['notes', 'memory'],
+      }),
+    } : {}),
     // weaveNotes Phase 3.1: create-note tool — available when createNote callback is set.
     ...(opts?.createNote && opts.currentUserId ? {
       create_note: weaveTool({
@@ -1743,7 +1771,7 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
   // tool selection: mode policies only apply when `enabled_tools` is empty, so a user with a
   // custom tool selection would otherwise never get them (and "create a note" would silently
   // fall back to emit_artifact). Skip any already registered from the selection above.
-  for (const noteTool of ['create_note', 'note_edit', 'note_publish'] as const) {
+  for (const noteTool of ['create_note', 'note_edit', 'note_publish', 'find_related_notes'] as const) {
     const t = scopedTools[noteTool];
     if (t && !registeredFromSelection.has(noteTool) && canUseTool(actorPersona, noteTool)) registry.register(t);
   }

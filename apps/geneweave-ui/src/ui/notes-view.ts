@@ -24,14 +24,18 @@ import { api } from './api.js';
 import { mountNotesEditor, type EditorInstance } from './notes-editor.js';
 import { wireNoteCoedit, createNoteShareLink, type NoteCoeditSession } from './notes-coedit.js';
 import { wireNoteAi, type NoteAiPanel } from './notes-ai.js';
+import { wireNoteConnections, type NoteConnectionsPanel } from './notes-graph.js';
 
 /** The live co-editing session for the currently-open note (Phase 2). */
 let _activeCoedit: NoteCoeditSession | null = null;
 /** The AI co-author panel for the currently-open note (Phase 3). */
 let _activeAi: NoteAiPanel | null = null;
+/** The knowledge-graph connections panel for the currently-open note (Phase 5). */
+let _activeConn: NoteConnectionsPanel | null = null;
 function teardownCoedit(): void {
   if (_activeCoedit) { _activeCoedit.close(); _activeCoedit = null; }
   if (_activeAi) { _activeAi.close(); _activeAi = null; }
+  if (_activeConn) { _activeConn.close(); _activeConn = null; }
 }
 
 // ── Data loaders ──────────────────────────────────────────────────────────────
@@ -304,6 +308,22 @@ function renderEditorPanel(note: NoteDoc, render: () => void): HTMLElement {
   const aiToolbar = h('div', { className: 'notes-ai-toolbar-mount' }) as HTMLElement;
   const aiPanel = h('div', { className: 'notes-ai-panel', style: 'display:none' }) as HTMLElement;
 
+  // weaveNotes Phase 5 — the knowledge-graph "Connections" panel (backlinks, unlinked
+  // mentions, related notes, mini graph), toggled by a toolbar button.
+  const connPanel = h('div', { className: 'notes-connections-panel' }) as HTMLElement;
+  connPanel.style.display = 'none'; // start hidden (explicit — attribute strings aren't reliable here)
+  let connOpen = false;
+  const connBtn = h('button', {
+    className: 'notes-connections-btn', title: 'Show connections: backlinks, related notes, knowledge graph',
+    // The panel is wired in the mount block (so it survives re-renders); the button
+    // just toggles its visibility and refreshes it when opened.
+    onClick: () => {
+      connOpen = !connOpen;
+      connPanel.style.display = connOpen ? '' : 'none';
+      if (connOpen) void _activeConn?.refresh();
+    },
+  }, '🔗 Connections') as HTMLElement;
+
   // weaveNotes Phase 2 — collaborative co-editing UI bits.
   // A live "N editing" badge, a "refresh" nudge shown when a collaborator edits
   // while you're typing, and a Share button that mints an invite link.
@@ -369,6 +389,7 @@ function renderEditorPanel(note: NoteDoc, render: () => void): HTMLElement {
       h('div', { className: 'notes-editor-toolbar' },
         presenceBadge,
         refreshNudge,
+        connBtn,
         shareBtn,
         publishBtn,
         h('button', {
@@ -417,6 +438,7 @@ function renderEditorPanel(note: NoteDoc, render: () => void): HTMLElement {
     ),
     aiToolbar,
     aiPanel,
+    connPanel,
     editorContainer,
   );
 
@@ -433,6 +455,8 @@ function renderEditorPanel(note: NoteDoc, render: () => void): HTMLElement {
     // suggestion (or inserting/refreshing an AI block) reloads the note so the
     // editor reflects the applied change.
     _activeAi = wireNoteAi({ noteId: note.id, toolbarEl: aiToolbar, panelEl: aiPanel, onApplied: () => { void loadNote(note.id).then(render); } });
+    // Phase 5: wire the knowledge-graph connections panel (hidden until the button opens it).
+    _activeConn = wireNoteConnections({ noteId: note.id, panelEl: connPanel, onOpenNote: (id) => { void loadNote(id).then(render); } });
 
     mountNotesEditor({
       container: editorContainer,
