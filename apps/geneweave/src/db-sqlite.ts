@@ -9158,6 +9158,34 @@ export class SQLiteAdapter implements DatabaseAdapter {
     return this.d.prepare('SELECT * FROM handoff_events WHERE handoff_id = ? ORDER BY rowid ASC').all(handoffId) as import('./db-types/adapter-me.js').HandoffEventRow[];
   }
 
+  // ── CRDT co-editing (m99, Collaboration Phase 7) ────────────────────────────
+  async createCoeditDoc(row: { id: string; run_id: string; tenant_id?: string | null; owner_id: string; title?: string | null; snapshot_json: string; state_vector_json: string; created_at: number; updated_at: number }): Promise<boolean> {
+    // Idempotent per run via UNIQUE(run_id).
+    return this.d.prepare(
+      `INSERT OR IGNORE INTO coedit_docs (id, run_id, tenant_id, owner_id, title, snapshot_json, state_vector_json, agent_written, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+    ).run(row.id, row.run_id, row.tenant_id ?? null, row.owner_id, row.title ?? null, row.snapshot_json, row.state_vector_json, row.created_at, row.updated_at).changes > 0;
+  }
+  async getCoeditDoc(id: string): Promise<import('./db-types/adapter-me.js').CoeditDocRow | null> {
+    return (this.d.prepare('SELECT * FROM coedit_docs WHERE id = ?').get(id) ?? null) as import('./db-types/adapter-me.js').CoeditDocRow | null;
+  }
+  async getCoeditDocByRun(runId: string): Promise<import('./db-types/adapter-me.js').CoeditDocRow | null> {
+    return (this.d.prepare('SELECT * FROM coedit_docs WHERE run_id = ?').get(runId) ?? null) as import('./db-types/adapter-me.js').CoeditDocRow | null;
+  }
+  async updateCoeditDoc(id: string, fields: { snapshot_json: string; state_vector_json: string; agent_written: number; updated_at: number }): Promise<void> {
+    this.d.prepare('UPDATE coedit_docs SET snapshot_json = ?, state_vector_json = ?, agent_written = ?, updated_at = ? WHERE id = ?')
+      .run(fields.snapshot_json, fields.state_vector_json, fields.agent_written, fields.updated_at, id);
+  }
+  async appendCoeditOp(row: import('./db-types/adapter-me.js').CoeditOpRow): Promise<boolean> {
+    return this.d.prepare(
+      `INSERT OR IGNORE INTO coedit_ops (id, doc_id, op_site, op_counter, op_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(row.id, row.doc_id, row.op_site, row.op_counter, row.op_json, row.created_at).changes > 0;
+  }
+  async listCoeditOps(docId: string): Promise<import('./db-types/adapter-me.js').CoeditOpRow[]> {
+    return this.d.prepare('SELECT * FROM coedit_ops WHERE doc_id = ? ORDER BY rowid ASC').all(docId) as import('./db-types/adapter-me.js').CoeditOpRow[];
+  }
+
   // Registered outbound webhook endpoints.
   async createWebhookEndpoint(row: { id: string; tenant_id?: string | null; user_id: string; url: string; signing_secret: string; created_at: number }): Promise<void> {
     this.d.prepare(

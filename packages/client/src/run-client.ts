@@ -170,6 +170,22 @@ export interface RunClient {
    * require a `reason`; `hand-back` may carry a `briefing`.
    */
   handoffAction(runId: string, handoffId: string, action: 'accept' | 'reject' | 'cancel' | 'start' | 'hand-back' | 'complete' | 'fail', body?: { reason?: string; note?: string; briefing?: unknown }): Promise<{ handoff: unknown }>;
+  /**
+   * Collaboration Phase 7 — create (idempotently) the run's CRDT co-edit doc.
+   * Returns the current text + full snapshot + state vector, and the SITE ID this
+   * user edits as (server-derived — never forge it).
+   */
+  coeditEnsure(runId: string, opts?: { title?: string }): Promise<{ docId: string; text: string; snapshot: unknown; stateVector: Record<string, number>; siteId: string }>;
+  /** Collaboration Phase 7 — read the current co-edit doc. */
+  coeditGet(runId: string): Promise<{ docId: string; text: string; snapshot: unknown; stateVector: Record<string, number>; siteId: string }>;
+  /** Collaboration Phase 7 — submit local CRDT ops (collaborator+); broadcast live. */
+  coeditSubmitOps(runId: string, ops: unknown[]): Promise<{ applied: number; text: string; stateVector: Record<string, number> }>;
+  /** Collaboration Phase 7 — fetch the ops this peer is missing (offline reconcile). */
+  coeditOpsSince(runId: string, since: Record<string, number>): Promise<{ ops: unknown[] }>;
+  /** Collaboration Phase 7 — broadcast an awareness (cursor/presence) update. */
+  coeditAwareness(runId: string, entry: { clock: number; state: unknown }): Promise<{ ok: boolean }>;
+  /** Collaboration Phase 7 — merge the run's agent output into the doc as the agent peer. */
+  coeditAgentSync(runId: string): Promise<{ applied: number; text: string }>;
 }
 
 export interface CreateRunClientOptions {
@@ -425,6 +441,29 @@ export function createRunClient(opts: CreateRunClientOptions): RunClient {
     },
     async handoffAction(runId, handoffId, action, body) {
       return json.post(`/api/me/runs/${runId}/handoffs/${handoffId}/${action}`, body ?? {});
+    },
+
+    async coeditEnsure(runId, coeditOpts) {
+      return json.post(`/api/me/runs/${runId}/coedit`, coeditOpts ?? {});
+    },
+    async coeditGet(runId) {
+      return (await json.get<{ docId: string; text: string; snapshot: unknown; stateVector: Record<string, number>; siteId: string }>(`/api/me/runs/${runId}/coedit`)) ?? { docId: '', text: '', snapshot: { nodes: [] }, stateVector: {}, siteId: '' };
+    },
+    async coeditSubmitOps(runId, ops) {
+      return json.post(`/api/me/runs/${runId}/coedit/ops`, { ops });
+    },
+    async coeditOpsSince(runId, since) {
+      // base64url-encode the state vector so it rides safely in the query string.
+      const enc = typeof btoa === 'function'
+        ? btoa(JSON.stringify(since)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+        : Buffer.from(JSON.stringify(since)).toString('base64url');
+      return (await json.get<{ ops: unknown[] }>(`/api/me/runs/${runId}/coedit/ops?since=${enc}`)) ?? { ops: [] };
+    },
+    async coeditAwareness(runId, entry) {
+      return json.post(`/api/me/runs/${runId}/coedit/awareness`, { entry });
+    },
+    async coeditAgentSync(runId) {
+      return json.post(`/api/me/runs/${runId}/coedit/agent-sync`, {});
     },
   };
 }

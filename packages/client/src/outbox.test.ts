@@ -46,6 +46,12 @@ function mockClient(opts: {
     async handoffAudit() { return { audit: [] }; },
     async handoffInbox() { return { handoffs: [] }; },
     async handoffAction() { return { handoff: {} }; },
+    async coeditEnsure() { return { docId: 'd', text: '', snapshot: { nodes: [] }, stateVector: {}, siteId: 'u:me' }; },
+    async coeditGet() { return { docId: 'd', text: '', snapshot: { nodes: [] }, stateVector: {}, siteId: 'u:me' }; },
+    async coeditSubmitOps() { return { applied: 0, text: '', stateVector: {} }; },
+    async coeditOpsSince() { return { ops: [] }; },
+    async coeditAwareness() { return { ok: true }; },
+    async coeditAgentSync() { return { applied: 0, text: '' }; },
   };
 }
 

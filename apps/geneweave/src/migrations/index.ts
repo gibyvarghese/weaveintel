@@ -78,6 +78,7 @@ import { applyM95SharedSessions } from './m95-shared-sessions.js';
 import { applyM96RunSubscriptions } from './m96-run-subscriptions.js';
 import { applyM97RunComments } from './m97-run-comments.js';
 import { applyM98SessionHandoffs } from './m98-session-handoffs.js';
+import { applyM99Coedit } from './m99-coedit.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -164,6 +165,7 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm96-run-subscriptions', description: 'Collaboration Phase 3: run_subscriptions (durable "notify me when this run finishes", UNIQUE(run,user) idempotent) + notification_feed (per-user in-app inbox, fan-out-on-write, dedupe) + notification_outbox (transactional outbox: leased, crash-safe at-least-once delivery on terminal run events) + webhook_endpoints (registered, per-endpoint signing secret, SSRF-validated) + collaboration_config relay cadence/retry columns', run: applyM96RunSubscriptions },
   { id: 'm97-run-comments', description: 'Collaboration Phase 4: run_comments (threaded, part-anchored review comments — stable part-id anchor + staleness seq + fuzzy sub-range; raw markdown + sanitized body_html; soft-delete tombstones; thread-level resolve; @mention list) + run_annotations (structured human-feedback scores: name/value/string_value/comment/source/data_type, part- or run-level — the evals bridge) + run_public_shares (capability-URL token for a public read-only redacted view; 256-bit, SHA-256-hashed, expirable/revocable)', run: applyM97RunComments },
   { id: 'm98-session-handoffs', description: 'Collaboration Phase 5: session_handoffs (unified handoff lifecycle across user↔user / agent↔human / agent↔agent — typed from/to actors, state machine requested→accepted/rejected→in_progress→handed_back→completed/failed/cancelled/timed_out, scoped briefing context, required reject reason, anti-loop depth, A2A referenceTaskIds, SLA expiry) + handoff_events (append-only audit trail, one row per transition: who/when/from→to/reason — EU AI Act Art.12 defensible)', run: applyM98SessionHandoffs },
+  { id: 'm99-coedit', description: 'Collaboration Phase 7: coedit_docs (CRDT co-editing — one shared text doc per run a human + the agent edit concurrently; full RGA snapshot_json + state_vector_json + agent_written for idempotent agent streaming) + coedit_ops (append-only op log keyed by author site+counter for state-vector diff sync / offline reconcile). Server is the trusted relay: ops validated + tenant-scoped', run: applyM99Coedit },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

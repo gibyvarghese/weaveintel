@@ -67,6 +67,7 @@ import { enqueueRunTerminalNotifications, isSafeWebhookUrl } from '../run-notifi
 import { createSqlCommentManager, createSqlAnnotationManager, mintPublicShareToken } from '../run-comment-sql.js';
 import { summarizeAnnotations, annotationsToEvalExamples, type CommentAnchor, type AnnotationDataType, type AnnotationSource, type HandoffScope, type HandoffBriefing } from '@weaveintel/collaboration';
 import { createSqlHandoffManager, buildRunBriefing } from '../handoff-sql.js';
+import { createCoeditRepo, userSiteId } from '../coedit-sql.js';
 
 /**
  * Register all /api/me routes on the provided router.
@@ -1058,6 +1059,109 @@ export function registerMeRoutes(
       }
     }, { auth: true });
   }
+
+  // ── CRDT co-editing (Collaboration Phase 7) ──────────────────────────────────
+  // The server is the TRUSTED RELAY: it holds the canonical replica, validates
+  // every edit, persists it, and fans it out. A user edits as a server-derived
+  // site id (`u:<userId>`) — never a client-supplied one (anti-forgery).
+
+  // Create (idempotently) the co-edit doc for a run + return its current state.
+  router.post('/api/me/runs/:runId/coedit', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveRunAccess(db, params['runId']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* */ }
+    const repo = createCoeditRepo(db);
+    const view = await repo.ensureDoc({ runId: access.run.id, tenantId: access.run.tenant_id ?? null, ownerId: access.run.user_id, ...(typeof body['title'] === 'string' ? { title: (body['title'] as string).slice(0, 200) } : {}) });
+    // Mint a UNIQUE device site under this user's namespace, so multiple tabs /
+    // devices are distinct CRDT replicas yet every op is provably owned by the user.
+    const siteId = `${userSiteId(auth.userId)}:${newUUIDv7().slice(0, 8)}`;
+    res.writeHead(201, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ...view, siteId }));
+  }, { auth: true });
+
+  // Read the current co-edit doc (text + full snapshot + state vector).
+  router.get('/api/me/runs/:runId/coedit', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveRunAccess(db, params['runId']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    const row = await db.getCoeditDocByRun(access.run.id);
+    if (!row) { res.writeHead(404); res.end(JSON.stringify({ error: 'No co-edit doc' })); return; }
+    const view = createCoeditRepo(db).view(row);
+    const siteId = `${userSiteId(auth.userId)}:${newUUIDv7().slice(0, 8)}`;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ...view, siteId }));
+  }, { auth: true });
+
+  // Submit local ops (a WRITE — collaborator+). Validated (anti-forgery + caps),
+  // applied to the canonical replica, persisted, broadcast live as `coedit.op`.
+  router.post('/api/me/runs/:runId/coedit/ops', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveRunAccess(db, params['runId']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    if (!roleAtLeast(access.role, 'collaborator')) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden: viewers cannot edit' })); return; }
+    const row = await db.getCoeditDocByRun(access.run.id);
+    if (!row) { res.writeHead(404); res.end(JSON.stringify({ error: 'No co-edit doc' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* */ }
+    // The author NAMESPACE is the user's; the op's device-site must live under it.
+    const result = await createCoeditRepo(db).submitOps(row.id, userSiteId(auth.userId), body['ops']);
+    if (!result.ok) { res.writeHead(result.error.startsWith('forbidden') ? 403 : 400); res.end(JSON.stringify({ error: result.error })); return; }
+    if (result.applied.length > 0) runExecutor.broadcastEphemeral(access.run.id, 'coedit.op', { docId: row.id, ops: result.applied });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ applied: result.applied.length, text: result.view.text, stateVector: result.view.stateVector }));
+  }, { auth: true });
+
+  // Fetch the ops a reconnecting/offline peer is missing (state-vector diff sync).
+  // `?since=<base64url(JSON state vector)>`.
+  router.get('/api/me/runs/:runId/coedit/ops', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveRunAccess(db, params['runId']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    const row = await db.getCoeditDocByRun(access.run.id);
+    if (!row) { res.writeHead(404); res.end(JSON.stringify({ error: 'No co-edit doc' })); return; }
+    const url = new URL(req.url ?? '/', 'http://x');
+    let since: Record<string, number> = {};
+    const raw = url.searchParams.get('since');
+    if (raw) { try { since = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as Record<string, number>; } catch { /* empty = everything */ } }
+    const ops = await createCoeditRepo(db).opsSince(row.id, since);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ops }));
+  }, { auth: true });
+
+  // Broadcast a presence/cursor awareness update (ephemeral — never persisted).
+  // Identity (`peerId`) is server-derived so a peer cannot impersonate another.
+  router.post('/api/me/runs/:runId/coedit/awareness', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveRunAccess(db, params['runId']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* */ }
+    const entry = (body['entry'] && typeof body['entry'] === 'object') ? body['entry'] as Record<string, unknown> : { clock: 0, state: null };
+    runExecutor.broadcastEphemeral(access.run.id, 'coedit.awareness', { peerId: userSiteId(auth.userId), entry });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true }));
+  }, { auth: true });
+
+  // Stream the run's agent output INTO the doc as the agent peer (idempotent).
+  // Owner/collaborator — the agent co-edits alongside humans.
+  router.post('/api/me/runs/:runId/coedit/agent-sync', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveRunAccess(db, params['runId']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    if (!roleAtLeast(access.role, 'collaborator')) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
+    const row = await db.getCoeditDocByRun(access.run.id);
+    if (!row) { res.writeHead(404); res.end(JSON.stringify({ error: 'No co-edit doc' })); return; }
+    // The agent's contribution is the run's assistant text output.
+    const events = await db.listUserRunEvents(access.run.id);
+    let fullText = '';
+    for (const ev of events) { if (ev.kind === 'text.delta') { try { const p = JSON.parse(ev.payload) as { delta?: unknown }; if (typeof p.delta === 'string') fullText += p.delta; } catch { /* */ } } }
+    const result = await createCoeditRepo(db).agentAppend(row.id, access.run.id, fullText);
+    if (result && result.applied.length > 0) runExecutor.broadcastEphemeral(access.run.id, 'coedit.op', { docId: row.id, ops: result.applied });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ applied: result?.applied.length ?? 0, text: result?.view.text ?? '' }));
+  }, { auth: true });
 
   // ─── Catalog ────────────────────────────────────────────────────────────
 

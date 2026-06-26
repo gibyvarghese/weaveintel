@@ -8,6 +8,7 @@
   "references": [
     { "path": "../geneweave-ui" },
     { "path": "../../packages/core" },
+    { "path": "../../packages/coedit" },
     { "path": "../../packages/oauth" },
     { "path": "../../packages/agents" },
     { "path": "../../packages/observability" },

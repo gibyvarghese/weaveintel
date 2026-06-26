@@ -233,6 +233,30 @@ export interface HandoffEventRow {
   note: string | null;
 }
 
+/** m99 (Collaboration Phase 7) — a CRDT co-editing document (the canonical replica). */
+export interface CoeditDocRow {
+  id: string;
+  run_id: string;
+  tenant_id: string | null;
+  owner_id: string;
+  title: string | null;
+  snapshot_json: string;       // full RGA state
+  state_vector_json: string;   // max op counter per site
+  agent_written: number;       // chars the agent peer has streamed (idempotency)
+  created_at: number;
+  updated_at: number;
+}
+
+/** m99 — one append-only co-edit op (keyed by author site + counter). */
+export interface CoeditOpRow {
+  id: string;
+  doc_id: string;
+  op_site: string;
+  op_counter: number;
+  op_json: string;
+  created_at: number;
+}
+
 export interface UserDeviceRow {
   id: string;
   user_id: string;
@@ -363,6 +387,13 @@ export interface IMeStore {
   listDueSessionHandoffs(now: number): Promise<SessionHandoffRow[]>;
   insertHandoffEvent(row: HandoffEventRow): Promise<void>;
   listHandoffEvents(handoffId: string): Promise<HandoffEventRow[]>;
+  // ── CRDT co-editing (m99, Collaboration Phase 7) ────────────────────────────
+  createCoeditDoc(row: { id: string; run_id: string; tenant_id?: string | null; owner_id: string; title?: string | null; snapshot_json: string; state_vector_json: string; created_at: number; updated_at: number }): Promise<boolean>;
+  getCoeditDoc(id: string): Promise<CoeditDocRow | null>;
+  getCoeditDocByRun(runId: string): Promise<CoeditDocRow | null>;
+  updateCoeditDoc(id: string, fields: { snapshot_json: string; state_vector_json: string; agent_written: number; updated_at: number }): Promise<void>;
+  appendCoeditOp(row: CoeditOpRow): Promise<boolean>;
+  listCoeditOps(docId: string): Promise<CoeditOpRow[]>;
   // Registered outbound webhook endpoints
   createWebhookEndpoint(row: { id: string; tenant_id?: string | null; user_id: string; url: string; signing_secret: string; created_at: number }): Promise<void>;
   listWebhookEndpoints(userId: string): Promise<WebhookEndpointRow[]>;

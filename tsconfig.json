@@ -68,6 +68,7 @@
     { "path": "packages/durability" },
     { "path": "packages/resilience" },
     { "path": "packages/collaboration" },
+    { "path": "packages/coedit" },
     { "path": "packages/compliance" },
     { "path": "packages/graph" },
     { "path": "packages/plugins" },

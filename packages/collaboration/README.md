@@ -239,6 +239,8 @@ are still **in-memory prototypes** that later phases make durable. See
 - **Phase 3 ✅** — Durable subscriptions (`run_subscriptions`) + offline notifications (transactional `notification_outbox` → in-app feed + signed webhooks), restart-safe. Plus the CVE-2026-53843 force-disconnect.
 - **Phase 4 ✅** — Collaborative run timeline: threaded part-anchored comments (`run_comments`) + structured annotation scores (`run_annotations`) + @mention notifications + a public read-only redacted share link.
 - **Phase 5 ✅** — Unified handoff (`session_handoffs` + append-only `handoff_events`): one audited lifecycle across user↔user / agent↔human / agent↔agent — scoped briefing context, required reject reason, anti-loop depth, SLA timeout, accept-grants-session-access.
+- **Phase 6 ✅** — Real-time transport hardening + AG-UI/A2A standards: one canonical SSE writer + RFC 6902 JSON Patch in `@weaveintel/core`; resumable SSE (`id:` + `Last-Event-ID`); `toAGUIEvents` emits the multiplayer signals as `STATE_SNAPSHOT`/`STATE_DELTA` + `CUSTOM`; a WebSocket control channel (cancel/steer/presence — idempotent, CSWSH-guarded, resume-beyond-reload).
+- **Phase 7 ✅** — CRDT co-editing / agent-as-peer (the new `@weaveintel/coedit` package): an RGA text CRDT (convergent, idempotent, causal) + awareness cursors + state-vector offline sync + the agent as a server-side co-editing peer; geneWeave is the trusted relay (`coedit_docs`/`coedit_ops`, anti-forgery, live broadcast).
 - **Phase 4** — Collaborative run comments / annotations.
 - **Phase 5** — Unified handoff (built on `@weaveintel/human-tasks` + `@weaveintel/a2a`).
 

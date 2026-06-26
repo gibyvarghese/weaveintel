@@ -29,6 +29,7 @@ import { MeRunExecutor } from './me-run-executor.js';
 import { startPresenceSweeper } from './presence-sql.js';
 import { createNotificationRelay, enqueueRunTerminalNotifications } from './run-notifications-outbox.js';
 import { startHandoffSweeper } from './handoff-sql.js';
+import { createCoeditRepo } from './coedit-sql.js';
 import { matchRunControlPath, isAllowedWsOrigin, handleRunControlConnection, MAX_CONTROL_MESSAGE_BYTES } from './run-control-ws.js';
 import { createChatPipelineMeRunAgent } from './me-run-agent.js';
 import { type TriggerDispatcherHandle } from './admin/api/triggers.js';
@@ -247,7 +248,17 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
         const run = await db.getUserRunById(runId);
         if (run) await enqueueRunTerminalNotifications(db, run);
         await notificationRelay.drainOnce();
-      })().catch(() => { /* relay retries on its interval */ });
+        // Collaboration Phase 7: if the run has a co-edit doc, merge the agent's
+        // final output into it as the agent peer (idempotent) + broadcast live.
+        const coeditRow = await db.getCoeditDocByRun(runId).catch(() => null);
+        if (coeditRow) {
+          const events = await db.listUserRunEvents(runId).catch(() => []);
+          let fullText = '';
+          for (const ev of events) { if (ev.kind === 'text.delta') { try { const p = JSON.parse(ev.payload) as { delta?: unknown }; if (typeof p.delta === 'string') fullText += p.delta; } catch { /* */ } } }
+          const result = await createCoeditRepo(db).agentAppend(coeditRow.id, runId, fullText).catch(() => null);
+          if (result && result.applied.length > 0) meRunExecutor.broadcastEphemeral(runId, 'coedit.op', { docId: coeditRow.id, ops: result.applied });
+        }
+      })().catch(() => { /* best-effort */ });
     },
   });
   registerMeRoutes(router, db, {
