@@ -935,6 +935,15 @@ export interface ToolRegistryOptions {
     preview_enabled: boolean;
     sandbox_html: boolean;
   };
+  /**
+   * weaveNotes Phase 3: note co-author callback. When set, the `note_edit` built-in
+   * tool is available so the agent can write into one of the user's notes — either
+   * `direct` (applied as a co-editing peer, converging live) or `suggest` (staged as
+   * a track-changes suggestion a human accepts/rejects). The callback resolves the
+   * user's access to the note itself, so the agent can never edit a note the user
+   * cannot, and viewers are refused.
+   */
+  noteEdit?: (args: { userId: string; noteId: string; markdown: string; mode: 'direct' | 'suggest' }) => Promise<{ ok: boolean; error?: string; applied?: number; suggestionId?: string }>;
 }
 
 export function filterToolNamesByPersona(toolNames: string[], persona: string | null | undefined): string[] {
@@ -1474,6 +1483,29 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
     agenda_delete: agendaDeleteTool,
     // P4-3: Knowledge graph tools — only available when graphStore is provided
     ...(opts?.graphStore ? Object.fromEntries(createGraphMemoryToolSet(opts.graphStore).map((t: Tool) => [t.schema.name, t])) : {}),
+    // weaveNotes Phase 3: note co-author tool — available when noteEdit callback is set.
+    ...(opts?.noteEdit && opts.currentUserId ? {
+      note_edit: weaveTool({
+        name: 'note_edit',
+        description: 'Write content into one of the user\'s notes (the AI as a co-author). Provide Markdown. mode="suggest" (default) stages it as a track-changes suggestion the user accepts or reject; mode="direct" applies it immediately as a co-editing peer (use only when the user explicitly asked the AI to edit the note). The note must be one the user owns or can edit; you only need its id.',
+        parameters: {
+          type: 'object',
+          properties: {
+            noteId: { type: 'string', description: 'The id of the note to edit (the user must own it or be a collaborator).' },
+            markdown: { type: 'string', description: 'The content to add, as Markdown (headings, lists, to-dos, etc.).' },
+            mode: { type: 'string', enum: ['suggest', 'direct'], description: 'suggest = stage for human review (default); direct = apply immediately.' },
+          },
+          required: ['noteId', 'markdown'],
+        },
+        execute: async (args: { noteId: string; markdown: string; mode?: 'direct' | 'suggest' }) => {
+          if (!opts.noteEdit || !opts.currentUserId) return { content: 'Note editing is unavailable in this context.', isError: true };
+          const r = await opts.noteEdit({ userId: opts.currentUserId, noteId: args.noteId, markdown: args.markdown, mode: args.mode === 'direct' ? 'direct' : 'suggest' });
+          if (!r.ok) return { content: `note_edit failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, mode: args.mode === 'direct' ? 'direct' : 'suggest', applied: r.applied ?? 0, suggestionId: r.suggestionId ?? null });
+        },
+        tags: ['notes', 'output'],
+      }),
+    } : {}),
     // m77: Artifact emission tool — available when artifactSave callback is set
     ...(opts?.artifactSave ? {
       emit_artifact: weaveTool({

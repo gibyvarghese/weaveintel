@@ -9251,6 +9251,28 @@ export class SQLiteAdapter implements DatabaseAdapter {
   async revokeNoteShareToken(id: string, noteId: string, revokedAt: number): Promise<number> {
     return this.d.prepare('UPDATE note_share_tokens SET revoked_at = ? WHERE id = ? AND note_id = ? AND revoked_at IS NULL').run(revokedAt, id, noteId).changes;
   }
+  // weaveNotes Phase 3 — AI co-author suggestions (track-changes).
+  async createNoteSuggestion(row: import('./db-types/adapter-me.js').NoteSuggestionRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO note_suggestions (id, note_id, doc_id, tenant_id, author_kind, author_id, author_site, action, status, ops_json, preview_text, anchor_json, created_at, resolved_at, resolved_by)
+       VALUES (@id, @note_id, @doc_id, @tenant_id, @author_kind, @author_id, @author_site, @action, @status, @ops_json, @preview_text, @anchor_json, @created_at, @resolved_at, @resolved_by)`,
+    ).run(row);
+  }
+  async getNoteSuggestion(id: string): Promise<import('./db-types/adapter-me.js').NoteSuggestionRow | null> {
+    return (this.d.prepare('SELECT * FROM note_suggestions WHERE id = ?').get(id) ?? null) as import('./db-types/adapter-me.js').NoteSuggestionRow | null;
+  }
+  async listNoteSuggestions(noteId: string, status?: 'pending' | 'accepted' | 'rejected'): Promise<import('./db-types/adapter-me.js').NoteSuggestionRow[]> {
+    const sql = status
+      ? 'SELECT * FROM note_suggestions WHERE note_id = ? AND status = ? ORDER BY created_at DESC'
+      : 'SELECT * FROM note_suggestions WHERE note_id = ? ORDER BY created_at DESC';
+    const args = status ? [noteId, status] : [noteId];
+    return this.d.prepare(sql).all(...args) as import('./db-types/adapter-me.js').NoteSuggestionRow[];
+  }
+  async resolveNoteSuggestion(id: string, status: 'accepted' | 'rejected', resolvedAt: number, resolvedBy: string): Promise<number> {
+    // Only a still-pending suggestion can be resolved (idempotency / double-accept guard).
+    return this.d.prepare("UPDATE note_suggestions SET status = ?, resolved_at = ?, resolved_by = ? WHERE id = ? AND status = 'pending'")
+      .run(status, resolvedAt, resolvedBy, id).changes;
+  }
 
   // Registered outbound webhook endpoints.
   async createWebhookEndpoint(row: { id: string; tenant_id?: string | null; user_id: string; url: string; signing_secret: string; created_at: number }): Promise<void> {

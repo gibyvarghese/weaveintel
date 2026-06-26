@@ -136,6 +136,34 @@ describe('agent as a block co-editor', () => {
     expect(human.blocks()[0]!.text).toBe('My note!'); // human edit preserved
   });
 
+  it('suggest mode computes ops WITHOUT touching the live doc (Phase 3 track-changes)', () => {
+    const doc = BlockDoc.fromSnapshot('agent:note-1:s1', (() => {
+      const h = new BlockDoc('human'); const { blockId } = h.insertBlock(null, 'paragraph'); h.insertText(blockId, 0, 'Base'); return h.snapshot();
+    })());
+    const before = doc.blocks().map((b) => b.text).join('|');
+    const peer = createBlockAgentPeer(doc, { mode: 'suggest' });
+    const ops = peer.appendMarkdown('## Proposed\n- idea');
+    // The live doc is UNCHANGED (the suggestion is staged, not applied)…
+    expect(doc.blocks().map((b) => b.text).join('|')).toBe(before);
+    expect(ops.length).toBeGreaterThan(0);
+    // …but accepting the suggestion (applying the ops) yields the proposed content.
+    doc.applyMany(ops);
+    const types = doc.blocks().map((b) => b.type);
+    expect(types).toContain('heading');
+    expect(types).toContain('bulletListItem');
+  });
+
+  it('two pending suggestions under distinct sites both apply (no op-id collision)', () => {
+    const seed = (() => { const h = new BlockDoc('human'); const { blockId } = h.insertBlock(null, 'paragraph'); h.insertText(blockId, 0, 'Doc'); return h.snapshot(); })();
+    const s1 = createBlockAgentPeer(BlockDoc.fromSnapshot('agent:n:s1', seed), { mode: 'suggest' }).appendMarkdown('- first suggestion');
+    const s2 = createBlockAgentPeer(BlockDoc.fromSnapshot('agent:n:s2', seed), { mode: 'suggest' }).appendMarkdown('- second suggestion');
+    const live = BlockDoc.fromSnapshot('server', seed);
+    live.applyMany(s1); live.applyMany(s2);
+    const texts = live.blocks().map((b) => b.text);
+    expect(texts).toContain('first suggestion');
+    expect(texts).toContain('second suggestion'); // both survived — distinct sites, no collision
+  });
+
   it('markdownToBlocks handles headings/lists/todos/code/quotes/inline marks', () => {
     const specs = markdownToBlocks('# Title\n\nA **bold** and _em_ line.\n\n```js\ncode()\n```\n\n> quote\n\n1. first\n2. second');
     const types = specs.map((s) => s.type);

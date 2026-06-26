@@ -96,11 +96,30 @@ export interface BlockAgentPeer {
   appendBlocks(specs: BlockSpec[]): BlockOp[];
 }
 
-/** Wrap a {@link BlockDoc} (whose siteId should be the agent's) as a block co-editor. */
-export function createBlockAgentPeer(doc: BlockDoc): BlockAgentPeer {
+export interface BlockAgentPeerOptions {
+  /**
+   * `direct` (default) = apply the ops to the live doc and return them for broadcast,
+   * exactly like a human typing. `suggest` = compute the ops WITHOUT touching the live
+   * doc and return them, so the host can stage them as **track-changes suggestions** a
+   * human accepts or rejects (the Phase 3 HITL gate). The returned ops are anchored to
+   * the live doc's real element ids, so they apply cleanly later on accept — even after
+   * other concurrent edits — because RGA ops reference ids, not positions.
+   */
+  mode?: 'direct' | 'suggest';
+}
+
+/**
+ * Wrap a {@link BlockDoc} (whose `siteId` should identify the agent — and, for
+ * `suggest` mode, be UNIQUE per suggestion so two pending suggestions never mint
+ * colliding op ids) as a block co-editor.
+ */
+export function createBlockAgentPeer(doc: BlockDoc, opts: BlockAgentPeerOptions = {}): BlockAgentPeer {
+  const mode = opts.mode ?? 'direct';
+  // In suggest mode we compute against a private clone so the live doc is untouched.
+  const target = (): BlockDoc => (mode === 'suggest' ? BlockDoc.fromSnapshot(doc.siteId, doc.snapshot()) : doc);
   return {
     doc,
-    appendMarkdown: (markdown) => appendBlocksToDoc(doc, markdownToBlocks(markdown)),
-    appendBlocks: (specs) => appendBlocksToDoc(doc, specs),
+    appendMarkdown: (markdown) => appendBlocksToDoc(target(), markdownToBlocks(markdown)),
+    appendBlocks: (specs) => appendBlocksToDoc(target(), specs),
   };
 }

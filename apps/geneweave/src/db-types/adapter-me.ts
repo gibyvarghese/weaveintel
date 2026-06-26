@@ -310,6 +310,25 @@ export interface NoteShareTokenRow {
   created_at: number;
 }
 
+/** m101 — one AI co-author SUGGESTION (track-changes: staged block ops a human accepts/rejects). */
+export interface NoteSuggestionRow {
+  id: string;
+  note_id: string;
+  doc_id: string;
+  tenant_id: string | null;
+  author_kind: 'agent' | 'user';
+  author_id: string;
+  author_site: string;
+  action: 'continue' | 'rewrite' | 'summarize' | 'ask' | 'note_edit' | 'ai_block';
+  status: 'pending' | 'accepted' | 'rejected';
+  ops_json: string;
+  preview_text: string;
+  anchor_json: string | null;
+  created_at: number;
+  resolved_at: number | null;
+  resolved_by: string | null;
+}
+
 export interface UserDeviceRow {
   id: string;
   user_id: string;
@@ -465,6 +484,11 @@ export interface IMeStore {
   listNoteShareTokens(noteId: string): Promise<NoteShareTokenRow[]>;
   incrementNoteShareTokenUses(id: string): Promise<void>;
   revokeNoteShareToken(id: string, noteId: string, revokedAt: number): Promise<number>;
+  // weaveNotes Phase 3 — AI co-author suggestions (track-changes)
+  createNoteSuggestion(row: NoteSuggestionRow): Promise<void>;
+  getNoteSuggestion(id: string): Promise<NoteSuggestionRow | null>;
+  listNoteSuggestions(noteId: string, status?: 'pending' | 'accepted' | 'rejected'): Promise<NoteSuggestionRow[]>;
+  resolveNoteSuggestion(id: string, status: 'accepted' | 'rejected', resolvedAt: number, resolvedBy: string): Promise<number>;
   // Registered outbound webhook endpoints
   createWebhookEndpoint(row: { id: string; tenant_id?: string | null; user_id: string; url: string; signing_secret: string; created_at: number }): Promise<void>;
   listWebhookEndpoints(userId: string): Promise<WebhookEndpointRow[]>;

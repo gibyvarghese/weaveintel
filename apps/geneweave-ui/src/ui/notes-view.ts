@@ -23,10 +23,16 @@ import { state, type NoteListItem, type NoteDoc } from './state.js';
 import { api } from './api.js';
 import { mountNotesEditor, type EditorInstance } from './notes-editor.js';
 import { wireNoteCoedit, createNoteShareLink, type NoteCoeditSession } from './notes-coedit.js';
+import { wireNoteAi, type NoteAiPanel } from './notes-ai.js';
 
 /** The live co-editing session for the currently-open note (Phase 2). */
 let _activeCoedit: NoteCoeditSession | null = null;
-function teardownCoedit(): void { if (_activeCoedit) { _activeCoedit.close(); _activeCoedit = null; } }
+/** The AI co-author panel for the currently-open note (Phase 3). */
+let _activeAi: NoteAiPanel | null = null;
+function teardownCoedit(): void {
+  if (_activeCoedit) { _activeCoedit.close(); _activeCoedit = null; }
+  if (_activeAi) { _activeAi.close(); _activeAi = null; }
+}
 
 // ── Data loaders ──────────────────────────────────────────────────────────────
 
@@ -293,6 +299,11 @@ function renderEditorPanel(note: NoteDoc, render: () => void): HTMLElement {
 
   const editorContainer = h('div', { className: 'notes-editor-mount' });
 
+  // weaveNotes Phase 3 — AI co-author: a toolbar (Continue / Rewrite / Summarize /
+  // Ask / +AI block) and a panel listing pending track-changes suggestions to review.
+  const aiToolbar = h('div', { className: 'notes-ai-toolbar-mount' }) as HTMLElement;
+  const aiPanel = h('div', { className: 'notes-ai-panel', style: 'display:none' }) as HTMLElement;
+
   // weaveNotes Phase 2 — collaborative co-editing UI bits.
   // A live "N editing" badge, a "refresh" nudge shown when a collaborator edits
   // while you're typing, and a Share button that mints an invite link.
@@ -386,6 +397,8 @@ function renderEditorPanel(note: NoteDoc, render: () => void): HTMLElement {
       iconEl,
       titleInput,
     ),
+    aiToolbar,
+    aiPanel,
     editorContainer,
   );
 
@@ -398,6 +411,10 @@ function renderEditorPanel(note: NoteDoc, render: () => void): HTMLElement {
     // people editing the same note merge instead of clobbering.
     teardownCoedit();
     _activeCoedit = wireNoteCoedit({ noteId: note.id, onRemoteChange, onPresence: updatePresence });
+    // Phase 3: wire the AI co-author toolbar + suggestion review. Accepting a
+    // suggestion (or inserting/refreshing an AI block) reloads the note so the
+    // editor reflects the applied change.
+    _activeAi = wireNoteAi({ noteId: note.id, toolbarEl: aiToolbar, panelEl: aiPanel, onApplied: () => { void loadNote(note.id).then(render); } });
 
     mountNotesEditor({
       container: editorContainer,

@@ -111,7 +111,21 @@ verbatim so a schema-version skew never drops content.
 **The agent as a block co-editor:** `createBlockAgentPeer(doc)` parses the model's
 Markdown into block ops and merges them — so the AI and a human build the same note
 at once, converging, with no clobbering (the Phase 7 "agent as a CRDT peer" pattern
-lifted to blocks).
+lifted to blocks). Pass `{ mode: 'suggest' }` (weaveNotes Phase 3) to get the ops
+back **without** applying them — the host stages them as **track-changes
+suggestions** a human accepts or rejects, so the AI never silently rewrites a
+document:
+
+```ts
+// DIRECT — the agent types into the doc, converging live with humans:
+const ops = createBlockAgentPeer(doc).appendMarkdown(modelMarkdown);
+
+// SUGGEST — stage for human review (give the doc a UNIQUE site per suggestion so
+// two pending suggestions never mint colliding op ids; they still apply on accept):
+const staged = createBlockAgentPeer(BlockDoc.fromSnapshot(`agent:${noteId}:s1`, snap), { mode: 'suggest' })
+  .appendMarkdown(modelMarkdown);
+// …later, on Accept: doc.applyMany(staged)
+```
 
 In geneWeave, `GET /api/me/notes/:id/blocks?format=blocks|markdown|html` runs a real
 note through `BlockDoc` and renders it (the building block for the Phase 2 collaborative

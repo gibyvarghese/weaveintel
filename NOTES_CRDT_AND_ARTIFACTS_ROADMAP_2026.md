@@ -440,10 +440,46 @@ helper** (Track D, Phase 11) as enhancements that talk to the same server/CRDT.
   Redis fan-out for multi-node SSE are documented follow-ups.)
 
 **Track B — AI in the document**
-- **Phase 3 — Agent-as-co-editor + AI actions + suggestions.** `note_edit` tool; agent peer
-  emits block ops; ask-AI / continue / rewrite / summarize as **track-changes** suggestions;
-  AI blocks (refreshFn); to-do⇄task extraction preserved. *Acceptance:* human + agent
-  co-write one note → convergent merge; suggestion accept/reject; cited AI block refreshes.
+- **Phase 3 — Agent-as-co-editor + AI actions + suggestions.** ✅ **delivered.** The AI
+  now works INSIDE the note, two ways. (1) **Track-changes suggestions** (safe default):
+  AI actions — *continue / rewrite / summarize / ask* — run the real LLM and STAGE the
+  result as a pending suggestion a human **accepts** (ops applied + broadcast) or
+  **rejects** (discarded); the AI never silently mutates a document (the defence against a
+  prompt-injected agent). (2) **Direct co-editing**: the **`note_edit` agent tool** and
+  **AI-block refresh** apply ops immediately through the Phase 2 relay under a distinct
+  `agent:*` CRDT site, converging with concurrent human edits. **Package** (`@weaveintel/coedit`):
+  `createBlockAgentPeer(doc, { mode: 'suggest' })` computes ops on a private clone (HITL) —
+  staged under a unique site so two pending suggestions never collide, yet still apply on
+  accept (RGA ops are id-anchored). **App** (`m101` `note_suggestions` + `note-ai-sql.ts`):
+  the AI service (`propose`/`accept`/`reject`, `agentEdit` direct|suggest, `insertAiBlock`,
+  `refreshAiBlock`) wired to the real model via `createModelTextGenerator(chatEngine.modelConfig)`;
+  the `note_edit` tool added to the agent/supervisor/ensemble tool policies + `ToolRegistryOptions.noteEdit`
+  (resolves the user's note access itself — no privilege escalation, viewers refused);
+  endpoints `POST /ai/:action`, `GET /suggestions`, `POST /suggestions/:sid/accept|reject`,
+  `POST /ai/insert-block`, `POST /ai/refresh-block` (all collaborator+, broadcast live over
+  the Phase 2 SSE hub). **AI blocks** carry `aiPrompt`+`aiCitation`+`aiRefreshedAt` attrs;
+  refresh re-generates the content, preserving the prompt + citation. to-do⇄task extraction
+  is preserved (the relay keeps `doc_json` in sync). **UI**: an AI toolbar (Continue /
+  Rewrite / Summarize / Ask / ＋AI block) + a suggestion-review panel (Accept / Reject).
+  *Tested:* package units (suggest-mode no-mutate + two-suggestion-no-collision); a
+  deterministic SQLite **integration suite** (10 — propose/accept/reject, rewrite-a-block,
+  double-accept guard, agent-direct convergence with a human, agent-suggest staging, AI
+  block insert+refresh preserving prompt, refresh refuses a non-AI block, viewer/stranger
+  refused, an 8-suggestion stress); **real-LLM Playwright e2e**: continue→stage→accept,
+  summarize→reject (doc untouched), rewrite-a-block, AI block insert+refresh, to-do
+  extraction after an AI edit, viewer-403/stranger-404, **the agent co-writes a note via
+  `note_edit` during a real run** (asserted strictly in single-agent **agent** mode →
+  convergent merge with a human edit; the same path runs in **supervisor**/**ensemble**
+  modes asserting the no-clobber safety invariant), and a web-UI test (toolbar →
+  suggestion → Accept). *Acceptance: human + agent co-write → convergent merge; suggestion
+  accept/reject; cited AI block refreshes — all met.* Honest scope notes: (a) `direct` mode
+  has no tools by policy, so the agent can't call `note_edit` there — that path is the
+  AI-action endpoints; (b) the multi-agent supervisor/ensemble loops invoke a single
+  `note_edit` tool-call far less deterministically with a small model (gpt-4o-mini), so the
+  *convergence* is asserted strictly only in agent mode — the mechanism itself is
+  mode-independent and proven deterministically in `note-ai-sql.test.ts`; (c) the platform's
+  prompt-injection guardrail correctly refuses agent note-edits phrased like "manipulate the
+  system with id X", so the agent co-authors via natural, mundane requests.
 
 **Track C — Workspace intelligence**
 - **Phase 4 — Emit-as-artifact (package+app).** `blocksToMarkdown/Html`; emit endpoint →

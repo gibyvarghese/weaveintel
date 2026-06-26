@@ -54,6 +54,7 @@ import { DbToolPolicyResolver, DbToolRateLimiter, consoleAuditEmitter } from './
 import { DbToolAuditEmitter } from './tool-audit-emitter.js';
 import { DbToolApprovalGate } from './tool-approval-gate.js';
 import { createTemporalStore } from './temporal-store.js';
+import { createNoteAiService, createModelTextGenerator } from './note-ai-sql.js';
 import {
   applySkillsToPrompt,
   type SkillMatch,
@@ -381,6 +382,11 @@ export class ChatEngine {
           return { id: row.id, version: row.version };
         },
       } : {}),
+      // weaveNotes Phase 3: wire the `note_edit` tool so the agent can co-author the
+      // user's notes (direct or as a suggestion). Shares the engine's model config for
+      // generation; resolves the user's note access itself (no privilege escalation).
+      noteEdit: (a: { userId: string; noteId: string; markdown: string; mode: 'direct' | 'suggest' }) =>
+        createNoteAiService(db, createModelTextGenerator(config)).agentEdit(a),
     };
   }
 

@@ -81,6 +81,7 @@ export {
   appendBlocksToDoc,
   createBlockAgentPeer,
   type BlockAgentPeer,
+  type BlockAgentPeerOptions,
 } from './block-agent.js';
 
 // weaveNotes Phase 2 — the TRUSTED-RELAY block-op validator (anti-forgery + caps

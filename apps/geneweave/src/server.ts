@@ -19,6 +19,7 @@ import type { DatabaseAdapter } from './db.js';
 import { SQLiteAdapter } from './db-sqlite.js';
 import { createSqliteA2ATaskStore } from '@weaveintel/a2a';
 import type { ChatEngine } from './chat.js';
+import { createModelTextGenerator } from './note-ai-sql.js';
 import type { VoiceEngine } from './voice-engine.js';
 import { DashboardService } from './dashboard.js';
 import { SPA_HTML, STYLES_CSP_HASH, SCRIPT_CSP_HASHES } from './ui-server.js';
@@ -282,7 +283,9 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   // M5-3: pass consent manager so isGranted() is called on every memory write path.
   registerMeMemoryRoutes(router, db, { consentManager: config.runtime ? createDurableConsentManager({ runtime: config.runtime, namespace: 'consent' }) : undefined });
   registerMeAgendaRoutes(router, db);
-  registerMeNotesRoutes(router, db);
+  // weaveNotes Phase 3: give the notes routes an LLM generator (built from the chat
+  // engine's resolved providers + default model) so the AI co-author actions work.
+  registerMeNotesRoutes(router, db, { aiGenerate: createModelTextGenerator(chatEngine.modelConfig) });
   registerMeComplianceRoutes(router, db, config.runtime);
   registerArtifactRoutes(router, db, { jwtSecret, publicBaseUrl });
   registerShareRoutes(router, db, { jwtSecret });

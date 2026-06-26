@@ -52,6 +52,7 @@ import {
   userNoteSiteId,
 } from '../note-coedit-sql.js';
 import { noteCoeditHub } from '../note-coedit-hub.js';
+import { createNoteAiService, type NoteAiGenerate, type AiAction } from '../note-ai-sql.js';
 import { meTaskRepo as taskRepo } from './me-stores.js';
 import { createActionItem } from '@weaveintel/human-tasks';
 import { safePageInt } from './index.js';
@@ -69,8 +70,11 @@ void createInMemoryNoteRepository; // keep the import available to embedders wit
  * without changing this file. Tests/embedders may inject their own repository via
  * `opts.noteRepository`.
  */
-export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts: { noteRepository?: NoteRepository } = {}): void {
+export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts: { noteRepository?: NoteRepository; aiGenerate?: NoteAiGenerate } = {}): void {
   const notes = opts.noteRepository ?? createSqlNoteRepository(db);
+  // weaveNotes Phase 3: the AI co-author service (suggestions, agent edits, AI blocks).
+  // Only wired when the host provides an LLM generator (so unit/embedder setups stay LLM-free).
+  const noteAi = opts.aiGenerate ? createNoteAiService(db, opts.aiGenerate) : null;
 
   // ── Notes list ─────────────────────────────────────────────────────────────
 
@@ -316,6 +320,111 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     else { res.writeHead(400); res.end(JSON.stringify({ error: 'userId or tokenId required' })); return; }
     res.writeHead(ok ? 200 : 404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ revoked: ok }));
+  }, { auth: true });
+
+  // ── weaveNotes Phase 3: AI co-author (suggestions + AI blocks) ────────────────
+  //
+  // The AI works INSIDE the note. "Actions" (continue / rewrite / summarize / ask)
+  // run the real LLM and STAGE the result as a track-changes suggestion the human
+  // accepts or rejects — the AI never silently mutates the document. "AI blocks"
+  // are blocks generated from a prompt that can be refreshed. All require the caller
+  // to be the owner or a collaborator (viewers 403); everything broadcasts live.
+  //
+  //   POST /api/me/notes/:id/ai/:action            run an AI action → a pending suggestion   (collaborator+)
+  //   GET  /api/me/notes/:id/suggestions?status=   list suggestions                          (any participant)
+  //   POST /api/me/notes/:id/suggestions/:sid/accept   apply a suggestion's staged ops       (collaborator+)
+  //   POST /api/me/notes/:id/suggestions/:sid/reject   discard a suggestion                  (collaborator+)
+  //   POST /api/me/notes/:id/ai/insert-block       generate + insert a refreshable AI block  (collaborator+)
+  //   POST /api/me/notes/:id/ai/refresh-block      re-generate an AI block's content         (collaborator+)
+  const AI_ACTIONS = new Set(['continue', 'rewrite', 'summarize', 'ask']);
+
+  // NOTE: register the STATIC `/ai/insert-block` + `/ai/refresh-block` routes BEFORE
+  // the `/ai/:action` param route, so the router matches them exactly (the param
+  // route would otherwise capture "insert-block" as an unknown action).
+  router.post('/api/me/notes/:id/ai/insert-block', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    if (!noteAi) { res.writeHead(501); res.end(JSON.stringify({ error: 'AI features are not configured' })); return; }
+    const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    if (!roleAtLeast(access.role, 'collaborator')) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    if (typeof body['prompt'] !== 'string' || !body['prompt'].trim()) { res.writeHead(400); res.end(JSON.stringify({ error: 'prompt required' })); return; }
+    const r = await noteAi.insertAiBlock({ noteId: params['id']!, access, prompt: body['prompt'], ...(typeof body['citation'] === 'string' ? { citation: body['citation'] } : {}) });
+    res.writeHead(r.ok ? 201 : 400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(r));
+  }, { auth: true });
+
+  router.post('/api/me/notes/:id/ai/refresh-block', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    if (!noteAi) { res.writeHead(501); res.end(JSON.stringify({ error: 'AI features are not configured' })); return; }
+    const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    if (!roleAtLeast(access.role, 'collaborator')) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    const blockId = body['blockId'];
+    if (!blockId || typeof blockId !== 'object') { res.writeHead(400); res.end(JSON.stringify({ error: 'blockId required' })); return; }
+    const r = await noteAi.refreshAiBlock({ noteId: params['id']!, access, blockId: blockId as { counter: number; siteId: string } });
+    res.writeHead(r.ok ? 200 : 400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(r));
+  }, { auth: true });
+
+  router.post('/api/me/notes/:id/ai/:action', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    if (!noteAi) { res.writeHead(501); res.end(JSON.stringify({ error: 'AI features are not configured on this server' })); return; }
+    const action = params['action']!;
+    // insert-block / refresh-block are handled by their own paths below; here only the 4 text actions.
+    if (!AI_ACTIONS.has(action)) { res.writeHead(404); res.end(JSON.stringify({ error: 'Unknown AI action' })); return; }
+    const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    if (!roleAtLeast(access.role, 'collaborator')) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden: viewers cannot use AI editing' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    const selBlock = body['selectionBlockId'];
+    const result = await noteAi.propose({
+      noteId: params['id']!, access, action: action as AiAction,
+      ...(typeof body['instruction'] === 'string' ? { instruction: body['instruction'] } : {}),
+      ...(typeof body['selectionText'] === 'string' ? { selectionText: body['selectionText'] } : {}),
+      ...(selBlock && typeof selBlock === 'object' ? { selectionBlockId: selBlock as { counter: number; siteId: string } } : {}),
+    });
+    res.writeHead(result.ok ? 201 : 400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
+  }, { auth: true });
+
+  router.get('/api/me/notes/:id/suggestions', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    if (!noteAi) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ suggestions: [] })); return; }
+    const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    const status = (new URL(req.url ?? '/', 'http://x').searchParams.get('status') ?? 'pending') as 'pending' | 'accepted' | 'rejected' | 'all';
+    const rows = await noteAi.list(params['id']!, status);
+    // Trim the heavy ops_json out of the list payload; the preview is what reviewers read.
+    const suggestions = rows.map((r) => ({ id: r.id, action: r.action, status: r.status, preview: r.preview_text, authorKind: r.author_kind, createdAt: r.created_at }));
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ suggestions }));
+  }, { auth: true });
+
+  router.post('/api/me/notes/:id/suggestions/:sid/accept', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    if (!noteAi) { res.writeHead(501); res.end(JSON.stringify({ error: 'AI features are not configured' })); return; }
+    const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    if (!roleAtLeast(access.role, 'collaborator')) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
+    const r = await noteAi.accept(params['sid']!, auth.userId, access);
+    res.writeHead(r.ok ? 200 : 400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(r));
+  }, { auth: true });
+
+  router.post('/api/me/notes/:id/suggestions/:sid/reject', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    if (!noteAi) { res.writeHead(501); res.end(JSON.stringify({ error: 'AI features are not configured' })); return; }
+    const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    if (!roleAtLeast(access.role, 'collaborator')) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
+    const r = await noteAi.reject(params['sid']!, auth.userId, access);
+    res.writeHead(r.ok ? 200 : 400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(r));
   }, { auth: true });
 
   router.post('/api/me/notes', async (req, res, _params, auth) => {
