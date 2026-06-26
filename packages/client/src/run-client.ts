@@ -152,6 +152,24 @@ export interface RunClient {
   listAnnotations(runId: string): Promise<{ annotations: unknown[]; summary: unknown[] }>;
   /** Collaboration Phase 4 — mint a public, read-only share link (owner only). */
   createRunPublicShare(runId: string, opts?: { expiresInMs?: number }): Promise<{ id: string; token: string; url: string; expiresAt: number | null }>;
+  /**
+   * Collaboration Phase 5 — request a handoff on a run (pass the baton). `scope`
+   * is user_to_user / agent_to_human / agent_to_agent; context travels as a
+   * scoped briefing (auto-built from the run unless `briefing` is supplied).
+   */
+  requestHandoff(runId: string, input: { toUserId: string; reason: string; scope?: 'user_to_user' | 'agent_to_human' | 'agent_to_agent'; briefing?: unknown; ttlMs?: number; referenceTaskIds?: string[]; parentHandoffId?: string }): Promise<{ handoff: unknown }>;
+  /** Collaboration Phase 5 — all handoffs on a run. */
+  listHandoffs(runId: string): Promise<{ handoffs: unknown[] }>;
+  /** Collaboration Phase 5 — the append-only audit trail for one handoff. */
+  handoffAudit(runId: string, handoffId: string): Promise<{ audit: unknown[] }>;
+  /** Collaboration Phase 5 — my inbox: handoffs assigned to me. */
+  handoffInbox(): Promise<{ handoffs: unknown[] }>;
+  /**
+   * Collaboration Phase 5 — drive a handoff transition. `action` is one of
+   * accept / reject / cancel / start / hand-back / complete / fail. `reject`/`fail`
+   * require a `reason`; `hand-back` may carry a `briefing`.
+   */
+  handoffAction(runId: string, handoffId: string, action: 'accept' | 'reject' | 'cancel' | 'start' | 'hand-back' | 'complete' | 'fail', body?: { reason?: string; note?: string; briefing?: unknown }): Promise<{ handoff: unknown }>;
 }
 
 export interface CreateRunClientOptions {
@@ -391,6 +409,22 @@ export function createRunClient(opts: CreateRunClientOptions): RunClient {
     },
     async createRunPublicShare(runId, shareOpts) {
       return json.post(`/api/me/runs/${runId}/public-share`, shareOpts ?? {});
+    },
+
+    async requestHandoff(runId, input) {
+      return json.post(`/api/me/runs/${runId}/handoff`, input);
+    },
+    async listHandoffs(runId) {
+      return (await json.get<{ handoffs: unknown[] }>(`/api/me/runs/${runId}/handoffs`)) ?? { handoffs: [] };
+    },
+    async handoffAudit(runId, handoffId) {
+      return (await json.get<{ audit: unknown[] }>(`/api/me/runs/${runId}/handoffs/${handoffId}/audit`)) ?? { audit: [] };
+    },
+    async handoffInbox() {
+      return (await json.get<{ handoffs: unknown[] }>('/api/me/handoffs/inbox')) ?? { handoffs: [] };
+    },
+    async handoffAction(runId, handoffId, action, body) {
+      return json.post(`/api/me/runs/${runId}/handoffs/${handoffId}/${action}`, body ?? {});
     },
   };
 }

@@ -198,6 +198,41 @@ export interface RunPublicShareRow {
   revoked_at: number | null;
 }
 
+/** m98 (Collaboration Phase 5) — a durable unified-handoff record. */
+export interface SessionHandoffRow {
+  id: string;
+  run_id: string;
+  tenant_id: string | null;
+  scope: 'user_to_user' | 'agent_to_human' | 'agent_to_agent';
+  from_actor_type: 'user' | 'agent' | 'role';
+  from_actor_id: string;
+  to_actor_type: 'user' | 'agent' | 'role';
+  to_actor_id: string;
+  state: string;
+  reason: string;
+  briefing_json: string | null;
+  rejection_reason: string | null;
+  hand_back_briefing_json: string | null;
+  depth: number;
+  parent_handoff_id: string | null;
+  reference_task_ids_json: string;
+  created_at: number;
+  updated_at: number;
+  resolved_at: number | null;
+  expires_at: number | null;
+}
+
+/** m98 — one append-only handoff audit event (a single transition). */
+export interface HandoffEventRow {
+  id: string;
+  handoff_id: string;
+  at: number;
+  actor_id: string;
+  from_state: string | null;
+  to_state: string;
+  note: string | null;
+}
+
 export interface UserDeviceRow {
   id: string;
   user_id: string;
@@ -319,6 +354,15 @@ export interface IMeStore {
   getRunPublicShareByHash(tokenHash: string): Promise<RunPublicShareRow | null>;
   listRunPublicShares(runId: string): Promise<RunPublicShareRow[]>;
   revokeRunPublicShare(id: string, runId: string, revokedAt: number): Promise<number>;
+  // ── Unified handoff (m98, Collaboration Phase 5) ────────────────────────────
+  insertSessionHandoff(row: SessionHandoffRow): Promise<void>;
+  getSessionHandoff(id: string): Promise<SessionHandoffRow | null>;
+  updateSessionHandoff(id: string, fields: Partial<Pick<SessionHandoffRow, 'state' | 'rejection_reason' | 'hand_back_briefing_json' | 'updated_at' | 'resolved_at'>>): Promise<void>;
+  listSessionHandoffsForRun(runId: string): Promise<SessionHandoffRow[]>;
+  listSessionHandoffsForActor(actorId: string): Promise<SessionHandoffRow[]>;
+  listDueSessionHandoffs(now: number): Promise<SessionHandoffRow[]>;
+  insertHandoffEvent(row: HandoffEventRow): Promise<void>;
+  listHandoffEvents(handoffId: string): Promise<HandoffEventRow[]>;
   // Registered outbound webhook endpoints
   createWebhookEndpoint(row: { id: string; tenant_id?: string | null; user_id: string; url: string; signing_secret: string; created_at: number }): Promise<void>;
   listWebhookEndpoints(userId: string): Promise<WebhookEndpointRow[]>;

@@ -41,6 +41,11 @@ function mockClient(opts: {
     async addAnnotation() { return { annotation: {} }; },
     async listAnnotations() { return { annotations: [], summary: [] }; },
     async createRunPublicShare() { return { id: 's', token: 't', url: '/share/runs/t', expiresAt: null }; },
+    async requestHandoff() { return { handoff: {} }; },
+    async listHandoffs() { return { handoffs: [] }; },
+    async handoffAudit() { return { audit: [] }; },
+    async handoffInbox() { return { handoffs: [] }; },
+    async handoffAction() { return { handoff: {} }; },
   };
 }
 

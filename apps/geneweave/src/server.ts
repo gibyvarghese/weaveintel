@@ -28,6 +28,7 @@ import { createNotificationsHub } from './notifications-wiring.js';
 import { MeRunExecutor } from './me-run-executor.js';
 import { startPresenceSweeper } from './presence-sql.js';
 import { createNotificationRelay, enqueueRunTerminalNotifications } from './run-notifications-outbox.js';
+import { startHandoffSweeper } from './handoff-sql.js';
 import { createChatPipelineMeRunAgent } from './me-run-agent.js';
 import { type TriggerDispatcherHandle } from './admin/api/triggers.js';
 import { type LoadedGatewayConfig } from './mcp-gateway.js';
@@ -262,6 +263,9 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   // down, or a crash between terminal + enqueue) is delivered on boot.
   notificationRelay.start();
   void notificationRelay.reconcile();
+  // Collaboration Phase 5: SLA sweeper — time out overdue handoffs so an
+  // unbounded human wait never deadlocks a run; broadcast each timeout live.
+  startHandoffSweeper(db, (runId, kind, payload) => meRunExecutor.broadcastEphemeral(runId, kind, payload));
   registerMeConversationsRoutes(router, db);
   // M5-3: pass consent manager so isGranted() is called on every memory write path.
   registerMeMemoryRoutes(router, db, { consentManager: config.runtime ? createDurableConsentManager({ runtime: config.runtime, namespace: 'consent' }) : undefined });

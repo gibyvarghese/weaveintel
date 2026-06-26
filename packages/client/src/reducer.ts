@@ -234,6 +234,23 @@ export interface RunCommentView {
   createdAt: number;
 }
 
+/**
+ * Collaboration Phase 5 — a handoff as carried over the live wire. The minimal
+ * shape the UI needs to render the baton-pass + its lifecycle state.
+ */
+export interface RunHandoffView {
+  id: string;
+  runId: string;
+  scope: 'user_to_user' | 'agent_to_human' | 'agent_to_agent';
+  fromActor: { type: string; id: string };
+  toActor: { type: string; id: string };
+  state: string;
+  reason: string;
+  rejectionReason: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
 // ---------------------------------------------------------------------------
 // The accumulated view model
 // ---------------------------------------------------------------------------
@@ -295,6 +312,13 @@ export interface RunViewModel {
    * a one-shot `listComments()` fetch; updated live as collaborators comment.
    */
   comments: RunCommentView[];
+  /**
+   * Collaboration Phase 5 — handoffs on this run, keyed by id and kept live via
+   * ephemeral `handoff.update` events (sequence -1). Each carries the lifecycle
+   * `state` (requested/accepted/in_progress/handed_back/completed/…) so the UI
+   * can show "this run was handed to Alice — accepted" without a refetch.
+   */
+  handoffs: RunHandoffView[];
   /** Phase 2 — ordered typed parts with per-part streaming state. */
   parts: RunPart[];
   /** All items in event order (for a linear render). */
@@ -319,6 +343,7 @@ export function emptyRunViewModel(): RunViewModel {
     files: [],
     presence: [],
     comments: [],
+    handoffs: [],
     parts: [],
     items: [],
   };
@@ -597,6 +622,15 @@ export function streamReducer(state: RunViewModel, envelope: RunEventEnvelope): 
     if (!threadId) return state;
     const resolvedAt = envelope.kind === 'comment.resolvedd' ? (envelope.timestamp ?? Date.now()) : null;
     return { ...state, comments: state.comments.map((c) => c.threadId === threadId ? { ...c, resolvedAt } : c) };
+  }
+
+  // Collaboration Phase 5 — live handoff lifecycle. Ephemeral (`sequence: -1`):
+  // upsert the handoff into `handoffs` so the UI tracks the baton-pass state.
+  if (envelope.kind === 'handoff.update') {
+    const incoming = (envelope.payload as { handoff?: RunHandoffView }).handoff;
+    if (!incoming || typeof incoming.id !== 'string') return state;
+    const rest = state.handoffs.filter((h) => h.id !== incoming.id);
+    return { ...state, handoffs: [...rest, incoming].sort((a, b) => a.createdAt - b.createdAt) };
   }
 
   // Skip already-seen or out-of-order events (idempotent)

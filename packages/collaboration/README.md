@@ -19,7 +19,8 @@ here"), live run subscriptions, and user handoff.
 | `createRunSubscriptionManager()` | (legacy in-memory prototype) live status/progress broadcast room — superseded by the durable `SubscriptionManager` above. |
 | `createInMemoryCommentManager()` | **Run comments** (Phase 4): threaded review comments ANCHORED to a stable run part (`tool-3`, `text-1`). The PORT + in-memory adapter; geneWeave's SQL adapter (over `run_comments`) + @mention notifications + a public read-only share layer on top. Both pass `commentManagerContract`. Markdown → safe HTML via `renderCommentMarkdown`. |
 | `createInMemoryAnnotationManager()` | **Run annotations** (Phase 4): structured human-feedback SCORES (`{name, value, source}`) on a run/part — the bridge to eval datasets. The PORT + in-memory adapter; geneWeave's SQL adapter over `run_annotations`. Both pass `annotationManagerContract`. |
-| `createHandoffManager()` | The **handoff** lifecycle — request → accept / reject / cancel / complete — for passing a session from one user to another. |
+| `createInMemoryHandoffManager()` | **Unified handoff** (Phase 5): one durable, audited lifecycle for passing the baton — user↔user, agent↔human (escalation), agent↔agent. The PORT + in-memory adapter; geneWeave's SQL adapter (over `session_handoffs` + `handoff_events`) layers session-takeover + notifications on top. Both pass `handoffManagerContract`. |
+| `createHandoffManager()` | (legacy in-memory prototype) request → accept / reject / cancel / complete — superseded by the unified `UnifiedHandoffManager` above. |
 
 ### Presence (Phase 1) — how it works
 
@@ -159,6 +160,51 @@ Design (mid-2026 research — Notion block comments + W3C Web Annotation
   revocable) rendering a REDACTED, read-only view (display names only — no emails/
   ids/system prompts/tool args), `noindex` + `no-referrer`.
 
+### Unified handoff (Phase 5) — how it works
+
+> New to this? A "handoff" is passing the baton on a running task. Maybe you hand
+> a live session to a teammate, or an AI run hits something it is unsure about and
+> ESCALATES to a human expert, who takes over, sorts it out, and hands it back.
+> This models that as one small, explicit lifecycle — REQUESTED → ACCEPTED (or
+> REJECTED, with a reason) → IN PROGRESS → HANDED BACK → COMPLETED — and writes
+> down every step so there is a clear, tamper-evident record of who did what.
+
+```ts
+import { createInMemoryHandoffManager } from '@weaveintel/collaboration';
+
+const handoffs = createInMemoryHandoffManager();
+const h = await handoffs.request({ id, runId, tenantId, scope: 'agent_to_human',
+  fromActor: { type: 'agent', id: 'support-bot' }, toActor: { type: 'user', id: 'alice' },
+  reason: 'low confidence on the refund policy',
+  briefing: { summary: 'Customer wants a refund; eligibility unclear.', confidence: 0.4 } });
+await handoffs.accept(h.id, 'alice');        // recipient takes it
+await handoffs.start(h.id, 'alice');         // …works on it…
+await handoffs.handBack(h.id, 'alice', { summary: 'Approved the refund.' });
+await handoffs.complete(h.id, 'support-bot');
+const trail = await handoffs.audit(h.id);    // every transition, append-only
+```
+
+Design (mid-2026 research — OpenAI Agents SDK handoffs, LangGraph interrupts, A2A
+v1.0 task lifecycle, EU AI Act Art. 12/14 audit + human-oversight):
+- **One explicit state machine** for all three scopes, mapped onto A2A's
+  interruptible-vs-terminal split; `rejected` is first-class and **requires a
+  reason** (evidentiary — silent rejections fail audit defensibility).
+- **Append-only audit**: every transition is its own event (who/when/from→to/
+  note), never a silently mutated field.
+- **Context transfer is a SCOPED BRIEFING, not the raw transcript** (the strongest
+  2026 consensus — full transcripts blow up tokens and bury signal): a summary,
+  decisions, open questions, a single next action, artifact refs, confidence.
+- **Anti-loop**: a handoff carries a `depth`; chaining past `maxDepth` is refused
+  (frameworks ship no built-in recursion limit — you must add one).
+- **SLA timer**: `expireDue` flips overdue `requested`/`accepted` handoffs to
+  `timed_out` (an unbounded human wait would deadlock the run).
+- **Authorization by actor**: only the RECIPIENT accepts/rejects/starts/hands
+  back; only the REQUESTER cancels. In geneWeave, **accepting grants the recipient
+  collaborator access** to the run's shared session — that is "taking over".
+- `agent_to_agent` carries A2A `referenceTaskIds` for wire interop (A2A has no
+  protocol-level transfer verb — delegation is client-orchestrated, so this
+  lifecycle is the negotiation layer A2A leaves to you).
+
 ## What this package is NOT (read this first)
 
 It is **not** where runs are stored or streamed. In **Collaboration Phase 0** the
@@ -192,6 +238,7 @@ are still **in-memory prototypes** that later phases make durable. See
 - **Phase 2 ✅** — Shared sessions + invite links (`shared_sessions`/`session_participants`) + role-gated multi-user access.
 - **Phase 3 ✅** — Durable subscriptions (`run_subscriptions`) + offline notifications (transactional `notification_outbox` → in-app feed + signed webhooks), restart-safe. Plus the CVE-2026-53843 force-disconnect.
 - **Phase 4 ✅** — Collaborative run timeline: threaded part-anchored comments (`run_comments`) + structured annotation scores (`run_annotations`) + @mention notifications + a public read-only redacted share link.
+- **Phase 5 ✅** — Unified handoff (`session_handoffs` + append-only `handoff_events`): one audited lifecycle across user↔user / agent↔human / agent↔agent — scoped briefing context, required reject reason, anti-loop depth, SLA timeout, accept-grants-session-access.
 - **Phase 4** — Collaborative run comments / annotations.
 - **Phase 5** — Unified handoff (built on `@weaveintel/human-tasks` + `@weaveintel/a2a`).
 

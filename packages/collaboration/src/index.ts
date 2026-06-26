@@ -124,3 +124,26 @@ export {
 export {
   annotationManagerContract,
 } from './run-annotation-contract.js';
+
+// Phase 5 — Unified handoff (user↔user, agent↔human, agent↔agent). The durable,
+// audited lifecycle PORT + in-memory reference adapter; geneWeave provides the
+// SQL adapter over `session_handoffs` + `handoff_events`. Both pass
+// `handoffManagerContract`. Supersedes the in-memory `createHandoffManager`
+// prototype above (kept for back-compat).
+export {
+  type HandoffScope,
+  type HandoffState,
+  type HandoffActor,
+  type HandoffBriefing,
+  type Handoff,
+  type HandoffEvent,
+  type RequestHandoffInput,
+  type UnifiedHandoffManager,
+  type InMemoryHandoffManagerOptions,
+  createInMemoryHandoffManager,
+  canTransition,
+  isTerminalHandoffState,
+} from './unified-handoff.js';
+export {
+  handoffManagerContract,
+} from './unified-handoff-contract.js';

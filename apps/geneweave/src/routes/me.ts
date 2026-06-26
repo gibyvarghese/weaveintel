@@ -65,7 +65,8 @@ import { roleAtLeast, type SessionRole, type SubscriptionChannel } from '@weavei
 import { createSqlSubscriptionManager, createSqlFeedStore } from '../run-subscription-sql.js';
 import { enqueueRunTerminalNotifications, isSafeWebhookUrl } from '../run-notifications-outbox.js';
 import { createSqlCommentManager, createSqlAnnotationManager, mintPublicShareToken } from '../run-comment-sql.js';
-import { summarizeAnnotations, annotationsToEvalExamples, type CommentAnchor, type AnnotationDataType, type AnnotationSource } from '@weaveintel/collaboration';
+import { summarizeAnnotations, annotationsToEvalExamples, type CommentAnchor, type AnnotationDataType, type AnnotationSource, type HandoffScope, type HandoffBriefing } from '@weaveintel/collaboration';
+import { createSqlHandoffManager, buildRunBriefing } from '../handoff-sql.js';
 
 /**
  * Register all /api/me routes on the provided router.
@@ -907,6 +908,153 @@ export function registerMeRoutes(
     res.writeHead(changed ? 200 : 404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ revoked: changed > 0 }));
   }, { auth: true });
+
+  // ── Unified handoff (Collaboration Phase 5) ──────────────────────────────────
+  // A small helper: drop an in-app notification (Phase 3 feed) to a user about a
+  // handoff, and push a live `handoff.update` to everyone watching the run.
+  async function notifyHandoff(runId: string, tenantId: string | null, toUserId: string, title: string): Promise<void> {
+    try {
+      await createSqlFeedStore(db).append({
+        id: newUUIDv7(), tenantId: tenantId ?? '__global__', principalId: toUserId,
+        category: 'handoff', title, deepLink: `geneweave://run/${runId}`, priority: 'high',
+        createdAt: Date.now(), readAt: null, dedupeKey: `handoff:${runId}:${newUUIDv7()}`,
+      });
+    } catch { /* best-effort */ }
+  }
+
+  const HANDOFF_SCOPES: HandoffScope[] = ['user_to_user', 'agent_to_human', 'agent_to_agent'];
+  const DEFAULT_HANDOFF_TTL_MS = 24 * 60 * 60 * 1000; // 24h SLA
+
+  // Request a handoff on a run. You must have run access to hand it off. The
+  // recipient (`toUserId`) is notified and lands in their inbox. Context travels
+  // as a SCOPED briefing (auto-built from the run unless one is supplied).
+  router.post('/api/me/runs/:runId/handoff', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveRunAccess(db, params['runId']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    const run = access.run;
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* */ }
+    const toUserId = typeof body['toUserId'] === 'string' ? body['toUserId'] : '';
+    if (!toUserId) { res.writeHead(400); res.end(JSON.stringify({ error: 'toUserId required' })); return; }
+    if (toUserId === auth.userId) { res.writeHead(400); res.end(JSON.stringify({ error: 'cannot hand off to yourself' })); return; }
+    const reason = typeof body['reason'] === 'string' ? body['reason'].slice(0, 1000) : '';
+    if (!reason.trim()) { res.writeHead(400); res.end(JSON.stringify({ error: 'a reason is required' })); return; }
+    const scope: HandoffScope = (typeof body['scope'] === 'string' && (HANDOFF_SCOPES as string[]).includes(body['scope'])) ? body['scope'] as HandoffScope : 'user_to_user';
+    // The recipient must exist (no leaking via mention of a ghost user).
+    const recipient = await db.getUserById(toUserId).catch(() => null);
+    if (!recipient) { res.writeHead(404); res.end(JSON.stringify({ error: 'recipient not found' })); return; }
+    // Scoped context briefing: caller override merged over an auto-summary of the run.
+    const overrides = (body['briefing'] && typeof body['briefing'] === 'object') ? body['briefing'] as Partial<HandoffBriefing> : {};
+    const briefing = await buildRunBriefing(db, run, overrides);
+    const ttlMs = typeof body['ttlMs'] === 'number' ? body['ttlMs'] : DEFAULT_HANDOFF_TTL_MS;
+    const fromType = scope === 'agent_to_human' || scope === 'agent_to_agent' ? 'agent' : 'user';
+
+    const handoffs = createSqlHandoffManager(db);
+    const handoff = await handoffs.request({
+      id: newUUIDv7(), runId: run.id, tenantId: run.tenant_id ?? '__global__', scope,
+      fromActor: { type: fromType, id: auth.userId }, toActor: { type: 'user', id: toUserId },
+      reason, briefing, ttlMs,
+      ...(typeof body['parentHandoffId'] === 'string' ? { parentHandoffId: body['parentHandoffId'] } : {}),
+      ...(Array.isArray(body['referenceTaskIds']) ? { referenceTaskIds: (body['referenceTaskIds'] as unknown[]).filter((x): x is string => typeof x === 'string') } : {}),
+    });
+    await notifyHandoff(run.id, run.tenant_id ?? null, toUserId, 'A run was handed to you');
+    runExecutor.broadcastEphemeral(run.id, 'handoff.update', { handoff });
+    res.writeHead(201, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ handoff }));
+  }, { auth: true });
+
+  // List handoffs on a run (+ optional audit per handoff). Requires run access.
+  router.get('/api/me/runs/:runId/handoffs', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveRunAccess(db, params['runId']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    const handoffs = await createSqlHandoffManager(db).listForRun(access.run.id);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ handoffs }));
+  }, { auth: true });
+
+  // The audit trail for one handoff (append-only). Requires run access.
+  router.get('/api/me/runs/:runId/handoffs/:id/audit', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveRunAccess(db, params['runId']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    const mgr = createSqlHandoffManager(db);
+    const h = await mgr.get(params['id']!);
+    if (!h || h.runId !== access.run.id) { res.writeHead(404); res.end(JSON.stringify({ error: 'Handoff not found' })); return; }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ audit: await mgr.audit(params['id']!) }));
+  }, { auth: true });
+
+  // My handoff INBOX — handoffs assigned to me (no run access needed; the handoff
+  // IS the capability, so a not-yet-accepted recipient can see + act on it).
+  router.get('/api/me/handoffs/inbox', async (_req, res, _params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const handoffs = await createSqlHandoffManager(db).listForActor(auth.userId);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ handoffs }));
+  }, { auth: true });
+
+  // Handoff lifecycle transitions. Authorization is by ACTOR (the port enforces:
+  // only the recipient accepts/rejects/starts/hands-back; only the requester
+  // cancels; either participant completes/fails). On ACCEPT the recipient is
+  // granted collaborator access to the run's shared session — that is "taking
+  // over the session". Each transition notifies the other party + broadcasts live.
+  for (const action of ['accept', 'reject', 'cancel', 'start', 'hand-back', 'complete', 'fail'] as const) {
+    router.post(`/api/me/runs/:runId/handoffs/:id/${action}`, async (req, res, params, auth) => {
+      if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+      const mgr = createSqlHandoffManager(db);
+      const existing = await mgr.get(params['id']!);
+      if (!existing || existing.runId !== params['runId']) { res.writeHead(404); res.end(JSON.stringify({ error: 'Handoff not found' })); return; }
+      let body: Record<string, unknown> = {};
+      try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* */ }
+      const note = typeof body['note'] === 'string' ? body['note'].slice(0, 1000) : undefined;
+      try {
+        let updated;
+        switch (action) {
+          case 'accept': {
+            updated = await mgr.accept(existing.id, auth.userId, note);
+            // Take over the session: grant the recipient collaborator access.
+            const run = await db.getUserRunById(existing.runId);
+            if (run) {
+              const sessions = createSqlSessionManager(db);
+              const session = await sessions.createSession({ id: newUUIDv7(), runId: run.id, tenantId: run.tenant_id ?? '__global__', ownerId: run.user_id });
+              await sessions.join(session.id, auth.userId, 'collaborator').catch(() => { /* idempotent */ });
+            }
+            await notifyHandoff(existing.runId, existing.tenantId === '__global__' ? null : existing.tenantId, existing.fromActor.id, 'Your handoff was accepted');
+            break;
+          }
+          case 'reject': {
+            const reason = typeof body['reason'] === 'string' ? body['reason'].slice(0, 1000) : '';
+            if (!reason.trim()) { res.writeHead(400); res.end(JSON.stringify({ error: 'a rejection requires a reason' })); return; }
+            updated = await mgr.reject(existing.id, auth.userId, reason);
+            await notifyHandoff(existing.runId, existing.tenantId === '__global__' ? null : existing.tenantId, existing.fromActor.id, 'Your handoff was declined');
+            break;
+          }
+          case 'cancel': updated = await mgr.cancel(existing.id, auth.userId, note); break;
+          case 'start': updated = await mgr.start(existing.id, auth.userId, note); break;
+          case 'hand-back': {
+            const back = (body['briefing'] && typeof body['briefing'] === 'object') ? body['briefing'] as HandoffBriefing : undefined;
+            updated = await mgr.handBack(existing.id, auth.userId, back, note);
+            await notifyHandoff(existing.runId, existing.tenantId === '__global__' ? null : existing.tenantId, existing.fromActor.id, 'A handoff was handed back to you');
+            break;
+          }
+          case 'complete': updated = await mgr.complete(existing.id, auth.userId, note); break;
+          case 'fail': {
+            const reason = typeof body['reason'] === 'string' ? body['reason'].slice(0, 1000) : 'failed';
+            updated = await mgr.fail(existing.id, auth.userId, reason);
+            break;
+          }
+        }
+        runExecutor.broadcastEphemeral(existing.runId, 'handoff.update', { handoff: updated });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ handoff: updated }));
+      } catch (err) {
+        // Illegal transition / forbidden actor → 403 (the port is the source of truth).
+        res.writeHead(403); res.end(JSON.stringify({ error: err instanceof Error ? err.message : 'Forbidden' }));
+      }
+    }, { auth: true });
+  }
 
   // ─── Catalog ────────────────────────────────────────────────────────────
 

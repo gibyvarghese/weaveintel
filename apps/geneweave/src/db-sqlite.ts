@@ -9120,6 +9120,44 @@ export class SQLiteAdapter implements DatabaseAdapter {
     return this.d.prepare('UPDATE run_public_shares SET revoked_at = ? WHERE id = ? AND run_id = ?').run(revokedAt, id, runId).changes;
   }
 
+  // ── Unified handoff (m98, Collaboration Phase 5) ────────────────────────────
+  async insertSessionHandoff(row: import('./db-types/adapter-me.js').SessionHandoffRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO session_handoffs (id, run_id, tenant_id, scope, from_actor_type, from_actor_id, to_actor_type, to_actor_id, state, reason, briefing_json, rejection_reason, hand_back_briefing_json, depth, parent_handoff_id, reference_task_ids_json, created_at, updated_at, resolved_at, expires_at)
+       VALUES (@id, @run_id, @tenant_id, @scope, @from_actor_type, @from_actor_id, @to_actor_type, @to_actor_id, @state, @reason, @briefing_json, @rejection_reason, @hand_back_briefing_json, @depth, @parent_handoff_id, @reference_task_ids_json, @created_at, @updated_at, @resolved_at, @expires_at)`,
+    ).run(row);
+  }
+  async getSessionHandoff(id: string): Promise<import('./db-types/adapter-me.js').SessionHandoffRow | null> {
+    return (this.d.prepare('SELECT * FROM session_handoffs WHERE id = ?').get(id) ?? null) as import('./db-types/adapter-me.js').SessionHandoffRow | null;
+  }
+  async updateSessionHandoff(id: string, fields: Partial<Pick<import('./db-types/adapter-me.js').SessionHandoffRow, 'state' | 'rejection_reason' | 'hand_back_briefing_json' | 'updated_at' | 'resolved_at'>>): Promise<void> {
+    const keys = Object.keys(fields);
+    if (keys.length === 0) return;
+    const set = keys.map((k) => `${k} = @${k}`).join(', ');
+    this.d.prepare(`UPDATE session_handoffs SET ${set} WHERE id = @id`).run({ ...fields, id });
+  }
+  async listSessionHandoffsForRun(runId: string): Promise<import('./db-types/adapter-me.js').SessionHandoffRow[]> {
+    return this.d.prepare('SELECT * FROM session_handoffs WHERE run_id = ? ORDER BY created_at DESC').all(runId) as import('./db-types/adapter-me.js').SessionHandoffRow[];
+  }
+  async listSessionHandoffsForActor(actorId: string): Promise<import('./db-types/adapter-me.js').SessionHandoffRow[]> {
+    return this.d.prepare('SELECT * FROM session_handoffs WHERE to_actor_id = ? ORDER BY created_at DESC').all(actorId) as import('./db-types/adapter-me.js').SessionHandoffRow[];
+  }
+  async listDueSessionHandoffs(now: number): Promise<import('./db-types/adapter-me.js').SessionHandoffRow[]> {
+    return this.d.prepare(`SELECT * FROM session_handoffs WHERE state IN ('requested','accepted') AND expires_at IS NOT NULL AND expires_at <= ?`).all(now) as import('./db-types/adapter-me.js').SessionHandoffRow[];
+  }
+  async insertHandoffEvent(row: import('./db-types/adapter-me.js').HandoffEventRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO handoff_events (id, handoff_id, at, actor_id, from_state, to_state, note)
+       VALUES (@id, @handoff_id, @at, @actor_id, @from_state, @to_state, @note)`,
+    ).run(row);
+  }
+  async listHandoffEvents(handoffId: string): Promise<import('./db-types/adapter-me.js').HandoffEventRow[]> {
+    // Order by INSERTION (rowid), not (at, id): many transitions land in the same
+    // millisecond and UUIDv7 ids are not reliably monotonic within a ms, which
+    // would scramble the audit trail. rowid is strict insertion order.
+    return this.d.prepare('SELECT * FROM handoff_events WHERE handoff_id = ? ORDER BY rowid ASC').all(handoffId) as import('./db-types/adapter-me.js').HandoffEventRow[];
+  }
+
   // Registered outbound webhook endpoints.
   async createWebhookEndpoint(row: { id: string; tenant_id?: string | null; user_id: string; url: string; signing_secret: string; created_at: number }): Promise<void> {
     this.d.prepare(
