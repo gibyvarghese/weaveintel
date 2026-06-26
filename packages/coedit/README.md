@@ -20,6 +20,7 @@ awareness cursors and offline reconcile (Collaboration Phase 7).
 | `Awareness` | **Ephemeral cursors + presence** (who's editing, where). Cursors are *relative positions* (anchored to a character id, not an integer offset) so they don't jump when others edit. Last-write-wins per peer; TTL-expired. |
 | `createAgentPeer` | The **agent as a co-editing peer** — a server-side replica with its own site id that streams its output as insert ops. `direct` or `suggest` (HITL) mode. |
 | `validateClientOps` | The **trusted-relay** op validator — anti-forgery (a peer can't author ops as another site), size/flood caps, shape checks. |
+| `BlockDoc` | The **rich-text / block-document CRDT** (weaveNotes Phase 1) — co-edit a *structured* note (headings, lists, to-dos, code, quotes) with inline marks, on the same RGA. `pmToBlocks`/`blocksToProseMirror` convert to/from Tiptap JSON; `blocksToMarkdown`/`blocksToHtml` serialize; `createBlockAgentPeer` lets the agent contribute Markdown as blocks. |
 
 ## The algorithm (RGA)
 
@@ -72,6 +73,47 @@ Mid-2026 research note: a 2025 user study found people prefer the agent as a
 **suggester** (tracked changes they accept) for large/overlapping edits — pass
 `{ mode: 'suggest' }` to get the ops back WITHOUT applying them, for the host to
 gate behind human approval.
+
+## Rich-text / block co-editing — `BlockDoc` (weaveNotes Phase 1)
+
+`RgaDoc` co-edits PLAIN text. A note is a STRUCTURED document — headings, lists,
+to-dos, code blocks, with **bold**/_italic_/`code`/links. `BlockDoc` makes the
+whole structure co-editable + convergent, on the **same RGA**.
+
+> New to this? The trick (Automerge's): instead of a tree, keep ONE flat sequence
+> of tiny elements — each is either a single CHARACTER or a "block marker" that
+> says "a new block (a heading / a list item / …) starts here". Because it is just
+> one sequence, all the proven plain-text CRDT machinery works unchanged. Splitting
+> a paragraph = inserting a marker. Merging two = deleting a marker. No trees, no
+> locks, no conflict-resolution code.
+
+```ts
+import { BlockDoc, pmToBlocks, blocksToProseMirror, blocksToMarkdown } from '@weaveintel/coedit';
+
+const doc = BlockDoc.fromBlocks('alice', pmToBlocks(tiptapJson)); // load a note
+doc.insertText(doc.blocks()[0]!.id, 0, 'Hi ');                    // edit it
+doc.splitBlock(blockId, 5);                                       // press Enter mid-paragraph
+const md = blocksToMarkdown(doc.blocks());                        // feed the note to an AI model
+const pm = blocksToProseMirror(doc.blocks());                     // render back to Tiptap (schema-repaired)
+```
+
+On top of the sequence sit two small last-write-wins layers: block **attributes**
+(`type`, `level`, `checked`, `listType` — keyed by the marker id) and inline
+**marks** (Peritext-lite spans anchored to character ids, so a span survives
+concurrent edits and add/remove commute). Convergence (Strong Eventual
+Consistency) is inherited from the RGA. `blocksToProseMirror` always runs a
+deterministic **schema repair** (`normalizeBlocks`) so a doc produced by a
+concurrent merge is valid ProseMirror; unknown block/mark types pass through
+verbatim so a schema-version skew never drops content.
+
+**The agent as a block co-editor:** `createBlockAgentPeer(doc)` parses the model's
+Markdown into block ops and merges them — so the AI and a human build the same note
+at once, converging, with no clobbering (the Phase 7 "agent as a CRDT peer" pattern
+lifted to blocks).
+
+In geneWeave, `GET /api/me/notes/:id/blocks?format=blocks|markdown|html` runs a real
+note through `BlockDoc` and renders it (the building block for the Phase 2 collaborative
+editor + the Phase 4 emit-as-artifact flow).
 
 ## Security (trusted relay)
 

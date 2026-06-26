@@ -384,9 +384,30 @@ helper** (Track D, Phase 11) as enhancements that talk to the same server/CRDT.
   the run, run through the to-do→task **extract** pipeline, plus databases/rows,
   favourites/search, owner-scoped security, the **Notes UI renders an API-created
   note**, and chat-stream regression. *Acceptance: identical behaviour — met.*
-- **Phase 1 — `BlockDoc` CRDT (package).** Block-sequence + per-block RGA + LWW attrs + ops;
-  `pmToBlocks`/`blocksToPm` + `normalize()` for the StarterKit subset; marks (Peritext-lite).
-  *Acceptance:* fuzz convergence + PM round-trip identity + adversarial-merge schema repair.
+- **Phase 1 — `BlockDoc` CRDT (package).** ✅ **delivered.** Built the rich-text/block
+  CRDT in **`@weaveintel/coedit`** on the **Automerge-style flat model** (one RGA
+  sequence of `char | block-marker` elements, reusing the Phase 7 RGA verbatim — so
+  split = insert a marker, merge = delete a marker; no trees, no char-moving). Two
+  small LWW layers on top: block **attributes** (type/level/checked/listType, keyed
+  by marker id) and inline **marks** (Peritext-lite spans anchored to char ids, so
+  add/remove commute and survive concurrent edits). Plus `pmToBlocks` /
+  `blocksToProseMirror` (+ deterministic `normalizeBlocks` **schema repair** — clamp
+  heading levels, strip divider text, guarantee ≥1 valid block, **unknown
+  nodes/marks pass through verbatim**), `blocksToMarkdown` / `blocksToHtml`
+  (sanitized), and `createBlockAgentPeer` (the agent contributes its Markdown as
+  block ops — Phase 7 agent-as-peer lifted to blocks). geneWeave wires a thin
+  surface, **`GET /api/me/notes/:id/blocks?format=blocks|markdown|html`**, that runs
+  a real note through the CRDT (via the Phase 0 `NoteRepository`). *Tested:* **18 new
+  package units** — fuzz convergence (N replicas × random block+text ops shuffled +
+  idempotent), concurrent block-insert + split-at-the-same-point convergence, **PM
+  round-trip identity**, **adversarial-merge schema repair**, marks, Markdown/HTML
+  serialization (incl. XSS-safe HTML), agent-as-block-peer, sync/snapshot (47/47
+  coedit total). **7/7 real-LLM Playwright e2e** — a real research run on **direct/
+  agent/supervisor/ensemble** is written as a rich note and round-trips through the
+  BlockDoc with every block type, to-do checked-state, and bold/link marks intact,
+  plus correct Markdown + sanitized HTML; owner-scoped security; malformed-note
+  robustness; Notes-UI regression. *Acceptance: fuzz convergence + PM round-trip
+  identity + adversarial-merge schema repair — all met.*
 - **Phase 2 — geneWeave relay + co-edit + sharing + presence (app).** `m100`; `note-coedit-sql`
   relay; `/coedit/*` endpoints; note sharing (Phase 2-collab tokens); presence cursors; swap
   the UI autosave for op sync. *Acceptance (real-LLM e2e, all modes):* two humans co-edit →

@@ -43,6 +43,7 @@ import {
   type UpdateNotePatch,
 } from '@weaveintel/notes';
 import { createSqlNoteRepository } from '../note-repository-sql.js';
+import { BlockDoc, pmToBlocks, blocksToProseMirror, blocksToMarkdown, blocksToHtml } from '@weaveintel/coedit';
 import { meTaskRepo as taskRepo } from './me-stores.js';
 import { createActionItem } from '@weaveintel/human-tasks';
 import { safePageInt } from './index.js';
@@ -96,6 +97,29 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     if (!note) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(note));
+  }, { auth: true });
+
+  // weaveNotes Phase 1: read a note as the CRDT BLOCK model (or as Markdown / HTML).
+  // The note's ProseMirror `doc_json` is parsed into blocks, run THROUGH the
+  // `BlockDoc` CRDT, and re-rendered — so this both proves the CRDT faithfully
+  // represents real notes AND gives the building blocks later phases need: the
+  // block model for the editor, Markdown for feeding the note to an AI model, and
+  // sanitized HTML for a read-only preview. `?format=blocks|markdown|html`.
+  router.get('/api/me/notes/:id/blocks', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const note = await notes.getNote(params['id']!, auth.userId);
+    if (!note) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    let pm: unknown;
+    try { pm = JSON.parse(note.doc_json); } catch { pm = { type: 'doc', content: [] }; }
+    // Round-trip through the CRDT: ProseMirror → blocks → BlockDoc → rendered blocks.
+    const doc = BlockDoc.fromBlocks(`u:${auth.userId}`, pmToBlocks(pm));
+    const blocks = doc.blocks();
+    const format = new URL(req.url ?? '/', 'http://x').searchParams.get('format') ?? 'blocks';
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    if (format === 'markdown') { res.end(JSON.stringify({ markdown: blocksToMarkdown(blocks) })); return; }
+    if (format === 'html') { res.end(JSON.stringify({ html: blocksToHtml(blocks) })); return; }
+    // Default: the block model + the round-tripped ProseMirror doc + the CRDT state vector.
+    res.end(JSON.stringify({ blocks, prosemirror: blocksToProseMirror(blocks), stateVector: doc.stateVector() }));
   }, { auth: true });
 
   router.post('/api/me/notes', async (req, res, _params, auth) => {

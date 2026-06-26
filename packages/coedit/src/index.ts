@@ -49,3 +49,36 @@ export {
   type OpValidationOptions,
   type OpValidationResult,
 } from './validation.js';
+
+// weaveNotes Phase 1 — the BLOCK-document CRDT (rich text / notes) on top of the
+// same RGA. A flat sequence of char|block-marker elements + LWW block attrs +
+// Peritext-lite marks; converges identically. Plus ProseMirror ⇄ blocks
+// conversion + schema repair, Markdown/HTML serializers, and the agent block-peer.
+export {
+  BlockDoc,
+  blockOpId,
+  type BlockType,
+  type BlockAttrs,
+  type MarkType,
+  type RenderedBlock,
+  type BlockOp,
+  type BlockSpec,
+  type BlockDocSnapshot,
+  type StateVector as BlockStateVector,
+} from './block-doc.js';
+export {
+  pmToBlocks,
+  blocksToProseMirror,
+  normalizeBlocks,
+  type NormalBlock,
+} from './prosemirror.js';
+export {
+  blocksToMarkdown,
+  blocksToHtml,
+} from './block-markdown.js';
+export {
+  markdownToBlocks,
+  appendBlocksToDoc,
+  createBlockAgentPeer,
+  type BlockAgentPeer,
+} from './block-agent.js';
