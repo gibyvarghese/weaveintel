@@ -221,6 +221,26 @@ on-ramps: `captureRun` (a chat run's output → a note + a `note_link` back to t
 box + clip-URL box) in the notes list. Every capture is owner-scoped + tenant-isolated, and web
 clips reject localhost/private/link-local/metadata/non-http targets.
 
+## Workspace RAG + version history + comments + synced blocks (weaveNotes Phase 8)
+
+Four features that make the workspace askable + reviewable. **Pure helpers** in
+[`@weaveintel/notes`](../notes) `rag.ts`: `snippetAround` (query-centred excerpts),
+`reciprocalRankFusion` (merge ranked lists from multiple corpora, score-scale-independent),
+`buildCitedContext` (numbered "[n]" context + sources), `parseCitedIds`. geneWeave wires:
+- **Workspace RAG** — `note-workspace-sql.ts` embeds each chat run's output into `run_embeddings`
+  (the run-side twin of Phase 5 `note_embeddings`), then `workspaceSearch` cosine-ranks notes +
+  runs, fuses with RRF, and returns a CITED context. Behind `POST /api/me/workspace/{search,reindex}`
+  and a `workspace_search` agent tool (so "what did we learn about X?" is answered with citations).
+- **Version history** — `note-version-sql.ts`: snapshot `doc_json` into `note_versions`; restore is
+  undoable (it snapshots the current draft first). `/api/me/notes/:id/versions`.
+- **Comments** — `note-comment-sql.ts`: threaded, block-anchored comments (reuses
+  `renderCommentMarkdown`; soft-delete tombstones; thread resolve; live over the co-edit hub).
+  `/api/me/notes/:id/comments`.
+- **Synced blocks** — `note-synced-sql.ts`: read-through transclusion (a block mirrors another
+  note's block/whole note; source edits reflect everywhere; self-sync refused).
+  `/api/me/notes/:id/synced`.
+The notes UI adds an "✦ Ask your workspace" box + 📜 History / 💬 Comments / 🔁 Synced panels.
+
 ## Security (trusted relay)
 
 CRDTs converge but are **not** Byzantine-tolerant — so the server validates every

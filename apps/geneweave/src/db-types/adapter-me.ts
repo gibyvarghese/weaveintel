@@ -362,6 +362,66 @@ export interface NoteEmbeddingRow {
   updated_at: number;
 }
 
+/** m103 — weaveNotes Phase 8: one embedding per chat RUN output (workspace RAG over runs). */
+export interface RunEmbeddingRow {
+  run_id: string;
+  user_id: string;
+  tenant_id: string | null;
+  dim: number;
+  embedding_json: string;
+  content_hash: string;
+  title: string | null;
+  content: string | null;
+  updated_at: number;
+}
+
+/** m103 — weaveNotes Phase 8: a per-note version snapshot (history + restore). */
+export interface NoteVersionRow {
+  id: string;
+  note_id: string;
+  user_id: string;
+  tenant_id: string | null;
+  title: string;
+  doc_json: string;
+  label: string | null;
+  reason: string;
+  word_count: number;
+  created_by: string;
+  created_at: number;
+}
+
+/** m103 — weaveNotes Phase 8: a threaded, block-anchored review comment on a note. */
+export interface NoteCommentRow {
+  id: string;
+  note_id: string;
+  tenant_id: string | null;
+  thread_id: string;
+  parent_id: string | null;
+  author_id: string;
+  body: string;
+  body_html: string;
+  mentions_json: string;
+  anchor_block_id: string;
+  created_at: number;
+  updated_at: number;
+  edited_at: number | null;
+  deleted_at: number | null;
+  deleted_by: string | null;
+  resolved_at: number | null;
+  resolved_by: string | null;
+}
+
+/** m103 — weaveNotes Phase 8: a synced block (transclusion) mirroring another note's block. */
+export interface NoteSyncedBlockRow {
+  id: string;
+  note_id: string;
+  user_id: string;
+  tenant_id: string | null;
+  source_note_id: string;
+  source_block_id: string;
+  created_at: number;
+}
+
 export interface UserDeviceRow {
   id: string;
   user_id: string;
@@ -530,6 +590,27 @@ export interface IMeStore {
   upsertNoteEmbedding(row: NoteEmbeddingRow): Promise<void>;
   getNoteEmbedding(noteId: string): Promise<NoteEmbeddingRow | null>;
   listUserNoteEmbeddings(userId: string): Promise<NoteEmbeddingRow[]>;
+  // weaveNotes Phase 8 — workspace RAG (run output embeddings)
+  upsertRunEmbedding(row: RunEmbeddingRow): Promise<void>;
+  getRunEmbedding(runId: string): Promise<RunEmbeddingRow | null>;
+  listUserRunEmbeddings(userId: string): Promise<RunEmbeddingRow[]>;
+  // weaveNotes Phase 8 — per-note version history
+  createNoteVersion(row: NoteVersionRow): Promise<void>;
+  listNoteVersions(noteId: string): Promise<NoteVersionRow[]>;
+  getNoteVersion(id: string): Promise<NoteVersionRow | null>;
+  // weaveNotes Phase 8 — block comments on notes
+  createNoteComment(row: NoteCommentRow): Promise<void>;
+  getNoteComment(id: string): Promise<NoteCommentRow | null>;
+  listNoteComments(noteId: string): Promise<NoteCommentRow[]>;
+  listNoteCommentThread(threadId: string): Promise<NoteCommentRow[]>;
+  updateNoteCommentBody(id: string, body: string, bodyHtml: string, mentionsJson: string, editedAt: number, updatedAt: number): Promise<void>;
+  softDeleteNoteComment(id: string, deletedBy: string, deletedAt: number): Promise<void>;
+  setNoteThreadResolution(threadId: string, resolvedAt: number | null, resolvedBy: string | null, updatedAt: number): Promise<void>;
+  // weaveNotes Phase 8 — synced blocks (transclusion)
+  createNoteSyncedBlock(row: NoteSyncedBlockRow): Promise<void>;
+  getNoteSyncedBlock(id: string): Promise<NoteSyncedBlockRow | null>;
+  listNoteSyncedBlocks(noteId: string): Promise<NoteSyncedBlockRow[]>;
+  deleteNoteSyncedBlock(id: string, noteId: string): Promise<void>;
   // Registered outbound webhook endpoints
   createWebhookEndpoint(row: { id: string; tenant_id?: string | null; user_id: string; url: string; signing_secret: string; created_at: number }): Promise<void>;
   listWebhookEndpoints(userId: string): Promise<WebhookEndpointRow[]>;

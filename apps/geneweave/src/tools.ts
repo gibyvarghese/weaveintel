@@ -980,6 +980,13 @@ export interface ToolRegistryOptions {
    * header + source link). SSRF-guarded (public http(s) only). Owner-scoped. Returns the note id.
    */
   captureWeb?: (args: { userId: string; tenantId?: string | null; url: string }) => Promise<{ ok: boolean; error?: string; noteId?: string }>;
+  /**
+   * weaveNotes Phase 8: workspace RAG. When set, the `workspace_search` tool is available so
+   * the agent can search the user's OWN content (notes + past chat runs) and ground its answer
+   * in it WITH citations. Returns a numbered context block the agent answers from + the sources.
+   * Owner-scoped.
+   */
+  workspaceSearch?: (args: { userId: string; tenantId?: string | null; query: string; limit?: number }) => Promise<{ ok: boolean; query: string; context: string; sources: Array<{ n: number; id: string; kind: string; title: string }> }>;
 }
 
 export function filterToolNamesByPersona(toolNames: string[], persona: string | null | undefined): string[] {
@@ -1565,6 +1572,28 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
         tags: ['notes', 'database', 'output'],
       }),
     } : {}),
+    // weaveNotes Phase 8: workspace RAG search — available when workspaceSearch callback is set.
+    ...(opts?.workspaceSearch && opts.currentUserId ? {
+      workspace_search: weaveTool({
+        name: 'workspace_search',
+        description: 'Search the USER\'S OWN workspace — their notes AND their past chat runs — for content relevant to a question, and get back a numbered context block with the most relevant excerpts plus their sources. Use this whenever the user asks about "my notes", "what we discussed/decided", "what did we learn about X", "summarize my research on Y", or anything that should be answered from their own material rather than general knowledge. Then write your answer FROM the returned excerpts and cite each claim with its bracketed number, e.g. "... rises 16 metres [1].". Returns { context, sources:[{n,id,kind,title}] }.',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: 'What to look for across the user\'s notes + past chats.' },
+            limit: { type: 'number', description: 'Max sources to return (default 6, max 12).' },
+          },
+          required: ['query'],
+        },
+        execute: async (args: { query: string; limit?: number }) => {
+          if (!opts.workspaceSearch || !opts.currentUserId) return { content: 'Workspace search is unavailable in this context.', isError: true };
+          const r = await opts.workspaceSearch({ userId: opts.currentUserId, tenantId: opts.currentTenantId ?? null, query: args.query, ...(args.limit ? { limit: args.limit } : {}) });
+          if (!r.context) return JSON.stringify({ ok: true, query: r.query, found: 0, context: '', sources: [], note: 'No relevant content found in the workspace yet. Answer from general knowledge or ask the user to add notes.' });
+          return JSON.stringify({ ok: true, query: r.query, found: r.sources.length, context: r.context, sources: r.sources });
+        },
+        tags: ['notes', 'retrieval', 'memory'],
+      }),
+    } : {}),
     // weaveNotes Phase 7: web capture (clip a page → note) — available when captureWeb callback is set.
     ...(opts?.captureWeb && opts.currentUserId ? {
       capture_web_page: weaveTool({
@@ -1827,7 +1856,7 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
   // tool selection: mode policies only apply when `enabled_tools` is empty, so a user with a
   // custom tool selection would otherwise never get them (and "create a note" would silently
   // fall back to emit_artifact). Skip any already registered from the selection above.
-  for (const noteTool of ['create_note', 'note_edit', 'note_publish', 'find_related_notes', 'autofill_database', 'capture_web_page'] as const) {
+  for (const noteTool of ['create_note', 'note_edit', 'note_publish', 'find_related_notes', 'autofill_database', 'capture_web_page', 'workspace_search'] as const) {
     const t = scopedTools[noteTool];
     if (t && !registeredFromSelection.has(noteTool) && canUseTool(actorPersona, noteTool)) registry.register(t);
   }

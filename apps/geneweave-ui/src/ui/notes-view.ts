@@ -27,6 +27,7 @@ import { wireNoteAi, type NoteAiPanel } from './notes-ai.js';
 import { wireNoteConnections, type NoteConnectionsPanel } from './notes-graph.js';
 import { renderDatabasesView } from './notes-database-view.js';
 import { renderCapturePanel } from './notes-capture.js';
+import { wireNoteHistory, wireNoteComments, wireNoteSynced, renderWorkspaceAsk, type SimplePanel } from './notes-workspace-ui.js';
 
 /** The live co-editing session for the currently-open note (Phase 2). */
 let _activeCoedit: NoteCoeditSession | null = null;
@@ -34,10 +35,17 @@ let _activeCoedit: NoteCoeditSession | null = null;
 let _activeAi: NoteAiPanel | null = null;
 /** The knowledge-graph connections panel for the currently-open note (Phase 5). */
 let _activeConn: NoteConnectionsPanel | null = null;
+/** Phase 8 panels: version history, comments, synced blocks. */
+let _activeHistory: SimplePanel | null = null;
+let _activeComments: SimplePanel | null = null;
+let _activeSynced: SimplePanel | null = null;
 function teardownCoedit(): void {
   if (_activeCoedit) { _activeCoedit.close(); _activeCoedit = null; }
   if (_activeAi) { _activeAi.close(); _activeAi = null; }
   if (_activeConn) { _activeConn.close(); _activeConn = null; }
+  if (_activeHistory) { _activeHistory.close(); _activeHistory = null; }
+  if (_activeComments) { _activeComments.close(); _activeComments = null; }
+  if (_activeSynced) { _activeSynced.close(); _activeSynced = null; }
 }
 
 // ── Data loaders ──────────────────────────────────────────────────────────────
@@ -224,6 +232,8 @@ function renderNotesList(render: () => void): HTMLElement {
     ),
     // weaveNotes Phase 7: the capture panel (quick jot + clip a web page).
     renderCapturePanel(render, () => loadNotesList({ search: state.notesSearch as string })),
+    // weaveNotes Phase 8: "Ask your workspace" — cited RAG search over notes + past chats.
+    renderWorkspaceAsk((id) => { void loadNote(id).then(() => { state.notesView = 'editor'; render(); }); }),
     loading
       ? h('div', { className: 'notes-loading' }, 'Loading…')
       : h('div', { className: 'notes-items' },
@@ -333,6 +343,25 @@ function renderEditorPanel(note: NoteDoc, render: () => void): HTMLElement {
     },
   }, '🔗 Connections') as HTMLElement;
 
+  // weaveNotes Phase 8 — version History, Comments, and Synced-blocks panels. Same pattern
+  // as Connections: a hidden panel wired in the mount block, toggled by a toolbar button.
+  const historyPanel = h('div', { className: 'notes-ws-panel' }) as HTMLElement; historyPanel.style.display = 'none';
+  const commentsPanel = h('div', { className: 'notes-ws-panel' }) as HTMLElement; commentsPanel.style.display = 'none';
+  const syncedPanel = h('div', { className: 'notes-ws-panel' }) as HTMLElement; syncedPanel.style.display = 'none';
+  let historyOpen = false, commentsOpen = false, syncedOpen = false;
+  const historyBtn = h('button', {
+    className: 'notes-history-btn', title: 'Version history: save points + restore',
+    onClick: () => { historyOpen = !historyOpen; historyPanel.style.display = historyOpen ? '' : 'none'; if (historyOpen) void _activeHistory?.refresh(); },
+  }, '📜 History') as HTMLElement;
+  const commentsBtn = h('button', {
+    className: 'notes-comments-btn', title: 'Comments + discussion threads on this note',
+    onClick: () => { commentsOpen = !commentsOpen; commentsPanel.style.display = commentsOpen ? '' : 'none'; if (commentsOpen) void _activeComments?.refresh(); },
+  }, '💬 Comments') as HTMLElement;
+  const syncedBtn = h('button', {
+    className: 'notes-synced-btn', title: 'Synced blocks: mirror content from another note',
+    onClick: () => { syncedOpen = !syncedOpen; syncedPanel.style.display = syncedOpen ? '' : 'none'; if (syncedOpen) void _activeSynced?.refresh(); },
+  }, '🔁 Synced') as HTMLElement;
+
   // weaveNotes Phase 2 — collaborative co-editing UI bits.
   // A live "N editing" badge, a "refresh" nudge shown when a collaborator edits
   // while you're typing, and a Share button that mints an invite link.
@@ -399,6 +428,9 @@ function renderEditorPanel(note: NoteDoc, render: () => void): HTMLElement {
         presenceBadge,
         refreshNudge,
         connBtn,
+        historyBtn,
+        commentsBtn,
+        syncedBtn,
         shareBtn,
         publishBtn,
         h('button', {
@@ -448,6 +480,9 @@ function renderEditorPanel(note: NoteDoc, render: () => void): HTMLElement {
     aiToolbar,
     aiPanel,
     connPanel,
+    historyPanel,
+    commentsPanel,
+    syncedPanel,
     editorContainer,
   );
 
@@ -466,6 +501,10 @@ function renderEditorPanel(note: NoteDoc, render: () => void): HTMLElement {
     _activeAi = wireNoteAi({ noteId: note.id, toolbarEl: aiToolbar, panelEl: aiPanel, onApplied: () => { void loadNote(note.id).then(render); } });
     // Phase 5: wire the knowledge-graph connections panel (hidden until the button opens it).
     _activeConn = wireNoteConnections({ noteId: note.id, panelEl: connPanel, onOpenNote: (id) => { void loadNote(id).then(render); } });
+    // Phase 8: wire the version-history, comments, and synced-blocks panels (hidden until opened).
+    _activeHistory = wireNoteHistory({ noteId: note.id, panelEl: historyPanel, onRestored: () => { void loadNote(note.id).then(render); } });
+    _activeComments = wireNoteComments({ noteId: note.id, panelEl: commentsPanel });
+    _activeSynced = wireNoteSynced({ noteId: note.id, panelEl: syncedPanel });
 
     mountNotesEditor({
       container: editorContainer,

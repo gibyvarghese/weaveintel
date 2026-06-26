@@ -71,3 +71,13 @@ export {
   buildCaptureNote,
   dailyNoteTitle,
 } from './capture.js';
+
+// weaveNotes Phase 8 — workspace RAG helpers (snippets, rank fusion, cited context).
+export {
+  type RagHit,
+  type CitedSource,
+  snippetAround,
+  reciprocalRankFusion,
+  buildCitedContext,
+  parseCitedIds,
+} from './rag.js';

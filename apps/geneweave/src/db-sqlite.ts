@@ -9305,6 +9305,78 @@ export class SQLiteAdapter implements DatabaseAdapter {
     return this.d.prepare('SELECT * FROM note_embeddings WHERE user_id = ?').all(userId) as import('./db-types/adapter-me.js').NoteEmbeddingRow[];
   }
 
+  // weaveNotes Phase 8 — run output embeddings (workspace RAG over runs).
+  async upsertRunEmbedding(row: import('./db-types/adapter-me.js').RunEmbeddingRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO run_embeddings (run_id, user_id, tenant_id, dim, embedding_json, content_hash, title, content, updated_at)
+       VALUES (@run_id,@user_id,@tenant_id,@dim,@embedding_json,@content_hash,@title,@content,@updated_at)
+       ON CONFLICT(run_id) DO UPDATE SET embedding_json=excluded.embedding_json, dim=excluded.dim, content_hash=excluded.content_hash, title=excluded.title, content=excluded.content, updated_at=excluded.updated_at`,
+    ).run(row);
+  }
+  async getRunEmbedding(runId: string): Promise<import('./db-types/adapter-me.js').RunEmbeddingRow | null> {
+    return (this.d.prepare('SELECT * FROM run_embeddings WHERE run_id = ?').get(runId) ?? null) as import('./db-types/adapter-me.js').RunEmbeddingRow | null;
+  }
+  async listUserRunEmbeddings(userId: string): Promise<import('./db-types/adapter-me.js').RunEmbeddingRow[]> {
+    return this.d.prepare('SELECT * FROM run_embeddings WHERE user_id = ?').all(userId) as import('./db-types/adapter-me.js').RunEmbeddingRow[];
+  }
+
+  // weaveNotes Phase 8 — per-note version history.
+  async createNoteVersion(row: import('./db-types/adapter-me.js').NoteVersionRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO note_versions (id, note_id, user_id, tenant_id, title, doc_json, label, reason, word_count, created_by, created_at)
+       VALUES (@id, @note_id, @user_id, @tenant_id, @title, @doc_json, @label, @reason, @word_count, @created_by, @created_at)`,
+    ).run(row);
+  }
+  async listNoteVersions(noteId: string): Promise<import('./db-types/adapter-me.js').NoteVersionRow[]> {
+    return this.d.prepare('SELECT * FROM note_versions WHERE note_id = ? ORDER BY created_at DESC').all(noteId) as import('./db-types/adapter-me.js').NoteVersionRow[];
+  }
+  async getNoteVersion(id: string): Promise<import('./db-types/adapter-me.js').NoteVersionRow | null> {
+    return (this.d.prepare('SELECT * FROM note_versions WHERE id = ?').get(id) ?? null) as import('./db-types/adapter-me.js').NoteVersionRow | null;
+  }
+
+  // weaveNotes Phase 8 — block comments on notes (mirrors run_comments).
+  async createNoteComment(row: import('./db-types/adapter-me.js').NoteCommentRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO note_comments (id, note_id, tenant_id, thread_id, parent_id, author_id, body, body_html, mentions_json, anchor_block_id, created_at, updated_at, edited_at, deleted_at, deleted_by, resolved_at, resolved_by)
+       VALUES (@id, @note_id, @tenant_id, @thread_id, @parent_id, @author_id, @body, @body_html, @mentions_json, @anchor_block_id, @created_at, @updated_at, @edited_at, @deleted_at, @deleted_by, @resolved_at, @resolved_by)`,
+    ).run(row);
+  }
+  async getNoteComment(id: string): Promise<import('./db-types/adapter-me.js').NoteCommentRow | null> {
+    return (this.d.prepare('SELECT * FROM note_comments WHERE id = ?').get(id) ?? null) as import('./db-types/adapter-me.js').NoteCommentRow | null;
+  }
+  async listNoteComments(noteId: string): Promise<import('./db-types/adapter-me.js').NoteCommentRow[]> {
+    return this.d.prepare('SELECT * FROM note_comments WHERE note_id = ? ORDER BY created_at ASC').all(noteId) as import('./db-types/adapter-me.js').NoteCommentRow[];
+  }
+  async listNoteCommentThread(threadId: string): Promise<import('./db-types/adapter-me.js').NoteCommentRow[]> {
+    return this.d.prepare('SELECT * FROM note_comments WHERE thread_id = ? ORDER BY created_at ASC').all(threadId) as import('./db-types/adapter-me.js').NoteCommentRow[];
+  }
+  async updateNoteCommentBody(id: string, body: string, bodyHtml: string, mentionsJson: string, editedAt: number, updatedAt: number): Promise<void> {
+    this.d.prepare('UPDATE note_comments SET body = ?, body_html = ?, mentions_json = ?, edited_at = ?, updated_at = ? WHERE id = ?').run(body, bodyHtml, mentionsJson, editedAt, updatedAt, id);
+  }
+  async softDeleteNoteComment(id: string, deletedBy: string, deletedAt: number): Promise<void> {
+    this.d.prepare(`UPDATE note_comments SET body = '', body_html = '', mentions_json = '[]', deleted_at = ?, deleted_by = ?, updated_at = ? WHERE id = ?`).run(deletedAt, deletedBy, deletedAt, id);
+  }
+  async setNoteThreadResolution(threadId: string, resolvedAt: number | null, resolvedBy: string | null, updatedAt: number): Promise<void> {
+    this.d.prepare('UPDATE note_comments SET resolved_at = ?, resolved_by = ?, updated_at = ? WHERE id = ?').run(resolvedAt, resolvedBy, updatedAt, threadId);
+  }
+
+  // weaveNotes Phase 8 — synced blocks (transclusion).
+  async createNoteSyncedBlock(row: import('./db-types/adapter-me.js').NoteSyncedBlockRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO note_synced_blocks (id, note_id, user_id, tenant_id, source_note_id, source_block_id, created_at)
+       VALUES (@id, @note_id, @user_id, @tenant_id, @source_note_id, @source_block_id, @created_at)`,
+    ).run(row);
+  }
+  async getNoteSyncedBlock(id: string): Promise<import('./db-types/adapter-me.js').NoteSyncedBlockRow | null> {
+    return (this.d.prepare('SELECT * FROM note_synced_blocks WHERE id = ?').get(id) ?? null) as import('./db-types/adapter-me.js').NoteSyncedBlockRow | null;
+  }
+  async listNoteSyncedBlocks(noteId: string): Promise<import('./db-types/adapter-me.js').NoteSyncedBlockRow[]> {
+    return this.d.prepare('SELECT * FROM note_synced_blocks WHERE note_id = ? ORDER BY created_at ASC').all(noteId) as import('./db-types/adapter-me.js').NoteSyncedBlockRow[];
+  }
+  async deleteNoteSyncedBlock(id: string, noteId: string): Promise<void> {
+    this.d.prepare('DELETE FROM note_synced_blocks WHERE id = ? AND note_id = ?').run(id, noteId);
+  }
+
   // Registered outbound webhook endpoints.
   async createWebhookEndpoint(row: { id: string; tenant_id?: string | null; user_id: string; url: string; signing_secret: string; created_at: number }): Promise<void> {
     this.d.prepare(

@@ -59,6 +59,7 @@ import { createNotePublishService } from './note-publish-sql.js';
 import { createNoteGraphService } from './note-graph-sql.js';
 import { createNoteDbService } from './note-db-sql.js';
 import { createNoteCaptureService } from './note-capture-sql.js';
+import { createNoteWorkspaceService } from './note-workspace-sql.js';
 import {
   applySkillsToPrompt,
   type SkillMatch,
@@ -409,6 +410,9 @@ export class ChatEngine {
       // weaveNotes Phase 7: wire the `capture_web_page` tool (clip a public page → structured note).
       captureWeb: (a: { userId: string; tenantId?: string | null; url: string }) =>
         createNoteCaptureService(db).agentCaptureWeb(a),
+      // weaveNotes Phase 8: wire the `workspace_search` tool (cited RAG over the user's notes + runs).
+      workspaceSearch: (a: { userId: string; tenantId?: string | null; query: string; limit?: number }) =>
+        createNoteWorkspaceService(db).agentWorkspaceSearch(a),
     };
   }
 

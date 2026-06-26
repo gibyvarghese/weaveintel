@@ -57,6 +57,10 @@ import { createNotePublishService, type PublishFormat } from '../note-publish-sq
 import { createNoteGraphService } from '../note-graph-sql.js';
 import { createNoteDbService } from '../note-db-sql.js';
 import { createNoteCaptureService } from '../note-capture-sql.js';
+import { createNoteWorkspaceService } from '../note-workspace-sql.js';
+import { createNoteVersionService } from '../note-version-sql.js';
+import { createNoteCommentService } from '../note-comment-sql.js';
+import { createNoteSyncedService } from '../note-synced-sql.js';
 import { isViewType, type DatabaseViewType as DbViewType } from '@weaveintel/notes';
 import { meTaskRepo as taskRepo } from './me-stores.js';
 import { createActionItem } from '@weaveintel/human-tasks';
@@ -90,6 +94,12 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
   const noteDb = createNoteDbService(db, opts.aiGenerate ? { generate: opts.aiGenerate } : {});
   // weaveNotes Phase 7: the capture service (run→note, web clip, email→note, daily jot).
   const noteCapture = createNoteCaptureService(db);
+  // weaveNotes Phase 8: workspace RAG (cited search over notes+runs), version history,
+  // block comments, and synced blocks (transclusion).
+  const noteWorkspace = createNoteWorkspaceService(db);
+  const noteVersions = createNoteVersionService(db);
+  const noteComments = createNoteCommentService(db);
+  const noteSynced = createNoteSyncedService(db);
 
   // ── Notes list ─────────────────────────────────────────────────────────────
 
@@ -847,5 +857,163 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     await notes.deleteRow(params['rowId']!, params['id']!);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ deleted: true }));
+  }, { auth: true });
+
+  // ── weaveNotes Phase 8: WORKSPACE RAG (cited search over notes + runs) ─────────
+  //
+  //   POST /api/me/workspace/search   { query, scope?, limit? }  cited hits over notes+runs
+  //   POST /api/me/workspace/reindex  { limit? }                 (re)embed recent chat runs
+  router.post('/api/me/workspace/search', async (req, res, _params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    if (typeof body['query'] !== 'string' || !body['query'].trim()) { res.writeHead(400); res.end(JSON.stringify({ error: 'query required' })); return; }
+    const scope = (['all', 'notes', 'runs'].includes(String(body['scope'])) ? body['scope'] : 'all') as 'all' | 'notes' | 'runs';
+    const result = await noteWorkspace.workspaceSearch({
+      userId: auth.userId, tenantId: auth.tenantId ?? null, query: body['query'], scope,
+      ...(typeof body['limit'] === 'number' ? { limit: body['limit'] } : {}),
+    });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
+  }, { auth: true });
+
+  router.post('/api/me/workspace/reindex', async (req, res, _params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    const result = await noteWorkspace.reindexRuns({ userId: auth.userId, tenantId: auth.tenantId ?? null, ...(typeof body['limit'] === 'number' ? { limit: body['limit'] } : {}) });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
+  }, { auth: true });
+
+  // ── weaveNotes Phase 8: VERSION HISTORY (snapshot + restore) ───────────────────
+  //
+  //   POST /api/me/notes/:id/versions               { label? }    snapshot the current note
+  //   GET  /api/me/notes/:id/versions                             list versions (newest first)
+  //   GET  /api/me/notes/:id/versions/:vid                        one version's full content
+  //   POST /api/me/notes/:id/versions/:vid/restore                restore (undoable)
+  router.post('/api/me/notes/:id/versions', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    const result = await noteVersions.saveVersion({ noteId: params['id']!, userId: auth.userId, tenantId: auth.tenantId ?? null, ...(typeof body['label'] === 'string' ? { label: body['label'] } : {}) });
+    res.writeHead(result.ok ? 201 : (result.code ?? 400), { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
+  }, { auth: true });
+
+  router.get('/api/me/notes/:id/versions', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const list = await noteVersions.listVersions({ noteId: params['id']!, userId: auth.userId });
+    if (list === null) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ versions: list }));
+  }, { auth: true });
+
+  router.get('/api/me/notes/:id/versions/:vid', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const v = await noteVersions.getVersion({ versionId: params['vid']!, userId: auth.userId });
+    if (!v || v.note_id !== params['id']) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(v));
+  }, { auth: true });
+
+  router.post('/api/me/notes/:id/versions/:vid/restore', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const result = await noteVersions.restoreVersion({ noteId: params['id']!, versionId: params['vid']!, userId: auth.userId, tenantId: auth.tenantId ?? null });
+    res.writeHead(result.ok ? 200 : (result.code ?? 400), { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
+  }, { auth: true });
+
+  // ── weaveNotes Phase 8: BLOCK COMMENTS ─────────────────────────────────────────
+  //
+  //   POST   /api/me/notes/:id/comments              { body, anchorBlockId?, parentId?, mentions? }
+  //   GET    /api/me/notes/:id/comments
+  //   PATCH  /api/me/notes/:id/comments/:cid         { body, mentions? }
+  //   DELETE /api/me/notes/:id/comments/:cid
+  //   POST   /api/me/notes/:id/comments/:cid/resolve { resolved }
+  router.post('/api/me/notes/:id/comments', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    if (typeof body['body'] !== 'string') { res.writeHead(400); res.end(JSON.stringify({ error: 'body required' })); return; }
+    const result = await noteComments.create({
+      noteId: params['id']!, userId: auth.userId, body: body['body'],
+      ...(typeof body['anchorBlockId'] === 'string' ? { anchorBlockId: body['anchorBlockId'] } : {}),
+      ...(typeof body['parentId'] === 'string' ? { parentId: body['parentId'] } : {}),
+      ...(Array.isArray(body['mentions']) ? { mentions: (body['mentions'] as unknown[]).map(String) } : {}),
+    });
+    if (result.ok && result.comment) {
+      noteCoeditHub.broadcast(params['id']!, 'note.comment', { kind: 'created', comment: result.comment });
+    }
+    res.writeHead(result.ok ? 201 : (result.code ?? 400), { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
+  }, { auth: true });
+
+  router.get('/api/me/notes/:id/comments', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const list = await noteComments.list({ noteId: params['id']!, userId: auth.userId });
+    if (list === null) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ comments: list }));
+  }, { auth: true });
+
+  router.add('PATCH', '/api/me/notes/:id/comments/:cid', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    if (typeof body['body'] !== 'string') { res.writeHead(400); res.end(JSON.stringify({ error: 'body required' })); return; }
+    const result = await noteComments.edit({ commentId: params['cid']!, userId: auth.userId, body: body['body'], ...(Array.isArray(body['mentions']) ? { mentions: (body['mentions'] as unknown[]).map(String) } : {}) });
+    res.writeHead(result.ok ? 200 : (result.code ?? 400), { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
+  }, { auth: true });
+
+  router.del('/api/me/notes/:id/comments/:cid', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const result = await noteComments.remove({ commentId: params['cid']!, userId: auth.userId });
+    res.writeHead(result.ok ? 200 : (result.code ?? 400), { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
+  }, { auth: true });
+
+  router.post('/api/me/notes/:id/comments/:cid/resolve', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    const result = await noteComments.setResolution({ threadId: params['cid']!, userId: auth.userId, resolved: body['resolved'] !== false });
+    if (result.ok) noteCoeditHub.broadcast(params['id']!, 'note.comment', { kind: 'resolved', threadId: params['cid'], resolved: body['resolved'] !== false });
+    res.writeHead(result.ok ? 200 : (result.code ?? 400), { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
+  }, { auth: true });
+
+  // ── weaveNotes Phase 8: SYNCED BLOCKS (transclusion) ───────────────────────────
+  //
+  //   POST   /api/me/notes/:id/synced       { sourceNoteId, sourceBlockIndex? }
+  //   GET    /api/me/notes/:id/synced       list, each resolved read-through to source content
+  //   DELETE /api/me/notes/:id/synced/:sid
+  router.post('/api/me/notes/:id/synced', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    if (typeof body['sourceNoteId'] !== 'string') { res.writeHead(400); res.end(JSON.stringify({ error: 'sourceNoteId required' })); return; }
+    const result = await noteSynced.create({
+      noteId: params['id']!, userId: auth.userId, tenantId: auth.tenantId ?? null, sourceNoteId: body['sourceNoteId'],
+      ...(typeof body['sourceBlockIndex'] === 'number' ? { sourceBlockIndex: body['sourceBlockIndex'] } : {}),
+    });
+    res.writeHead(result.ok ? 201 : (result.code ?? 400), { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
+  }, { auth: true });
+
+  router.get('/api/me/notes/:id/synced', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const list = await noteSynced.list({ noteId: params['id']!, userId: auth.userId });
+    if (list === null) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ synced: list }));
+  }, { auth: true });
+
+  router.del('/api/me/notes/:id/synced/:sid', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const result = await noteSynced.remove({ id: params['sid']!, noteId: params['id']!, userId: auth.userId });
+    res.writeHead(result.ok ? 200 : (result.code ?? 400), { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
   }, { auth: true });
 }

@@ -978,6 +978,52 @@ input{font-family:inherit;outline:none}
 .notes-capture-btn{padding:0 12px;border:none;border-radius:6px;background:var(--accent);color:#fff;font-size:12px;cursor:pointer;white-space:nowrap}
 .notes-capture-btn:hover{opacity:.9}
 .notes-capture-status{font-size:11px;color:var(--fg3);min-height:14px;margin-top:2px}
+/* weaveNotes Phase 8 — workspace panels (history / comments / synced) + Ask box */
+.notes-ws-panel{border:1px solid var(--bg4);border-radius:8px;background:var(--bg2);padding:8px;margin:6px 12px}
+.notes-ws-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.notes-ws-title{font-size:12px;font-weight:600;color:var(--fg1)}
+.notes-ws-action{padding:3px 10px;border:none;border-radius:6px;background:var(--accent);color:#fff;font-size:11px;cursor:pointer;white-space:nowrap}
+.notes-ws-action:hover{opacity:.9}
+.notes-ws-link{border:none;background:transparent;color:var(--accent);font-size:11px;cursor:pointer;padding:2px 4px}
+.notes-ws-loading,.notes-ws-empty{font-size:11px;color:var(--fg3);padding:6px 2px}
+.notes-ws-list{display:flex;flex-direction:column;gap:6px;max-height:280px;overflow-y:auto}
+.notes-ws-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 6px;border:1px solid var(--bg4);border-radius:6px}
+.notes-ws-row-main{display:flex;flex-direction:column}
+.notes-ws-row-title{font-size:12px;color:var(--fg1)}
+.notes-ws-row-meta{font-size:10px;color:var(--fg3)}
+.notes-ws-restore{padding:2px 8px;border:1px solid var(--bg4);border-radius:6px;background:var(--bg1);color:var(--fg2);font-size:11px;cursor:pointer}
+.notes-ws-restore:hover{border-color:var(--accent);color:var(--accent)}
+.notes-ws-comment-new,.notes-ws-synced-new{display:flex;gap:6px;margin-bottom:6px;align-items:flex-start}
+.notes-ws-comment-input{flex:1;resize:vertical;padding:5px 8px;border:1px solid var(--bg4);border-radius:6px;background:var(--bg1);color:var(--fg1);font-size:12px;font-family:inherit;box-sizing:border-box}
+.notes-ws-thread{border:1px solid var(--bg4);border-radius:6px;padding:6px}
+.notes-ws-comment{padding:3px 0}
+.notes-ws-comment.reply{margin-left:14px;border-left:2px solid var(--bg4);padding-left:8px}
+.notes-ws-comment.resolved{opacity:.6}
+.notes-ws-comment-head{display:flex;align-items:center;gap:8px;font-size:10px;color:var(--fg3)}
+.notes-ws-comment-author{font-weight:600;color:var(--fg2)}
+.notes-ws-comment-body{font-size:12px;color:var(--fg1)}
+.notes-ws-resolved-badge{background:var(--bg4);color:var(--fg2);border-radius:4px;padding:0 4px;font-size:9px}
+.notes-ws-reply{margin-top:4px}
+.notes-ws-reply-input{width:100%;padding:4px 8px;border:1px solid var(--bg4);border-radius:6px;background:var(--bg1);color:var(--fg1);font-size:11px;box-sizing:border-box}
+.notes-ws-select{flex:1;padding:5px 8px;border:1px solid var(--bg4);border-radius:6px;background:var(--bg1);color:var(--fg1);font-size:12px}
+.notes-ws-synced{border:1px solid var(--bg4);border-radius:6px;padding:6px;background:var(--bg1)}
+.notes-ws-synced.unavailable{opacity:.6}
+.notes-ws-synced-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:3px}
+.notes-ws-synced-src{font-size:11px;font-weight:600;color:var(--accent)}
+.notes-ws-synced-body{font-size:12px;color:var(--fg1);white-space:pre-wrap}
+.notes-ws-ask{padding:4px 12px 8px}
+.notes-ws-ask-bar{display:flex;gap:6px;align-items:center}
+.notes-ws-ask-input{flex:1;padding:6px 10px;border:1px solid var(--bg4);border-radius:8px;background:var(--bg2);color:var(--fg1);font-size:12px;box-sizing:border-box}
+.notes-ws-ask-input:focus{outline:none;border-color:var(--accent)}
+.notes-ws-ask-results{margin-top:6px;display:flex;flex-direction:column;gap:6px;max-height:300px;overflow-y:auto}
+.notes-ws-ask-label{font-size:11px;color:var(--fg3)}
+.notes-ws-ask-hit{border:1px solid var(--bg4);border-radius:6px;padding:6px;cursor:pointer}
+.notes-ws-ask-hit:hover{border-color:var(--accent)}
+.notes-ws-ask-hit-head{display:flex;align-items:center;gap:6px;margin-bottom:2px}
+.notes-ws-ask-n{font-weight:700;color:var(--accent);font-size:11px}
+.notes-ws-ask-kind{font-size:9px;text-transform:uppercase;background:var(--bg4);color:var(--fg2);border-radius:4px;padding:0 4px}
+.notes-ws-ask-title{font-size:12px;font-weight:600;color:var(--fg1)}
+.notes-ws-ask-snippet{font-size:11px;color:var(--fg2);line-height:1.4}
 .notes-loading{padding:16px;text-align:center;color:var(--fg3);font-size:12px}
 .notes-items{flex:1;overflow-y:auto;padding:0 8px 12px}
 .notes-section{margin-bottom:8px}

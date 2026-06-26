@@ -595,10 +595,38 @@ helper** (Track D, Phase 11) as enhancements that talk to the same server/CRDT.
   (Deferred to later phases: live Gmail/Calendar/Drive/Slack OAuth ingestion + the scheduled
   "keep-this-note-fresh" trigger; the capture core + run/web/email/jot on-ramps are in place.)
 - **Phase 8 — Workspace RAG search + chat-with-workspace + version history + comments +
-  synced blocks.** `retrieval`+`memory` over all notes/runs/files with citations; per-note
-  version timeline (op log) + restore; block comments (Phase 4-collab); synced blocks/
-  transclusion. *Acceptance:* "summarize what we learned about X" answers with click-to-source
-  citations; restore an old version; a synced block updates everywhere.
+  synced blocks.** ✅ **delivered.** Four features that make the workspace ASKABLE, REVIEWABLE,
+  and time-travelable. **Package primitives**: `@weaveintel/notes` gains a pure `rag.ts` —
+  `snippetAround` (query-centred excerpts), `reciprocalRankFusion` (merge ranked lists from
+  multiple corpora, score-scale-independent), `buildCitedContext` (numbered "[n]" context block
+  + parallel sources), `parseCitedIds` (read "[n]" markers back out of an answer). **DB (m103)**:
+  `run_embeddings` (one vector per chat-run output — the run-side twin of Phase 5
+  `note_embeddings`), `note_versions` (doc_json snapshot timeline), `note_comments` (threaded,
+  block-anchored, mirroring m97 run_comments), `note_synced_blocks` (transclusion references).
+  **geneWeave**: (1) `note-workspace-sql.ts` — `indexRun` (embed a run's output, idempotent),
+  `workspaceSearch` (cosine-rank notes + runs SEPARATELY, fuse with RRF, build a CITED context),
+  + a **`workspace_search` agent tool** (always-on + policies + chat wiring) so "what did we
+  learn about X?" is answered FROM the user's notes/runs with "[n]" citations; endpoints
+  `POST /api/me/workspace/{search,reindex}`. (2) `note-version-sql.ts` — `saveVersion` /
+  `listVersions` / `getVersion` / `restoreVersion` (restore snapshots the current draft first, so
+  it is undoable); endpoints under `/api/me/notes/:id/versions`. (3) `note-comment-sql.ts` —
+  threaded block-anchored comments (reuses `renderCommentMarkdown`; soft-delete tombstones;
+  thread resolve; broadcast live over the co-edit hub); `/api/me/notes/:id/comments`. (4)
+  `note-synced-sql.ts` — read-through transclusion (a block mirrors another note's block/whole
+  note; resolved live so editing the source updates everywhere; self-sync refused);
+  `/api/me/notes/:id/synced`. **UI**: an "✦ Ask your workspace" cited-search box in the notes
+  list, and 📜 History / 💬 Comments / 🔁 Synced editor panels. *Tested:* package units (12) + a
+  deterministic SQLite **integration suite (12)** (RAG fuses note+run hits & excludes off-topic +
+  owner-scoping; version save/restore-undoable; comment threads/edit-author-only/tombstone/
+  resolve; synced read-through reflects source edits + self-sync refused) + **real-LLM Playwright
+  e2e** (real-embedding workspace search cites the right note; restore reverts content; comment
+  thread resolves; a synced block reflects a source edit; stranger-404; the **agent grounds its
+  answer via `workspace_search` across agent/supervisor/ensemble**; a **web-UI** Ask + Save-version
+  test). *Acceptance: cited workspace answers; restore an old version; a synced block updates
+  everywhere — all met.* (Deferred: indexing uploaded FILES — no file-store table yet; captured
+  web pages are already notes and thus covered. Version history snapshots `doc_json` rather than
+  replaying the CRDT op log — simpler + sufficient since the relay writes merged state back to
+  `doc_json`.)
 
 **Track D — Voice & meetings**
 - **Phase 10 — Voice memo + streaming transcription block.** Mic → AudioWorklet → WS →

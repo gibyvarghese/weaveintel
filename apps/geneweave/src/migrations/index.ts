@@ -82,6 +82,7 @@ import { applyM99Coedit } from './m99-coedit.js';
 import { applyM100NoteCoedit } from './m100-note-coedit.js';
 import { applyM101NoteSuggestions } from './m101-note-suggestions.js';
 import { applyM102NoteGraph } from './m102-note-graph.js';
+import { applyM103NoteWorkspace } from './m103-note-workspace.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -172,6 +173,7 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm100-note-coedit', description: 'weaveNotes Phase 2: note_coedit_docs (per-note BlockDoc CRDT snapshot_json + state_vector_json — a rich-text note a human + the agent co-edit, always converging) + note_coedit_ops (append-only block-op log keyed by author site+counter for state-vector diff sync / offline reconcile) + note_shares (durable note membership, UNIQUE(note,user) idempotent join, collaborator/viewer roles) + note_share_tokens (note invite links: 256-bit token, SHA-256-hashed at rest, expiry/max-uses/revocation). Server is the trusted relay: block-ops validated + role-gated (viewers 403) + tenant-scoped', run: applyM100NoteCoedit },
   { id: 'm101-note-suggestions', description: 'weaveNotes Phase 3: note_suggestions (AI co-author track-changes — staged BlockOp[] from continue/rewrite/summarize/ask/note_edit/ai_block, authored under a unique CRDT site so pending suggestions never collide; pending→accepted/rejected; preview Markdown + anchor for the reviewer). The AI never silently mutates a note — a human accepts (ops applied + broadcast) or rejects (discarded)', run: applyM101NoteSuggestions },
   { id: 'm102-note-graph', description: 'weaveNotes Phase 5: notes knowledge graph — note_entities + note_relations (LLM-extracted entities/relations per note, owner-scoped, replaced on re-index) + note_embeddings (one vector per note for semantic "related notes" via cosine). [[wiki-links]] reuse the m46 note_links table for backlinks; unlinked mentions are computed on the fly', run: applyM102NoteGraph },
+  { id: 'm103-note-workspace', description: 'weaveNotes Phase 8: workspace RAG + version history + comments + synced blocks — run_embeddings (one vector per chat run output, the run-side twin of note_embeddings, for cited workspace search over notes+runs) + note_versions (per-note doc_json snapshot timeline, restore-with-undo) + note_comments (threaded, block-anchored review comments mirroring m97 run_comments: stable CRDT-block anchor, raw markdown + sanitized html, soft-delete tombstones, thread resolve) + note_synced_blocks (transclusion: a block mirroring another note block, resolved read-through so source edits reflect everywhere)', run: applyM103NoteWorkspace },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

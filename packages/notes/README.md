@@ -38,6 +38,7 @@ shared contract pins every adapter to identical behaviour.
 | `parseWikiLinks` / `findUnlinkedMentions` / `titleKey` | Phase 5 knowledge-graph helpers: `[[wiki-link]]` parsing + unlinked-mention detection. |
 | `PropertyDef` / `parseSchema` / `coerceValue` / `validateRow` / `computeRollup` / `VIEW_TYPES` | Phase 6 typed-database model (columns, validation, rollups, view types). |
 | `parseEmail` / `buildCaptureNote` / `dailyNoteTitle` | Phase 7 capture helpers: parse an email (fields or raw RFC822 → text), assemble a provenance-stamped capture note, and the daily-jots inbox title. |
+| `snippetAround` / `reciprocalRankFusion` / `buildCitedContext` / `parseCitedIds` | Phase 8 workspace-RAG helpers: query-centred excerpts, rank-fusion of multiple corpora, numbered "[n]" cited context for the LLM, and citation-marker parsing. |
 
 ```ts
 import { createInMemoryNoteRepository, extractTaskItems } from '@weaveintel/notes';
