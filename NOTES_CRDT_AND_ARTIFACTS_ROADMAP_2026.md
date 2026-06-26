@@ -540,9 +540,34 @@ helper** (Track D, Phase 11) as enhancements that talk to the same server/CRDT.
   supervisor/ensemble**, and a **web-UI** Connections-panel test. 135 unit/integration green;
   typecheck + builds clean. *Acceptance: entities/relations extracted; backlinks render; "related
   notes" surfaced — all met.*
-- **Phase 6 — Databases/views + AI auto-fill + typed objects.** Extend `note_databases` with
-  table/board/calendar/timeline/gallery + relations/rollups; AI fills properties from
-  page+workspace+web. *Acceptance:* a view renders; AI auto-fills a column with citations.
+- **Phase 6 — Databases/views + AI auto-fill + typed objects.** ✅ **delivered.** Notes get
+  Notion-style **databases**: typed columns, relations + rollups, five views, and AI column
+  auto-fill with citations. **Package primitives**: `@weaveintel/notes` gains the pure typed-
+  property model — `PropertyDef` (text / number / select / multi_select / date / checkbox /
+  url / email / relation / rollup), `parseSchema`, `coerceValue` (per-type, e.g. url → http(s)
+  only, select → must be an option), `validateRow`, `computeRollup` (count / sum / average /
+  min / max / percent_checked / count_unique / show_original), and `VIEW_TYPES`
+  (table/board/calendar/timeline/gallery). `@weaveintel/extraction` gains `autofillProperty(rows,
+  property, generate)` — model-AGNOSTIC AI column fill that returns a typed value **+ cited
+  source ids per row** (citations filtered to each row's declared sources). Reuses
+  `@weaveintel/tools-search` for web context. **geneWeave**: `note-db-sql.ts` — `view` (schema +
+  rows with computed rollups across relations + per-cell citations), `autofillColumn` (gather
+  each row's context from the PAGE = its fields, the WORKSPACE = related rows, and the WEB =
+  best-effort search; fill + coerce + persist value & citations under a reserved `_citations`
+  key; a filled value always carries at least the row citation). Endpoints `GET /:id/view` +
+  `POST /:id/autofill` (owner-scoped), and the create route now accepts the 5 view types + a
+  typed `columns` schema. An **`autofill_database` agent tool** (always-on note tools + policies
+  + chat wiring) lets the agent fill a column. **UI**: a 🗃 **Databases** view — a databases list,
+  a table/gallery/board renderer, per-column ✨ **Fill** (and 🌐 web-fill) buttons, and 🔖 citation
+  chips. *Tested:* package units (property model 8, autofill 4) + a deterministic SQLite
+  **integration suite (6)** (typed view, relation + **percent_checked rollup** across two
+  databases, AI auto-fill value+citation, refuse rollup/relation/unknown column, owner-scoping,
+  agentAutofill) + **real-LLM Playwright e2e**: a Companies table → **view renders** + AI
+  **auto-fills `founded`=1999/2014 from each row's description and `sector` within its options,
+  with citations**; a Project **rolls up 67% of its Tasks done**; stranger-404; the **agent fills
+  a column via `autofill_database` across agent/supervisor/ensemble**; and a **web-UI** test
+  (Databases → table → ✨ Fill populates the column). *Acceptance: a view renders; AI auto-fills a
+  column with citations — all met.*
 - **Phase 7 — Capture & integrations.** Emit run→note; web clipper (`tools-browser`);
   email-to-notes (`tools-gmail`); calendar/file context (`tools-gcal`/`gdrive`/`onedrive`/
   `slack`); daily-jots inbox; scheduled "keep-this-note-fresh" agent (`triggers`).

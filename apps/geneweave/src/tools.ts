@@ -968,6 +968,12 @@ export interface ToolRegistryOptions {
    * graph navigation) before answering, editing, or linking. Owner-scoped.
    */
   notesSearch?: (args: { userId: string; tenantId?: string | null; query: string; limit?: number }) => Promise<Array<{ noteId: string; title: string; score: number }>>;
+  /**
+   * weaveNotes Phase 6: database column auto-fill. When set, the `autofill_database` tool is
+   * available so the agent can fill a column of one of the user's note databases from each
+   * row's context (the page + workspace + optionally the web), with citations. Owner-scoped.
+   */
+  dbAutofill?: (args: { userId: string; tenantId?: string | null; databaseId: string; propertyKey: string; useWeb?: boolean }) => Promise<{ ok: boolean; error?: string; filled?: number }>;
 }
 
 export function filterToolNamesByPersona(toolNames: string[], persona: string | null | undefined): string[] {
@@ -1530,6 +1536,29 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
         tags: ['notes', 'output'],
       }),
     } : {}),
+    // weaveNotes Phase 6: database column auto-fill — available when dbAutofill callback is set.
+    ...(opts?.dbAutofill && opts.currentUserId ? {
+      autofill_database: weaveTool({
+        name: 'autofill_database',
+        description: 'Fill in a column of one of the user\'s note databases (tables) using AI — e.g. a Summary, Category, Priority, or a looked-up fact for every row. Each filled cell records citations. Set useWeb=true to let it search the web for facts it cannot find in the existing data. You need the database id and the column\'s property key.',
+        parameters: {
+          type: 'object',
+          properties: {
+            databaseId: { type: 'string', description: 'The id of the note database (table) to fill.' },
+            propertyKey: { type: 'string', description: 'The key of the column (property) to fill.' },
+            useWeb: { type: 'boolean', description: 'Allow a web search for facts not present in the rows (default false).' },
+          },
+          required: ['databaseId', 'propertyKey'],
+        },
+        execute: async (args: { databaseId: string; propertyKey: string; useWeb?: boolean }) => {
+          if (!opts.dbAutofill || !opts.currentUserId) return { content: 'Database auto-fill is unavailable in this context.', isError: true };
+          const r = await opts.dbAutofill({ userId: opts.currentUserId, tenantId: opts.currentTenantId ?? null, databaseId: args.databaseId, propertyKey: args.propertyKey, useWeb: args.useWeb === true });
+          if (!r.ok) return { content: `autofill_database failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, filled: r.filled ?? 0 });
+        },
+        tags: ['notes', 'database', 'output'],
+      }),
+    } : {}),
     // weaveNotes Phase 5: semantic note search — available when notesSearch callback is set.
     ...(opts?.notesSearch && opts.currentUserId ? {
       find_related_notes: weaveTool({
@@ -1771,7 +1800,7 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
   // tool selection: mode policies only apply when `enabled_tools` is empty, so a user with a
   // custom tool selection would otherwise never get them (and "create a note" would silently
   // fall back to emit_artifact). Skip any already registered from the selection above.
-  for (const noteTool of ['create_note', 'note_edit', 'note_publish', 'find_related_notes'] as const) {
+  for (const noteTool of ['create_note', 'note_edit', 'note_publish', 'find_related_notes', 'autofill_database'] as const) {
     const t = scopedTools[noteTool];
     if (t && !registeredFromSelection.has(noteTool) && canUseTool(actorPersona, noteTool)) registry.register(t);
   }

@@ -47,3 +47,17 @@ export {
   findUnlinkedMentions,
   titleKey,
 } from './wiki-links.js';
+
+// weaveNotes Phase 6 — typed database properties, validation + rollups.
+export {
+  type PropertyType,
+  type RollupFn,
+  type PropertyDef,
+  type DatabaseViewType,
+  VIEW_TYPES,
+  isViewType,
+  parseSchema,
+  coerceValue,
+  validateRow,
+  computeRollup,
+} from './note-database.js';

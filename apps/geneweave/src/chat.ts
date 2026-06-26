@@ -57,6 +57,7 @@ import { createTemporalStore } from './temporal-store.js';
 import { createNoteAiService, createModelTextGenerator, agentCreateNote } from './note-ai-sql.js';
 import { createNotePublishService } from './note-publish-sql.js';
 import { createNoteGraphService } from './note-graph-sql.js';
+import { createNoteDbService } from './note-db-sql.js';
 import {
   applySkillsToPrompt,
   type SkillMatch,
@@ -401,6 +402,9 @@ export class ChatEngine {
       // weaveNotes Phase 5: wire the `find_related_notes` tool (semantic note search).
       notesSearch: (a: { userId: string; tenantId?: string | null; query: string; limit?: number }) =>
         createNoteGraphService(db).searchNotes({ userId: a.userId, tenantId: a.tenantId ?? null }, a.query, a.limit ?? 5),
+      // weaveNotes Phase 6: wire the `autofill_database` tool (AI fills a table column w/ citations).
+      dbAutofill: (a: { userId: string; tenantId?: string | null; databaseId: string; propertyKey: string; useWeb?: boolean }) =>
+        createNoteDbService(db, { generate: createModelTextGenerator(config) }).agentAutofill(a),
     };
   }
 

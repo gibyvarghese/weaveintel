@@ -25,6 +25,7 @@ import { mountNotesEditor, type EditorInstance } from './notes-editor.js';
 import { wireNoteCoedit, createNoteShareLink, type NoteCoeditSession } from './notes-coedit.js';
 import { wireNoteAi, type NoteAiPanel } from './notes-ai.js';
 import { wireNoteConnections, type NoteConnectionsPanel } from './notes-graph.js';
+import { renderDatabasesView } from './notes-database-view.js';
 
 /** The live co-editing session for the currently-open note (Phase 2). */
 let _activeCoedit: NoteCoeditSession | null = null;
@@ -201,6 +202,11 @@ function renderNotesList(render: () => void): HTMLElement {
             render();
           },
         }, '⊞ Templates'),
+        h('button', {
+          className: 'notes-databases-btn',
+          title: 'Databases (tables, with AI auto-fill)',
+          onClick: () => { state.currentDatabaseId = null; state.notesView = 'databases'; render(); },
+        }, '🗃 Databases'),
       ),
     ),
     h('div', { className: 'notes-search-bar' },
@@ -491,9 +497,11 @@ export function renderNotesView(render: () => void): HTMLElement {
       h('div', { className: 'notes-sidebar' },
         renderNotesList(render)
       ),
-      // Right: editor or templates
+      // Right: editor, templates, or databases (Phase 6)
       h('div', { className: 'notes-main' },
-        notesView === 'templates'
+        notesView === 'databases'
+          ? renderDatabasesView(render)
+          : notesView === 'templates'
           ? renderTemplatesGallery(render)
           : notesView === 'editor' && currentNote
             ? renderEditorPanel(currentNote, render)

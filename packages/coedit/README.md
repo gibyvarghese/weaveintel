@@ -192,6 +192,20 @@ backlinks come for free), extracting entities/relations, and embedding the note 
 tool. The editor's 🔗 **Connections** panel renders backlinks, unlinked mentions, related notes,
 and a small knowledge-graph map.
 
+## Databases / views + AI auto-fill (weaveNotes Phase 6)
+
+Notes can be organised as Notion-style **databases** — typed columns, relations + rollups, and
+five views. The pure model lives in [`@weaveintel/notes`](../notes): `PropertyDef` (text / number
+/ select / multi_select / date / checkbox / url / email / relation / rollup), `parseSchema`,
+`coerceValue`, `validateRow`, `computeRollup`, `VIEW_TYPES`. The AI column auto-fill lives in
+[`@weaveintel/extraction`](../extraction): `autofillProperty(rows, property, generate)` returns a
+typed value **+ cited source ids per row** (model-agnostic). geneWeave's `note-db-sql.ts` ties them
+together — `view` (rows + computed rollups + citations) and `autofillColumn` (gather each row's
+context from the page + workspace + web via `@weaveintel/tools-search`, fill + coerce + persist
+value & citations) — behind `GET /api/me/note-databases/:id/view`, `POST /:id/autofill`, and an
+`autofill_database` agent tool. The 🗃 **Databases** UI renders table/gallery/board with per-column
+✨ Fill buttons and 🔖 citation chips.
+
 ## Security (trusted relay)
 
 CRDTs converge but are **not** Byzantine-tolerant — so the server validates every

@@ -55,6 +55,8 @@ import { noteCoeditHub } from '../note-coedit-hub.js';
 import { createNoteAiService, type NoteAiGenerate, type AiAction } from '../note-ai-sql.js';
 import { createNotePublishService, type PublishFormat } from '../note-publish-sql.js';
 import { createNoteGraphService } from '../note-graph-sql.js';
+import { createNoteDbService } from '../note-db-sql.js';
+import { isViewType, type DatabaseViewType as DbViewType } from '@weaveintel/notes';
 import { meTaskRepo as taskRepo } from './me-stores.js';
 import { createActionItem } from '@weaveintel/human-tasks';
 import { safePageInt } from './index.js';
@@ -83,6 +85,8 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
   // extraction, unlinked mentions, semantic related notes). Entity extraction needs the LLM
   // generator; the rest works without it.
   const noteGraph = createNoteGraphService(db, opts.aiGenerate ? { generate: opts.aiGenerate } : {});
+  // weaveNotes Phase 6: the database service (typed views + rollups + AI column auto-fill).
+  const noteDb = createNoteDbService(db, opts.aiGenerate ? { generate: opts.aiGenerate } : {});
 
   // ── Notes list ─────────────────────────────────────────────────────────────
 
@@ -690,20 +694,51 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     const body = JSON.parse(await readBody(req)) as Record<string, unknown>;
     if (!body['name']) { res.writeHead(400); res.end(JSON.stringify({ error: 'name is required' })); return; }
     const id = newUUIDv7();
+    // weaveNotes Phase 6: accept the 5 view types + a typed schema (columns) as a JSON
+    // array or string. `columns` is the property schema (PropertyDef[]).
+    const columns = body['columns'] ?? body['columns_json'];
     await notes.createDatabase({
       id,
       owner_user_id: auth.userId,
       tenant_id: auth.tenantId ?? null,
       name: String(body['name']),
       source: (['agenda_items', 'tasks', 'generic'].includes(String(body['source'] ?? '')) ? body['source'] : 'generic') as NoteDatabaseSource,
-      view_type: (['table', 'board', 'calendar'].includes(String(body['view_type'] ?? '')) ? body['view_type'] : 'table') as NoteDatabaseViewType,
+      view_type: (isViewType(body['view_type']) ? body['view_type'] : 'table') as DbViewType as NoteDatabaseViewType,
       filter_json: typeof body['filter_json'] === 'string' ? body['filter_json'] : '{}',
       sort_json: typeof body['sort_json'] === 'string' ? body['sort_json'] : '[]',
-      columns_json: typeof body['columns_json'] === 'string' ? body['columns_json'] : '[]',
+      columns_json: typeof columns === 'string' ? columns : (Array.isArray(columns) ? JSON.stringify(columns) : '[]'),
     });
     const db_ = await notes.getDatabase(id, auth.userId);
     res.writeHead(201, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(db_));
+  }, { auth: true });
+
+  // ── weaveNotes Phase 6: typed database view (rollups) + AI column auto-fill ────
+  //
+  //   GET  /api/me/note-databases/:id/view       schema + rows with computed rollups + citations
+  //   POST /api/me/note-databases/:id/autofill   AI-fill a column (with citations). Body:
+  //                                              { propertyKey, rowIds?, useWeb? }. owner-only.
+  router.get('/api/me/note-databases/:id/view', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const v = await noteDb.view(params['id']!, auth.userId);
+    if (!v) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(v));
+  }, { auth: true });
+
+  router.post('/api/me/note-databases/:id/autofill', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    if (typeof body['propertyKey'] !== 'string') { res.writeHead(400); res.end(JSON.stringify({ error: 'propertyKey required' })); return; }
+    const result = await noteDb.autofillColumn({
+      databaseId: params['id']!, userId: auth.userId, tenantId: auth.tenantId ?? null,
+      propertyKey: body['propertyKey'],
+      ...(Array.isArray(body['rowIds']) ? { rowIds: (body['rowIds'] as unknown[]).map(String) } : {}),
+      useWeb: body['useWeb'] === true,
+    });
+    res.writeHead(result.ok ? 200 : (result.code ?? 400), { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
   }, { auth: true });
 
   router.del('/api/me/note-databases/:id', async (_req, res, params, auth) => {

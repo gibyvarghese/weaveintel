@@ -10,3 +10,5 @@ export * from './stages/tasks.js';
 export * from './stages/timeline.js';
 // weaveNotes Phase 5 — LLM-backed entity/relation extraction for the notes knowledge graph.
 export * from './knowledge-graph.js';
+// weaveNotes Phase 6 — AI database column auto-fill with citations.
+export * from './autofill.js';

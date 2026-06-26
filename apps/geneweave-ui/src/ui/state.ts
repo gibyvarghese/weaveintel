@@ -130,9 +130,10 @@ export const state: any = {
   notesSearch: '' as string,
   currentNoteId: null as string | null,
   currentNote: null as NoteDoc | null,
-  notesView: 'list' as string,               // 'list' | 'editor' | 'templates'
+  notesView: 'list' as string,               // 'list' | 'editor' | 'templates' | 'databases'
   noteTemplates: [] as NoteListItem[],
   noteDatabases: [] as any[],
+  currentDatabaseId: null as string | null,  // weaveNotes Phase 6: the open database
 
   // Admin
   adminTab: 'prompts',

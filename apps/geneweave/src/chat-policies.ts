@@ -184,6 +184,7 @@ const TOOL_POLICIES: Record<ChatMode, string[]> = {
     'note_edit', // weaveNotes Phase 3: the agent can co-author the user's notes
     'note_publish', // weaveNotes Phase 4: the agent can publish a note as an artifact
     'find_related_notes', // weaveNotes Phase 5: semantic note search/knowledge-graph nav
+    'autofill_database', // weaveNotes Phase 6: AI table column auto-fill
     'datetime', 'timezone_info',
     'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list',
     'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status',
@@ -200,6 +201,7 @@ const TOOL_POLICIES: Record<ChatMode, string[]> = {
     'note_edit', // weaveNotes Phase 3: co-author notes
     'note_publish', // weaveNotes Phase 4: publish a note as an artifact
     'find_related_notes', // weaveNotes Phase 5: semantic note search
+    'autofill_database', // weaveNotes Phase 6: AI table column auto-fill
     'datetime', 'timezone_info', 'calculator', 'json_format', 'text_analysis',
     'agenda_list', 'agenda_create', 'agenda_update', 'agenda_delete',
   ],
@@ -211,6 +213,7 @@ const TOOL_POLICIES: Record<ChatMode, string[]> = {
     'note_edit', // weaveNotes Phase 3: co-author notes
     'note_publish', // weaveNotes Phase 4: publish a note as an artifact
     'find_related_notes', // weaveNotes Phase 5: semantic note search
+    'autofill_database', // weaveNotes Phase 6: AI table column auto-fill
     'datetime', 'timezone_info',
     'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list',
     'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status',
