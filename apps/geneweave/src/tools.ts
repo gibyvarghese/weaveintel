@@ -1730,11 +1730,22 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
       tags: ['ui', 'output'],
     }),
   };
+  const registeredFromSelection = new Set<string>();
   for (const name of filterToolNamesByPersona(toolNames, actorPersona)) {
     // Skip tools disabled in the operator-managed tool catalog
     if (opts?.disabledToolKeys && opts.disabledToolKeys.has(name)) continue;
     const tool = scopedTools[name];
-    if (tool) registry.register(tool);
+    if (tool) { registry.register(tool); registeredFromSelection.add(name); }
+  }
+  // weaveNotes (Phase 3-4): the note-agent tools — create_note / note_edit / note_publish —
+  // are CORE capabilities, each gated by per-call access checks (viewers/strangers refused).
+  // Make them available whenever their callbacks are wired, REGARDLESS of the chat's saved
+  // tool selection: mode policies only apply when `enabled_tools` is empty, so a user with a
+  // custom tool selection would otherwise never get them (and "create a note" would silently
+  // fall back to emit_artifact). Skip any already registered from the selection above.
+  for (const noteTool of ['create_note', 'note_edit', 'note_publish'] as const) {
+    const t = scopedTools[noteTool];
+    if (t && !registeredFromSelection.has(noteTool) && canUseTool(actorPersona, noteTool)) registry.register(t);
   }
   if (customTools) {
     for (const tool of customTools) {
