@@ -54,7 +54,7 @@ import { DbToolPolicyResolver, DbToolRateLimiter, consoleAuditEmitter } from './
 import { DbToolAuditEmitter } from './tool-audit-emitter.js';
 import { DbToolApprovalGate } from './tool-approval-gate.js';
 import { createTemporalStore } from './temporal-store.js';
-import { createNoteAiService, createModelTextGenerator } from './note-ai-sql.js';
+import { createNoteAiService, createModelTextGenerator, agentCreateNote } from './note-ai-sql.js';
 import { createNotePublishService } from './note-publish-sql.js';
 import {
   applySkillsToPrompt,
@@ -393,6 +393,10 @@ export class ChatEngine {
       // the sensitivity gate itself (no privilege escalation; restricted refused).
       notePublish: (a: { userId: string; noteId: string; format?: 'markdown' | 'html' }) =>
         createNotePublishService(db).agentPublish(a),
+      // weaveNotes Phase 3.1: wire the `create_note` tool so the agent can create a new
+      // note and fill it with content it produced (research / summary / plan / to-dos).
+      createNote: (a: { userId: string; tenantId?: string | null; title: string; markdown?: string }) =>
+        agentCreateNote(db, a),
     };
   }
 
@@ -1107,6 +1111,7 @@ export class ChatEngine {
       ...this.toolOptions,
       defaultTimezone: settings.timezone,
       currentUserId: userId,
+      ...(tenantId != null ? { currentTenantId: tenantId } : {}),
       currentChatId: chatId,
       // Phase 3: run-scope artifacts produced via /api/me/runs (the executor
       // stamps ctx.metadata.runId) so `artifacts.run_id` is populated.

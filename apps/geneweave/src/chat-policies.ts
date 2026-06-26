@@ -180,6 +180,7 @@ const TOOL_POLICIES: Record<ChatMode, string[]> = {
   agent: [
     'emit_artifact',
     'emit_widget',
+    'create_note', // weaveNotes Phase 3.1: the agent can create a new note
     'note_edit', // weaveNotes Phase 3: the agent can co-author the user's notes
     'note_publish', // weaveNotes Phase 4: the agent can publish a note as an artifact
     'datetime', 'timezone_info',
@@ -194,6 +195,7 @@ const TOOL_POLICIES: Record<ChatMode, string[]> = {
   supervisor: [
     'emit_artifact',
     'emit_widget',
+    'create_note', // weaveNotes Phase 3.1: create a new note
     'note_edit', // weaveNotes Phase 3: co-author notes
     'note_publish', // weaveNotes Phase 4: publish a note as an artifact
     'datetime', 'timezone_info', 'calculator', 'json_format', 'text_analysis',
@@ -203,6 +205,7 @@ const TOOL_POLICIES: Record<ChatMode, string[]> = {
   ensemble: [
     'emit_artifact',
     'emit_widget',
+    'create_note', // weaveNotes Phase 3.1: create a new note
     'note_edit', // weaveNotes Phase 3: co-author notes
     'note_publish', // weaveNotes Phase 4: publish a note as an artifact
     'datetime', 'timezone_info',

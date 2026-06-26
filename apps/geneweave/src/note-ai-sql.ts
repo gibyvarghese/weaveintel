@@ -27,6 +27,7 @@ import {
   BlockDoc,
   createBlockAgentPeer,
   markdownToBlocks,
+  blocksToProseMirror,
   diffBlocks,
   pmToBlocks,
   type BlockOp,
@@ -332,3 +333,36 @@ export function createNoteAiService(db: NoteAiDb, generate: NoteAiGenerate, opts
 }
 
 export type NoteAiService = ReturnType<typeof createNoteAiService>;
+
+/**
+ * The `create_note` agent-tool entry point (weaveNotes Phase 3.1): create a BRAND-NEW
+ * note owned by the user and (optionally) seed it with the agent's Markdown content —
+ * so the agent can capture research / a summary / a plan it just produced as a real,
+ * editable note. Reuses the Phase 1 `markdownToBlocks` → `blocksToProseMirror` path so
+ * headings, lists, to-dos, code and inline formatting all render correctly. Returns the
+ * new note id (which the agent can then hand to `note_edit` / `note_publish`).
+ */
+export async function agentCreateNote(
+  db: Pick<DatabaseAdapter, 'createNote'>,
+  args: { userId: string; tenantId?: string | null; title: string; markdown?: string },
+): Promise<{ ok: boolean; noteId?: string; error?: string }> {
+  const title = (args.title ?? '').trim() || 'Untitled note';
+  let docJson = '{"type":"doc","content":[]}';
+  if (args.markdown && args.markdown.trim()) {
+    try {
+      // markdown → blocks → a fresh BlockDoc → rendered ProseMirror (the note's doc_json).
+      const blocks = BlockDoc.fromBlocks(`u:${args.userId}`, markdownToBlocks(args.markdown)).blocks();
+      docJson = JSON.stringify(blocksToProseMirror(blocks));
+    } catch { /* fall back to an empty doc rather than failing the whole create */ }
+  }
+  const id = newUUIDv7();
+  try {
+    await db.createNote({
+      id, owner_user_id: args.userId, tenant_id: args.tenantId ?? null,
+      title, doc_json: docJson, is_template: 0, favorite: 0, sensitivity: 'normal',
+    });
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'failed to create note' };
+  }
+  return { ok: true, noteId: id };
+}

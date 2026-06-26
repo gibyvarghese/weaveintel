@@ -804,6 +804,8 @@ export interface ToolRegistryOptions {
   defaultTimezone?: string;
   temporalStore?: TemporalStore;
   currentUserId?: string;
+  /** Tenant of the current user (weaveNotes Phase 3.1) — stamped on notes the agent creates. */
+  currentTenantId?: string | null;
   currentChatId?: string;
   /** Run id (set on the /api/me/runs path) so emitted artifacts are run-scoped. */
   currentRunId?: string;
@@ -953,6 +955,13 @@ export interface ToolRegistryOptions {
    * link; a human opts into public sharing).
    */
   notePublish?: (args: { userId: string; noteId: string; format?: 'markdown' | 'html' }) => Promise<{ ok: boolean; error?: string; artifactId?: string; redactions?: number; sourceSensitivity?: string }>;
+  /**
+   * weaveNotes Phase 3.1: note creation callback. When set, the `create_note` built-in
+   * tool is available so the agent can create a brand-new note for the user and seed it
+   * with Markdown content it produced (research, a summary, a plan, to-dos). Returns the
+   * new note id, which the agent can pass to `note_edit` / `note_publish`.
+   */
+  createNote?: (args: { userId: string; tenantId?: string | null; title: string; markdown?: string }) => Promise<{ ok: boolean; error?: string; noteId?: string }>;
 }
 
 export function filterToolNamesByPersona(toolNames: string[], persona: string | null | undefined): string[] {
@@ -1511,6 +1520,28 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
           const r = await opts.noteEdit({ userId: opts.currentUserId, noteId: args.noteId, markdown: args.markdown, mode: args.mode === 'direct' ? 'direct' : 'suggest' });
           if (!r.ok) return { content: `note_edit failed: ${r.error ?? 'unknown error'}`, isError: true };
           return JSON.stringify({ ok: true, mode: args.mode === 'direct' ? 'direct' : 'suggest', applied: r.applied ?? 0, suggestionId: r.suggestionId ?? null });
+        },
+        tags: ['notes', 'output'],
+      }),
+    } : {}),
+    // weaveNotes Phase 3.1: create-note tool — available when createNote callback is set.
+    ...(opts?.createNote && opts.currentUserId ? {
+      create_note: weaveTool({
+        name: 'create_note',
+        description: 'Create a brand-new note for the user and fill it with content you provide as Markdown. Use this when the user asks to "create/make/start a note", "save this as a note", or "write up … as a note". Put the actual content (headings, bullet points, to-dos as "- [ ] task", code blocks, etc.) in `markdown`, based on what the user asked about or the information discussed. Returns the new note id (which you can then pass to note_edit to add more, or note_publish to share).',
+        parameters: {
+          type: 'object',
+          properties: {
+            title: { type: 'string', description: 'A short, descriptive title for the note.' },
+            markdown: { type: 'string', description: 'The note body as Markdown — the research/summary/plan the user asked for. Supports headings, bullet/numbered lists, to-dos ("- [ ] task"), code blocks, quotes, bold/italic/links.' },
+          },
+          required: ['title'],
+        },
+        execute: async (args: { title: string; markdown?: string }) => {
+          if (!opts.createNote || !opts.currentUserId) return { content: 'Note creation is unavailable in this context.', isError: true };
+          const r = await opts.createNote({ userId: opts.currentUserId, tenantId: opts.currentTenantId ?? null, title: args.title, ...(args.markdown ? { markdown: args.markdown } : {}) });
+          if (!r.ok) return { content: `create_note failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, noteId: r.noteId, title: args.title });
         },
         tags: ['notes', 'output'],
       }),
