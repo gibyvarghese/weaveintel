@@ -28,6 +28,9 @@ import { wireNoteConnections, type NoteConnectionsPanel } from './notes-graph.js
 import { renderDatabasesView } from './notes-database-view.js';
 import { renderCapturePanel } from './notes-capture.js';
 import { wireNoteHistory, wireNoteComments, wireNoteSynced, renderWorkspaceAsk, type SimplePanel } from './notes-workspace-ui.js';
+import { renderEditorCanvas, type OverflowItem } from './notes-editor-canvas.js';
+import { renderRightRail } from './notes-right-rail.js';
+import { wovenMarkSvg, wordmarkHtml } from './notes-brand.js';
 
 /** The live co-editing session for the currently-open note (Phase 2). */
 let _activeCoedit: NoteCoeditSession | null = null;
@@ -186,8 +189,13 @@ function renderNotesList(render: () => void): HTMLElement {
   const others = notes.filter((n) => !n.favorite);
 
   return h('div', { className: 'notes-list-panel' },
+    // geneWeave brand lockup (woven mark + wordmark) — the rail header per the design.
+    h('div', { className: 'gw-brand' },
+      h('span', { className: 'gw-brand-mark', innerHTML: wovenMarkSvg(24, 'duo') }),
+      h('span', { className: 'gw-brand-word', innerHTML: wordmarkHtml() }),
+    ),
     h('div', { className: 'notes-list-header' },
-      h('div', { className: 'notes-list-title' }, '📝 Notes'),
+      h('div', { className: 'notes-list-title' }, 'Notes'),
       h('div', { className: 'notes-list-actions' },
         h('button', {
           className: 'notes-new-btn',
@@ -304,8 +312,12 @@ function renderTemplatesGallery(render: () => void): HTMLElement {
 
 // ── Editor panel ──────────────────────────────────────────────────────────────
 
-function renderEditorPanel(note: NoteDoc, render: () => void): HTMLElement {
+/** The right-rail Assistant tab (module-local so it survives editor re-renders). */
+let _railTab: 'assistant' | 'outline' | 'links' = 'assistant';
+
+function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLElement; rail: HTMLElement } {
   const isFav = note.favorite === 1;
+  const creative = (state.notesTheme as string) === 'creative';
   let editorMounted = false;
   let extractResult: string | null = null;
 
@@ -328,44 +340,26 @@ function renderEditorPanel(note: NoteDoc, render: () => void): HTMLElement {
   const aiPanel = h('div', { className: 'notes-ai-panel', style: 'display:none' }) as HTMLElement;
 
   // weaveNotes Phase 5 — the knowledge-graph "Connections" panel (backlinks, unlinked
-  // mentions, related notes, mini graph), toggled by a toolbar button.
+  // mentions, related notes, mini graph). Lives in the right rail's "Links" tab.
   const connPanel = h('div', { className: 'notes-connections-panel' }) as HTMLElement;
-  connPanel.style.display = 'none'; // start hidden (explicit — attribute strings aren't reliable here)
-  let connOpen = false;
-  const connBtn = h('button', {
-    className: 'notes-connections-btn', title: 'Show connections: backlinks, related notes, knowledge graph',
-    // The panel is wired in the mount block (so it survives re-renders); the button
-    // just toggles its visibility and refreshes it when opened.
-    onClick: () => {
-      connOpen = !connOpen;
-      connPanel.style.display = connOpen ? '' : 'none';
-      if (connOpen) void _activeConn?.refresh();
-    },
-  }, '🔗 Connections') as HTMLElement;
 
-  // weaveNotes Phase 8 — version History, Comments, and Synced-blocks panels. Same pattern
-  // as Connections: a hidden panel wired in the mount block, toggled by a toolbar button.
+  // weaveNotes Phase 8 — version History, Comments, and Synced-blocks panels. Inline panels
+  // shown above the editor, toggled from the centre top-bar overflow (⋯) menu.
   const historyPanel = h('div', { className: 'notes-ws-panel' }) as HTMLElement; historyPanel.style.display = 'none';
   const commentsPanel = h('div', { className: 'notes-ws-panel' }) as HTMLElement; commentsPanel.style.display = 'none';
   const syncedPanel = h('div', { className: 'notes-ws-panel' }) as HTMLElement; syncedPanel.style.display = 'none';
-  let historyOpen = false, commentsOpen = false, syncedOpen = false;
-  const historyBtn = h('button', {
-    className: 'notes-history-btn', title: 'Version history: save points + restore',
-    onClick: () => { historyOpen = !historyOpen; historyPanel.style.display = historyOpen ? '' : 'none'; if (historyOpen) void _activeHistory?.refresh(); },
-  }, '📜 History') as HTMLElement;
-  const commentsBtn = h('button', {
-    className: 'notes-comments-btn', title: 'Comments + discussion threads on this note',
-    onClick: () => { commentsOpen = !commentsOpen; commentsPanel.style.display = commentsOpen ? '' : 'none'; if (commentsOpen) void _activeComments?.refresh(); },
-  }, '💬 Comments') as HTMLElement;
-  const syncedBtn = h('button', {
-    className: 'notes-synced-btn', title: 'Synced blocks: mirror content from another note',
-    onClick: () => { syncedOpen = !syncedOpen; syncedPanel.style.display = syncedOpen ? '' : 'none'; if (syncedOpen) void _activeSynced?.refresh(); },
-  }, '🔁 Synced') as HTMLElement;
+  // A generic toggle for an inline panel: flip visibility + refresh its wired controller when shown.
+  const togglePanel = (panel: HTMLElement, refresh?: () => void): void => {
+    const show = panel.style.display === 'none';
+    panel.style.display = show ? '' : 'none';
+    if (show) refresh?.();
+  };
 
   // weaveNotes Phase 2 — collaborative co-editing UI bits.
   // A live "N editing" badge, a "refresh" nudge shown when a collaborator edits
   // while you're typing, and a Share button that mints an invite link.
   let lastLocalEditTs = 0;
+  let mountTs = 0;
   const presenceBadge = h('span', { className: 'notes-presence-badge', title: 'People editing this note', style: 'display:none' }) as HTMLElement;
   const refreshNudge = h('button', {
     className: 'notes-coedit-refresh', title: 'A collaborator edited — click to load the latest', style: 'display:none',
@@ -376,7 +370,10 @@ function renderEditorPanel(note: NoteDoc, render: () => void): HTMLElement {
     else { presenceBadge.style.display = 'none'; }
   };
   // A remote edit arrived: if you're not actively typing, refresh silently; else nudge.
+  // Ignore the first ~1.5s after mount — joining the co-edit room replays the seed op, which
+  // is not a real collaborator edit and would otherwise flash the nudge for a solo author.
   const onRemoteChange = (): void => {
+    if (Date.now() - mountTs < 1500) return;
     const typingNow = editorContainer.contains(document.activeElement) && Date.now() - lastLocalEditTs < 2500;
     if (typingNow) { refreshNudge.style.display = ''; }
     else { void loadNote(note.id).then(render); }
@@ -421,75 +418,88 @@ function renderEditorPanel(note: NoteDoc, render: () => void): HTMLElement {
     },
   }, note.icon ?? '📄');
 
-  const panel = h('div', { className: 'notes-editor-panel' },
-    h('div', { className: 'notes-editor-top' },
-      h('button', { className: 'notes-back-btn', onClick: () => { destroyActiveEditor(); state.notesView = 'list'; render(); } }, '← Notes'),
-      h('div', { className: 'notes-editor-toolbar' },
-        presenceBadge,
-        refreshNudge,
-        connBtn,
-        historyBtn,
-        commentsBtn,
-        syncedBtn,
-        shareBtn,
-        publishBtn,
-        h('button', {
-          className: `notes-fav-btn${isFav ? ' active' : ''}`,
-          title: isFav ? 'Unfavourite' : 'Favourite',
-          onClick: async () => {
-            await api.put(`/api/me/notes/${note.id}`, { favorite: isFav ? 0 : 1 });
-            note.favorite = isFav ? 0 : 1;
-            render();
-          },
-        }, isFav ? '★' : '☆'),
-        h('button', {
-          className: 'notes-extract-btn',
-          title: 'Extract to-dos as tasks (WC8)',
-          onClick: async () => {
-            const result = await extractNote(note.id);
-            if (result) {
-              const count = result.extractedTasks.length;
-              extractResult = count > 0
-                ? `${count} task${count === 1 ? '' : 's'} created`
-                : 'No new to-dos found';
-              render();
-            }
-          },
-        }, '⊡ Extract'),
-        h('button', {
-          className: 'notes-delete-btn',
-          title: 'Delete note',
-          onClick: async () => {
-            if (!confirm('Delete this note? This cannot be undone.')) return;
-            destroyActiveEditor();
-            await deleteNote(note.id);
-            state.currentNoteId = null;
-            state.currentNote = null;
-            state.notesView = 'list';
-            await loadNotesList();
-            render();
-          },
-        }, '🗑'),
-      ),
-    ),
-    extractResult ? h('div', { className: 'notes-extract-result' }, extractResult) : null,
-    h('div', { className: 'notes-editor-header' },
-      iconEl,
-      titleInput,
-    ),
-    aiToolbar,
-    aiPanel,
-    connPanel,
-    historyPanel,
-    commentsPanel,
-    syncedPanel,
-    editorContainer,
-  );
+  // — the secondary actions live in the centre top-bar overflow (⋯) menu —
+  const overflow: OverflowItem[] = [
+    { label: isFav ? '★ Unfavourite' : '☆ Favourite', title: 'Favourite', onClick: async () => { await api.put(`/api/me/notes/${note.id}`, { favorite: isFav ? 0 : 1 }); note.favorite = isFav ? 0 : 1; render(); } },
+    { label: '📜 Version history', title: 'Save points + restore', onClick: () => togglePanel(historyPanel, () => void _activeHistory?.refresh()) },
+    { label: '💬 Comments', title: 'Discussion threads on this note', onClick: () => togglePanel(commentsPanel, () => void _activeComments?.refresh()) },
+    { label: '🔁 Synced blocks', title: 'Mirror content from another note', onClick: () => togglePanel(syncedPanel, () => void _activeSynced?.refresh()) },
+    { label: '🔗 Share', title: 'Share for co-editing', onClick: async () => {
+        const link = await createNoteShareLink(note.id, 'collaborator');
+        if (!link) { alert('Could not create a share link.'); return; }
+        try { await navigator.clipboard.writeText(link.url); } catch { /* clipboard may be blocked */ }
+        prompt('Share this co-editing link (copied to clipboard):', link.url);
+      } },
+    { label: '📤 Publish', title: 'Publish as a shareable document', onClick: async () => {
+        const res = await api.post(`/api/me/notes/${note.id}/emit-artifact`, { format: 'markdown', share: true });
+        const data = await res.json().catch(() => ({})) as { ok?: boolean; shareUrl?: string; error?: string; redactions?: number };
+        if (!res.ok || !data.ok) { alert(`Could not publish: ${data.error ?? res.status}`); return; }
+        const redactionNote = data.redactions ? `\n\n(${data.redactions} sensitive item(s) were redacted before publishing.)` : '';
+        if (data.shareUrl) { try { await navigator.clipboard.writeText(data.shareUrl); } catch { /* blocked */ } }
+        prompt(`Published! Public link (copied to clipboard):${redactionNote}`, data.shareUrl ?? '(no link)');
+      } },
+    { label: '⊡ Extract to-dos', title: 'Extract to-dos as tasks', onClick: async () => {
+        const result = await extractNote(note.id);
+        if (result) { const count = result.extractedTasks.length; extractResult = count > 0 ? `${count} task${count === 1 ? '' : 's'} created` : 'No new to-dos found'; render(); }
+      } },
+    { label: '🗑 Delete note', title: 'Delete note', danger: true, onClick: async () => {
+        if (!confirm('Delete this note? This cannot be undone.')) return;
+        destroyActiveEditor();
+        await deleteNote(note.id);
+        state.currentNoteId = null; state.currentNote = null; state.notesView = 'list';
+        await loadNotesList(); render();
+      } },
+  ];
+
+  // — formatting commands drive the live Tiptap instance (no-op until it mounts) —
+  const fmt = (cmd: string, arg?: unknown): void => {
+    try {
+      const ed = _activeEditor as unknown as { chain?: () => { focus: () => Record<string, (a?: unknown) => { run: () => void }> } } | null;
+      ed?.chain?.().focus()?.[cmd]?.(arg)?.run();
+    } catch { /* editor not ready / command unavailable */ }
+  };
+
+  // — the Assistant body (AI toolbar + pending-suggestion panel) for the right rail —
+  const assistantBody = h('div', { className: 'gw-assistant-body' }, aiToolbar, aiPanel);
+
+  // — compute the outline from the note's headings (best-effort from doc_json) —
+  const outline = computeOutline(note.doc_json);
+
+  // — CENTRE canvas (presentational module) —
+  const center = renderEditorCanvas({
+    breadcrumb: { notebook: 'Notes', title: note.title },
+    creative,
+    metaText: 'Edited just now',
+    isLive: true,
+    iconEl, titleInput, editorContainer, presenceBadge, refreshNudge,
+    inlinePanels: [historyPanel, commentsPanel, syncedPanel],
+    extractResult,
+    onSetTheme: (t) => { state.notesTheme = t; render(); },
+    onAskAi: () => { _railTab = 'assistant'; render(); },
+    onInsert: () => { editorContainer.querySelector<HTMLElement>('[contenteditable]')?.focus(); },
+    format: { bold: () => fmt('toggleBold'), italic: () => fmt('toggleItalic'), underline: () => fmt('toggleUnderline'), highlight: (color) => fmt('toggleHighlight', { color }) },
+    overflow,
+  });
+
+  // — RIGHT Assistant rail (presentational module) —
+  const rail = renderRightRail({
+    tab: _railTab,
+    onTab: (t) => { _railTab = t; if (t === 'links') void _activeConn?.refresh(); render(); },
+    assistantBody,
+    linksBody: connPanel,
+    outline,
+    onOutlineClick: () => { editorContainer.querySelector<HTMLElement>('[contenteditable]')?.focus(); },
+    composerPlaceholder: 'Ask this note anything…',
+    onComposerSend: async (text) => {
+      try { await api.post(`/api/me/notes/${note.id}/ai/ask`, { instruction: text }); await _activeAi?.refresh(); } catch { /* surfaced in the panel */ }
+    },
+  });
 
   // Mount Tiptap after the panel DOM is attached (via requestAnimationFrame)
   requestAnimationFrame(() => {
     if (editorMounted) return;
     editorMounted = true;
+    mountTs = Date.now();
     // Phase 2: join the note's live co-editing room (ensures the shared doc, opens
     // the presence/op stream). Saves route through the relay's diff-on-save so two
     // people editing the same note merge instead of clobbering.
@@ -524,7 +534,23 @@ function renderEditorPanel(note: NoteDoc, render: () => void): HTMLElement {
     });
   });
 
-  return panel;
+  return { center, rail };
+}
+
+/** Derive a heading outline from a note's ProseMirror doc_json (best-effort). */
+function computeOutline(docJson: unknown): Array<{ text: string; level: number }> {
+  const out: Array<{ text: string; level: number }> = [];
+  const walk = (node: unknown): void => {
+    if (!node || typeof node !== 'object') return;
+    const n = node as { type?: string; attrs?: { level?: number }; content?: unknown[]; text?: string };
+    if (n.type === 'heading') {
+      const text = (n.content ?? []).map((c) => (c as { text?: string }).text ?? '').join('');
+      out.push({ text, level: Math.min(3, Math.max(1, n.attrs?.level ?? 1)) });
+    }
+    if (Array.isArray(n.content)) n.content.forEach(walk);
+  };
+  try { walk(typeof docJson === 'string' ? JSON.parse(docJson) : docJson); } catch { /* */ }
+  return out;
 }
 
 // ── Main notes view ───────────────────────────────────────────────────────────
@@ -532,27 +558,49 @@ function renderEditorPanel(note: NoteDoc, render: () => void): HTMLElement {
 export function renderNotesView(render: () => void): HTMLElement {
   const notesView = state.notesView as string;
   const currentNote = state.currentNote as NoteDoc | null;
+  if (state.notesTheme === undefined) state.notesTheme = 'pro';
 
-  return h('div', { className: 'notes-full-view' },
-    h('div', { className: 'notes-layout' },
-      // Left: note list sidebar
-      h('div', { className: 'notes-sidebar' },
-        renderNotesList(render)
+  // The geneWeave Notes shell is a persistent THREE-column layout (design handoff):
+  //   left notebooks rail · centre canvas · right Assistant rail.
+  // Databases/templates take over the centre; the right rail shows a calm empty Assistant.
+  const editing = notesView === 'editor' && currentNote;
+  const composed = editing ? renderEditorPanel(currentNote, render) : null;
+
+  const centre = notesView === 'databases'
+    ? h('main', { className: 'gw-canvas' }, renderDatabasesView(render))
+    : notesView === 'templates'
+      ? h('main', { className: 'gw-canvas' }, renderTemplatesGallery(render))
+      : composed
+        ? composed.center
+        : h('main', { className: 'gw-canvas' },
+            h('div', { className: 'notes-select-prompt' },
+              h('div', { className: 'notes-select-icon', innerHTML: wovenMarkSvg(40, 'ai') }),
+              h('div', { className: 'notes-select-msg' }, 'Select a note to start editing'),
+              h('div', { className: 'notes-select-sub' }, 'or create a new one with + New note'),
+            ),
+          );
+
+  const rightRail = composed ? composed.rail : renderEmptyAssistantRail();
+
+  return h('div', { className: 'gw-notes notes-full-view' },
+    h('div', { className: 'gw-shell' },
+      h('nav', { className: 'gw-left-rail' }, renderNotesList(render)),
+      centre,
+      rightRail,
+    ),
+  );
+}
+
+/** A calm right rail shown when no note is open (matches the design's empty Assistant). */
+function renderEmptyAssistantRail(): HTMLElement {
+  return h('aside', { className: 'gw-rail' },
+    h('div', { className: 'gw-rail-tabs' }, h('span', { className: 'gw-rail-tab active' }, 'Assistant')),
+    h('div', { className: 'gw-rail-divider' }),
+    h('div', { className: 'gw-rail-body gw-scroll' },
+      h('div', { className: 'gw-rail-empty' },
+        h('div', { className: 'gw-rail-empty-mark', innerHTML: wovenMarkSvg(28, 'ai') }),
+        h('div', null, 'Open a note and geneWeave AI will help you write, edit, and diagram alongside you.'),
       ),
-      // Right: editor, templates, or databases (Phase 6)
-      h('div', { className: 'notes-main' },
-        notesView === 'databases'
-          ? renderDatabasesView(render)
-          : notesView === 'templates'
-          ? renderTemplatesGallery(render)
-          : notesView === 'editor' && currentNote
-            ? renderEditorPanel(currentNote, render)
-            : h('div', { className: 'notes-select-prompt' },
-                h('div', { className: 'notes-select-icon' }, '📝'),
-                h('div', { className: 'notes-select-msg' }, 'Select a note to start editing'),
-                h('div', { className: 'notes-select-sub' }, 'or create a new one with + New'),
-              )
-      )
-    )
+    ),
   );
 }

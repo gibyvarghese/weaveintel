@@ -131,6 +131,7 @@ export const state: any = {
   currentNoteId: null as string | null,
   currentNote: null as NoteDoc | null,
   notesView: 'list' as string,               // 'list' | 'editor' | 'templates' | 'databases'
+  notesTheme: 'pro' as 'pro' | 'creative',   // design Pro/Creative page theme (Notes editor)
   noteTemplates: [] as NoteListItem[],
   noteDatabases: [] as any[],
   currentDatabaseId: null as string | null,  // weaveNotes Phase 6: the open database

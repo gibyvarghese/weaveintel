@@ -2,29 +2,55 @@
 // This is embedded in the HTML as a <style> tag
 
 export const STYLES = `
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;700&family=JetBrains+Mono:wght@400;500&family=Fira+Code:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Caveat:wght@500;600;700&display=swap');
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+/* geneWeave design system — "color encodes agency": neutrals = you, emerald/mint = the AI.
+   Token names are kept stable (--bg/--fg/--accent…) and remapped to the design palette so the
+   whole app adopts the language; new semantic tokens (--mint/--ink/--coral…) are added alongside. */
 :root{
-  --bg:#EDF5F0;--bg2:#F7FBF8;--bg3:#F5F7F6;--bg4:#E2EAE5;
-  --fg:#1A2B23;--fg2:#5A6B63;--fg3:#8A9B93;
-  --accent:#2AB090;--accent2:#1E8A6F;--accent-dim:#E0F5EE;
-  --solid:#1A2B23;--solid-hover:#24382F;--solid-contrast:#FFFFFF;
-  --danger:#dc2626;--success:#16a34a;--warn:#d97706;
+  /* neutrals */
+  --bg:#F6F8F7;            /* canvas — app background (Pro) */
+  --bg2:#FFFFFF;           /* surface — cards, panels, rails */
+  --bg3:#F0F2F1;           /* subtle fill — toggle tracks, resting chips */
+  --bg4:#E7ECEA;           /* hairline — borders, dividers */
+  --fg:#14201B;            /* ink — primary text */
+  --fg2:#5E6E67;           /* muted — secondary text, labels, resting icons */
+  --fg3:#9AA7A1;           /* placeholder — hints, disabled glyphs */
+  /* signal — emerald encodes the assistant + primary action */
+  --accent:#0E9A6E;        /* emerald */
+  --accent2:#0B7A57;       /* emerald-press — pressed/active, text on mint */
+  --accent-dim:#E8F5EE;    /* mint — AI surfaces, agent bubbles, active rows */
+  --mint:#E8F5EE;--mint-deep:#DCEFE5;--mint-border:#BEE3D2;--mint-wash:#F4FBF7;
+  --ink:#14201B;--muted:#5E6E67;--hairline:#E7ECEA;--canvas:#F6F8F7;--paper:#FBF8F1;--surface:#FFFFFF;
+  /* attention / human ink (used sparingly) */
+  --amber:#D98A3D;--coral:#D85A30;
+  --hl-amber:#FAC775;--hl-pink:#F4C0D1;--hl-teal:#9FE1CB;--hl-blue:#B5D4F4;
+  --diff-add-bg:#E8F5EE;--diff-add-fg:#14201B;--diff-del-bg:#FBEFEA;--diff-del-fg:#9C6B5C;
+  --danger-zone-bg:#FCF7F2;--danger-zone-border:#F0E0D5;--danger-zone-fg:#A8551F;
+  --solid:#14201B;--solid-hover:#24382F;--solid-contrast:#FFFFFF;
+  --danger:#D85A30;--success:#0E9A6E;--warn:#D98A3D;
   --radius:12px;--radius-lg:16px;
-  --font:'DM Sans','Plus Jakarta Sans',system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-  --font-display:'Plus Jakarta Sans','DM Sans',sans-serif;
-  --mono:'JetBrains Mono','Fira Code',SFMono-Regular,Menlo,Consolas,monospace;
-  --shadow-soft:0 1px 3px rgba(26,43,35,.06),0 8px 20px rgba(26,43,35,.06);
-  --shadow-hover:0 2px 8px rgba(26,43,35,.10),0 14px 28px rgba(26,43,35,.10);
+  --font:'Inter',system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --font-display:'Plus Jakarta Sans','Inter',sans-serif;
+  --mono:'JetBrains Mono',SFMono-Regular,Menlo,Consolas,monospace;
+  --font-hand:'Caveat',cursive;
+  --shadow-soft:0 1px 3px rgba(20,32,27,.06);
+  --shadow-hover:0 2px 8px rgba(20,32,27,.10),0 14px 28px rgba(20,32,27,.10);
+  --shadow-pop:0 8px 28px rgba(20,32,27,.12);
 }
 html[data-theme='dark']{
-  --bg:#0E1713;--bg2:#121E19;--bg3:#1A2B23;--bg4:#2E4339;
-  --fg:#E5F2EC;--fg2:#B4CBC0;--fg3:#88A498;
-  --accent:#34C9A5;--accent2:#2AB090;--accent-dim:#1C3A31;
-  --solid:#28453A;--solid-hover:#315447;--solid-contrast:#F7FBF8;
-  --danger:#F87171;--success:#4ADE80;--warn:#FBBF24;
-  --shadow-soft:0 1px 2px rgba(0,0,0,.35),0 8px 24px rgba(0,0,0,.35);
+  --bg:#0E1714;--bg2:#15201C;--bg3:#1B2723;--bg4:#2A3833;
+  --fg:#E8EFEB;--fg2:#AEC2B9;--fg3:#7C928A;
+  --accent:#2FD39B;--accent2:#3FE0A8;--accent-dim:#16332A;
+  --mint:#16332A;--mint-deep:#1C3F33;--mint-border:#2A5A47;--mint-wash:#11271F;
+  --ink:#E8EFEB;--muted:#AEC2B9;--hairline:#2A3833;--canvas:#0E1714;--paper:#141E18;--surface:#15201C;
+  --diff-add-bg:#16332A;--diff-add-fg:#E8EFEB;--diff-del-bg:#3A201A;--diff-del-fg:#D4A595;
+  --danger-zone-bg:#241A14;--danger-zone-border:#3A2A1E;--danger-zone-fg:#E0A87F;
+  --solid:#2A453B;--solid-hover:#345449;--solid-contrast:#E8EFEB;
+  --danger:#F08A60;--success:#2FD39B;--warn:#E0A87F;
+  --shadow-soft:0 1px 2px rgba(0,0,0,.35);
   --shadow-hover:0 2px 8px rgba(0,0,0,.45),0 16px 32px rgba(0,0,0,.45);
+  --shadow-pop:0 8px 28px rgba(0,0,0,.5);
 }
 html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--fg);-webkit-font-smoothing:antialiased}
 a{color:var(--accent);text-decoration:none}
@@ -1024,6 +1050,109 @@ input{font-family:inherit;outline:none}
 .notes-ws-ask-kind{font-size:9px;text-transform:uppercase;background:var(--bg4);color:var(--fg2);border-radius:4px;padding:0 4px}
 .notes-ws-ask-title{font-size:12px;font-weight:600;color:var(--fg1)}
 .notes-ws-ask-snippet{font-size:11px;color:var(--fg2);line-height:1.4}
+
+/* ════════════════ geneWeave Notes — 3-column design shell (design handoff) ════════════════ */
+.gw-notes{height:100%}
+.gw-shell{display:grid;grid-template-columns:248px minmax(0,1fr) 300px;height:100%;overflow:hidden;background:var(--canvas)}
+.gw-scroll::-webkit-scrollbar{width:10px}
+.gw-scroll::-webkit-scrollbar-thumb{background:var(--bg4);border-radius:999px;border:3px solid transparent;background-clip:padding-box}
+/* — left notebooks rail — */
+.gw-left-rail{background:var(--surface);border-right:1px solid var(--hairline);overflow:hidden;display:flex;flex-direction:column;min-width:0}
+.gw-left-rail .notes-list-panel{height:100%}
+.gw-brand{display:flex;align-items:center;gap:10px;padding:16px 16px 8px}
+.gw-brand-mark{display:inline-flex}
+.gw-brand-word{font-family:var(--font-display);font-size:15px;font-weight:700;letter-spacing:-0.02em}
+/* — centre canvas — */
+.gw-canvas{display:flex;flex-direction:column;min-width:0;overflow:hidden;background:var(--surface)}
+.gw-canvas.creative{background:var(--paper)}
+.gw-topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:13px 28px;border-bottom:1px solid var(--hairline);background:color-mix(in srgb,var(--surface) 70%,transparent);backdrop-filter:blur(6px);flex:none}
+.gw-breadcrumb{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--fg3);min-width:0}
+.gw-breadcrumb-sep{color:var(--bg4)}
+.gw-breadcrumb-cur{color:var(--ink);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gw-topbar-right{display:flex;align-items:center;gap:12px;flex:none}
+.gw-presence{display:flex;align-items:center}
+.gw-avatar{width:26px;height:26px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;border:2px solid var(--surface);font-size:11px;font-weight:600}
+.gw-avatar-you{background:var(--ink);color:var(--surface)}
+.gw-avatar-ai{background:var(--mint);margin-left:-8px}
+.gw-theme-toggle{display:flex;background:var(--bg3);border-radius:999px;padding:3px}
+.gw-theme-tab{font-size:12px;font-weight:600;border:none;border-radius:999px;padding:6px 14px;cursor:pointer;background:transparent;color:var(--fg2);transition:all .15s}
+.gw-theme-tab.active{background:var(--surface);color:var(--accent2);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.gw-btn-emerald{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:#fff;background:var(--accent);border:none;border-radius:999px;padding:8px 16px;cursor:pointer}
+.gw-btn-emerald:hover{background:var(--accent2)}
+.gw-plus{font-size:14px;line-height:1}
+.gw-overflow{position:relative}
+.gw-icon-btn{width:32px;height:32px;border-radius:8px;border:1px solid var(--hairline);background:var(--surface);color:var(--fg2);cursor:pointer;font-size:16px;line-height:1}
+.gw-icon-btn:hover{border-color:var(--accent);color:var(--accent)}
+.gw-overflow-menu{position:absolute;right:0;top:38px;z-index:30;background:var(--surface);border:1px solid var(--hairline);border-radius:12px;box-shadow:var(--shadow-pop);padding:6px;min-width:200px;display:flex;flex-direction:column;gap:2px}
+.gw-overflow-item{text-align:left;font-size:13px;color:var(--fg);background:transparent;border:none;border-radius:8px;padding:8px 10px;cursor:pointer}
+.gw-overflow-item:hover{background:var(--mint)}
+.gw-overflow-item.danger{color:var(--danger-zone-fg)}
+.gw-overflow-item.danger:hover{background:var(--danger-zone-bg)}
+/* — tool strip — */
+.gw-toolstrip{display:flex;align-items:center;gap:6px;padding:9px 28px;border-bottom:1px solid var(--hairline);flex:none}
+.gw-tool-group{display:flex;align-items:center;gap:2px;padding-right:10px;margin-right:4px;border-right:1px solid var(--hairline)}
+.gw-tool-group.gw-highlighters{gap:6px}
+.gw-tool{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border-radius:7px;border:none;background:transparent;color:var(--fg2);cursor:pointer;font-size:14px}
+.gw-tool:hover{background:var(--bg3)}
+.gw-tool-b{font-weight:700}.gw-tool-i{font-style:italic;font-family:Georgia,serif}.gw-tool-u{text-decoration:underline}
+.gw-hl{width:18px;height:18px;border-radius:50%;cursor:pointer}
+.gw-hl.active{box-shadow:0 0 0 2px var(--surface),0 0 0 3px var(--accent)}
+.gw-ask-ai{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:var(--accent2);background:var(--mint);border:1px solid var(--mint-deep);border-radius:8px;padding:6px 12px;cursor:pointer;margin-left:auto}
+.gw-ask-ai:hover{background:var(--mint-deep)}
+.gw-ask-mark{display:inline-flex}
+/* — the page — */
+.gw-page-scroll{flex:1;overflow-y:auto;padding:48px 28px 120px}
+.gw-page{max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:18px;position:relative}
+.gw-page-title{display:flex;align-items:center;gap:12px}
+.gw-page-title .notes-editor-icon{font-size:30px;cursor:pointer;line-height:1}
+.gw-page-title .notes-title-input{flex:1;font-family:var(--font-display);font-size:34px;font-weight:800;letter-spacing:-0.025em;line-height:1.15;color:var(--ink);border:none;background:transparent;outline:none;padding:0}
+.gw-canvas.creative .gw-page-title .notes-title-input{font-family:var(--font-hand);font-size:46px;font-weight:700;letter-spacing:0}
+.gw-page-meta{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--fg3);margin-top:-6px}
+.gw-meta-mono{font-family:var(--mono)}
+.gw-ai-here{display:inline-flex;align-items:center;gap:5px}
+.gw-ai-dot{width:6px;height:6px;border-radius:50%;background:var(--accent)}
+.gw-extract-result{font-size:12px;color:var(--accent2);background:var(--mint);border-radius:8px;padding:6px 10px;align-self:flex-start}
+.gw-canvas .notes-editor-mount{flex:none;padding:0}
+.gw-canvas .notes-editor-mount [contenteditable]{font-size:16px;line-height:1.75;color:var(--ink)}
+/* — right Assistant rail — */
+.gw-rail{background:var(--surface);border-left:1px solid var(--hairline);display:flex;flex-direction:column;min-width:0;overflow:hidden}
+.gw-rail-tabs{display:flex;gap:4px;padding:14px 16px 0}
+.gw-rail-tab{font-size:13px;color:var(--fg3);background:none;border:none;padding:8px 12px;cursor:pointer;border-bottom:2px solid transparent}
+.gw-rail-tab.active{color:var(--accent2);font-weight:600;border-bottom-color:var(--accent)}
+.gw-rail-divider{height:1px;background:var(--hairline)}
+.gw-rail-body{flex:1;overflow-y:auto;padding:16px}
+.gw-rail-empty{display:flex;flex-direction:column;gap:12px;align-items:flex-start;font-size:13px;color:var(--fg2);line-height:1.6;padding:8px 4px}
+.gw-rail-empty-mark{opacity:.8}
+.gw-assistant-body{display:flex;flex-direction:column;gap:14px}
+.gw-outline-list{display:flex;flex-direction:column;gap:2px}
+.gw-outline-item{text-align:left;font-size:13px;color:var(--fg2);background:none;border:none;border-radius:7px;padding:6px 8px;cursor:pointer}
+.gw-outline-item:hover{background:var(--bg3);color:var(--ink)}
+.gw-outline-item.lvl2{padding-left:18px}.gw-outline-item.lvl3{padding-left:30px;font-size:12px}
+/* — composer — */
+.gw-composer{padding:14px 16px;border-top:1px solid var(--hairline)}
+.gw-composer-pill{display:flex;align-items:center;gap:10px;background:var(--canvas);border:1px solid var(--hairline);border-radius:14px;padding:9px 12px}
+.gw-composer-input{flex:1;border:none;background:transparent;outline:none;font-size:13px;color:var(--ink)}
+.gw-composer-send{width:30px;height:30px;border-radius:50%;background:var(--accent);border:none;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;flex:none}
+.gw-composer-send svg path{stroke:#fff}
+/* AI inline diff (Phase 3 suggestions) — design diff colours */
+.notes-suggestion-removed,.gw-diff-del{background:var(--diff-del-bg);color:var(--diff-del-fg);text-decoration:line-through;border-radius:8px;padding:8px 12px}
+.notes-suggestion-added,.gw-diff-add{background:var(--diff-add-bg);color:var(--diff-add-fg);border-radius:8px;padding:8px 12px}
+/* left-rail header: let the action buttons wrap inside the narrow 248px rail */
+.gw-left-rail .notes-list-header{flex-wrap:wrap;gap:6px;padding:8px 14px}
+.gw-left-rail .notes-list-actions{flex-wrap:wrap}
+.gw-left-rail .notes-ws-ask-bar{flex-wrap:wrap}
+.gw-left-rail .notes-databases-btn{margin-top:4px}
+.gw-left-rail .notes-list-title{font-family:var(--font-display);font-weight:700;font-size:13px;color:var(--fg2)}
+/* right-rail Assistant: space out the AI co-author action buttons (design suggestion chips) */
+.gw-assistant-body .notes-ai-toolbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.gw-assistant-body .notes-ai-label{font-size:12px;font-weight:600;color:var(--accent2);width:100%}
+.gw-assistant-body .notes-ai-btn{font-size:12px;color:var(--accent2);background:var(--surface);border:1px solid var(--mint-deep);border-radius:10px;padding:7px 11px;cursor:pointer;text-align:left}
+.gw-assistant-body .notes-ai-btn:hover{background:var(--mint)}
+/* the co-edit "updated" nudge: a compact left-aligned pill, not a full-width centred bar */
+.gw-canvas>.notes-coedit-refresh{align-self:flex-start;margin:8px 28px 0;font-size:12px;font-weight:600;color:var(--accent2);background:var(--mint);border:1px solid var(--mint-deep);border-radius:999px;padding:5px 12px;cursor:pointer}
+@media(max-width:1100px){.gw-shell{grid-template-columns:248px minmax(0,1fr)}.gw-rail{display:none}}
+@media(max-width:760px){.gw-shell{grid-template-columns:1fr}.gw-left-rail{display:none}}
+
 .notes-loading{padding:16px;text-align:center;color:var(--fg3);font-size:12px}
 .notes-items{flex:1;overflow-y:auto;padding:0 8px 12px}
 .notes-section{margin-bottom:8px}
