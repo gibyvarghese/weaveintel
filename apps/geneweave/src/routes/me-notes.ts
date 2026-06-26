@@ -32,40 +32,36 @@ import { newUUIDv7 } from '@weaveintel/core';
 import type { Router } from '../server-core.js';
 import { readBody } from '../server-core.js';
 import type { DatabaseAdapter } from '../db-types.js';
-import type { NoteSensitivity, NoteLinkTargetKind } from '../db-types/adapter-agenda-notes.js';
+import {
+  createInMemoryNoteRepository, // (re-exported for tests/embedders that want a fake)
+  extractTaskItems,
+  type NoteRepository,
+  type NoteSensitivity,
+  type NoteLinkTargetKind,
+  type NoteDatabaseSource,
+  type NoteDatabaseViewType,
+  type UpdateNotePatch,
+} from '@weaveintel/notes';
+import { createSqlNoteRepository } from '../note-repository-sql.js';
 import { meTaskRepo as taskRepo } from './me-stores.js';
 import { createActionItem } from '@weaveintel/human-tasks';
 import { safePageInt } from './index.js';
 
-// ── To-do ⇄ task extraction ─────────────────────────────────────────────────
-// Walks the Tiptap doc JSON looking for taskList/taskItem nodes, and for each
-// unchecked to-do that has a text label, creates a linked task if one does not
-// already exist (idempotency: stores linked_task_id on the agenda link).
-function extractTaskItems(docJson: unknown): string[] {
-  const titles: string[] = [];
-  function walk(node: unknown): void {
-    if (!node || typeof node !== 'object') return;
-    const n = node as Record<string, unknown>;
-    if (n['type'] === 'taskItem' && n['attrs'] && (n['attrs'] as Record<string, unknown>)['checked'] === false) {
-      const content = n['content'] as Array<Record<string, unknown>> | undefined;
-      if (content) {
-        const text = content.flatMap((para) =>
-          ((para['content'] as Array<Record<string, unknown>> | undefined) ?? [])
-            .filter((c) => c['type'] === 'text')
-            .map((c) => String(c['text'] ?? ''))
-        ).join('').trim();
-        if (text) titles.push(text);
-      }
-    }
-    if (Array.isArray(n['content'])) {
-      for (const child of n['content']) walk(child);
-    }
-  }
-  walk(docJson);
-  return titles;
-}
+void createInMemoryNoteRepository; // keep the import available to embedders without tree-shaking it away
 
-export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter): void {
+/**
+ * Register all `/api/me/notes` routes.
+ *
+ * weaveNotes Phase 0: every note read/write now goes through the
+ * `@weaveintel/notes` {@link NoteRepository} PORT instead of calling the database
+ * adapter directly. Behaviour is UNCHANGED — `createSqlNoteRepository(db)` is a
+ * thin pass-through to the same SQL — but the routes now depend only on the
+ * interface, so a later phase can swap in a CRDT co-editing relay (a new adapter)
+ * without changing this file. Tests/embedders may inject their own repository via
+ * `opts.noteRepository`.
+ */
+export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts: { noteRepository?: NoteRepository } = {}): void {
+  const notes = opts.noteRepository ?? createSqlNoteRepository(db);
 
   // ── Notes list ─────────────────────────────────────────────────────────────
 
@@ -75,19 +71,19 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter): void
     const parentNoteId = url.searchParams.has('parent')
       ? (url.searchParams.get('parent') === 'null' ? null : url.searchParams.get('parent'))
       : undefined;
-    const notes = await db.listNotes(auth.userId, {
+    const list = await notes.listNotes(auth.userId, {
       parentNoteId,
       favorite: url.searchParams.get('favorite') === '1',
       search: url.searchParams.get('search') ?? undefined,
       limit: safePageInt(url.searchParams.get('limit'), 50, 1, 500),
     });
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ notes }));
+    res.end(JSON.stringify({ notes: list }));
   }, { auth: true });
 
   router.get('/api/me/notes/templates', async (_req, res, _params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
-    const templates = await db.listNoteTemplates();
+    const templates = await notes.listTemplates();
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ templates }));
   }, { auth: true });
@@ -96,7 +92,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter): void
 
   router.get('/api/me/notes/:id', async (_req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
-    const note = await db.getNote(params['id']!, auth.userId);
+    const note = await notes.getNote(params['id']!, auth.userId);
     if (!note) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(note));
@@ -109,14 +105,14 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter): void
     // Optional: instantiate from a template
     let docJson = '{"type":"doc","content":[]}';
     if (typeof body['template_id'] === 'string') {
-      const tmpl = await db.getNote(body['template_id'], auth.userId);
+      const tmpl = await notes.getNote(body['template_id'], auth.userId);
       if (tmpl) docJson = tmpl.doc_json;
     }
     if (typeof body['doc_json'] === 'string') docJson = body['doc_json'];
     else if (body['doc_json'] && typeof body['doc_json'] === 'object') docJson = JSON.stringify(body['doc_json']);
 
     const id = newUUIDv7();
-    await db.createNote({
+    await notes.createNote({
       id,
       owner_user_id: auth.userId,
       tenant_id: auth.tenantId ?? null,
@@ -130,7 +126,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter): void
       favorite: 0,
     });
 
-    const note = await db.getNote(id, auth.userId);
+    const note = await notes.getNote(id, auth.userId);
     res.writeHead(201, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(note));
   }, { auth: true });
@@ -138,7 +134,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter): void
   router.add('PATCH','/api/me/notes/:id', async (req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
     const body = JSON.parse(await readBody(req)) as Record<string, unknown>;
-    const patch: Parameters<typeof db.updateNote>[2] = {};
+    const patch: UpdateNotePatch = {};
     if (typeof body['title'] === 'string') patch.title = body['title'];
     if ('icon' in body) patch.icon = typeof body['icon'] === 'string' ? body['icon'] : null;
     if ('cover' in body) patch.cover = typeof body['cover'] === 'string' ? body['cover'] : null;
@@ -148,8 +144,8 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter): void
     else if (body['doc_json'] && typeof body['doc_json'] === 'object') patch.doc_json = JSON.stringify(body['doc_json']);
     if (typeof body['favorite'] === 'number') patch.favorite = body['favorite'];
 
-    await db.updateNote(params['id']!, auth.userId, patch);
-    const note = await db.getNote(params['id']!, auth.userId);
+    await notes.updateNote(params['id']!, auth.userId, patch);
+    const note = await notes.getNote(params['id']!, auth.userId);
     if (!note) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(note));
@@ -157,7 +153,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter): void
 
   router.del('/api/me/notes/:id', async (_req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
-    const deleted = await db.deleteNote(params['id']!, auth.userId);
+    const deleted = await notes.deleteNote(params['id']!, auth.userId);
     if (!deleted) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ deleted: true }));
@@ -167,7 +163,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter): void
 
   router.get('/api/me/notes/:id/links', async (_req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
-    const links = await db.listNoteLinks(params['id']!);
+    const links = await notes.listLinks(params['id']!);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ links }));
   }, { auth: true });
@@ -183,21 +179,21 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter): void
       res.writeHead(400); res.end(JSON.stringify({ error: 'Invalid target_kind' })); return;
     }
     const link = { id: newUUIDv7(), note_id: params['id']!, target_kind: body['target_kind'] as NoteLinkTargetKind, target_id: String(body['target_id']) };
-    await db.createNoteLink(link);
+    await notes.createLink(link);
     res.writeHead(201, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(link));
   }, { auth: true });
 
   router.del('/api/me/notes/:id/links/:linkId', async (_req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
-    await db.deleteNoteLink(params['linkId']!, params['id']!);
+    await notes.deleteLink(params['linkId']!, params['id']!);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ deleted: true }));
   }, { auth: true });
 
   router.get('/api/me/notes/:id/backlinks', async (_req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
-    const backlinks = await db.listNoteBacklinks('note', params['id']!);
+    const backlinks = await notes.listBacklinks('note', params['id']!);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ backlinks }));
   }, { auth: true });
@@ -210,7 +206,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter): void
   router.post('/api/me/notes/:id/extract', async (req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
 
-    const note = await db.getNote(params['id']!, auth.userId);
+    const note = await notes.getNote(params['id']!, auth.userId);
     if (!note) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
 
     let doc: unknown;
@@ -221,7 +217,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter): void
     if (doc) {
       const todoTitles = extractTaskItems(doc);
       // Create tasks for new to-dos (deduplicate against existing links)
-      const existingLinks = await db.listNoteLinks(note.id);
+      const existingLinks = await notes.listLinks(note.id);
       const linkedTaskIds = new Set(existingLinks.filter((l) => l.target_kind === 'task').map((l) => l.target_id));
 
       for (const title of todoTitles) {
@@ -239,7 +235,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter): void
         });
         await taskRepo.save(task);
 
-        await db.createNoteLink({
+        await notes.createLink({
           id: newUUIDv7(),
           note_id: note.id,
           target_kind: 'task',
@@ -258,7 +254,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter): void
 
   router.get('/api/me/note-databases', async (_req, res, _params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
-    const databases = await db.listNoteDatabases(auth.userId);
+    const databases = await notes.listDatabases(auth.userId);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ databases }));
   }, { auth: true });
@@ -268,25 +264,25 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter): void
     const body = JSON.parse(await readBody(req)) as Record<string, unknown>;
     if (!body['name']) { res.writeHead(400); res.end(JSON.stringify({ error: 'name is required' })); return; }
     const id = newUUIDv7();
-    await db.createNoteDatabase({
+    await notes.createDatabase({
       id,
       owner_user_id: auth.userId,
       tenant_id: auth.tenantId ?? null,
       name: String(body['name']),
-      source: (['agenda_items', 'tasks', 'generic'].includes(String(body['source'] ?? '')) ? body['source'] : 'generic') as import('../db-types/adapter-agenda-notes.js').NoteDatabaseSource,
-      view_type: (['table', 'board', 'calendar'].includes(String(body['view_type'] ?? '')) ? body['view_type'] : 'table') as import('../db-types/adapter-agenda-notes.js').NoteDatabaseViewType,
+      source: (['agenda_items', 'tasks', 'generic'].includes(String(body['source'] ?? '')) ? body['source'] : 'generic') as NoteDatabaseSource,
+      view_type: (['table', 'board', 'calendar'].includes(String(body['view_type'] ?? '')) ? body['view_type'] : 'table') as NoteDatabaseViewType,
       filter_json: typeof body['filter_json'] === 'string' ? body['filter_json'] : '{}',
       sort_json: typeof body['sort_json'] === 'string' ? body['sort_json'] : '[]',
       columns_json: typeof body['columns_json'] === 'string' ? body['columns_json'] : '[]',
     });
-    const db_ = await db.getNoteDatabase(id, auth.userId);
+    const db_ = await notes.getDatabase(id, auth.userId);
     res.writeHead(201, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(db_));
   }, { auth: true });
 
   router.del('/api/me/note-databases/:id', async (_req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
-    await db.deleteNoteDatabase(params['id']!, auth.userId);
+    await notes.deleteDatabase(params['id']!, auth.userId);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ deleted: true }));
   }, { auth: true });
@@ -295,7 +291,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter): void
 
   router.get('/api/me/note-databases/:id/rows', async (_req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
-    const rows = await db.listNoteDbRows(params['id']!);
+    const rows = await notes.listRows(params['id']!);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ rows }));
   }, { auth: true });
@@ -307,7 +303,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter): void
     const fieldsJson = typeof body['fields'] === 'object' && body['fields'] !== null
       ? JSON.stringify(body['fields'])
       : '{}';
-    await db.createNoteDbRow({ id, database_id: params['id']!, fields_json: fieldsJson });
+    await notes.createRow({ id, database_id: params['id']!, fields_json: fieldsJson });
     res.writeHead(201, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ id, database_id: params['id'], fields: body['fields'] ?? {} }));
   }, { auth: true });
@@ -318,14 +314,14 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter): void
     const fieldsJson = typeof body['fields'] === 'object' && body['fields'] !== null
       ? JSON.stringify(body['fields'])
       : '{}';
-    await db.updateNoteDbRow(params['rowId']!, params['id']!, fieldsJson);
+    await notes.updateRow(params['rowId']!, params['id']!, fieldsJson);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: true }));
   }, { auth: true });
 
   router.del('/api/me/note-databases/:id/rows/:rowId', async (_req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
-    await db.deleteNoteDbRow(params['rowId']!, params['id']!);
+    await notes.deleteRow(params['rowId']!, params['id']!);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ deleted: true }));
   }, { auth: true });
