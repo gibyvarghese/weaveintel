@@ -170,13 +170,63 @@ export function layoutDiagram(scene: DiagramScene): DiagramLayout {
 const SVG_ESC: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 function esc(s: string): string { return s.replace(/[&<>"']/g, (c) => SVG_ESC[c]!); }
 
-/** Render a diagram scene to a self-contained `<svg>` (rounded coloured nodes + arrowed edges). */
-export function diagramToSvg(scene: DiagramScene): string {
+// ─── Hand-drawn ("sketch") rendering — a self-contained, dependency-free take on Rough.js ─────────
+// Notes can render diagrams in a clean style OR a HAND-DRAWN style (wobbly strokes + a handwriting
+// label font), to match the sketch-note aesthetic. The wobble is SEEDED off each shape's geometry so
+// the same diagram always draws identically (no Math.random — deterministic + test-stable).
+
+export type DiagramStyle = 'clean' | 'sketch';
+
+/** A tiny deterministic PRNG (mulberry32) seeded per-shape so a diagram redraws identically. */
+function rng(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function seedOf(...nums: number[]): number {
+  let s = 2166136261;
+  for (const n of nums) { s = Math.imul(s ^ Math.round(n * 7.3), 16777619); }
+  return s >>> 0;
+}
+
+/** One hand-drawn line as an SVG path `d` — a quadratic with an offset mid-point (the Rough.js trick). */
+function roughLine(x1: number, y1: number, x2: number, y2: number, r: () => number, amp = 2.2): string {
+  const mx = (x1 + x2) / 2 + (r() - 0.5) * amp * 2;
+  const my = (y1 + y2) / 2 + (r() - 0.5) * amp * 2;
+  const j = () => (r() - 0.5) * amp;
+  return `M ${(x1 + j()).toFixed(1)} ${(y1 + j()).toFixed(1)} Q ${mx.toFixed(1)} ${my.toFixed(1)} ${(x2 + j()).toFixed(1)} ${(y2 + j()).toFixed(1)}`;
+}
+
+/** A hand-drawn rounded rectangle border — four wobbly sides, drawn as one path (double-pass feel). */
+function roughRectPath(x: number, y: number, w: number, h: number, r: () => number): string {
+  const sides = [
+    roughLine(x, y, x + w, y, r),
+    roughLine(x + w, y, x + w, y + h, r),
+    roughLine(x + w, y + h, x, y + h, r),
+    roughLine(x, y + h, x, y, r),
+  ];
+  return sides.join(' ');
+}
+
+/**
+ * Render a diagram scene to a self-contained `<svg>`.
+ * - `style: 'clean'` (default) — crisp rounded coloured nodes + smooth arrows.
+ * - `style: 'sketch'` — HAND-DRAWN: wobbly Rough.js-style strokes + a handwriting label font, to
+ *   match the sketch-note aesthetic. Deterministic (seeded), so a diagram always redraws identically.
+ */
+export function diagramToSvg(scene: DiagramScene, opts: { style?: DiagramStyle } = {}): string {
+  const sketch = opts.style === 'sketch';
+  const labelFont = sketch ? "'Caveat','Patrick Hand',cursive" : 'system-ui,sans-serif';
+  const sw = sketch ? 2 : 1.5;
   const layout = layoutDiagram(scene);
   const byId = new Map(layout.nodes.map((n) => [n.id, n]));
   const parts: string[] = [];
   parts.push(`<defs><marker id="gw-arrow" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="${READING_INK}"/></marker></defs>`);
-  if (scene.title) parts.push(`<text x="${layout.width / 2}" y="18" text-anchor="middle" font-family="system-ui,sans-serif" font-size="13" font-weight="700" fill="${READING_INK}">${esc(scene.title)}</text>`);
+  if (scene.title) parts.push(`<text x="${layout.width / 2}" y="18" text-anchor="middle" font-family="${labelFont}" font-size="${sketch ? 17 : 13}" font-weight="700" fill="${READING_INK}">${esc(scene.title)}</text>`);
 
   // Edges first (under the nodes).
   for (const e of scene.edges) {
@@ -184,8 +234,13 @@ export function diagramToSvg(scene: DiagramScene): string {
     const x1 = a.x + a.w, y1 = a.y + a.h / 2, x2 = b.x, y2 = b.y + b.h / 2;
     const mx = (x1 + x2) / 2;
     const stroke = e.color && sanitizeColor(e.color) ? sanitizeColor(e.color)! : READING_INK;
-    parts.push(`<path d="M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}" fill="none" stroke="${esc(stroke)}" stroke-width="1.5" marker-end="url(#gw-arrow)" opacity="0.8"/>`);
-    if (e.label) parts.push(`<text x="${mx}" y="${(y1 + y2) / 2 - 4}" text-anchor="middle" font-family="system-ui,sans-serif" font-size="10" fill="#5E6E67">${esc(e.label)}</text>`);
+    if (sketch) {
+      const r = rng(seedOf(x1, y1, x2, y2));
+      parts.push(`<path d="${roughLine(x1, y1, x2, y2, r, 3)}" fill="none" stroke="${esc(stroke)}" stroke-width="${sw}" stroke-linecap="round" marker-end="url(#gw-arrow)" opacity="0.85"/>`);
+    } else {
+      parts.push(`<path d="M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}" fill="none" stroke="${esc(stroke)}" stroke-width="${sw}" marker-end="url(#gw-arrow)" opacity="0.8"/>`);
+    }
+    if (e.label) parts.push(`<text x="${mx}" y="${(y1 + y2) / 2 - 4}" text-anchor="middle" font-family="${labelFont}" font-size="${sketch ? 13 : 10}" fill="#5E6E67">${esc(e.label)}</text>`);
   }
   // Nodes.
   for (const n of layout.nodes) {
@@ -193,24 +248,30 @@ export function diagramToSvg(scene: DiagramScene): string {
     const stroke = darken(fill);
     const cx = n.x + n.w / 2, cy = n.y + n.h / 2;
     const x = n.x, y = n.y, w = n.w, hh = n.h;
-    if (n.shape === 'diamond') {
-      parts.push(`<polygon points="${cx},${y} ${x + w},${cy} ${cx},${y + hh} ${x},${cy}" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`);
+    if (sketch && (n.shape === undefined || n.shape === 'box' || n.shape === 'pill')) {
+      // Hand-drawn rounded box: a soft solid fill underneath + a wobbly hand-drawn border on top.
+      const r = rng(seedOf(x, y, w, hh));
+      const rx = n.shape === 'pill' ? hh / 2 : 12;
+      parts.push(`<rect x="${x}" y="${y}" width="${w}" height="${hh}" rx="${rx}" fill="${fill}" opacity="0.92"/>`);
+      parts.push(`<path d="${roughRectPath(x, y, w, hh, r)}" fill="none" stroke="${stroke}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"/>`);
+    } else if (n.shape === 'diamond') {
+      parts.push(`<polygon points="${cx},${y} ${x + w},${cy} ${cx},${y + hh} ${x},${cy}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`);
     } else if (n.shape === 'ellipse') {
-      parts.push(`<ellipse cx="${cx}" cy="${cy}" rx="${w / 2}" ry="${hh / 2}" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`);
+      parts.push(`<ellipse cx="${cx}" cy="${cy}" rx="${w / 2}" ry="${hh / 2}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`);
     } else if (n.shape === 'cylinder') {
       const ry = Math.min(8, hh / 4);
-      parts.push(`<path d="M ${x} ${y + ry} A ${w / 2} ${ry} 0 0 1 ${x + w} ${y + ry} L ${x + w} ${y + hh - ry} A ${w / 2} ${ry} 0 0 1 ${x} ${y + hh - ry} Z" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/><path d="M ${x} ${y + ry} A ${w / 2} ${ry} 0 0 0 ${x + w} ${y + ry}" fill="none" stroke="${stroke}" stroke-width="1.5"/>`);
+      parts.push(`<path d="M ${x} ${y + ry} A ${w / 2} ${ry} 0 0 1 ${x + w} ${y + ry} L ${x + w} ${y + hh - ry} A ${w / 2} ${ry} 0 0 1 ${x} ${y + hh - ry} Z" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/><path d="M ${x} ${y + ry} A ${w / 2} ${ry} 0 0 0 ${x + w} ${y + ry}" fill="none" stroke="${stroke}" stroke-width="${sw}"/>`);
     } else if (n.shape === 'parallelogram') {
       const sk = Math.min(16, w / 4);
-      parts.push(`<polygon points="${x + sk},${y} ${x + w},${y} ${x + w - sk},${y + hh} ${x},${y + hh}" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`);
+      parts.push(`<polygon points="${x + sk},${y} ${x + w},${y} ${x + w - sk},${y + hh} ${x},${y + hh}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`);
     } else if (n.shape === 'hexagon') {
       const sk = Math.min(16, w / 4);
-      parts.push(`<polygon points="${x + sk},${y} ${x + w - sk},${y} ${x + w},${cy} ${x + w - sk},${y + hh} ${x + sk},${y + hh} ${x},${cy}" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`);
+      parts.push(`<polygon points="${x + sk},${y} ${x + w - sk},${y} ${x + w},${cy} ${x + w - sk},${y + hh} ${x + sk},${y + hh} ${x},${cy}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`);
     } else {
       const rx = n.shape === 'pill' ? hh / 2 : 10;
-      parts.push(`<rect x="${x}" y="${y}" width="${w}" height="${hh}" rx="${rx}" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`);
+      parts.push(`<rect x="${x}" y="${y}" width="${w}" height="${hh}" rx="${rx}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`);
     }
-    parts.push(`<text x="${cx}" y="${cy + 4}" text-anchor="middle" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="${READING_INK}">${esc(n.label.length > 26 ? n.label.slice(0, 25) + '…' : n.label)}</text>`);
+    parts.push(`<text x="${cx}" y="${cy + 4}" text-anchor="middle" font-family="${labelFont}" font-size="${sketch ? 15 : 12}" font-weight="600" fill="${READING_INK}">${esc(n.label.length > 26 ? n.label.slice(0, 25) + '…' : n.label)}</text>`);
   }
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${layout.width} ${layout.height}" width="${layout.width}" height="${layout.height}" class="gw-diagram">${parts.join('')}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${layout.width} ${layout.height}" width="${layout.width}" height="${layout.height}" class="gw-diagram${sketch ? ' sketch' : ''}">${parts.join('')}</svg>`;
 }

@@ -108,7 +108,7 @@ export function createNoteCreativeService(db: NoteCreativeDb, generate: NoteAiGe
     const reply = await generate({ system: sys, user: `${input.instruction}\n\nNote context:\n${view.markdown.slice(0, 3000)}`, userId: input.access.ownerId, tenantId: input.access.tenantId, temperature: 0.3, maxTokens: 1200 });
     const scene: DiagramScene = validateDiagramScene(extractJson(reply, 'object'));
     if (scene.nodes.length === 0) return { ok: false, error: 'the model produced no diagram', action: 'create_diagram' };
-    const svg = diagramToSvg(scene);
+    const svg = diagramToSvg(scene, { style: 'sketch' });
     const preview = `Diagram: ${scene.title ?? 'untitled'} (${scene.nodes.length} node${scene.nodes.length === 1 ? '' : 's'})`;
     return stageInsert(input.noteId, input.access, 'create_diagram', 'diagram', { scene, title: scene.title ?? '', kind: scene.kind ?? 'flow', author: 'ai' }, preview, { svg });
   }

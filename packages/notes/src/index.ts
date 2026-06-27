@@ -193,6 +193,7 @@ export {
   type DiagramScene,
   type PlacedNode,
   type DiagramLayout,
+  type DiagramStyle,
   validateDiagramScene,
   layoutDiagram,
   diagramToSvg,

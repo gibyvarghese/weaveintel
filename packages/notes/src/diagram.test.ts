@@ -66,6 +66,24 @@ describe('diagram — diagramToSvg', () => {
     expect(svg).toContain('<polygon'); // the diamond
     expect(svg).toContain('Tides'); // the title
   });
+  it('SKETCH style: renders hand-drawn (wobbly path borders + a handwriting label font), deterministically', () => {
+    const sk1 = diagramToSvg(scene, { style: 'sketch' });
+    const sk2 = diagramToSvg(scene, { style: 'sketch' });
+    expect(sk1.startsWith('<svg')).toBe(true);
+    expect(sk1).toContain('class="gw-diagram sketch"');
+    expect(sk1).toContain('Caveat');                 // handwriting label font
+    expect(sk1).toContain('Q ');                      // wobbly quadratic strokes (Rough.js-style)
+    expect(sk1).toContain('Moon'); expect(sk1).toContain('Tide');
+    expect(sk1).toBe(sk2);                            // deterministic (seeded) — same input → same SVG
+    // The default (clean) style is unchanged.
+    expect(diagramToSvg(scene)).toContain('class="gw-diagram"');
+    expect(diagramToSvg(scene)).not.toContain('Caveat');
+  });
+  it('SKETCH style: a hostile label/colour is still safe (no script/CSS injection)', () => {
+    const svg = diagramToSvg(validateDiagramScene({ nodes: [{ id: 'x', label: '</text><script>alert(1)</script>', color: 'red;}body{}' }], edges: [] }), { style: 'sketch' });
+    expect(svg).not.toContain('<script>');
+    expect(svg).toContain('&lt;');
+  });
   it('renders process/business shapes (cylinder, parallelogram, hexagon)', () => {
     const svg = diagramToSvg(validateDiagramScene({
       nodes: [{ id: 'db', label: 'Store', shape: 'cylinder' }, { id: 'io', label: 'Input', shape: 'parallelogram' }, { id: 'pre', label: 'Prep', shape: 'hexagon' }],

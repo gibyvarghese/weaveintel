@@ -2,7 +2,7 @@
 // This is embedded in the HTML as a <style> tag
 
 export const STYLES = `
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Caveat:wght@500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Caveat:wght@500;600;700&family=Kalam:wght@400;700&family=Patrick+Hand&family=Gochi+Hand&display=swap');
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 /* geneWeave design system — "color encodes agency": neutrals = you, emerald/mint = the AI.
    Token names are kept stable (--bg/--fg/--accent…) and remapped to the design palette so the
@@ -1261,6 +1261,42 @@ input{font-family:inherit;outline:none}
 .gw-canvas .notes-editor-mount .gw-image figcaption{color:var(--muted);font-size:13px}
 .gw-canvas .notes-editor-mount .gw-sticker{display:inline-block;font-size:30px;line-height:1;margin:6px 2px;cursor:default}
 .gw-canvas .notes-editor-mount .gw-washi{height:12px;margin:14px 0;border:none;border-radius:6px;background:repeating-linear-gradient(45deg,var(--hl-amber) 0 10px,var(--hl-pink) 10px 20px)}
+
+/* ── Creative theme: a HAND-DRAWN study-notebook look (handwriting fonts + dotted paper + marker
+   headings + sketchy diagram frame). Turns the calm Pro note into the aesthetic of the sample
+   study notes. Pro theme is untouched. ───────────────────────────────────────────────────────── */
+.gw-canvas.creative .gw-page-scroll{
+  background-color:#FBF8F1;
+  background-image:radial-gradient(#E3DAC6 1.1px, transparent 1.2px);
+  background-size:22px 22px;
+}
+.gw-canvas.creative .notes-editor-mount [contenteditable]{font-family:'Kalam','Patrick Hand',cursive;font-size:18px;line-height:1.75;color:#2B2A26}
+.gw-canvas.creative .notes-editor-mount h1{font-family:'Caveat',cursive;font-size:36px;font-weight:700;color:#1F6FB2}
+.gw-canvas.creative .notes-editor-mount h2{font-family:'Caveat',cursive;font-size:30px;font-weight:700;color:#15803D;display:inline-block;background:linear-gradient(transparent 70%, #FBE7A8 70%);padding:0 2px;margin:10px 0 4px}
+.gw-canvas.creative .notes-editor-mount h3{font-family:'Patrick Hand',cursive;font-size:22px;font-weight:400;color:#B45309}
+.gw-canvas.creative .notes-editor-mount ul li::marker{color:#1F6FB2}
+.gw-canvas.creative .notes-editor-mount ol li::marker{color:#15803D;font-weight:700}
+.gw-canvas.creative .notes-editor-mount .gw-callout{border-left-width:5px;border-radius:14px;box-shadow:0 1px 0 rgba(0,0,0,.03)}
+.gw-canvas.creative .notes-editor-mount .gw-diagram-block{background:#FFFFFFAA;border:1.5px dashed #C9BFA6;border-radius:14px;padding:8px;margin:12px 0}
+.gw-canvas.creative .notes-editor-mount .gw-diagram{max-width:100%;height:auto}
+/* the woven "AI" / agency mint frame for AI-authored creative blocks stays, but warmer in Creative */
+.gw-canvas.creative .notes-editor-mount .gw-callout[data-tone="warning"]{background:#FCEFD6}
+.gw-canvas.creative .notes-editor-mount .gw-callout[data-tone="success"]{background:#E4F6EA}
+.gw-canvas.creative .notes-editor-mount .gw-callout[data-tone="note"]{background:#EAF2FB;border-left-color:#1F6FB2}
+/* ── Real tables (planner / Cornell / charting). Bordered cells, a tinted header row, zebra rows.
+   Targets the editor's <table> directly so it works regardless of TipTap's class plumbing. ── */
+.gw-canvas .notes-editor-mount .tableWrapper{margin:14px 0;overflow-x:auto}
+.gw-canvas .notes-editor-mount table{border-collapse:collapse;width:100%;font-size:14px;table-layout:fixed;border:1.5px solid #B9C6C0}
+.gw-canvas .notes-editor-mount table td,.gw-canvas .notes-editor-mount table th{border:1px solid #B9C6C0;padding:7px 10px;vertical-align:top;position:relative;min-width:60px}
+.gw-canvas .notes-editor-mount table th{background:#EAF3EE;font-weight:700;text-align:left;color:#0B5E45}
+.gw-canvas .notes-editor-mount table tr:nth-child(even) td{background:#F4F8F6}
+.gw-canvas .notes-editor-mount table p{margin:0}
+.gw-canvas .notes-editor-mount table .selectedCell:after{content:'';position:absolute;inset:0;background:rgba(14,154,110,.12);pointer-events:none}
+.gw-canvas .notes-editor-mount table .column-resize-handle{position:absolute;right:-2px;top:0;bottom:0;width:4px;background:var(--accent);cursor:col-resize}
+.gw-canvas.creative .notes-editor-mount table{border-color:#9FB5AB}
+.gw-canvas.creative .notes-editor-mount table td,.gw-canvas.creative .notes-editor-mount table th{border-color:#9FB5AB}
+.gw-canvas.creative .notes-editor-mount table th{background:#E4F6EA;font-family:'Patrick Hand',cursive;color:#15803D}
+.gw-canvas.creative .notes-editor-mount table tr:nth-child(even) td{background:#EFFAF2}
 .gw-canvas .notes-editor-mount .gw-washi[data-pattern="dots"]{background:radial-gradient(var(--hl-teal) 30%,transparent 32%) 0 0/14px 14px}
 /* AI-authored blocks (Phase 3 AI block, suggestions) — mint frame + byline, per the design */
 .gw-canvas .notes-ai-block,.gw-canvas .notes-suggestion{border:1.5px solid var(--mint-border);border-radius:16px;background:var(--mint-wash);overflow:hidden}

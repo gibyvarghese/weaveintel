@@ -43,6 +43,11 @@ type TiptapBundle = {
   // weaveNotes Phase 4 creative nodes.
   DiagramNode: TiptapExtension;
   InkCanvasNode: TiptapExtension;
+  // Tables (planner / Cornell / charting layouts).
+  Table: TiptapExtension;
+  TableRow: TiptapExtension;
+  TableHeader: TiptapExtension;
+  TableCell: TiptapExtension;
 };
 
 type TiptapEditor = {
@@ -146,6 +151,7 @@ const SLASH_COMMANDS = [
   { label: 'Callout — tip', icon: '💡', action: (editor: TiptapEditor) => { editor.chain().focus()['setCallout']?.({ tone: 'tip' }).run(); } },
   { label: 'Callout — warning', icon: '⚠️', action: (editor: TiptapEditor) => { editor.chain().focus()['setCallout']?.({ tone: 'warning' }).run(); } },
   { label: 'Toggle list', icon: '▸', action: (editor: TiptapEditor) => { editor.chain().focus()['setToggle']?.({ summary: 'Details' }).run(); } },
+  { label: 'Table', icon: '▦', action: (editor: TiptapEditor) => { editor.chain().focus()['insertTable']?.({ rows: 3, cols: 3, withHeaderRow: true }).run(); } },
   { label: 'Image embed', icon: '🖼', action: (editor: TiptapEditor) => { const src = window.prompt('Image URL (https:// or data:image)'); if (src) editor.chain().focus()['setImage']?.({ src, alt: '' }).run(); } },
   { label: 'Sticker ✨', icon: '✨', action: (editor: TiptapEditor) => { editor.chain().focus()['setSticker']?.({ emoji: '✨' }).run(); } },
   { label: 'Washi divider', icon: '🎀', action: (editor: TiptapEditor) => { editor.chain().focus()['setWashiDivider']?.({ pattern: 'tape' }).run(); } },
@@ -266,6 +272,11 @@ export async function mountNotesEditor(opts: {
       // weaveNotes Phase 4 creative nodes.
       bundle.DiagramNode,
       bundle.InkCanvasNode,
+      // Tables (planner / Cornell / charting layouts) — resizable, with header cells.
+      bundle.Table?.configure?.({ resizable: true, HTMLAttributes: { class: 'gw-table' } }) ?? bundle.Table,
+      bundle.TableRow,
+      bundle.TableHeader,
+      bundle.TableCell,
       bundle.Placeholder?.configure?.({ placeholder }) ?? bundle.Placeholder,
     ].filter(Boolean),
     onUpdate: ({ editor: ed }: { editor: TiptapEditor }) => {

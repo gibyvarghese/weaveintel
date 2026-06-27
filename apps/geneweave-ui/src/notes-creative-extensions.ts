@@ -244,7 +244,8 @@ export const DiagramNode = Node.create({
       const dom = document.createElement('figure');
       dom.className = 'gw-diagram-block';
       if (node.attrs.author) dom.setAttribute('data-author', node.attrs.author);
-      try { dom.innerHTML = diagramToSvg(validateDiagramScene(node.attrs.scene)); }
+      // Render diagrams in the HAND-DRAWN ("sketch") style to match the sketch-note aesthetic.
+      try { dom.innerHTML = diagramToSvg(validateDiagramScene(node.attrs.scene), { style: 'sketch' }); }
       catch { dom.textContent = '[diagram]'; }
       return { dom };
     };
