@@ -326,6 +326,8 @@ export interface NoteSuggestionRow {
   status: 'pending' | 'accepted' | 'rejected';
   ops_json: string;
   preview_text: string;
+  /** m115: the ORIGINAL text the suggestion replaces (for the inline old→new diff); '' for appends. */
+  before_text?: string;
   anchor_json: string | null;
   created_at: number;
   resolved_at: number | null;

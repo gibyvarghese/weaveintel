@@ -29,6 +29,8 @@ export interface EditorCanvasOpts {
   /** Phase 3: live participant avatars (updated imperatively as people/AI join + leave). */
   presenceAvatarsEl?: HTMLElement;
   inlinePanels: HTMLElement[];
+  /** Panels rendered in the note body AFTER the editor content (e.g. the inline AI-edit diff cards). */
+  afterEditorPanels?: HTMLElement[];
   extractResult: string | null;
   /** Handlers. */
   onSetTheme: (t: 'pro' | 'creative') => void;
@@ -138,6 +140,7 @@ export function renderEditorCanvas(opts: EditorCanvasOpts): HTMLElement {
       opts.extractResult ? h('div', { className: 'gw-extract-result' }, opts.extractResult) : null,
       ...opts.inlinePanels,
       opts.editorContainer,
+      ...(opts.afterEditorPanels ?? []),
     ),
   );
 

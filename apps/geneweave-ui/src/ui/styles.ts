@@ -1113,6 +1113,25 @@ input{font-family:inherit;outline:none}
 .gw-export-opt:hover{border-color:var(--accent2,#0f766e);background:var(--surface,#fff)}
 .gw-export-opt-label{font-size:13px;font-weight:600;color:var(--fg1,#111827)}
 .gw-export-opt-hint{font-size:11px;color:var(--fg3,#9ca3af)}
+/* weaveNotes — the INLINE AI-edit diff card (matches GeneWeave Notes.dc.html track-changes) */
+.notes-ai-panel{display:flex;flex-direction:column;gap:12px}
+.notes-diff{border:1px solid #DCEFE5;border-radius:14px;overflow:hidden;background:#fff;box-shadow:0 1px 2px rgba(20,32,27,.04)}
+.notes-diff-head{display:flex;align-items:center;gap:8px;padding:9px 14px;border-bottom:1px solid #F0F2F1;background:#F4FBF7}
+.notes-diff-mark{display:inline-flex;align-items:center}
+.notes-diff-title{font-size:12px;font-weight:600;color:#0B7A57}
+.notes-diff-by{font-size:11px;color:#9aa7a1;margin-left:auto}
+.notes-diff-body{padding:14px;display:flex;flex-direction:column;gap:8px}
+.notes-diff-old{font-size:15px;line-height:1.7;color:#9c6b5c;background:#FBEFEA;border-radius:8px;padding:8px 12px;text-decoration:line-through;white-space:pre-wrap}
+.notes-diff-new{font-size:15px;line-height:1.7;color:#14201B;background:#E8F5EE;border-radius:8px;padding:8px 12px;white-space:pre-wrap}
+.notes-diff-actions{display:flex;gap:8px;padding-top:2px}
+.notes-diff-accept{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:#fff;background:#0E9A6E;border:none;border-radius:999px;padding:7px 15px;cursor:pointer}
+.notes-diff-accept:hover{background:#0B7A57}
+.notes-diff-reject{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:#5E6E67;background:#fff;border:1px solid #E7ECEA;border-radius:999px;padding:7px 15px;cursor:pointer}
+.notes-diff-reject:hover{background:#F6F8F7}
+.notes-diff-resolved{font-size:15px;line-height:1.7;color:#14201B;white-space:pre-wrap}
+.notes-diff-badge{font-size:11px;border-radius:999px;padding:2px 8px;white-space:nowrap;margin-left:6px;display:inline-block}
+.notes-diff-badge.accepted{color:#0B7A57;background:#E8F5EE}
+.notes-diff-badge.rejected{color:#9aa7a1;background:#F0F2F1}
 /* — dropdown menus (Insert / overflow) + modal — */
 .gw-menu-anchor{position:relative;display:inline-flex}
 .gw-menu{position:absolute;top:38px;z-index:300;background:var(--surface);border:1px solid var(--hairline);border-radius:12px;box-shadow:var(--shadow-pop);padding:6px;min-width:210px;display:flex;flex-direction:column;gap:2px}

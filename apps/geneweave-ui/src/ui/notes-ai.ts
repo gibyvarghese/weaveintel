@@ -13,6 +13,7 @@
  */
 import { h } from './dom.js';
 import { api } from './api.js';
+import { wovenMarkSvg } from './notes-brand.js';
 
 export interface NoteAiPanel {
   /** Re-fetch + re-render the pending suggestions list. */
@@ -21,7 +22,17 @@ export interface NoteAiPanel {
   close(): void;
 }
 
-interface Suggestion { id: string; action: string; status: string; preview: string; authorKind: string }
+interface Suggestion { id: string; action: string; status: string; preview: string; before?: string; authorKind: string }
+
+/** A friendly label for what the AI proposed, by action (drives the diff-card header). */
+function suggestionLabel(action: string): string {
+  if (action === 'create_diagram') return 'AI suggested a diagram';
+  if (action === 'draw_ink' || action === 'recolor_ink') return 'AI suggested a drawing';
+  if (action === 'create_illustration' || action === 'generate_image') return 'AI suggested an image';
+  if (action === 'apply_highlight' || action === 'apply_text_color' || action === 'colorize_semantic') return 'AI suggested colour';
+  if (action === 'continue' || action === 'ai_block') return 'AI suggested an addition';
+  return 'AI suggested an edit';
+}
 
 /**
  * Build the AI toolbar + suggestions panel for a note and wire all the actions.
@@ -82,22 +93,52 @@ export function wireNoteAi(opts: { noteId: string; toolbarEl: HTMLElement; panel
     ),
   );
 
+  /**
+   * Render each pending AI suggestion as the design's INLINE track-changes card (GeneWeave
+   * Notes.dc.html): a "AI suggested an edit" header, the old text struck-through + the new text on
+   * mint, and ✓ Accept / ✕ Reject right in the note — not a plain text list. On a decision the card
+   * flips to its resolved state ("AI edit accepted" / "kept yours") before the list refreshes.
+   */
   function renderSuggestions(list: Suggestion[]): void {
     panelEl.innerHTML = '';
     if (list.length === 0) { panelEl.style.display = 'none'; return; }
     panelEl.style.display = '';
-    panelEl.appendChild(h('div', { className: 'notes-ai-suggestions-title' }, `${list.length} AI suggestion${list.length === 1 ? '' : 's'} to review`));
     for (const s of list) {
-      panelEl.appendChild(
-        h('div', { className: 'notes-ai-suggestion' },
-          h('div', { className: 'notes-ai-suggestion-meta' }, `${s.authorKind === 'agent' ? '🤖 agent' : '✨ you'} · ${s.action}`),
-          h('pre', { className: 'notes-ai-suggestion-preview' }, s.preview.slice(0, 600)),
-          h('div', { className: 'notes-ai-suggestion-actions' },
-            h('button', { className: 'notes-ai-accept', onClick: () => void resolve(s.id, 'accept') }, '✓ Accept'),
-            h('button', { className: 'notes-ai-reject', onClick: () => void resolve(s.id, 'reject') }, '✕ Reject'),
-          ),
-        ),
-      );
+      const card = h('div', { className: 'notes-diff', 'data-suggestion': s.id }) as HTMLElement;
+      // Header: woven mark + label.
+      card.appendChild(h('div', { className: 'notes-diff-head' },
+        h('span', { className: 'notes-diff-mark', innerHTML: wovenMarkSvg(13, 'ai') }),
+        h('span', { className: 'notes-diff-title' }, suggestionLabel(s.action)),
+        s.authorKind === 'agent' ? h('span', { className: 'notes-diff-by' }, 'from the assistant') : null,
+      ));
+      const bodyEl = h('div', { className: 'notes-diff-body' }) as HTMLElement;
+      // Pending state: old (struck-through) when we have it, then new, then the action pills.
+      const renderPending = (): void => {
+        bodyEl.innerHTML = '';
+        if (s.before && s.before.trim()) bodyEl.appendChild(h('div', { className: 'notes-diff-old' }, s.before));
+        bodyEl.appendChild(h('div', { className: 'notes-diff-new' }, s.preview.slice(0, 1200)));
+        bodyEl.appendChild(h('div', { className: 'notes-diff-actions' },
+          h('button', { className: 'notes-diff-accept', onClick: () => void decide(s, 'accept') }, '✓ Accept'),
+          h('button', { className: 'notes-diff-reject', onClick: () => void decide(s, 'reject') }, '✕ Reject'),
+        ));
+      };
+      // Resolved state: the kept text + a small badge, briefly, before the list re-fetches.
+      const renderResolved = (decision: 'accept' | 'reject'): void => {
+        bodyEl.innerHTML = '';
+        const kept = decision === 'accept' ? s.preview : (s.before || s.preview);
+        bodyEl.appendChild(h('div', { className: 'notes-diff-resolved' },
+          h('span', null, kept.slice(0, 1200)),
+          h('span', { className: `notes-diff-badge ${decision === 'accept' ? 'accepted' : 'rejected'}` },
+            decision === 'accept' ? 'AI edit accepted' : 'kept yours'),
+        ));
+      };
+      const decide = async (sg: Suggestion, decision: 'accept' | 'reject'): Promise<void> => {
+        renderResolved(decision);            // immediate design feedback
+        await resolve(sg.id, decision);      // persist + (on accept) apply to the note + refresh
+      };
+      renderPending();
+      card.appendChild(bodyEl);
+      panelEl.appendChild(card);
     }
   }
 

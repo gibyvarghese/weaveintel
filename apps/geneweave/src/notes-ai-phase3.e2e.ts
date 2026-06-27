@@ -20,6 +20,7 @@ import { BlockDoc, diffBlocks, type BlockDocSnapshot, type BlockSpec } from '@we
 const PASSWORD = 'Str0ng!Pass99';
 const OWNER = 'notes-p3-owner@weaveintel.dev';
 const VIEWER = 'notes-p3-viewer@weaveintel.dev';
+const SHOT = '/private/tmp/claude-501/-Users-gibyvarghese-weaveintel/0cefaca8-142c-42d3-a6ee-29842fff7652/scratchpad';
 
 async function login(page: Page, email: string): Promise<void> {
   let res = await page.request.post('/api/auth/login', { data: { email, password: PASSWORD } });
@@ -269,19 +270,23 @@ test('Phase 3 — web UI: the AI toolbar proposes a suggestion the user can Acce
   const title = `P3 UI note ${Date.now()}`;
   const noteId = await makeNote(page.request, origin, hdr, title, SEED);
 
-  // Open the note in the editor.
+  // Open the note in the editor (current three-column notes shell).
   await page.evaluate(() => window.localStorage.setItem('geneweave.uiState.v1', JSON.stringify({ view: 'notes' })));
   await page.reload();
-  await expect(page.locator('.notes-list-panel')).toBeVisible({ timeout: 15000 });
-  await page.locator('.note-row-title', { hasText: title }).click();
+  await expect(page.locator('.gw-notes')).toBeVisible({ timeout: 15000 });
+  await page.getByText(title, { exact: false }).first().click({ timeout: 15000 });
+  await expect(page.locator('.notes-editor-mount')).toBeVisible({ timeout: 15000 });
 
-  // The AI toolbar is present; click "Continue" → a suggestion appears in the panel.
+  // The AI toolbar is present; click "Continue" → a suggestion appears as the inline diff card.
   await expect(page.locator('.notes-ai-continue')).toBeVisible({ timeout: 15000 });
   await page.locator('.notes-ai-continue').click();
-  await expect(page.locator('.notes-ai-suggestion')).toBeVisible({ timeout: 60000 });
+  await expect(page.locator('.notes-diff')).toBeVisible({ timeout: 60000 });
+  await expect(page.locator('.notes-diff-title')).toContainText(/AI suggested/);
+  await expect(page.locator('.notes-diff-new')).toBeVisible();
+  await page.screenshot({ path: `${SHOT}/gw-notes-diff-card.png` });
 
-  // Accept it → the suggestion clears and the note is updated.
+  // Accept it via the inline ✓ Accept → the suggestion clears and the note is updated.
   const blocksBefore = (await getBlocks(page.request, origin, noteId)).blocks.length;
-  await page.locator('.notes-ai-accept').first().click();
+  await page.locator('.notes-diff-accept').first().click();
   await expect.poll(async () => (await getBlocks(page.request, origin, noteId)).blocks.length, { timeout: 30000 }).toBeGreaterThan(blocksBefore);
 });

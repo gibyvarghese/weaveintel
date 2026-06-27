@@ -106,7 +106,7 @@ test('Phase 4b — UI: an SVG illustration renders; the card Visualize picker wo
   await page.screenshot({ path: `${SHOT}/gw-wn4b-card.png` });
   await page.locator('.notes-aicard-visual .notes-aicard-create').click();
   await expect(page.locator('.notes-aicard-status')).toContainText('Suggestion ready', { timeout: 40000 });
-  await page.locator('.notes-ai-accept').first().click();
+  await page.locator('.notes-diff-accept').first().click();
   await page.waitForTimeout(1500);
   // Now there are at least two images (the seed heart + the new illustration).
   expect(await page.locator('.gw-image img').count()).toBeGreaterThanOrEqual(2);

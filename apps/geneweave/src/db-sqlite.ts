@@ -9254,9 +9254,9 @@ export class SQLiteAdapter implements DatabaseAdapter {
   // weaveNotes Phase 3 — AI co-author suggestions (track-changes).
   async createNoteSuggestion(row: import('./db-types/adapter-me.js').NoteSuggestionRow): Promise<void> {
     this.d.prepare(
-      `INSERT INTO note_suggestions (id, note_id, doc_id, tenant_id, author_kind, author_id, author_site, action, status, ops_json, preview_text, anchor_json, created_at, resolved_at, resolved_by)
-       VALUES (@id, @note_id, @doc_id, @tenant_id, @author_kind, @author_id, @author_site, @action, @status, @ops_json, @preview_text, @anchor_json, @created_at, @resolved_at, @resolved_by)`,
-    ).run(row);
+      `INSERT INTO note_suggestions (id, note_id, doc_id, tenant_id, author_kind, author_id, author_site, action, status, ops_json, preview_text, before_text, anchor_json, created_at, resolved_at, resolved_by)
+       VALUES (@id, @note_id, @doc_id, @tenant_id, @author_kind, @author_id, @author_site, @action, @status, @ops_json, @preview_text, @before_text, @anchor_json, @created_at, @resolved_at, @resolved_by)`,
+    ).run({ ...row, before_text: row.before_text ?? '' });
   }
   async getNoteSuggestion(id: string): Promise<import('./db-types/adapter-me.js').NoteSuggestionRow | null> {
     return (this.d.prepare('SELECT * FROM note_suggestions WHERE id = ?').get(id) ?? null) as import('./db-types/adapter-me.js').NoteSuggestionRow | null;

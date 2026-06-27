@@ -151,8 +151,8 @@ test.describe('the selection card makes a diagram (real LLM)', () => {
     await expect(page.locator('.notes-aicard-status')).toContainText('Suggestion ready', { timeout: 30000 });
 
     // Accept the diagram suggestion → it renders in the note.
-    await expect(page.locator('.notes-ai-suggestion').first()).toBeVisible({ timeout: 8000 });
-    await page.locator('.notes-ai-accept').first().click();
+    await expect(page.locator('.notes-diff').first()).toBeVisible({ timeout: 8000 });
+    await page.locator('.notes-diff-accept').first().click();
     await expect(page.locator('.gw-diagram-block svg')).toBeVisible({ timeout: 10000 });
     await page.screenshot({ path: `${SHOT}/gw-wn4-card-diagram.png` });
     const doc = (await (await page.request.get(`${origin}/api/me/notes/${note.id}`)).json() as { doc_json: string }).doc_json;

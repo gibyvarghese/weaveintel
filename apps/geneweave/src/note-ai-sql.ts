@@ -172,10 +172,12 @@ export function createNoteAiService(db: NoteAiDb, generate: NoteAiGenerate, opts
       const shadow = BlockDoc.fromSnapshot(site, snap);
       let ops: BlockOp[];
       let anchor: Record<string, unknown>;
+      let beforeText = ''; // the original text the suggestion replaces (for the inline old→new diff)
       if (action === 'rewrite' && input.selectionBlockId) {
         // Replace the target block's content with the AI's blocks.
         const target: BlockSpec[] = shadow.blocks().map((b) => {
           if (b.id && input.selectionBlockId && b.id.counter === input.selectionBlockId.counter && b.id.siteId === input.selectionBlockId.siteId) {
+            beforeText = b.text ?? ''; // capture the original for the track-changes card
             const repl = markdownToBlocks(aiMarkdown)[0] ?? { type: 'paragraph', text: aiMarkdown };
             return { type: repl.type, attrs: repl.attrs ?? b.attrs, text: repl.text ?? '', marks: repl.marks ?? [] };
           }
@@ -194,7 +196,7 @@ export function createNoteAiService(db: NoteAiDb, generate: NoteAiGenerate, opts
       const row: NoteSuggestionRow = {
         id, note_id: noteId, doc_id: view.docId, tenant_id: access.tenantId,
         author_kind: 'user', author_id: access.ownerId, author_site: site, action,
-        status: 'pending', ops_json: JSON.stringify(ops), preview_text: aiMarkdown,
+        status: 'pending', ops_json: JSON.stringify(ops), preview_text: aiMarkdown, before_text: beforeText,
         anchor_json: JSON.stringify(anchor), created_at: now(), resolved_at: null, resolved_by: null,
       };
       await db.createNoteSuggestion(row);

@@ -697,7 +697,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     const status = (new URL(req.url ?? '/', 'http://x').searchParams.get('status') ?? 'pending') as 'pending' | 'accepted' | 'rejected' | 'all';
     const rows = await noteAi.list(params['id']!, status);
     // Trim the heavy ops_json out of the list payload; the preview is what reviewers read.
-    const suggestions = rows.map((r) => ({ id: r.id, action: r.action, status: r.status, preview: r.preview_text, authorKind: r.author_kind, createdAt: r.created_at }));
+    const suggestions = rows.map((r) => ({ id: r.id, action: r.action, status: r.status, preview: r.preview_text, before: r.before_text ?? '', authorKind: r.author_kind, createdAt: r.created_at }));
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ suggestions }));
   }, { auth: true });

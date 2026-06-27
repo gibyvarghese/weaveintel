@@ -126,9 +126,9 @@ test('Phase 2 — UI: select text → AI card → highlight → suggestion → a
   await expect(card.locator('.notes-aicard-status')).toContainText('Suggestion ready', { timeout: 10000 });
 
   // The suggestion shows in the right rail; Accept it.
-  await expect(page.locator('.notes-ai-suggestion').first()).toBeVisible({ timeout: 8000 });
+  await expect(page.locator('.notes-diff').first()).toBeVisible({ timeout: 8000 });
   await page.screenshot({ path: `${SHOT}/gw-wn2-suggestion.png` });
-  await page.locator('.notes-ai-accept').first().click();
+  await page.locator('.notes-diff-accept').first().click();
   await page.waitForTimeout(1500);
   // The highlight is now painted in the note (mark present in the doc).
   const doc = (await (await page.request.get(`${origin}/api/me/notes/${note.id}`)).json() as { doc_json: string }).doc_json;

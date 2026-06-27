@@ -568,7 +568,8 @@ function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLEle
       h('div', { className: 'gw-ai-msg-bubble' }, 'I can help with this note — continue your writing, rewrite a passage, summarize the page, or turn it into something new.'),
     ),
     aiToolbar,
-    aiPanel,
+    // The AI's proposed edits (aiPanel) render INLINE IN THE NOTE (the centre canvas), not here —
+    // as the design's track-changes diff cards (accept/reject right where the change is).
   );
 
   // — compute the outline from the note's headings (best-effort from doc_json) —
@@ -582,6 +583,7 @@ function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLEle
     isLive: true,
     iconEl, titleInput, editorContainer, presenceBadge, presenceAvatarsEl,
     inlinePanels: [historyPanel, commentsPanel, syncedPanel],
+    afterEditorPanels: [aiPanel], // the inline AI-edit diff cards live in the note body
     extractResult,
     onSetTheme: (t) => {
       state.notesTheme = t;
