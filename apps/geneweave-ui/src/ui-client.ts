@@ -1735,10 +1735,10 @@ function renderApp() {
     return wrap;
   }
   // Builder — the full-bleed three-pane "configure the assistant" app (its own nav),
-  // recreated from "GeneWeave Builder.dc.html" and wired to /api/admin/prompt-fragments.
+  // recreated from "GeneWeave Builder.dc.html" as a Builder-styled skin over the WHOLE admin.
   if (state.view === 'builder') {
     wrap.classList.add('app-fullbleed');
-    wrap.appendChild(renderBuilderView(render));
+    wrap.appendChild(renderBuilderView(render, { loadAdmin }));
     return wrap;
   }
   wrap.appendChild(renderWorkspaceNav({

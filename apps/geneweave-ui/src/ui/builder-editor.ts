@@ -1,126 +1,141 @@
 // SPDX-License-Identifier: MIT
 /**
- * geneWeave Builder — the record EDITOR pane (presentational), recreated from
- * "GeneWeave Builder.dc.html". A single-column form (max-width 640) grouped into
- * hairline-separated sections with emerald mono labels:
- *   BASICS (Shortcut + {{>key}} hint, Name) · THE BLOCK (What it's for, Block text as a
- *   dark monospace code editor with a MARKDOWN tab + char count) · DETAILS (Fill-in values
- *   as a validated JSON editor with Format, Labels as chips, Version) · AVAILABILITY (an
- *   animated Active toggle). A warm "danger zone" card holds Delete, demoted out of the
- *   action row, and a sticky bottom bar shows the dirty state + Cancel/Save.
+ * geneWeave Builder — the GENERIC record-editor renderer (presentational).
  *
- * Dumb module: it takes the working draft + handlers from the container (builder-view.ts).
+ * Drives any admin resource (the Builder is a skin over the whole admin schema), so it takes
+ * a tab's field schema + the working form and renders Builder-styled controls, choosing the
+ * right treatment per field: a toggle for booleans, a select for option lists, a validated
+ * JSON editor, removable chips for CSV arrays, a DARK monospace code editor for the primary
+ * prose/markdown field, a mono input for keys/ids/versions, else a plain input/textarea. Non-
+ * boolean fields go under a "<RESOURCE>" section; booleans collect under "AVAILABILITY".
+ *
+ * Dumb module: state + persistence live in builder-view.ts (which reuses the admin save layer).
  */
 import { h } from './dom.js';
 
-export interface BuilderDraft {
-  id: string; key: string; name: string; description: string; content: string;
-  variables: string; tags: string[]; version: string; enabled: boolean; isNew?: boolean;
-}
-export interface EditorHandlers {
-  onField: (field: keyof BuilderDraft, value: unknown) => void;
-  onToggle: () => void;
-  onAddTag: (label: string) => void;
-  onRemoveTag: (index: number) => void;
-  onFormatJson: () => void;
-  onSave: () => void;
-  onCancel: () => void;
-  onDelete: () => void;
+export interface FieldSchema { key: string; label?: string; type?: string; textarea?: boolean; rows?: number; options?: string[]; save?: string; hint?: string; readOnly?: boolean }
+export interface FieldHandlers { get: (key: string) => unknown; set: (key: string, value: unknown) => void }
+
+export type FieldKind = 'toggle' | 'select' | 'json' | 'chips' | 'code' | 'mono' | 'textarea' | 'number' | 'text';
+
+const CONTENT_RE = /content|template|^text$|body|prompt|markdown|instruction|system|preamble|message|description/i;
+const JSON_RE = /json|schema|config|variables|spec|payload|metadata|params|mapping/i;
+const CSV_RE = /tags|labels|aliases|keywords/i;
+const MONO_RE = /(^|_|-)key$|version|^id$|slug|shortcut|model|provider|endpoint|hash/i;
+
+export function fieldKind(f: FieldSchema): FieldKind {
+  if (f.save === 'bool' || f.save === 'intBool' || f.type === 'checkbox' || f.type === 'boolean') return 'toggle';
+  if (Array.isArray(f.options) && f.options.length) return 'select';
+  if (f.save === 'json' || f.save === 'jsonStr' || JSON_RE.test(f.key)) return 'json';
+  if (f.save === 'csvArr' || CSV_RE.test(f.key)) return 'chips';
+  if (f.textarea) return CONTENT_RE.test(f.key) ? 'code' : 'textarea';
+  if (MONO_RE.test(f.key)) return 'mono';
+  if (f.type === 'number') return 'number';
+  return 'text';
 }
 
-function section(label: string, ...body: HTMLElement[]): HTMLElement {
-  return h('div', { className: 'bld-section' }, h('div', { className: 'bld-section-label' }, label), ...body);
+export function validateJson(str: string): string | null {
+  const s = (str ?? '').trim();
+  if (!s) return null;
+  try { JSON.parse(s); return null; }
+  catch (e) { return `Must be valid JSON — ${(e instanceof Error ? e.message : 'parse error').replace(/^JSON\.parse:\s*/, '').toLowerCase()}`; }
 }
-function field(label: string, control: HTMLElement, hint?: HTMLElement | null, headerRight?: HTMLElement | null): HTMLElement {
+
+export function jsonFieldsInvalid(fields: FieldSchema[], get: (k: string) => unknown): boolean {
+  return fields.some((f) => fieldKind(f) === 'json' && !!validateJson(String(get(f.key) ?? '')));
+}
+
+function prettify(key: string): string { return key.replace(/[-_]/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase()); }
+function asBool(v: unknown): boolean { return v === true || v === 1 || v === '1' || v === 'true'; }
+
+function fieldShell(label: string, control: HTMLElement, hint?: HTMLElement | null, headerRight?: HTMLElement | null): HTMLElement {
   return h('div', { className: 'bld-field' },
     h('div', { className: 'bld-field-head' }, h('label', { className: 'bld-label' }, label), headerRight ?? null),
-    control,
-    hint ?? null,
+    control, hint ?? null,
   );
 }
 
-function validateJson(str: string): string | null {
-  try { JSON.parse(str || '[]'); return null; }
-  catch (e) { return `Variables must be valid JSON — ${(e instanceof Error ? e.message : 'parse error').replace(/^JSON\.parse:\s*/, '').toLowerCase()}`; }
+function renderControl(f: FieldSchema, hnd: FieldHandlers): HTMLElement {
+  const kind = fieldKind(f);
+  const label = f.label || prettify(f.key);
+  const val = hnd.get(f.key);
+
+  if (kind === 'select') {
+    const sel = h('select', { className: 'bld-select', onChange: (e: Event) => hnd.set(f.key, (e.target as HTMLSelectElement).value) },
+      ...(f.options ?? []).map((o) => h('option', { value: o, selected: String(val) === String(o) }, o)),
+    ) as HTMLSelectElement;
+    return fieldShell(label, sel, f.hint ? h('span', { className: 'bld-hint' }, f.hint) : null);
+  }
+  if (kind === 'json') {
+    const err = validateJson(String(val ?? ''));
+    const ta = h('textarea', { className: `bld-json${err ? ' invalid' : ''}`, rows: f.rows ?? 4, value: String(val ?? ''), onInput: (e: Event) => hnd.set(f.key, (e.target as HTMLTextAreaElement).value) }) as HTMLTextAreaElement;
+    const fmt = h('button', { className: 'bld-mini-btn bld-mini-emerald', onClick: () => { try { hnd.set(f.key, JSON.stringify(JSON.parse(String(val)), null, 2)); } catch { /* */ } } }, 'Format');
+    return fieldShell(label, ta, err ? h('span', { className: 'bld-json-error' }, h('span', { className: 'bld-err-ic' }, '!'), err) : (f.hint ? h('span', { className: 'bld-hint' }, f.hint) : null), fmt);
+  }
+  if (kind === 'chips') {
+    const csv = String(val ?? '');
+    const items = csv.split(',').map((s) => s.trim()).filter(Boolean);
+    const input = h('input', { className: 'bld-tag-input', type: 'text', placeholder: 'Type to add…',
+      onKeyDown: (e: KeyboardEvent) => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.trim(); if (v) { hnd.set(f.key, [...items, v].join(', ')); } } } }) as HTMLInputElement;
+    const chips = h('div', { className: 'bld-chips' },
+      ...items.map((t, i) => h('span', { className: 'bld-chip' }, t, h('button', { className: 'bld-chip-x', onClick: () => hnd.set(f.key, items.filter((_, j) => j !== i).join(', ')) }, '×'))),
+      input,
+    );
+    return fieldShell(label, chips);
+  }
+  if (kind === 'code') {
+    const text = String(val ?? '');
+    const charCount = h('span', { className: 'bld-code-meta' }, `${text.length} chars`) as HTMLElement;
+    const ta = h('textarea', { className: 'bld-code-area', rows: f.rows ?? 8, value: text, onInput: (e: Event) => { const v = (e.target as HTMLTextAreaElement).value; hnd.set(f.key, v); charCount.textContent = `${v.length} chars`; } }) as HTMLTextAreaElement;
+    const code = h('div', { className: 'bld-code' }, h('div', { className: 'bld-code-bar' }, h('span', { className: 'bld-code-meta' }, 'MARKDOWN'), charCount), ta);
+    return fieldShell(label, code, f.hint ? h('span', { className: 'bld-hint' }, f.hint) : null);
+  }
+  if (kind === 'textarea') {
+    const ta = h('textarea', { className: 'bld-textarea', rows: f.rows ?? 3, value: String(val ?? ''), onInput: (e: Event) => hnd.set(f.key, (e.target as HTMLTextAreaElement).value) }) as HTMLTextAreaElement;
+    return fieldShell(label, ta, f.hint ? h('span', { className: 'bld-hint' }, f.hint) : null);
+  }
+  // mono / number / text → input
+  const input = h('input', {
+    className: `bld-input${kind === 'mono' ? ' bld-mono' : ''}`, type: kind === 'number' ? 'number' : 'text',
+    value: String(val ?? ''), onInput: (e: Event) => hnd.set(f.key, (e.target as HTMLInputElement).value),
+  }) as HTMLInputElement;
+  const hint = f.hint ? h('span', { className: 'bld-hint' }, f.hint)
+    : (kind === 'mono' && /(^|_|-)key$|shortcut/i.test(f.key) ? h('span', { className: 'bld-hint' }, 'Drop this into any instruction by typing ', h('span', { className: 'bld-mono bld-keyhint' }, `{{>${String(val ?? '')}}}`)) : null);
+  return fieldShell(label, input, hint);
 }
 
-export function renderBuilderEditor(draft: BuilderDraft, dirty: boolean, h2: EditorHandlers): HTMLElement {
-  const jsonError = validateJson(draft.variables);
-
-  // BASICS
-  const keyInput = h('input', { className: 'bld-input bld-mono', value: draft.key, onInput: (e: Event) => h2.onField('key', (e.target as HTMLInputElement).value) }) as HTMLInputElement;
-  const nameInput = h('input', { className: 'bld-input', value: draft.name, onInput: (e: Event) => h2.onField('name', (e.target as HTMLInputElement).value) }) as HTMLInputElement;
-  const basics = section('BASICS',
-    field('Shortcut', keyInput, h('span', { className: 'bld-hint' }, 'Drop this block into any instruction by typing ', h('span', { className: 'bld-mono bld-keyhint' }, `{{>${draft.key || ''}}}`))),
-    field('Name', nameInput),
-  );
-
-  // THE BLOCK — dark code editor
-  const descTa = h('textarea', { className: 'bld-textarea', rows: 3, value: draft.description, onInput: (e: Event) => h2.onField('description', (e.target as HTMLTextAreaElement).value) }) as HTMLTextAreaElement;
-  const contentTa = h('textarea', { className: 'bld-code-area', rows: 8, value: draft.content, onInput: (e: Event) => { h2.onField('content', (e.target as HTMLTextAreaElement).value); charCount.textContent = `${(e.target as HTMLTextAreaElement).value.length} chars`; } }) as HTMLTextAreaElement;
-  const charCount = h('span', { className: 'bld-code-meta' }, `${draft.content.length} chars`) as HTMLElement;
-  const codeEditor = h('div', { className: 'bld-code' },
-    h('div', { className: 'bld-code-bar' }, h('span', { className: 'bld-code-meta' }, 'MARKDOWN'), charCount),
-    contentTa,
-  );
-  const block = section('THE BLOCK',
-    field('What it’s for', descTa, h('span', { className: 'bld-hint' }, 'A short, plain summary of what this block does.')),
-    field('Block text', codeEditor),
-  );
-
-  // DETAILS
-  const varsTa = h('textarea', { className: `bld-json${jsonError ? ' invalid' : ''}`, rows: 4, value: draft.variables, onInput: (e: Event) => h2.onField('variables', (e.target as HTMLTextAreaElement).value) }) as HTMLTextAreaElement;
-  const formatBtn = h('button', { className: 'bld-mini-btn bld-mini-emerald', onClick: h2.onFormatJson }, 'Format');
-  const tagsInput = h('input', { className: 'bld-tag-input', type: 'text', placeholder: 'Type to add…',
-    onKeyDown: (e: KeyboardEvent) => { if (e.key === 'Enter') { const v = (e.target as HTMLInputElement).value.trim(); if (v) { h2.onAddTag(v); (e.target as HTMLInputElement).value = ''; } } } }) as HTMLInputElement;
-  const chips = h('div', { className: 'bld-chips' },
-    ...draft.tags.map((t, i) => h('span', { className: 'bld-chip' }, t, h('button', { className: 'bld-chip-x', onClick: () => h2.onRemoveTag(i) }, '×'))),
-    tagsInput,
-  );
-  const versionInput = h('input', { className: 'bld-input bld-mono bld-version', value: draft.version, onInput: (e: Event) => h2.onField('version', (e.target as HTMLInputElement).value) }) as HTMLInputElement;
-  const details = section('DETAILS',
-    field('Fill-in values', varsTa,
-      jsonError ? h('span', { className: 'bld-json-error' }, h('span', { className: 'bld-err-ic' }, '!'), jsonError) : h('span', { className: 'bld-hint' }, 'Values swapped in when the block is used · checked automatically.'),
-      formatBtn),
-    field('Labels', chips),
-    field('Version', versionInput),
-  );
-
-  // AVAILABILITY — toggle
-  const toggle = h('div', { className: `bld-toggle${draft.enabled ? ' on' : ''}`, onClick: h2.onToggle }, h('span', { className: 'bld-knob' }));
-  const availability = section('AVAILABILITY',
-    h('div', { className: 'bld-avail-card' },
-      h('div', { className: 'bld-avail-text' },
-        h('span', { className: 'bld-avail-title' }, 'Active'),
-        h('span', { className: 'bld-avail-sub' }, 'When off, this block is skipped when instructions are put together.'),
-      ),
-      toggle,
+function renderToggleRow(f: FieldSchema, hnd: FieldHandlers): HTMLElement {
+  const on = asBool(hnd.get(f.key));
+  return h('div', { className: 'bld-avail-card' },
+    h('div', { className: 'bld-avail-text' },
+      h('span', { className: 'bld-avail-title' }, f.label || prettify(f.key)),
+      f.hint ? h('span', { className: 'bld-avail-sub' }, f.hint) : null,
     ),
+    h('div', { className: `bld-toggle${on ? ' on' : ''}`, onClick: () => hnd.set(f.key, !on) }, h('span', { className: 'bld-knob' })),
   );
+}
 
-  // Danger zone
-  const danger = h('div', { className: 'bld-danger' },
-    h('div', { className: 'bld-danger-text' },
-      h('span', { className: 'bld-danger-title' }, 'Delete building block'),
-      h('span', { className: 'bld-danger-sub' }, 'This can’t be undone.'),
-    ),
-    h('button', { className: 'bld-danger-btn', onClick: h2.onDelete }, 'Delete'),
-  );
+/** Render all of a resource's fields, Builder-styled, grouped into a main + availability section. */
+export function renderBuilderFields(schema: { fields?: FieldSchema[]; singular?: string }, hnd: FieldHandlers): HTMLElement {
+  const fields = (schema.fields ?? []).filter((f) => !f.readOnly && f.key !== 'id');
+  const toggles = fields.filter((f) => fieldKind(f) === 'toggle');
+  const mains = fields.filter((f) => fieldKind(f) !== 'toggle');
+  const mainLabel = (schema.singular ? schema.singular : 'Details').toUpperCase();
 
-  return h('div', { className: 'bld-editor-scroll gw-scroll' },
-    h('div', { className: 'bld-form' }, basics, block, details, availability, danger),
-  );
+  const sections: HTMLElement[] = [];
+  if (mains.length) sections.push(h('div', { className: 'bld-section' }, h('div', { className: 'bld-section-label' }, mainLabel), ...mains.map((f) => renderControl(f, hnd))));
+  if (toggles.length) sections.push(h('div', { className: 'bld-section' }, h('div', { className: 'bld-section-label' }, 'AVAILABILITY'), ...toggles.map((f) => renderToggleRow(f, hnd))));
+  if (!sections.length) sections.push(h('div', { className: 'bld-editor-empty-inline' }, 'This resource has no editable fields.'));
+  return h('div', { className: 'bld-form' }, ...sections);
 }
 
 /** The sticky bottom action bar (dirty indicator + Cancel + Save). */
-export function renderBuilderActionBar(dirty: boolean, jsonInvalid: boolean, h2: Pick<EditorHandlers, 'onSave' | 'onCancel'>): HTMLElement {
+export function renderBuilderActionBar(dirty: boolean, saveBlocked: boolean, onSave: () => void, onCancel: () => void): HTMLElement {
   return h('footer', { className: 'bld-actionbar' },
     h('span', { className: `bld-dirty${dirty ? ' on' : ''}` }, h('span', { className: 'bld-dirty-dot' }), dirty ? 'Unsaved changes' : 'All changes saved'),
     h('div', { className: 'bld-actions' },
-      h('button', { className: 'bld-btn-ghost', onClick: h2.onCancel }, 'Cancel'),
-      h('button', { className: `bld-btn-save${jsonInvalid ? ' disabled' : ''}`, onClick: jsonInvalid ? () => {} : h2.onSave }, dirty ? 'Save' : 'Saved'),
+      h('button', { className: 'bld-btn-ghost', onClick: onCancel }, 'Cancel'),
+      h('button', { className: `bld-btn-save${saveBlocked ? ' disabled' : ''}`, onClick: saveBlocked ? () => {} : onSave }, dirty ? 'Save' : 'Saved'),
     ),
   );
 }
-
-export { validateJson };
