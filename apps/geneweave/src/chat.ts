@@ -54,7 +54,7 @@ import { DbToolPolicyResolver, DbToolRateLimiter, consoleAuditEmitter } from './
 import { DbToolAuditEmitter } from './tool-audit-emitter.js';
 import { DbToolApprovalGate } from './tool-approval-gate.js';
 import { createTemporalStore } from './temporal-store.js';
-import { createNoteAiService, createModelTextGenerator, agentCreateNote, agentNewFromTemplate } from './note-ai-sql.js';
+import { createNoteAiService, createModelTextGenerator, agentCreateNote, agentNewFromTemplate, agentRecentNotes } from './note-ai-sql.js';
 import { createColorizeTools } from './note-colorize-sql.js';
 import { createCreativeTools, createModelImageGenerator } from './note-creative-sql.js';
 import { createStudyTool } from './note-study-sql.js';
@@ -409,6 +409,9 @@ export class ChatEngine {
       // weaveNotes Phase 6: wire the `new_from_template` tool — start a note from a ready-made template.
       noteNewFromTemplate: (a: { userId: string; tenantId?: string | null; templateKey: string; title?: string }) =>
         agentNewFromTemplate(db, a),
+      // weaveNotes Phase 8: wire the `recent_notes` tool — what has the user recently worked on.
+      noteRecentNotes: (a: { userId: string; tenantId?: string | null; limit?: number }) =>
+        agentRecentNotes(db, a),
       // weaveNotes Phase 5: wire the `find_related_notes` tool (semantic note search).
       notesSearch: (a: { userId: string; tenantId?: string | null; query: string; limit?: number }) =>
         createNoteGraphService(db).searchNotes({ userId: a.userId, tenantId: a.tenantId ?? null }, a.query, a.limit ?? 5),

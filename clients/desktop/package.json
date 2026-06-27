@@ -1,0 +1,20 @@
+{
+  "name": "@geneweave/desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "geneWeave desktop app — a Tauri v2 shell around the geneWeave web build (global quick-capture, offline notes cache, native menus, signed auto-update).",
+  "scripts": {
+    "//": "These require the Rust toolchain + the Tauri CLI (not part of the headless TS workspace).",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-global-shortcut": "^2",
+    "@tauri-apps/plugin-updater": "^2"
+  }
+}

@@ -113,6 +113,15 @@ describe('weaveNotes config validator', () => {
     expect(config.mobileOfflineNoteLimit).toBe(5000);  // clamped to max
     expect(validateWeaveNotesConfig({ mobileOfflineNoteLimit: 1 }).config.mobileOfflineNoteLimit).toBe(10); // clamped to min
   });
+  it('Phase 8: desktop flags validate (booleans coerced, cache cap clamped)', () => {
+    expect(DEFAULT_WEAVENOTES_CONFIG.desktopOfflineEnabled).toBe(true);
+    expect(DEFAULT_WEAVENOTES_CONFIG.quickCaptureEnabled).toBe(true);
+    const { config } = validateWeaveNotesConfig({ desktopOfflineEnabled: 'false', quickCaptureEnabled: '1', desktopOfflineNoteLimit: 999999 });
+    expect(config.desktopOfflineEnabled).toBe(false);
+    expect(config.quickCaptureEnabled).toBe(true);
+    expect(config.desktopOfflineNoteLimit).toBe(10000); // clamped to max
+    expect(validateWeaveNotesConfig({ desktopOfflineNoteLimit: 1 }).config.desktopOfflineNoteLimit).toBe(10); // min
+  });
   it('null/undefined input returns the safe defaults', () => {
     expect(validateWeaveNotesConfig(null).config).toEqual(DEFAULT_WEAVENOTES_CONFIG);
     expect(validateWeaveNotesConfig(undefined).config).toEqual(DEFAULT_WEAVENOTES_CONFIG);

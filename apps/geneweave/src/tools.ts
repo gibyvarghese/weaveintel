@@ -969,6 +969,12 @@ export interface ToolRegistryOptions {
    */
   noteNewFromTemplate?: (args: { userId: string; tenantId?: string | null; templateKey: string; title?: string }) => Promise<{ ok: boolean; error?: string; noteId?: string; title?: string; templateKey?: string; available?: string[] }>;
   /**
+   * weaveNotes Phase 8: list the user's RECENT notes. When set, the `recent_notes` tool is available
+   * so the agent can see what the user has just created/edited ("what was I working on?", "open my
+   * last note", "summarise today's notes"). Read-only + owner-scoped.
+   */
+  noteRecentNotes?: (args: { userId: string; tenantId?: string | null; limit?: number }) => Promise<{ ok: boolean; notes: Array<{ noteId: string; title: string; updatedAt: string; favorite: boolean }> }>;
+  /**
    * weaveNotes Phase 5: semantic note search. When set, the `find_related_notes` tool is
    * available so the agent can find the user's notes most relevant to a query (knowledge-
    * graph navigation) before answering, editing, or linking. Owner-scoped.
@@ -1904,6 +1910,25 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
         tags: ['notes', 'templates', 'output'],
       }),
     } : {}),
+    // weaveNotes Phase 8: recent-notes tool — available when noteRecentNotes is set.
+    ...(opts?.noteRecentNotes && opts.currentUserId ? {
+      recent_notes: weaveTool({
+        name: 'recent_notes',
+        description: 'List the user\'s most recently created or edited notes (newest first). Use this when the user asks what they have been working on lately, wants to pick up where they left off ("open my last note"), or asks you to summarise recent work ("what did I write today?"). Read-only; returns each note\'s id, title, when it was last updated, and whether it is a favourite.',
+        parameters: {
+          type: 'object',
+          properties: {
+            limit: { type: 'number', description: 'How many recent notes to return (default 10, max 50).' },
+          },
+        },
+        execute: async (args: { limit?: number }) => {
+          if (!opts.noteRecentNotes || !opts.currentUserId) return { content: 'Recent notes are unavailable in this context.', isError: true };
+          const r = await opts.noteRecentNotes({ userId: opts.currentUserId, tenantId: opts.currentTenantId ?? null, ...(typeof args.limit === 'number' ? { limit: args.limit } : {}) });
+          return JSON.stringify({ ok: true, notes: r.notes });
+        },
+        tags: ['notes', 'memory'],
+      }),
+    } : {}),
     // weaveNotes Phase 4: note publish tool — available when notePublish callback is set.
     ...(opts?.notePublish && opts.currentUserId ? {
       note_publish: weaveTool({
@@ -2101,7 +2126,7 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
   // tool selection: mode policies only apply when `enabled_tools` is empty, so a user with a
   // custom tool selection would otherwise never get them (and "create a note" would silently
   // fall back to emit_artifact). Skip any already registered from the selection above.
-  for (const noteTool of ['create_note', 'new_from_template', 'note_edit', 'note_publish', 'find_related_notes', 'autofill_database', 'capture_web_page', 'workspace_search', 'read_note_activity'] as const) {
+  for (const noteTool of ['create_note', 'new_from_template', 'recent_notes', 'note_edit', 'note_publish', 'find_related_notes', 'autofill_database', 'capture_web_page', 'workspace_search', 'read_note_activity'] as const) {
     const t = scopedTools[noteTool];
     if (t && !registeredFromSelection.has(noteTool) && canUseTool(actorPersona, noteTool)) registry.register(t);
   }

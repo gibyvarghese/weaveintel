@@ -452,6 +452,10 @@ export interface WeaveNotesSettingsRow {
   mobile_offline_enabled: number;
   mobile_ink_enabled: number;
   mobile_offline_note_limit: number;
+  /** weaveNotes Phase 8: desktop offline cache + open-to-last-note, quick-capture hotkey, cache cap. */
+  desktop_offline_enabled: number;
+  quick_capture_enabled: number;
+  desktop_offline_note_limit: number;
   enabled_ai_tools: string;
   updated_at: string;
 }

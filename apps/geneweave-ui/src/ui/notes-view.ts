@@ -30,6 +30,8 @@ import { wireNoteConnections, type NoteConnectionsPanel } from './notes-graph.js
 import { renderDatabasesView } from './notes-database-view.js';
 import { renderStudyView } from './notes-study.js';
 import { renderCapturePanel } from './notes-capture.js';
+import { saveNotesSnapshot, cacheNote, offlineNotes, offlineNote, setLastNoteId, getLastNoteId } from './notes-offline.js';
+import { openQuickCaptureModal } from './notes-quick-capture.js';
 import { wireNoteHistory, wireNoteComments, wireNoteSynced, renderWorkspaceAsk, type SimplePanel } from './notes-workspace-ui.js';
 import { renderEditorCanvas, type OverflowItem } from './notes-editor-canvas.js';
 import { renderRightRail } from './notes-right-rail.js';
@@ -73,8 +75,18 @@ export async function loadNotesList(opts?: { search?: string }): Promise<void> {
     if (!res.ok) return;
     const { notes } = await res.json() as { notes: NoteListItem[] };
     state.notesItems = notes;
+    (state as { notesOffline?: boolean }).notesOffline = false;
+    // Phase 8: mirror the list into the offline cache so the desktop app can launch + list with no network.
+    saveNotesSnapshot(notes as Array<{ id: string }>);
   } catch (e) {
-    console.warn('[notes-view] loadNotesList error', e);
+    // Phase 8: offline (or the server is unreachable) → hydrate the list from the local snapshot.
+    const cached = offlineNotes();
+    if (cached.length > 0) {
+      state.notesItems = cached as unknown as NoteListItem[];
+      (state as { notesOffline?: boolean }).notesOffline = true;
+    } else {
+      console.warn('[notes-view] loadNotesList error', e);
+    }
   } finally {
     state.notesLoading = false;
   }
@@ -92,16 +104,42 @@ export async function loadNoteTemplates(): Promise<void> {
 export async function loadNote(id: string): Promise<void> {
   try {
     const res = await api.get(`/api/me/notes/${id}`);
-    if (!res.ok) return;
+    if (!res.ok) throw new Error(`status ${res.status}`);
     const note = await res.json() as NoteDoc;
     state.currentNote = note;
     state.currentNoteId = note.id;
     // weaveNotes Phase 1: adopt the note's persisted page theme (spec §10.6).
     const theme = (note as { page_theme?: string }).page_theme;
     state.notesTheme = theme === 'creative' ? 'creative' : 'pro';
+    // Phase 8: remember this as the last-opened note + cache its content for offline reopening.
+    setLastNoteId(note.id);
+    cacheNote(note as { id: string });
+    (state as { notesOffline?: boolean }).notesOffline = false;
   } catch (e) {
-    console.warn('[notes-view] loadNote error', e);
+    // Phase 8: offline → open the note from the local cache instead of failing.
+    const cached = offlineNote(id);
+    if (cached) {
+      state.currentNote = cached as unknown as NoteDoc;
+      state.currentNoteId = cached.id;
+      setLastNoteId(cached.id);
+      (state as { notesOffline?: boolean }).notesOffline = true;
+    } else {
+      console.warn('[notes-view] loadNote error', e);
+    }
   }
+}
+
+/**
+ * weaveNotes Phase 8 (desktop): open the LAST note the user had open — the "launches offline and opens
+ * to last note" behaviour. Reads the persisted last-note id (from the server, or the offline cache).
+ * Returns true if a note was opened.
+ */
+export async function openLastNote(render: () => void): Promise<boolean> {
+  const id = getLastNoteId();
+  if (!id) return false;
+  await loadNote(id);
+  if (state.currentNoteId === id) { state.notesView = 'editor'; render(); return true; }
+  return false;
 }
 
 async function saveNote(id: string, docJson: string, title?: string): Promise<void> {
@@ -291,6 +329,7 @@ function buildInsertMenu(render: () => void): OverflowItem[] {
   const openNote = async (id: string): Promise<void> => { await loadNote(id); state.notesView = 'editor'; render(); };
   return [
     { label: '📝 New note', title: 'Create a blank note', onClick: async () => { const n = await createNote(); if (n) { state.notesItems = [n as NoteListItem, ...(state.notesItems as NoteListItem[])]; await openNote(n.id); } } },
+    { label: '⚡ Quick capture', title: 'Jot a quick note (⌘/Ctrl+Shift+K)', onClick: () => { openQuickCaptureModal((id) => { void openNote(id); }); } },
     { label: '⊞ New from template', title: 'Start from a template', onClick: async () => { await loadNoteTemplates(); state.notesView = 'templates'; render(); } },
     { label: '🌐 Capture a web page', title: 'Clip a public page into a note', onClick: async () => {
         const url = prompt('Paste a public web page URL to clip into a note:'); if (!url) return;
@@ -652,7 +691,11 @@ export function renderNotesView(render: () => void): HTMLElement {
     onHome: () => { state.view = 'home'; render(); },
   });
 
+  // weaveNotes Phase 8 (desktop): an offline banner when the list/note came from the local cache.
+  const offline = (state as { notesOffline?: boolean }).notesOffline === true;
   return h('div', { className: 'gw-notes notes-full-view' },
+    offline ? h('div', { className: 'gw-notes-offline', title: 'Showing your locally cached notes' },
+      '✈︎ Offline — showing your cached notes. Changes will sync when you reconnect.') : null,
     h('div', { className: 'gw-shell' }, leftRail, centre, rightRail),
   );
 }

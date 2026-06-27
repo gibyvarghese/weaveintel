@@ -1092,6 +1092,20 @@ input{font-family:inherit;outline:none}
 .gw-newnote-archived{display:flex;align-items:center;gap:7px;width:100%;font-family:var(--font);font-size:12px;font-weight:500;color:var(--fg3);background:transparent;border:none;border-radius:8px;padding:7px 12px;cursor:pointer;margin-top:2px}
 .gw-newnote-archived:hover{color:var(--accent2);background:var(--surface)}
 .gw-newnote-archived-ic{display:inline-flex;opacity:.8}
+/* weaveNotes Phase 8 — desktop: quick-capture overlay + offline banner */
+.gw-qc-overlay{position:fixed;inset:0;background:rgba(15,23,42,.38);display:flex;align-items:flex-start;justify-content:center;padding-top:14vh;z-index:1000}
+.gw-qc-card{width:min(560px,92vw);background:var(--surface,#fff);border:1px solid var(--bg4,#e5e7eb);border-radius:14px;box-shadow:0 16px 48px rgba(0,0,0,.22);overflow:hidden}
+.gw-qc-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--bg4,#eef0f2)}
+.gw-qc-title{font-weight:700;font-size:14px;color:var(--fg1,#111827)}
+.gw-qc-x{border:none;background:transparent;font-size:20px;line-height:1;color:var(--fg3,#9ca3af);cursor:pointer}
+.gw-qc-input{width:100%;border:none;outline:none;resize:none;padding:16px;font-size:15px;line-height:1.5;font-family:var(--font,inherit);color:var(--fg1,#111827);background:transparent}
+.gw-qc-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 16px;border-top:1px solid var(--bg4,#eef0f2);background:var(--bg2,#fafafa)}
+.gw-qc-hint{font-size:11px;color:var(--fg3,#9ca3af)}
+.gw-qc-actions{display:flex;align-items:center;gap:10px}
+.gw-qc-status{font-size:12px;color:var(--fg3,#9ca3af)}
+.gw-qc-save{background:var(--accent2,#0f766e);color:#fff;border:none;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer}
+.gw-qc-save:hover{filter:brightness(1.05)}
+.gw-notes-offline{padding:7px 16px;background:#FEF3C7;color:#92400E;font-size:12px;font-weight:600;text-align:center}
 /* — dropdown menus (Insert / overflow) + modal — */
 .gw-menu-anchor{position:relative;display:inline-flex}
 .gw-menu{position:absolute;top:38px;z-index:300;background:var(--surface);border:1px solid var(--hairline);border-radius:12px;box-shadow:var(--shadow-pop);padding:6px;min-width:210px;display:flex;flex-direction:column;gap:2px}

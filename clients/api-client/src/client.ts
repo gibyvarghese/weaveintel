@@ -189,7 +189,7 @@ export interface NoteDoc extends NoteListItem {
   doc_json: string;
 }
 
-/** Client-relevant weaveNotes capability flags (GET /api/me/notes/capabilities) — drives mobile gating. */
+/** Client-relevant weaveNotes capability flags (GET /api/me/notes/capabilities) — drives mobile + desktop gating. */
 export interface NotesCapabilities {
   /** Phase 7: offline editing + sync is allowed for this workspace. */
   mobileOfflineEnabled: boolean;
@@ -197,6 +197,12 @@ export interface NotesCapabilities {
   mobileInkEnabled: boolean;
   /** Phase 7: how many notes the mobile app should cache on-device. */
   mobileOfflineNoteLimit: number;
+  /** Phase 8: desktop offline cache + open-to-last-note is allowed. */
+  desktopOfflineEnabled?: boolean;
+  /** Phase 8: the global quick-capture hotkey is allowed. */
+  quickCaptureEnabled?: boolean;
+  /** Phase 8: how many notes the desktop app should cache locally. */
+  desktopOfflineNoteLimit?: number;
 }
 
 /** The typed geneWeave client surface. */

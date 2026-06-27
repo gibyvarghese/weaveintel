@@ -1962,6 +1962,18 @@ export function initialize() {
         if (d.authenticated) {
         state.user = d.user;
         state.csrfToken = d.csrfToken;
+        // weaveNotes Phase 8 (desktop): wire the global quick-capture shortcut (⌘/Ctrl+Shift+K, or the
+        // Tauri OS-global hotkey). Capturing jumps into the new note. Wired once per session.
+        try {
+          const { wireQuickCapture } = await import('./ui/notes-quick-capture.js');
+          wireQuickCapture(async (noteId: string) => {
+            state.view = 'notes';
+            (state as { notesView?: string }).notesView = 'editor';
+            const { loadNote } = await import('./ui/notes-view.js');
+            await loadNote(noteId);
+            render();
+          });
+        } catch { /* non-fatal */ }
         // weaveNotes Phase 2: if we arrived via a note share link, redeem it and
         // jump straight into that note's collaborative editor.
         try {
@@ -1987,6 +1999,10 @@ export function initialize() {
           await loadCalendarItems();
         } else if (state.view === 'notes') {
           await loadNotesList();
+          // weaveNotes Phase 8 (desktop): launch straight into the note you last had open.
+          if (!state.currentNoteId && (state as { notesView?: string }).notesView !== 'editor') {
+            try { const { openLastNote } = await import('./ui/notes-view.js'); await openLastNote(render); } catch { /* */ }
+          }
         } else if (state.view === 'connectors') {
           await openConnectorsView(render);
         } else if (state.view === 'admin') {

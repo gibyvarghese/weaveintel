@@ -57,6 +57,12 @@ export interface WeaveNotesConfig {
   mobileInkEnabled: boolean;
   /** Phase 7: cap how many notes the mobile app keeps cached on-device for offline use. */
   mobileOfflineNoteLimit: number;
+  /** Phase 8: let the DESKTOP app work offline — cache notes locally + open to the last note. */
+  desktopOfflineEnabled: boolean;
+  /** Phase 8: let the global QUICK-CAPTURE hotkey jot a note from anywhere on the desktop. */
+  quickCaptureEnabled: boolean;
+  /** Phase 8: how many notes the desktop app caches locally for offline use. */
+  desktopOfflineNoteLimit: number;
   /** The note AI tools the editor agent is allowed to use (subset of the catalog). */
   enabledAiTools: string[];
 }
@@ -72,6 +78,8 @@ export const WEAVENOTES_AI_TOOLS = [
   'create_illustration', 'generate_image', 'create_visual',
   // Phase 5 — AI study: turn a note into flashcards.
   'make_flashcards',
+  // Phase 8 — desktop: the AI can see what you have recently worked on.
+  'recent_notes',
 ] as const;
 
 export const DEFAULT_WEAVENOTES_CONFIG: WeaveNotesConfig = {
@@ -94,6 +102,9 @@ export const DEFAULT_WEAVENOTES_CONFIG: WeaveNotesConfig = {
   mobileOfflineEnabled: true,
   mobileInkEnabled: true,
   mobileOfflineNoteLimit: 200,
+  desktopOfflineEnabled: true,
+  quickCaptureEnabled: true,
+  desktopOfflineNoteLimit: 500,
   enabledAiTools: [...WEAVENOTES_AI_TOOLS],
 };
 
@@ -160,6 +171,9 @@ export function validateWeaveNotesConfig(
       mobileOfflineEnabled: asBool(p.mobileOfflineEnabled ?? base.mobileOfflineEnabled, base.mobileOfflineEnabled),
       mobileInkEnabled: asBool(p.mobileInkEnabled ?? base.mobileInkEnabled, base.mobileInkEnabled),
       mobileOfflineNoteLimit: clampInt(p.mobileOfflineNoteLimit ?? base.mobileOfflineNoteLimit, 10, 5000, base.mobileOfflineNoteLimit),
+      desktopOfflineEnabled: asBool(p.desktopOfflineEnabled ?? base.desktopOfflineEnabled, base.desktopOfflineEnabled),
+      quickCaptureEnabled: asBool(p.quickCaptureEnabled ?? base.quickCaptureEnabled, base.quickCaptureEnabled),
+      desktopOfflineNoteLimit: clampInt(p.desktopOfflineNoteLimit ?? base.desktopOfflineNoteLimit, 10, 10000, base.desktopOfflineNoteLimit),
       enabledAiTools: tools,
     },
     warnings,

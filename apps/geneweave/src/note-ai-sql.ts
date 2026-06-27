@@ -395,3 +395,21 @@ export async function agentNewFromTemplate(
   }
   return { ok: true, noteId: id, title, templateKey: tpl.key };
 }
+
+/**
+ * weaveNotes Phase 8 — the `recent_notes` tool helper. Lists the user's most recently created or
+ * edited notes (newest first), so the assistant can understand what they have been working on and
+ * pick up where they left off. Read-only + owner-scoped (reuses the same listing the app uses).
+ */
+export async function agentRecentNotes(
+  db: Pick<DatabaseAdapter, 'listNotes'>,
+  args: { userId: string; tenantId?: string | null; limit?: number },
+): Promise<{ ok: boolean; notes: Array<{ noteId: string; title: string; updatedAt: string; favorite: boolean }> }> {
+  const limit = Math.max(1, Math.min(50, args.limit ?? 10));
+  // listNotes is owner-scoped, excludes templates + archived, and is ordered favorite DESC, updated_at DESC.
+  const rows = await db.listNotes(args.userId, { limit });
+  return {
+    ok: true,
+    notes: rows.map((r) => ({ noteId: r.id, title: r.title || 'Untitled', updatedAt: r.updated_at, favorite: r.favorite === 1 })),
+  };
+}

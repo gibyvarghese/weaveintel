@@ -44,6 +44,9 @@ function rowToConfig(row: WeaveNotesSettingsRow | null): WeaveNotesConfig {
     mobileOfflineEnabled: row.mobile_offline_enabled !== 0,  // undefined (pre-m112) → enabled
     mobileInkEnabled: row.mobile_ink_enabled !== 0,
     ...(typeof row.mobile_offline_note_limit === 'number' ? { mobileOfflineNoteLimit: row.mobile_offline_note_limit } : {}),
+    desktopOfflineEnabled: row.desktop_offline_enabled !== 0,  // undefined (pre-m113) → enabled
+    quickCaptureEnabled: row.quick_capture_enabled !== 0,
+    ...(typeof row.desktop_offline_note_limit === 'number' ? { desktopOfflineNoteLimit: row.desktop_offline_note_limit } : {}),
     enabledAiTools: tools,
   }).config;
 }
@@ -82,6 +85,9 @@ export function createNoteSettingsService(db: SettingsDb, opts: { now?: () => nu
       mobile_offline_enabled: config.mobileOfflineEnabled ? 1 : 0,
       mobile_ink_enabled: config.mobileInkEnabled ? 1 : 0,
       mobile_offline_note_limit: config.mobileOfflineNoteLimit,
+      desktop_offline_enabled: config.desktopOfflineEnabled ? 1 : 0,
+      quick_capture_enabled: config.quickCaptureEnabled ? 1 : 0,
+      desktop_offline_note_limit: config.desktopOfflineNoteLimit,
       enabled_ai_tools: JSON.stringify(config.enabledAiTools),
     });
     return { config, warnings };

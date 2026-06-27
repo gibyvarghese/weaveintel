@@ -43,6 +43,9 @@ import {
   type UpdateNotePatch,
   coercePageTheme,
   templateByKey,
+  parseQuickCapture,
+  blocksToDoc,
+  type NoteBlock,
 } from '@weaveintel/notes';
 import { createSqlNoteRepository } from '../note-repository-sql.js';
 import { BlockDoc, pmToBlocks, blocksToProseMirror, blocksToMarkdown, blocksToHtml } from '@weaveintel/coedit';
@@ -95,7 +98,9 @@ void createInMemoryNoteRepository; // keep the import available to embedders wit
  */
 function clientProvenance(req: { headers?: Record<string, unknown> }): string {
   const v = String(req.headers?.['x-client-version'] ?? '').toLowerCase();
-  return v.includes('mobile') ? ' on mobile' : '';
+  if (v.includes('mobile')) return ' on mobile';
+  if (v.includes('desktop')) return ' on desktop';
+  return '';
 }
 
 export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts: { noteRepository?: NoteRepository; aiGenerate?: NoteAiGenerate; imageGenerate?: import('../note-creative-sql.js').NoteImageGenerate; jwtSecret?: string; publicBaseUrl?: string } = {}): void {
@@ -179,7 +184,40 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
       mobileOfflineEnabled: cfg.mobileOfflineEnabled,
       mobileInkEnabled: cfg.mobileInkEnabled,
       mobileOfflineNoteLimit: cfg.mobileOfflineNoteLimit,
+      // Phase 8 — desktop offline cache + open-to-last-note + global quick-capture.
+      desktopOfflineEnabled: cfg.desktopOfflineEnabled,
+      quickCaptureEnabled: cfg.quickCaptureEnabled,
+      desktopOfflineNoteLimit: cfg.desktopOfflineNoteLimit,
     }));
+  }, { auth: true });
+
+  // weaveNotes Phase 8: the global quick-capture endpoint. The client sends the raw typed text; the
+  // shared `parseQuickCapture` (from @weaveintel/notes) turns it into a note — first line → title, a
+  // leading `/template` or `kind:` hint → a system template — created via the same owner-scoped path
+  // as any note (so a desktop capture lands stamped "on desktop" in the activity log).
+  router.post('/api/me/notes/quick-capture', async (req, res, _params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const cfg = await noteSettings.getConfig();
+    if (!cfg.quickCaptureEnabled) { res.writeHead(403); res.end(JSON.stringify({ error: 'Quick capture is disabled for this workspace' })); return; }
+    const body = JSON.parse(await readBody(req)) as { text?: unknown };
+    const qc = parseQuickCapture(typeof body.text === 'string' ? body.text : '');
+
+    let docJson = '{"type":"doc","content":[]}';
+    let icon: string | null = null;
+    let title = qc.title;
+    if (qc.templateKey) {
+      const tpl = templateByKey(qc.templateKey);
+      if (tpl) { docJson = JSON.stringify(tpl.doc); icon = tpl.icon; if (!qc.title || qc.title === 'Untitled') title = tpl.title; }
+    } else if (qc.body) {
+      docJson = blocksToDoc(qc.body.split('\n').map((line): NoteBlock => ({ type: 'paragraph', text: line })));
+    }
+
+    const id = newUUIDv7();
+    await notes.createNote({ id, owner_user_id: auth.userId, tenant_id: auth.tenantId ?? null, title, icon, doc_json: docJson, is_template: 0, favorite: 0, sensitivity: 'normal', ...(qc.templateKey ? { template_key: qc.templateKey } : {}) });
+    const note = await notes.getNote(id, auth.userId);
+    void noteSettings.recordActivity({ noteId: id, userId: auth.userId, tenantId: auth.tenantId ?? null, action: 'created', actor: 'user', summary: `Quick-captured “${title}”${clientProvenance(req)}` });
+    res.writeHead(201, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(note));
   }, { auth: true });
 
   // ── Single note ────────────────────────────────────────────────────────────

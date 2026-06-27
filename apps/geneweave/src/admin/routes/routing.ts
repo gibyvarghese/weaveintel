@@ -484,6 +484,9 @@ export function registerAdminRoutingRoutes(
     if (body['mobile_offline_enabled'] !== undefined) partial['mobileOfflineEnabled'] = body['mobile_offline_enabled'];
     if (body['mobile_ink_enabled'] !== undefined) partial['mobileInkEnabled'] = body['mobile_ink_enabled'];
     if (body['mobile_offline_note_limit'] !== undefined) partial['mobileOfflineNoteLimit'] = body['mobile_offline_note_limit'];
+    if (body['desktop_offline_enabled'] !== undefined) partial['desktopOfflineEnabled'] = body['desktop_offline_enabled'];
+    if (body['quick_capture_enabled'] !== undefined) partial['quickCaptureEnabled'] = body['quick_capture_enabled'];
+    if (body['desktop_offline_note_limit'] !== undefined) partial['desktopOfflineNoteLimit'] = body['desktop_offline_note_limit'];
     if (body['enabled_ai_tools'] !== undefined) {
       let arr: unknown = body['enabled_ai_tools'];
       try { if (typeof arr === 'string') arr = JSON.parse(arr); } catch { arr = []; }

@@ -205,6 +205,22 @@ export {
   svgToSafeDataUri,
 } from './svg.js';
 
+// weaveNotes Phase 8 — the SHARED desktop quick-capture + offline-session model.
+export {
+  type QuickCapture,
+  type RecentNote,
+  type SnapshotNote,
+  type NotesSnapshot,
+  DEFAULT_RECENTS_LIMIT,
+  SNAPSHOT_VERSION,
+  parseQuickCapture,
+  pushRecent,
+  resolveLastNote,
+  buildNotesSnapshot,
+  readNotesSnapshot,
+  snapshotNote,
+} from './desktop.js';
+
 // weaveNotes Phase 7 — the SHARED cross-platform note-document model (mobile ⇆ web doc_json).
 export {
   type ParagraphBlock,

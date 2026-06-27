@@ -15,12 +15,26 @@ function getCsrfToken(): string {
   return state.csrfToken || '';
 }
 
+/**
+ * weaveNotes Phase 8: detect the Tauri desktop shell so the server can record "on desktop" provenance
+ * (the webview injects `window.__TAURI__` / `__TAURI_INTERNALS__`). In a plain browser this is false
+ * and no client header is sent — the same web build runs as both the web app and the desktop shell.
+ */
+function isDesktopShell(): boolean {
+  if (typeof window === 'undefined') return false;
+  const w = window as unknown as Record<string, unknown>;
+  return !!(w['__TAURI__'] || w['__TAURI_INTERNALS__']);
+}
+
 // Generic fetch wrapper with CSRF support
 async function fetchWithCsrf(url: string, options: RequestInit = {}) {
   const headers = new Headers(options.headers || {});
   headers.set('Content-Type', 'application/json');
   if (getCsrfToken()) {
     headers.set('X-CSRF-Token', getCsrfToken());
+  }
+  if (isDesktopShell()) {
+    headers.set('X-Client-Version', 'geneweave-desktop/1.0.0');
   }
 
   const response = await fetch(url, {
