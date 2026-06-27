@@ -1000,6 +1000,10 @@ export interface ToolRegistryOptions {
   // weaveNotes Phase 4 — the AI creative tools (ink + diagrams; each stages a track-changes suggestion).
   noteCreateDiagram?: (args: { userId: string; noteId: string; instruction: string }) => Promise<{ ok: boolean; error?: string; suggestionId?: string; artifactId?: string | null }>;
   noteDrawInk?: (args: { userId: string; noteId: string; instruction: string }) => Promise<{ ok: boolean; error?: string; suggestionId?: string; artifactId?: string | null }>;
+  // weaveNotes Phase 4 (creative expansion) — illustrations, generated images, and the auto router.
+  noteCreateIllustration?: (args: { userId: string; noteId: string; instruction: string }) => Promise<{ ok: boolean; error?: string; suggestionId?: string; artifactId?: string | null }>;
+  noteGenerateImage?: (args: { userId: string; noteId: string; instruction: string }) => Promise<{ ok: boolean; error?: string; suggestionId?: string; artifactId?: string | null }>;
+  noteCreateVisual?: (args: { userId: string; noteId: string; instruction: string; kind?: string }) => Promise<{ ok: boolean; error?: string; suggestionId?: string; artifactId?: string | null; kind?: string }>;
 }
 
 export function filterToolNamesByPersona(toolNames: string[], persona: string | null | undefined): string[] {
@@ -1714,6 +1718,49 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
           const r = await opts.noteDrawInk({ userId: opts.currentUserId, noteId: args.noteId, instruction: args.instruction });
           if (!r.ok) return { content: `draw_ink failed: ${r.error ?? 'unknown error'}`, isError: true };
           return JSON.stringify({ ok: true, suggestionId: r.suggestionId ?? null, artifactId: r.artifactId ?? null });
+        },
+        tags: ['notes', 'output'],
+      }),
+    } : {}),
+    // weaveNotes Phase 4 (creative expansion): illustrations, generated images, + the auto router.
+    ...(opts?.noteCreateIllustration && opts.currentUserId ? {
+      create_illustration: weaveTool({
+        name: 'create_illustration',
+        description: 'Draw a detailed VECTOR illustration (an SVG — e.g. an anatomical heart, a leaf, a logo, a labelled figure) in one of the user\'s notes. Use this for a real picture the boxes-and-arrows diagram tool can\'t express. Describe the subject in plain words. Staged as a track-changes suggestion the user accepts or rejects.',
+        parameters: { type: 'object', properties: { noteId: { type: 'string', description: 'The id of the note.' }, instruction: { type: 'string', description: 'What to illustrate (e.g. "the human heart in cross-section, labelled").' } }, required: ['noteId', 'instruction'] },
+        execute: async (args: { noteId: string; instruction: string }) => {
+          if (!opts.noteCreateIllustration || !opts.currentUserId) return { content: 'Illustrations are unavailable here.', isError: true };
+          const r = await opts.noteCreateIllustration({ userId: opts.currentUserId, noteId: args.noteId, instruction: args.instruction });
+          if (!r.ok) return { content: `create_illustration failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, suggestionId: r.suggestionId ?? null, artifactId: r.artifactId ?? null });
+        },
+        tags: ['notes', 'output'],
+      }),
+    } : {}),
+    ...(opts?.noteGenerateImage && opts.currentUserId ? {
+      generate_image: weaveTool({
+        name: 'generate_image',
+        description: 'Generate a realistic RASTER image with an image model and embed it in one of the user\'s notes. Use this only when the user wants a photo-like / painterly picture (not a diagram or vector drawing). May be disabled by the workspace (it costs money). Staged as a track-changes suggestion.',
+        parameters: { type: 'object', properties: { noteId: { type: 'string', description: 'The id of the note.' }, instruction: { type: 'string', description: 'A description of the image to generate.' } }, required: ['noteId', 'instruction'] },
+        execute: async (args: { noteId: string; instruction: string }) => {
+          if (!opts.noteGenerateImage || !opts.currentUserId) return { content: 'Image generation is unavailable here.', isError: true };
+          const r = await opts.noteGenerateImage({ userId: opts.currentUserId, noteId: args.noteId, instruction: args.instruction });
+          if (!r.ok) return { content: `generate_image failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, suggestionId: r.suggestionId ?? null, artifactId: r.artifactId ?? null });
+        },
+        tags: ['notes', 'output'],
+      }),
+    } : {}),
+    ...(opts?.noteCreateVisual && opts.currentUserId ? {
+      create_visual: weaveTool({
+        name: 'create_visual',
+        description: 'The ONE-STOP visual tool: describe any picture for one of the user\'s notes — a process / business / block diagram, freeform ink, a vector illustration, or a realistic image — and the AI picks the best kind automatically. Prefer this when the user just says "draw / make / visualize X" without specifying a format. Optionally force kind = "diagram" | "ink" | "illustration" | "image". Honours the workspace\'s enabled modes. Staged as a track-changes suggestion.',
+        parameters: { type: 'object', properties: { noteId: { type: 'string', description: 'The id of the note.' }, instruction: { type: 'string', description: 'What to draw / visualize, in plain words.' }, kind: { type: 'string', enum: ['auto', 'diagram', 'ink', 'illustration', 'image'], description: 'Force a kind, or omit for auto.' } }, required: ['noteId', 'instruction'] },
+        execute: async (args: { noteId: string; instruction: string; kind?: string }) => {
+          if (!opts.noteCreateVisual || !opts.currentUserId) return { content: 'Visuals are unavailable here.', isError: true };
+          const r = await opts.noteCreateVisual({ userId: opts.currentUserId, noteId: args.noteId, instruction: args.instruction, ...(args.kind ? { kind: args.kind } : {}) });
+          if (!r.ok) return { content: `create_visual failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, kind: r.kind ?? null, suggestionId: r.suggestionId ?? null, artifactId: r.artifactId ?? null });
         },
         tags: ['notes', 'output'],
       }),

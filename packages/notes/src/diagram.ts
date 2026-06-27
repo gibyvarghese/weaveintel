@@ -22,7 +22,8 @@ import { HIGHLIGHT_PALETTE, READING_INK } from './colorize.js';
 import { sanitizeColor } from './creative.js';
 
 export type DiagramKind = 'flow' | 'mindmap' | 'graph';
-export type NodeShape = 'box' | 'pill' | 'diamond' | 'ellipse';
+/** Node shapes — process/business/block-diagram vocabulary. */
+export type NodeShape = 'box' | 'pill' | 'diamond' | 'ellipse' | 'cylinder' | 'parallelogram' | 'hexagon';
 
 /** A diagram node: a labelled, coloured shape. `color` is a swatch label or hex (validated to a safe pastel). */
 export interface DiagramNode { id: string; label: string; color?: string; shape?: NodeShape }
@@ -82,7 +83,8 @@ export function validateDiagramScene(input: unknown): DiagramScene {
     while (ids.has(id)) id = `${id}_${auto}`;
     ids.add(id); auto += 1;
     const label = typeof n['label'] === 'string' ? n['label'].slice(0, MAX_LABEL) : (typeof n['text'] === 'string' ? (n['text'] as string).slice(0, MAX_LABEL) : id);
-    const shape: NodeShape = n['shape'] === 'diamond' || n['shape'] === 'ellipse' || n['shape'] === 'pill' ? n['shape'] : 'box';
+    const SHAPES: NodeShape[] = ['box', 'pill', 'diamond', 'ellipse', 'cylinder', 'parallelogram', 'hexagon'];
+    const shape: NodeShape = SHAPES.includes(n['shape'] as NodeShape) ? n['shape'] as NodeShape : 'box';
     nodes.push({ id, label, color: nodeFill(typeof n['color'] === 'string' ? n['color'] : undefined, nodes.length), shape });
   }
   if (nodes.length === 0) nodes.push({ id: 'n0', label: title ?? 'Diagram', color: HIGHLIGHT_PALETTE[0]!.color, shape: 'box' });
@@ -190,13 +192,23 @@ export function diagramToSvg(scene: DiagramScene): string {
     const fill = n.color ?? HIGHLIGHT_PALETTE[0]!.color;
     const stroke = darken(fill);
     const cx = n.x + n.w / 2, cy = n.y + n.h / 2;
+    const x = n.x, y = n.y, w = n.w, hh = n.h;
     if (n.shape === 'diamond') {
-      parts.push(`<polygon points="${cx},${n.y} ${n.x + n.w},${cy} ${cx},${n.y + n.h} ${n.x},${cy}" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`);
+      parts.push(`<polygon points="${cx},${y} ${x + w},${cy} ${cx},${y + hh} ${x},${cy}" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`);
     } else if (n.shape === 'ellipse') {
-      parts.push(`<ellipse cx="${cx}" cy="${cy}" rx="${n.w / 2}" ry="${n.h / 2}" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`);
+      parts.push(`<ellipse cx="${cx}" cy="${cy}" rx="${w / 2}" ry="${hh / 2}" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`);
+    } else if (n.shape === 'cylinder') {
+      const ry = Math.min(8, hh / 4);
+      parts.push(`<path d="M ${x} ${y + ry} A ${w / 2} ${ry} 0 0 1 ${x + w} ${y + ry} L ${x + w} ${y + hh - ry} A ${w / 2} ${ry} 0 0 1 ${x} ${y + hh - ry} Z" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/><path d="M ${x} ${y + ry} A ${w / 2} ${ry} 0 0 0 ${x + w} ${y + ry}" fill="none" stroke="${stroke}" stroke-width="1.5"/>`);
+    } else if (n.shape === 'parallelogram') {
+      const sk = Math.min(16, w / 4);
+      parts.push(`<polygon points="${x + sk},${y} ${x + w},${y} ${x + w - sk},${y + hh} ${x},${y + hh}" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`);
+    } else if (n.shape === 'hexagon') {
+      const sk = Math.min(16, w / 4);
+      parts.push(`<polygon points="${x + sk},${y} ${x + w - sk},${y} ${x + w},${cy} ${x + w - sk},${y + hh} ${x + sk},${y + hh} ${x},${cy}" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`);
     } else {
-      const rx = n.shape === 'pill' ? n.h / 2 : 10;
-      parts.push(`<rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="${rx}" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`);
+      const rx = n.shape === 'pill' ? hh / 2 : 10;
+      parts.push(`<rect x="${x}" y="${y}" width="${w}" height="${hh}" rx="${rx}" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`);
     }
     parts.push(`<text x="${cx}" y="${cy + 4}" text-anchor="middle" font-family="system-ui,sans-serif" font-size="12" font-weight="600" fill="${READING_INK}">${esc(n.label.length > 26 ? n.label.slice(0, 25) + '…' : n.label)}</text>`);
   }

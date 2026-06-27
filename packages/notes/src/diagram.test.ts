@@ -66,6 +66,14 @@ describe('diagram — diagramToSvg', () => {
     expect(svg).toContain('<polygon'); // the diamond
     expect(svg).toContain('Tides'); // the title
   });
+  it('renders process/business shapes (cylinder, parallelogram, hexagon)', () => {
+    const svg = diagramToSvg(validateDiagramScene({
+      nodes: [{ id: 'db', label: 'Store', shape: 'cylinder' }, { id: 'io', label: 'Input', shape: 'parallelogram' }, { id: 'pre', label: 'Prep', shape: 'hexagon' }],
+      edges: [{ from: 'io', to: 'pre' }, { from: 'pre', to: 'db' }],
+    }));
+    expect(svg).toContain('<polygon'); // parallelogram / hexagon
+    expect(svg).toContain('A '); // cylinder arc path
+  });
   it('SECURITY: a hostile label/colour cannot inject script or CSS', () => {
     const svg = diagramToSvg(validateDiagramScene({
       nodes: [{ id: 'x', label: '</text><script>alert(1)</script>', color: 'red;}body{}' }],

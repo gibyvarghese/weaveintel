@@ -164,7 +164,11 @@ export type InkPrimitive =
   | { kind: 'arrow'; x1: number; y1: number; x2: number; y2: number; color?: string; width?: number }
   | { kind: 'box'; x: number; y: number; w: number; h: number; color?: string; width?: number }
   | { kind: 'circle'; cx: number; cy: number; r: number; color?: string; width?: number }
-  | { kind: 'check'; x: number; y: number; size?: number; color?: string; width?: number };
+  | { kind: 'check'; x: number; y: number; size?: number; color?: string; width?: number }
+  // Freeform: the AI traces an organic outline as a real, editable stroke (open polyline or a
+  // closed shape). `points` is `[{x,y}, …]`; `closed` joins the last point back to the first.
+  | { kind: 'path'; points: Array<{ x: number; y: number }>; closed?: boolean; color?: string; width?: number }
+  | { kind: 'dot'; cx: number; cy: number; color?: string; width?: number };
 
 /** Turn the AI's high-level ink primitives into real, editable strokes. Hand-drawn, slightly loose. */
 export function inkFromPrimitives(primitives: unknown): InkStroke[] {
@@ -195,6 +199,19 @@ export function inkFromPrimitives(primitives: unknown): InkStroke[] {
         mk(pts); break;
       }
       case 'check': { const x = num('x'), y = num('y'), s = clampNum(p['size'], 4, 200, 16); mk([{ x, y: y + s * 0.5 }, { x: x + s * 0.4, y: y + s }, { x: x + s, y }]); break; }
+      case 'dot': { const cx = num('cx'), cy = num('cy'); mk([{ x: cx, y: cy }, { x: cx + 0.5, y: cy + 0.5 }]); break; }
+      case 'path': {
+        const ptsIn = Array.isArray(p['points']) ? (p['points'] as unknown[]).slice(0, MAX_POINTS) : [];
+        const pts: InkPoint[] = [];
+        for (const pr of ptsIn) {
+          if (!pr || typeof pr !== 'object') continue;
+          const pp = pr as Record<string, unknown>;
+          const x = Number(pp['x']); const y = Number(pp['y']);
+          if (Number.isFinite(x) && Number.isFinite(y)) pts.push({ x: clampNum(x, -MAX_COORD, MAX_COORD, 0), y: clampNum(y, -MAX_COORD, MAX_COORD, 0) });
+        }
+        if (pts.length >= 2) { if (p['closed'] === true && pts.length >= 3) pts.push({ ...pts[0]! }); mk(pts); }
+        break;
+      }
       default: break;
     }
   }

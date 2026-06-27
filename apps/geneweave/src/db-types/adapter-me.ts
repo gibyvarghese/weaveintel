@@ -321,7 +321,8 @@ export interface NoteSuggestionRow {
   author_site: string;
   action: 'continue' | 'rewrite' | 'summarize' | 'ask' | 'note_edit' | 'ai_block'
     | 'apply_highlight' | 'apply_text_color' | 'colorize_semantic'
-    | 'create_diagram' | 'draw_ink' | 'recolor_ink';
+    | 'create_diagram' | 'draw_ink' | 'recolor_ink'
+    | 'create_illustration' | 'generate_image';
   status: 'pending' | 'accepted' | 'rejected';
   ops_json: string;
   preview_text: string;
@@ -438,6 +439,12 @@ export interface WeaveNotesSettingsRow {
   live_cursors_enabled: number;
   /** weaveNotes Phase 3: show the AI as a live participant while it edits (0/1). */
   ai_presence_enabled: number;
+  /** weaveNotes Phase 4 creative modes (0/1) + the image model. */
+  diagrams_enabled: number;
+  ink_enabled: number;
+  illustration_enabled: number;
+  image_generation_enabled: number;
+  image_model: string;
   enabled_ai_tools: string;
   updated_at: string;
 }

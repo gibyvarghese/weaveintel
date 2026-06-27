@@ -111,9 +111,8 @@ export function wireSelectionCard(opts: { container: HTMLElement; noteId: string
     () => void send(`ai/${action}`, { instruction, selectionText: savedText }, label);
   const highlight = (color: string) => () => void send('ai/highlight', { phrase: savedText, color }, 'highlighting');
   const colorize = (scheme: string) => () => void send('ai/colorize', { scheme }, 'colour-coding');
-  // Phase 4: turn the selection into a diagram, or draw ink, from the card.
-  const makeDiagram = () => void send('ai/diagram', { instruction: `Make a clear, colour-coded diagram of: ${savedText}` }, 'drawing a diagram');
-  const drawInk = () => void send('ai/ink', { instruction: savedText || 'a blue underline' }, 'drawing');
+  // Phase 4 (creative expansion): the one-stop "Visualize" — the AI picks the kind (or you force it).
+  const visualize = (kind: string) => () => void send('ai/visual', { instruction: savedText || 'a visual for this note', kind }, kind === 'image' ? 'generating an image' : kind === 'illustration' ? 'illustrating' : kind === 'diagram' ? 'drawing a diagram' : kind === 'ink' ? 'sketching' : 'visualizing');
 
   function openCard(): void {
     if (!savedRect) return;
@@ -126,6 +125,13 @@ export function wireSelectionCard(opts: { container: HTMLElement; noteId: string
     const chip = (label: string, onClick: () => void, cls = '') => h('button', { className: `notes-aicard-chip ${cls}`, onMouseDown: (e: MouseEvent) => { e.preventDefault(); onClick(); } }, label);
 
     const schemeSel = h('select', { className: 'notes-aicard-scheme' }, ...SCHEMES.map((s) => h('option', { value: s.key }, s.label))) as HTMLSelectElement;
+    const visualSel = h('select', { className: 'notes-aicard-scheme' },
+      h('option', { value: 'auto' }, 'auto (AI picks)'),
+      h('option', { value: 'diagram' }, 'diagram'),
+      h('option', { value: 'illustration' }, 'illustration'),
+      h('option', { value: 'ink' }, 'sketch / ink'),
+      h('option', { value: 'image' }, 'image (realistic)'),
+    ) as HTMLSelectElement;
 
     card = h('div', { className: 'notes-aicard', onMouseDown: (e: MouseEvent) => e.stopPropagation() },
       h('div', { className: 'notes-aicard-prompt' }, h('span', { className: 'notes-aicard-spark' }, '✦'), promptInput),
@@ -135,8 +141,6 @@ export function wireSelectionCard(opts: { container: HTMLElement; noteId: string
         chip('Expand', textAction('rewrite', 'Expand this passage with more detail.', 'expanding')),
         chip('Explain', textAction('ask', 'Explain this passage simply.', 'explaining')),
         chip('Continue', textAction('continue', '', 'continuing')),
-        chip('✦ Make a diagram', makeDiagram, 'notes-aicard-create'),
-        chip('✎ Draw ink', drawInk, 'notes-aicard-create'),
       ),
       h('div', { className: 'notes-aicard-colors' },
         h('span', { className: 'notes-aicard-colorlabel' }, 'Highlight'),
@@ -145,6 +149,13 @@ export function wireSelectionCard(opts: { container: HTMLElement; noteId: string
         h('span', { className: 'notes-aicard-colorlabel' }, 'Colour-code'),
         schemeSel,
         chip('Go', () => colorize(schemeSel.value)(), 'notes-aicard-go'),
+      ),
+      // Phase 4: the one-stop Visualize row — pick a kind (or Auto) → the AI draws it.
+      h('div', { className: 'notes-aicard-visual' },
+        h('span', { className: 'notes-aicard-spark' }, '✦'),
+        h('span', { className: 'notes-aicard-colorlabel' }, 'Visualize'),
+        visualSel,
+        chip('Draw', () => visualize(visualSel.value)(), 'notes-aicard-create'),
       ),
       h('div', { className: 'notes-aicard-status' }),
     ) as HTMLElement;

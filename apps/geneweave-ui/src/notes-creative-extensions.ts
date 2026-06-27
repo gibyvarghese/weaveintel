@@ -31,11 +31,13 @@ function safeColor(input: unknown): string | null {
   return null;
 }
 
-/** Only allow a safe image src scheme (http/https/data:image). */
+/** Only allow a safe image src: http(s), an inert data:image URI, or a same-origin artifact path. */
 function safeSrc(input: unknown): string | null {
   if (typeof input !== 'string') return null;
   const s = input.trim();
   if (/^https?:\/\//i.test(s) || /^data:image\//i.test(s)) return s;
+  // Same-origin generated-image / artifact path (Phase 4): /api/artifacts/<id>/data
+  if (/^\/api\/artifacts\/[\w-]+\/data$/.test(s)) return s;
   return null;
 }
 

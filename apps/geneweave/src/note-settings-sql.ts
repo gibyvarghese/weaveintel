@@ -34,6 +34,11 @@ function rowToConfig(row: WeaveNotesSettingsRow | null): WeaveNotesConfig {
     localModelForSensitive: row.local_model_for_sensitive !== 0,
     liveCursorsEnabled: row.live_cursors_enabled !== 0,   // undefined (pre-m107) → enabled
     aiPresenceEnabled: row.ai_presence_enabled !== 0,
+    diagramsEnabled: row.diagrams_enabled !== 0,          // undefined (pre-m109) → enabled
+    inkEnabled: row.ink_enabled !== 0,
+    illustrationEnabled: row.illustration_enabled !== 0,
+    imageGenerationEnabled: row.image_generation_enabled === 1, // default OFF (undefined → off)
+    ...(typeof row.image_model === 'string' && row.image_model ? { imageModel: row.image_model } : {}),
     enabledAiTools: tools,
   }).config;
 }
@@ -62,6 +67,11 @@ export function createNoteSettingsService(db: SettingsDb, opts: { now?: () => nu
       local_model_for_sensitive: config.localModelForSensitive ? 1 : 0,
       live_cursors_enabled: config.liveCursorsEnabled ? 1 : 0,
       ai_presence_enabled: config.aiPresenceEnabled ? 1 : 0,
+      diagrams_enabled: config.diagramsEnabled ? 1 : 0,
+      ink_enabled: config.inkEnabled ? 1 : 0,
+      illustration_enabled: config.illustrationEnabled ? 1 : 0,
+      image_generation_enabled: config.imageGenerationEnabled ? 1 : 0,
+      image_model: config.imageModel,
       enabled_ai_tools: JSON.stringify(config.enabledAiTools),
     });
     return { config, warnings };

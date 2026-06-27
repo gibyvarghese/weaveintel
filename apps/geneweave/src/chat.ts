@@ -56,7 +56,7 @@ import { DbToolApprovalGate } from './tool-approval-gate.js';
 import { createTemporalStore } from './temporal-store.js';
 import { createNoteAiService, createModelTextGenerator, agentCreateNote } from './note-ai-sql.js';
 import { createColorizeTools } from './note-colorize-sql.js';
-import { createCreativeTools } from './note-creative-sql.js';
+import { createCreativeTools, createModelImageGenerator } from './note-creative-sql.js';
 import { withAiPresence } from './note-ai-presence.js';
 import { createNotePublishService } from './note-publish-sql.js';
 import { createNoteGraphService } from './note-graph-sql.js';
@@ -432,9 +432,17 @@ export class ChatEngine {
       // weaveNotes Phase 4: wire the AI creative tools (diagram + ink). Each emits native,
       // editable content as a track-changes suggestion + mirrors its SVG to an artifact.
       noteCreateDiagram: (a: { userId: string; noteId: string; instruction: string }) =>
-        createCreativeTools(db, createModelTextGenerator(config)).createDiagram(a),
+        createCreativeTools(db, createModelTextGenerator(config), { generateImage: createModelImageGenerator(config) }).createDiagram(a),
       noteDrawInk: (a: { userId: string; noteId: string; instruction: string }) =>
-        createCreativeTools(db, createModelTextGenerator(config)).drawInk(a),
+        createCreativeTools(db, createModelTextGenerator(config), { generateImage: createModelImageGenerator(config) }).drawInk(a),
+      // weaveNotes Phase 4 (creative expansion): illustrations, generated images, and the
+      // one-stop auto-routing visual tool — so the agent can make ANY kind of picture.
+      noteCreateIllustration: (a: { userId: string; noteId: string; instruction: string }) =>
+        createCreativeTools(db, createModelTextGenerator(config), { generateImage: createModelImageGenerator(config) }).createIllustration(a),
+      noteGenerateImage: (a: { userId: string; noteId: string; instruction: string }) =>
+        createCreativeTools(db, createModelTextGenerator(config), { generateImage: createModelImageGenerator(config) }).generateImage(a),
+      noteCreateVisual: (a: { userId: string; noteId: string; instruction: string; kind?: string }) =>
+        createCreativeTools(db, createModelTextGenerator(config), { generateImage: createModelImageGenerator(config) }).createVisual(a as { userId: string; noteId: string; instruction: string; kind?: 'auto' | 'diagram' | 'ink' | 'illustration' | 'image' }),
     };
   }
 

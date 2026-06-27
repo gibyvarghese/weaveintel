@@ -86,7 +86,7 @@ void createInMemoryNoteRepository; // keep the import available to embedders wit
  * without changing this file. Tests/embedders may inject their own repository via
  * `opts.noteRepository`.
  */
-export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts: { noteRepository?: NoteRepository; aiGenerate?: NoteAiGenerate; jwtSecret?: string; publicBaseUrl?: string } = {}): void {
+export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts: { noteRepository?: NoteRepository; aiGenerate?: NoteAiGenerate; imageGenerate?: import('../note-creative-sql.js').NoteImageGenerate; jwtSecret?: string; publicBaseUrl?: string } = {}): void {
   const notes = opts.noteRepository ?? createSqlNoteRepository(db);
   // weaveNotes Phase 3: the AI co-author service (suggestions, agent edits, AI blocks).
   // Only wired when the host provides an LLM generator (so unit/embedder setups stay LLM-free).
@@ -95,7 +95,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
   // colour-code by meaning). Same LLM-optional wiring as the co-author service.
   const noteColorize = opts.aiGenerate ? createNoteColorizeService(db, opts.aiGenerate) : null;
   // weaveNotes Phase 4: the AI creative service (diagrams + ink). Same LLM-optional wiring.
-  const noteCreative = opts.aiGenerate ? createNoteCreativeService(db, opts.aiGenerate) : null;
+  const noteCreative = opts.aiGenerate ? createNoteCreativeService(db, opts.aiGenerate, opts.imageGenerate ? { generateImage: opts.imageGenerate } : {}) : null;
   // weaveNotes Phase 4: the publish service (note → shareable artifact, sensitivity-gated).
   const publish = createNotePublishService(db, { jwtSecret: opts.jwtSecret ?? process.env['JWT_SECRET'] ?? 'insecure-dev-secret', ...(opts.publicBaseUrl ? { publicBaseUrl: opts.publicBaseUrl } : {}) });
   // weaveNotes Phase 5: the knowledge-graph service (wiki-links/backlinks, entity/relation
@@ -487,6 +487,28 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     res.writeHead(r.ok ? 201 : 400, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(r));
   }, { auth: true });
+
+  // Phase 4 (creative expansion): SVG illustration, generated image, and the AUTO router.
+  //   POST /api/me/notes/:id/ai/illustration { instruction }          → an SVG-illustration suggestion
+  //   POST /api/me/notes/:id/ai/image        { instruction }          → a generated-image suggestion (if enabled)
+  //   POST /api/me/notes/:id/ai/visual       { instruction, kind? }   → the AI picks the best kind
+  const creativeRoute = (path: string, run: (noteId: string, access: NonNullable<Awaited<ReturnType<typeof resolveNoteAccess>>>, body: Record<string, unknown>) => Promise<{ ok: boolean }>) =>
+    router.post(`/api/me/notes/:id/ai/${path}`, async (req, res, params, auth) => {
+      if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+      if (!noteCreative) { res.writeHead(501); res.end(JSON.stringify({ error: 'AI features are not configured' })); return; }
+      const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+      if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+      if (!roleAtLeast(access.role, 'collaborator')) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
+      let body: Record<string, unknown> = {};
+      try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+      const r = await run(params['id']!, access, body);
+      res.writeHead(r.ok ? 201 : 400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(r));
+    }, { auth: true });
+
+  creativeRoute('illustration', (noteId, access, body) => noteCreative!.createIllustration({ noteId, access, instruction: typeof body['instruction'] === 'string' && body['instruction'].trim() ? body['instruction'] : 'an illustration of this note' }));
+  creativeRoute('image', (noteId, access, body) => noteCreative!.generateImage({ noteId, access, instruction: typeof body['instruction'] === 'string' && body['instruction'].trim() ? body['instruction'] : 'an image for this note' }));
+  creativeRoute('visual', (noteId, access, body) => noteCreative!.createVisual({ noteId, access, instruction: typeof body['instruction'] === 'string' && body['instruction'].trim() ? body['instruction'] : 'a visual for this note', ...(typeof body['kind'] === 'string' ? { kind: body['kind'] as 'auto' | 'diagram' | 'ink' | 'illustration' | 'image' } : {}) }));
 
   router.post('/api/me/notes/:id/ai/:action', async (req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }

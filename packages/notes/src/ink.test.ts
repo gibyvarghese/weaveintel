@@ -56,6 +56,14 @@ describe('ink — inkFromPrimitives (the AI draws editable ink)', () => {
     const box = s.find((st) => st.points.length === 5);
     expect(box).toBeTruthy();
   });
+  it('traces a freeform path (organic outline) as one editable stroke', () => {
+    const s = inkFromPrimitives([{ kind: 'path', points: [{ x: 0, y: 0 }, { x: 10, y: 20 }, { x: 20, y: 0 }], closed: true, color: '#A8281F' }]);
+    expect(s).toHaveLength(1);
+    expect(s[0]!.points.length).toBe(4); // closed → first point appended
+    expect(s[0]!.color).toBe('#A8281F');
+    // a degenerate path (<2 points) is dropped
+    expect(inkFromPrimitives([{ kind: 'path', points: [{ x: 0, y: 0 }] }])).toHaveLength(0);
+  });
   it('recolours all non-eraser strokes', () => {
     const s = inkFromPrimitives([{ kind: 'line', x1: 0, y1: 0, x2: 10, y2: 10 }]);
     const re = recolorStrokes(s, '#0B6B4F');

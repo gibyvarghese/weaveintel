@@ -197,3 +197,10 @@ export {
   layoutDiagram,
   diagramToSvg,
 } from './diagram.js';
+
+// weaveNotes Phase 4 (creative expansion) — the SVG ILLUSTRATION sanitiser (AI-authored vector art).
+export {
+  sanitizeSvg,
+  svgToDataUri,
+  svgToSafeDataUri,
+} from './svg.js';

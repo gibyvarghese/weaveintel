@@ -37,6 +37,16 @@ export interface WeaveNotesConfig {
   liveCursorsEnabled: boolean;
   /** Show the AI as a live participant ("weaveIntel AI") while it edits a note (Phase 3). */
   aiPresenceEnabled: boolean;
+  /** Phase 4: let the AI create node/edge diagrams (flow / mind-map / process / block). */
+  diagramsEnabled: boolean;
+  /** Phase 4: let the AI draw freehand ink (underline / arrow / sketch / organic outline). */
+  inkEnabled: boolean;
+  /** Phase 4: let the AI author detailed SVG illustrations (vector art — a heart, a leaf, a logo). */
+  illustrationEnabled: boolean;
+  /** Phase 4: let the AI GENERATE raster images via an image model (realistic pictures; costs money). */
+  imageGenerationEnabled: boolean;
+  /** Phase 4: the image model used when image generation is enabled. */
+  imageModel: string;
   /** The note AI tools the editor agent is allowed to use (subset of the catalog). */
   enabledAiTools: string[];
 }
@@ -47,8 +57,9 @@ export const WEAVENOTES_AI_TOOLS = [
   'capture_web_page', 'autofill_database', 'read_note_activity',
   // Phase 2 — the AI selection card's colour tools.
   'apply_highlight', 'apply_text_color', 'colorize_semantic',
-  // Phase 4 — the AI creative tools (ink + diagrams).
+  // Phase 4 — the AI creative tools (ink + diagrams + illustrations + images).
   'create_diagram', 'draw_ink', 'recolor_ink',
+  'create_illustration', 'generate_image', 'create_visual',
 ] as const;
 
 export const DEFAULT_WEAVENOTES_CONFIG: WeaveNotesConfig = {
@@ -61,6 +72,11 @@ export const DEFAULT_WEAVENOTES_CONFIG: WeaveNotesConfig = {
   localModelForSensitive: false,
   liveCursorsEnabled: true,
   aiPresenceEnabled: true,
+  diagramsEnabled: true,
+  inkEnabled: true,
+  illustrationEnabled: true,
+  imageGenerationEnabled: false, // off by default: raster image generation costs money + needs an image model
+  imageModel: 'gpt-image-1',
   enabledAiTools: [...WEAVENOTES_AI_TOOLS],
 };
 
@@ -117,6 +133,11 @@ export function validateWeaveNotesConfig(
       localModelForSensitive: asBool(p.localModelForSensitive ?? base.localModelForSensitive, base.localModelForSensitive),
       liveCursorsEnabled: asBool(p.liveCursorsEnabled ?? base.liveCursorsEnabled, base.liveCursorsEnabled),
       aiPresenceEnabled: asBool(p.aiPresenceEnabled ?? base.aiPresenceEnabled, base.aiPresenceEnabled),
+      diagramsEnabled: asBool(p.diagramsEnabled ?? base.diagramsEnabled, base.diagramsEnabled),
+      inkEnabled: asBool(p.inkEnabled ?? base.inkEnabled, base.inkEnabled),
+      illustrationEnabled: asBool(p.illustrationEnabled ?? base.illustrationEnabled, base.illustrationEnabled),
+      imageGenerationEnabled: asBool(p.imageGenerationEnabled ?? base.imageGenerationEnabled, base.imageGenerationEnabled),
+      imageModel: typeof p.imageModel === 'string' && p.imageModel.trim() ? p.imageModel.trim().slice(0, 64) : base.imageModel,
       enabledAiTools: tools,
     },
     warnings,

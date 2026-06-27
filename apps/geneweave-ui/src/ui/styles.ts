@@ -1566,6 +1566,11 @@ input{font-family:inherit;outline:none}
 .gw-ink-surface{position:relative;min-height:120px;touch-action:none;cursor:crosshair}
 .gw-ink-surface svg{display:block;max-width:100%}
 .gw-ink-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--fg3,#8A958F);font-size:13px;pointer-events:none}
+/* weaveNotes Phase 4 (creative expansion) — the card Visualize row + AI illustrations/images */
+.notes-aicard-visual{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding-top:8px;border-top:1px solid var(--hairline,#E7ECEA);margin-top:8px}
+.notes-aicard-visual .notes-aicard-spark{color:var(--accent,#0E9A6E);font-weight:800}
+.gw-canvas .notes-editor-mount .gw-image[data-author="ai"]{padding:8px;border-radius:12px;background:var(--mint-wash,#F2FAF6);box-shadow:inset 3px 0 0 var(--accent,#0E9A6E)}
+.gw-canvas .notes-editor-mount .gw-image[data-author="ai"] img{border-radius:8px}
 /* Slash menu */
 .notes-slash-menu{background:var(--bg1);border:1px solid var(--bg4);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:4px;min-width:200px;z-index:300}
 .notes-slash-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;cursor:pointer;font-size:13px;color:var(--fg1)}

@@ -474,6 +474,11 @@ export function registerAdminRoutingRoutes(
     if (body['local_model_for_sensitive'] !== undefined) partial['localModelForSensitive'] = body['local_model_for_sensitive'];
     if (body['live_cursors_enabled'] !== undefined) partial['liveCursorsEnabled'] = body['live_cursors_enabled'];
     if (body['ai_presence_enabled'] !== undefined) partial['aiPresenceEnabled'] = body['ai_presence_enabled'];
+    if (body['diagrams_enabled'] !== undefined) partial['diagramsEnabled'] = body['diagrams_enabled'];
+    if (body['ink_enabled'] !== undefined) partial['inkEnabled'] = body['ink_enabled'];
+    if (body['illustration_enabled'] !== undefined) partial['illustrationEnabled'] = body['illustration_enabled'];
+    if (body['image_generation_enabled'] !== undefined) partial['imageGenerationEnabled'] = body['image_generation_enabled'];
+    if (body['image_model'] !== undefined) partial['imageModel'] = body['image_model'];
     if (body['enabled_ai_tools'] !== undefined) {
       let arr: unknown = body['enabled_ai_tools'];
       try { if (typeof arr === 'string') arr = JSON.parse(arr); } catch { arr = []; }
