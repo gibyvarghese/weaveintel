@@ -204,3 +204,20 @@ export {
   svgToDataUri,
   svgToSafeDataUri,
 } from './svg.js';
+
+// weaveNotes Phase 5 — STUDY: flashcards + the SM-2 spaced-repetition scheduler.
+export {
+  type ReviewRating,
+  type CardSchedule,
+  type Flashcard,
+  type StudyStats,
+  MIN_EASE,
+  INITIAL_EASE,
+  ratingToQuality,
+  initialSchedule,
+  sm2,
+  isDue,
+  dueCards,
+  studyStats,
+  validateFlashcards,
+} from './study.js';

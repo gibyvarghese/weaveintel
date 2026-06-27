@@ -47,6 +47,10 @@ export interface WeaveNotesConfig {
   imageGenerationEnabled: boolean;
   /** Phase 4: the image model used when image generation is enabled. */
   imageModel: string;
+  /** Phase 5: let the AI turn a note into flashcards + schedule reviews (SM-2 spaced repetition). */
+  flashcardsEnabled: boolean;
+  /** Phase 5: cap how many NEW cards a study session introduces per day (active-recall pacing). */
+  dailyNewCardLimit: number;
   /** The note AI tools the editor agent is allowed to use (subset of the catalog). */
   enabledAiTools: string[];
 }
@@ -60,6 +64,8 @@ export const WEAVENOTES_AI_TOOLS = [
   // Phase 4 — the AI creative tools (ink + diagrams + illustrations + images).
   'create_diagram', 'draw_ink', 'recolor_ink',
   'create_illustration', 'generate_image', 'create_visual',
+  // Phase 5 — AI study: turn a note into flashcards.
+  'make_flashcards',
 ] as const;
 
 export const DEFAULT_WEAVENOTES_CONFIG: WeaveNotesConfig = {
@@ -77,6 +83,8 @@ export const DEFAULT_WEAVENOTES_CONFIG: WeaveNotesConfig = {
   illustrationEnabled: true,
   imageGenerationEnabled: false, // off by default: raster image generation costs money + needs an image model
   imageModel: 'gpt-image-1',
+  flashcardsEnabled: true,
+  dailyNewCardLimit: 20,
   enabledAiTools: [...WEAVENOTES_AI_TOOLS],
 };
 
@@ -138,6 +146,8 @@ export function validateWeaveNotesConfig(
       illustrationEnabled: asBool(p.illustrationEnabled ?? base.illustrationEnabled, base.illustrationEnabled),
       imageGenerationEnabled: asBool(p.imageGenerationEnabled ?? base.imageGenerationEnabled, base.imageGenerationEnabled),
       imageModel: typeof p.imageModel === 'string' && p.imageModel.trim() ? p.imageModel.trim().slice(0, 64) : base.imageModel,
+      flashcardsEnabled: asBool(p.flashcardsEnabled ?? base.flashcardsEnabled, base.flashcardsEnabled),
+      dailyNewCardLimit: clampInt(p.dailyNewCardLimit ?? base.dailyNewCardLimit, 1, 1000, base.dailyNewCardLimit),
       enabledAiTools: tools,
     },
     warnings,

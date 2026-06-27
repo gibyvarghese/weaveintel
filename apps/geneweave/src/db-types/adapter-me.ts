@@ -445,6 +445,9 @@ export interface WeaveNotesSettingsRow {
   illustration_enabled: number;
   image_generation_enabled: number;
   image_model: string;
+  /** weaveNotes Phase 5: flashcards + spaced repetition. */
+  flashcards_enabled: number;
+  daily_new_card_limit: number;
   enabled_ai_tools: string;
   updated_at: string;
 }

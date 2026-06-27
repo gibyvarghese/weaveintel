@@ -28,6 +28,7 @@ import { wireSelectionCard, type SelectionCard } from './notes-ai-card.js';
 import { wireLiveCursors, peerColor, type LiveCursors, type Participant } from './notes-cursors.js';
 import { wireNoteConnections, type NoteConnectionsPanel } from './notes-graph.js';
 import { renderDatabasesView } from './notes-database-view.js';
+import { renderStudyView } from './notes-study.js';
 import { renderCapturePanel } from './notes-capture.js';
 import { wireNoteHistory, wireNoteComments, wireNoteSynced, renderWorkspaceAsk, type SimplePanel } from './notes-workspace-ui.js';
 import { renderEditorCanvas, type OverflowItem } from './notes-editor-canvas.js';
@@ -228,6 +229,7 @@ function buildInsertMenu(render: () => void): OverflowItem[] {
         openCenterModal('Ask your workspace', renderWorkspaceAsk((id) => { void openNote(id); document.querySelector('.gw-modal-overlay')?.remove(); }));
       } },
     { label: '🗃 Databases', title: 'Tables with AI auto-fill', onClick: () => { state.currentDatabaseId = null; state.notesView = 'databases'; render(); } },
+    { label: '📇 Study (flashcards)', title: 'Make + review flashcards from this note (spaced repetition)', onClick: () => { teardownCoedit(); state.notesView = 'study'; render(); } },
   ];
 }
 
@@ -532,7 +534,9 @@ export function renderNotesView(render: () => void): HTMLElement {
   const editing = notesView === 'editor' && currentNote;
   const composed = editing ? renderEditorPanel(currentNote, render) : null;
 
-  const centre = notesView === 'databases'
+  const centre = notesView === 'study' && currentNote
+    ? renderStudyView(currentNote.id, currentNote.title || 'Untitled', () => { state.notesView = 'editor'; render(); })
+    : notesView === 'databases'
     ? h('main', { className: 'gw-canvas' }, renderDatabasesView(render))
     : notesView === 'templates'
       ? h('main', { className: 'gw-canvas' }, renderTemplatesGallery(render))

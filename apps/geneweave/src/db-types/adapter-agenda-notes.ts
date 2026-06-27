@@ -111,6 +111,22 @@ export interface NoteDatabaseRow {
   created_at: string;
 }
 
+/** weaveNotes Phase 5: a flashcard (front/back) + its SM-2 schedule. Times are epoch-ms. */
+export interface NoteFlashcardRow {
+  id: string;
+  note_id: string;
+  owner_user_id: string;
+  tenant_id: string | null;
+  front: string;
+  back: string;
+  ease_factor: number;
+  interval_days: number;
+  repetitions: number;
+  due_at: number;
+  last_reviewed_at: number | null;
+  created_at: number;
+}
+
 export interface NoteDbRowRow {
   id: string;
   database_id: string;
@@ -195,4 +211,14 @@ export interface IAgendaNotesStore {
   createNoteDbRow(row: Pick<NoteDbRowRow, 'id' | 'database_id'> & { fields_json?: string }): Promise<void>;
   updateNoteDbRow(id: string, databaseId: string, fieldsJson: string): Promise<void>;
   deleteNoteDbRow(id: string, databaseId: string): Promise<void>;
+
+  // ── weaveNotes Phase 5: flashcards (SM-2 spaced repetition) ──────────────────
+  createNoteFlashcard(row: NoteFlashcardRow): Promise<void>;
+  listNoteFlashcards(noteId: string, ownerUserId: string): Promise<NoteFlashcardRow[]>;
+  getNoteFlashcard(id: string, ownerUserId: string): Promise<NoteFlashcardRow | null>;
+  /** Cards due (due_at ≤ now) for a user, across all their notes, soonest-due first. */
+  listDueFlashcards(ownerUserId: string, nowMs: number, limit: number): Promise<NoteFlashcardRow[]>;
+  /** Update a card's SM-2 schedule after a review (owner-scoped). */
+  updateNoteFlashcardSchedule(id: string, ownerUserId: string, sched: { ease_factor: number; interval_days: number; repetitions: number; due_at: number; last_reviewed_at: number }): Promise<void>;
+  countNoteFlashcards(noteId: string, ownerUserId: string): Promise<number>;
 }

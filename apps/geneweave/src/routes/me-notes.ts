@@ -56,6 +56,7 @@ import { noteCoeditHub } from '../note-coedit-hub.js';
 import { createNoteAiService, type NoteAiGenerate, type AiAction } from '../note-ai-sql.js';
 import { createNoteColorizeService } from '../note-colorize-sql.js';
 import { createNoteCreativeService } from '../note-creative-sql.js';
+import { createNoteStudyService } from '../note-study-sql.js';
 import { isColorScheme } from '@weaveintel/notes';
 import { sanitizeAwarenessState } from '@weaveintel/coedit';
 import { withAiPresence } from '../note-ai-presence.js';
@@ -96,6 +97,8 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
   const noteColorize = opts.aiGenerate ? createNoteColorizeService(db, opts.aiGenerate) : null;
   // weaveNotes Phase 4: the AI creative service (diagrams + ink). Same LLM-optional wiring.
   const noteCreative = opts.aiGenerate ? createNoteCreativeService(db, opts.aiGenerate, opts.imageGenerate ? { generateImage: opts.imageGenerate } : {}) : null;
+  // weaveNotes Phase 5: the AI study service (flashcards + SM-2 spaced repetition).
+  const noteStudy = opts.aiGenerate ? createNoteStudyService(db, opts.aiGenerate) : null;
   // weaveNotes Phase 4: the publish service (note → shareable artifact, sensitivity-gated).
   const publish = createNotePublishService(db, { jwtSecret: opts.jwtSecret ?? process.env['JWT_SECRET'] ?? 'insecure-dev-secret', ...(opts.publicBaseUrl ? { publicBaseUrl: opts.publicBaseUrl } : {}) });
   // weaveNotes Phase 5: the knowledge-graph service (wiki-links/backlinks, entity/relation
@@ -509,6 +512,53 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
   creativeRoute('illustration', (noteId, access, body) => noteCreative!.createIllustration({ noteId, access, instruction: typeof body['instruction'] === 'string' && body['instruction'].trim() ? body['instruction'] : 'an illustration of this note' }));
   creativeRoute('image', (noteId, access, body) => noteCreative!.generateImage({ noteId, access, instruction: typeof body['instruction'] === 'string' && body['instruction'].trim() ? body['instruction'] : 'an image for this note' }));
   creativeRoute('visual', (noteId, access, body) => noteCreative!.createVisual({ noteId, access, instruction: typeof body['instruction'] === 'string' && body['instruction'].trim() ? body['instruction'] : 'a visual for this note', ...(typeof body['kind'] === 'string' ? { kind: body['kind'] as 'auto' | 'diagram' | 'ink' | 'illustration' | 'image' } : {}) }));
+
+  // ── weaveNotes Phase 5: flashcards + spaced repetition (active-recall study) ──
+  //   POST /api/me/notes/:id/flashcards       make a deck from the note            (collaborator+)
+  //   GET  /api/me/notes/:id/flashcards       the note's deck + study stats         (any access)
+  //   GET  /api/me/flashcards/due             the cross-note review queue (due now) (any user)
+  //   POST /api/me/flashcards/:cid/review     grade a card → SM-2 reschedule        (owner of card)
+  router.post('/api/me/notes/:id/flashcards', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    if (!noteStudy) { res.writeHead(501); res.end(JSON.stringify({ error: 'AI features are not configured' })); return; }
+    const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    const r = await noteStudy.generateFlashcards({ noteId: params['id']!, access, userId: auth.userId, ...(typeof body['count'] === 'number' ? { count: body['count'] } : {}) });
+    res.writeHead(r.ok ? 201 : 400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(r));
+  }, { auth: true });
+
+  router.get('/api/me/notes/:id/flashcards', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    if (!noteStudy) { res.writeHead(501); res.end(JSON.stringify({ error: 'AI features are not configured' })); return; }
+    const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    const r = await noteStudy.listCards(params['id']!, auth.userId);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(r));
+  }, { auth: true });
+
+  router.get('/api/me/flashcards/due', async (req, res, _params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    if (!noteStudy) { res.writeHead(501); res.end(JSON.stringify({ error: 'AI features are not configured' })); return; }
+    const limit = safePageInt(new URL(req.url ?? '/', 'http://x').searchParams.get('limit'), 50, 1, 200);
+    const r = await noteStudy.dueCards(auth.userId, limit);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(r));
+  }, { auth: true });
+
+  router.post('/api/me/flashcards/:cid/review', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    if (!noteStudy) { res.writeHead(501); res.end(JSON.stringify({ error: 'AI features are not configured' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    const rating = ['again', 'hard', 'good', 'easy'].includes(String(body['rating'])) ? body['rating'] as 'again' | 'hard' | 'good' | 'easy' : 'good';
+    const r = await noteStudy.reviewCard({ cardId: params['cid']!, userId: auth.userId, rating });
+    res.writeHead(r.ok ? 200 : 404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(r));
+  }, { auth: true });
 
   router.post('/api/me/notes/:id/ai/:action', async (req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }

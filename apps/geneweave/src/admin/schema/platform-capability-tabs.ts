@@ -549,6 +549,8 @@ export const PLATFORM_CAPABILITY_ADMIN_TABS: Record<string, AdminTabDef> = {
       { key: 'illustration_enabled', label: 'AI can author SVG illustrations (vector art)', type: 'checkbox', save: 'bool', default: true },
       { key: 'image_generation_enabled', label: 'AI can GENERATE images (realistic raster — costs money)', type: 'checkbox', save: 'bool', default: false },
       { key: 'image_model', label: 'Image model (when image generation is on)', default: 'gpt-image-1', placeholder: 'gpt-image-1' },
+      { key: 'flashcards_enabled', label: 'AI can make flashcards + schedule reviews (spaced repetition)', type: 'checkbox', save: 'bool', default: true },
+      { key: 'daily_new_card_limit', label: 'New flashcards introduced per study session', type: 'number', save: 'int', default: 20 },
       { key: 'enabled_ai_tools', label: 'Note AI tools the editor may use (JSON array)', textarea: true, save: 'json', rows: 3 },
     ],
   },

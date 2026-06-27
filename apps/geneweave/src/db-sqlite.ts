@@ -9943,6 +9943,30 @@ export class SQLiteAdapter implements DatabaseAdapter {
     this.d.prepare('DELETE FROM note_db_rows WHERE id = ? AND database_id = ?').run(id, databaseId);
   }
 
+  // ─── weaveNotes Phase 5: flashcards (SM-2) ──────────────────────────────────
+  async createNoteFlashcard(row: import('./db-types/adapter-agenda-notes.js').NoteFlashcardRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO note_flashcards (id, note_id, owner_user_id, tenant_id, front, back, ease_factor, interval_days, repetitions, due_at, last_reviewed_at, created_at)
+       VALUES (@id, @note_id, @owner_user_id, @tenant_id, @front, @back, @ease_factor, @interval_days, @repetitions, @due_at, @last_reviewed_at, @created_at)`,
+    ).run(row);
+  }
+  async listNoteFlashcards(noteId: string, ownerUserId: string): Promise<import('./db-types/adapter-agenda-notes.js').NoteFlashcardRow[]> {
+    return this.d.prepare('SELECT * FROM note_flashcards WHERE note_id = ? AND owner_user_id = ? ORDER BY created_at ASC').all(noteId, ownerUserId) as import('./db-types/adapter-agenda-notes.js').NoteFlashcardRow[];
+  }
+  async getNoteFlashcard(id: string, ownerUserId: string): Promise<import('./db-types/adapter-agenda-notes.js').NoteFlashcardRow | null> {
+    return (this.d.prepare('SELECT * FROM note_flashcards WHERE id = ? AND owner_user_id = ?').get(id, ownerUserId) as import('./db-types/adapter-agenda-notes.js').NoteFlashcardRow) ?? null;
+  }
+  async listDueFlashcards(ownerUserId: string, nowMs: number, limit: number): Promise<import('./db-types/adapter-agenda-notes.js').NoteFlashcardRow[]> {
+    return this.d.prepare('SELECT * FROM note_flashcards WHERE owner_user_id = ? AND due_at <= ? ORDER BY due_at ASC LIMIT ?').all(ownerUserId, nowMs, Math.max(1, Math.min(500, limit))) as import('./db-types/adapter-agenda-notes.js').NoteFlashcardRow[];
+  }
+  async updateNoteFlashcardSchedule(id: string, ownerUserId: string, sched: { ease_factor: number; interval_days: number; repetitions: number; due_at: number; last_reviewed_at: number }): Promise<void> {
+    this.d.prepare('UPDATE note_flashcards SET ease_factor = ?, interval_days = ?, repetitions = ?, due_at = ?, last_reviewed_at = ? WHERE id = ? AND owner_user_id = ?')
+      .run(sched.ease_factor, sched.interval_days, sched.repetitions, sched.due_at, sched.last_reviewed_at, id, ownerUserId);
+  }
+  async countNoteFlashcards(noteId: string, ownerUserId: string): Promise<number> {
+    return (this.d.prepare('SELECT COUNT(*) AS n FROM note_flashcards WHERE note_id = ? AND owner_user_id = ?').get(noteId, ownerUserId) as { n: number }).n;
+  }
+
   // ─── Voice configs ────────────────────────────────────────────────────────
 
   async getVoiceConfig(userId: string): Promise<import('./db-types/adapter-voice.js').VoiceConfigRow | null> {

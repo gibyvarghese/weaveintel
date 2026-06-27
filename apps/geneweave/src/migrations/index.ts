@@ -89,6 +89,7 @@ import { applyM106NoteColorTools } from './m106-note-color-tools.js';
 import { applyM107NoteLivePresence } from './m107-note-live-presence.js';
 import { applyM108NoteCreativeTools } from './m108-note-creative-tools.js';
 import { applyM109NoteCreativeModes } from './m109-note-creative-modes.js';
+import { applyM110NoteFlashcards } from './m110-note-flashcards.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -186,6 +187,7 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm107-note-live-presence', description: 'weaveNotes Phase 3: live collaboration settings — adds weavenotes_settings.live_cursors_enabled (show each collaborator’s coloured caret + name live) and ai_presence_enabled (announce the AI as a live participant while it edits/colour-codes). Both default ON; Builder-editable. Idempotent ALTERs', run: applyM107NoteLivePresence },
   { id: 'm108-note-creative-tools', description: 'weaveNotes Phase 4: the AI creative tools — registers create_diagram / draw_ink / recolor_ink in tool_catalog (Builder-governable), grants them to the weaveNotes Editor worker agent, and merges them into weavenotes_settings.enabled_ai_tools. The AI emits native, editable diagram scenes + freehand strokes (the same data a human draws), with WCAG-AA colours; every creation is a track-changes suggestion the user accepts or rejects, and its rendered SVG is mirrored to an artifact for export. Idempotent (INSERT OR IGNORE + JSON merge)', run: applyM108NoteCreativeTools },
   { id: 'm109-note-creative-modes', description: 'weaveNotes Phase 4 (creative expansion): per-workspace creative MODES — adds weavenotes_settings.diagrams_enabled / ink_enabled / illustration_enabled (vector SVG) / image_generation_enabled (raster via an image model, default OFF — costs money) / image_model. Registers create_illustration / generate_image / create_visual (the auto-routing one-stop visual tool) in tool_catalog + the weaveNotes Editor agent + enabled_ai_tools. So a user can request ANY visual — process/business/block diagram, freeform ink, an SVG illustration, or a realistic image — and the AI picks the right kind. Idempotent', run: applyM109NoteCreativeModes },
+  { id: 'm110-note-flashcards', description: 'weaveNotes Phase 5: AI study — adds note_flashcards (one row per card: front/back + the SM-2 schedule ease_factor/interval_days/repetitions/due_at/last_reviewed_at; owner-scoped, tenant-isolated, cascades on note delete, indexed by note + by (owner, due_at)) + weavenotes_settings.flashcards_enabled + daily_new_card_limit. Registers the make_flashcards tool in tool_catalog, grants it to the weaveNotes Editor agent, and enables it. "Make flashcards from this note" produces a reviewable deck scheduled with spaced repetition. Idempotent', run: applyM110NoteFlashcards },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

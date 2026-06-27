@@ -1004,6 +1004,8 @@ export interface ToolRegistryOptions {
   noteCreateIllustration?: (args: { userId: string; noteId: string; instruction: string }) => Promise<{ ok: boolean; error?: string; suggestionId?: string; artifactId?: string | null }>;
   noteGenerateImage?: (args: { userId: string; noteId: string; instruction: string }) => Promise<{ ok: boolean; error?: string; suggestionId?: string; artifactId?: string | null }>;
   noteCreateVisual?: (args: { userId: string; noteId: string; instruction: string; kind?: string }) => Promise<{ ok: boolean; error?: string; suggestionId?: string; artifactId?: string | null; kind?: string }>;
+  // weaveNotes Phase 5 — turn a note into flashcards (active recall + SM-2 spaced repetition).
+  noteMakeFlashcards?: (args: { userId: string; noteId: string; count?: number }) => Promise<{ ok: boolean; error?: string; created?: number }>;
 }
 
 export function filterToolNamesByPersona(toolNames: string[], persona: string | null | undefined): string[] {
@@ -1763,6 +1765,28 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
           return JSON.stringify({ ok: true, kind: r.kind ?? null, suggestionId: r.suggestionId ?? null, artifactId: r.artifactId ?? null });
         },
         tags: ['notes', 'output'],
+      }),
+    } : {}),
+    // weaveNotes Phase 5: turn a note into flashcards — available when noteMakeFlashcards is set.
+    ...(opts?.noteMakeFlashcards && opts.currentUserId ? {
+      make_flashcards: weaveTool({
+        name: 'make_flashcards',
+        description: 'Turn one of the user\'s notes into question→answer FLASHCARDS for active-recall study, scheduled with spaced repetition (SM-2). Use this when the user asks to "make flashcards", "quiz me on this", "help me study/memorise this note", or "turn this into study cards". You only need the note id (and optionally how many cards). The user then reviews the deck on a schedule.',
+        parameters: {
+          type: 'object',
+          properties: {
+            noteId: { type: 'string', description: 'The id of the note to make flashcards from.' },
+            count: { type: 'number', description: 'Roughly how many cards to make (3–40; default 10).' },
+          },
+          required: ['noteId'],
+        },
+        execute: async (args: { noteId: string; count?: number }) => {
+          if (!opts.noteMakeFlashcards || !opts.currentUserId) return { content: 'Flashcards are unavailable in this context.', isError: true };
+          const r = await opts.noteMakeFlashcards({ userId: opts.currentUserId, noteId: args.noteId, ...(typeof args.count === 'number' ? { count: args.count } : {}) });
+          if (!r.ok) return { content: `make_flashcards failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, created: r.created ?? 0 });
+        },
+        tags: ['notes', 'study', 'output'],
       }),
     } : {}),
     // weaveNotes Phase 8: workspace RAG search — available when workspaceSearch callback is set.

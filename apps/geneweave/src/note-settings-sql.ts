@@ -39,6 +39,8 @@ function rowToConfig(row: WeaveNotesSettingsRow | null): WeaveNotesConfig {
     illustrationEnabled: row.illustration_enabled !== 0,
     imageGenerationEnabled: row.image_generation_enabled === 1, // default OFF (undefined → off)
     ...(typeof row.image_model === 'string' && row.image_model ? { imageModel: row.image_model } : {}),
+    flashcardsEnabled: row.flashcards_enabled !== 0, // undefined (pre-m110) → enabled
+    ...(typeof row.daily_new_card_limit === 'number' ? { dailyNewCardLimit: row.daily_new_card_limit } : {}),
     enabledAiTools: tools,
   }).config;
 }
@@ -72,6 +74,8 @@ export function createNoteSettingsService(db: SettingsDb, opts: { now?: () => nu
       illustration_enabled: config.illustrationEnabled ? 1 : 0,
       image_generation_enabled: config.imageGenerationEnabled ? 1 : 0,
       image_model: config.imageModel,
+      flashcards_enabled: config.flashcardsEnabled ? 1 : 0,
+      daily_new_card_limit: config.dailyNewCardLimit,
       enabled_ai_tools: JSON.stringify(config.enabledAiTools),
     });
     return { config, warnings };

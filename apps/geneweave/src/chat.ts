@@ -57,6 +57,7 @@ import { createTemporalStore } from './temporal-store.js';
 import { createNoteAiService, createModelTextGenerator, agentCreateNote } from './note-ai-sql.js';
 import { createColorizeTools } from './note-colorize-sql.js';
 import { createCreativeTools, createModelImageGenerator } from './note-creative-sql.js';
+import { createStudyTool } from './note-study-sql.js';
 import { withAiPresence } from './note-ai-presence.js';
 import { createNotePublishService } from './note-publish-sql.js';
 import { createNoteGraphService } from './note-graph-sql.js';
@@ -443,6 +444,9 @@ export class ChatEngine {
         createCreativeTools(db, createModelTextGenerator(config), { generateImage: createModelImageGenerator(config) }).generateImage(a),
       noteCreateVisual: (a: { userId: string; noteId: string; instruction: string; kind?: string }) =>
         createCreativeTools(db, createModelTextGenerator(config), { generateImage: createModelImageGenerator(config) }).createVisual(a as { userId: string; noteId: string; instruction: string; kind?: 'auto' | 'diagram' | 'ink' | 'illustration' | 'image' }),
+      // weaveNotes Phase 5: wire the make_flashcards tool — turn a note into a spaced-repetition deck.
+      noteMakeFlashcards: (a: { userId: string; noteId: string; count?: number }) =>
+        createStudyTool(db, createModelTextGenerator(config)).makeFlashcards(a),
     };
   }
 
