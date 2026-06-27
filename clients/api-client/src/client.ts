@@ -180,11 +180,23 @@ export interface NoteListItem {
   parent_note_id: string | null;
   created_at: string;
   updated_at: string;
+  /** Phase 6: soft-archive timestamp (NULL = active). Present on list rows. */
+  archived_at?: string | null;
 }
 
 /** Full note with doc_json, returned by GET /api/me/notes/:id. */
 export interface NoteDoc extends NoteListItem {
   doc_json: string;
+}
+
+/** Client-relevant weaveNotes capability flags (GET /api/me/notes/capabilities) — drives mobile gating. */
+export interface NotesCapabilities {
+  /** Phase 7: offline editing + sync is allowed for this workspace. */
+  mobileOfflineEnabled: boolean;
+  /** Phase 7: freehand ink is allowed on mobile. */
+  mobileInkEnabled: boolean;
+  /** Phase 7: how many notes the mobile app should cache on-device. */
+  mobileOfflineNoteLimit: number;
 }
 
 /** The typed geneWeave client surface. */
@@ -268,12 +280,14 @@ export interface GeneweaveClient {
   createAgendaItem(input: { title: string; kind?: string; start_at?: string; end_at?: string; all_day?: boolean; category_id?: string; location?: string; nlText?: string }): Promise<AgendaItem>;
   deleteAgendaItem(id: string): Promise<void>;
 
-  // Notes (WC6-WC10)
-  listNotes(opts?: { search?: string; parent?: string }): Promise<NoteListItem[]>;
+  // Notes (WC6-WC10 + Phase 7 mobile)
+  listNotes(opts?: { search?: string; parent?: string; archived?: boolean }): Promise<NoteListItem[]>;
   getNote(id: string): Promise<NoteDoc>;
-  createNote(input?: { title?: string; template_id?: string }): Promise<NoteListItem>;
+  createNote(input?: { title?: string; template_id?: string; template_key?: string; doc_json?: string; icon?: string }): Promise<NoteListItem>;
   updateNote(id: string, patch: { title?: string; doc_json?: string; icon?: string; favorite?: number }): Promise<NoteListItem>;
   deleteNote(id: string): Promise<void>;
+  /** Phase 7: read the client-relevant weaveNotes capability flags (offline/ink gating). */
+  getNotesCapabilities(): Promise<NotesCapabilities>;
 }
 
 /** Wrap an outbox storage so its keys are isolated under `namespace`. */
@@ -718,6 +732,7 @@ export function createGeneweaveClient(opts: CreateGeneweaveClientOptions): Genew
     async listNotes(opts) {
       const params = new URLSearchParams({ parent: opts?.parent ?? 'null' });
       if (opts?.search) params.set('search', opts.search);
+      if (opts?.archived) params.set('archived', '1');
       const req = { method: 'GET' as const, path: `/api/me/notes?${params}` };
       const raw = await send(req);
       if (!ok(raw.status)) fail(raw, req);
@@ -752,6 +767,13 @@ export function createGeneweaveClient(opts: CreateGeneweaveClientOptions): Genew
       const req = { method: 'DELETE' as const, path: `/api/me/notes/${id}` };
       const raw = await send(req);
       if (!ok(raw.status)) fail(raw, req);
+    },
+
+    async getNotesCapabilities() {
+      const req = { method: 'GET' as const, path: '/api/me/notes/capabilities' };
+      const raw = await send(req);
+      if (!ok(raw.status)) fail(raw, req);
+      return raw.body as NotesCapabilities;
     },
   };
 

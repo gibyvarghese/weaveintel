@@ -51,6 +51,12 @@ export interface WeaveNotesConfig {
   flashcardsEnabled: boolean;
   /** Phase 5: cap how many NEW cards a study session introduces per day (active-recall pacing). */
   dailyNewCardLimit: number;
+  /** Phase 7: let the mobile app work OFFLINE — edit notes with no signal and sync when back online. */
+  mobileOfflineEnabled: boolean;
+  /** Phase 7: let people DRAW freehand ink on a phone/tablet (synced to the web note untouched). */
+  mobileInkEnabled: boolean;
+  /** Phase 7: cap how many notes the mobile app keeps cached on-device for offline use. */
+  mobileOfflineNoteLimit: number;
   /** The note AI tools the editor agent is allowed to use (subset of the catalog). */
   enabledAiTools: string[];
 }
@@ -85,6 +91,9 @@ export const DEFAULT_WEAVENOTES_CONFIG: WeaveNotesConfig = {
   imageModel: 'gpt-image-1',
   flashcardsEnabled: true,
   dailyNewCardLimit: 20,
+  mobileOfflineEnabled: true,
+  mobileInkEnabled: true,
+  mobileOfflineNoteLimit: 200,
   enabledAiTools: [...WEAVENOTES_AI_TOOLS],
 };
 
@@ -148,6 +157,9 @@ export function validateWeaveNotesConfig(
       imageModel: typeof p.imageModel === 'string' && p.imageModel.trim() ? p.imageModel.trim().slice(0, 64) : base.imageModel,
       flashcardsEnabled: asBool(p.flashcardsEnabled ?? base.flashcardsEnabled, base.flashcardsEnabled),
       dailyNewCardLimit: clampInt(p.dailyNewCardLimit ?? base.dailyNewCardLimit, 1, 1000, base.dailyNewCardLimit),
+      mobileOfflineEnabled: asBool(p.mobileOfflineEnabled ?? base.mobileOfflineEnabled, base.mobileOfflineEnabled),
+      mobileInkEnabled: asBool(p.mobileInkEnabled ?? base.mobileInkEnabled, base.mobileInkEnabled),
+      mobileOfflineNoteLimit: clampInt(p.mobileOfflineNoteLimit ?? base.mobileOfflineNoteLimit, 10, 5000, base.mobileOfflineNoteLimit),
       enabledAiTools: tools,
     },
     warnings,

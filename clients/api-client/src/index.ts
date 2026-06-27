@@ -64,9 +64,10 @@ export {
   // Agenda + Calendar (WC2-WC5)
   type AgendaItem,
   type AgendaCategory,
-  // Notes (WC6-WC10)
+  // Notes (WC6-WC10 + Phase 7 mobile)
   type NoteListItem,
   type NoteDoc,
+  type NotesCapabilities,
 } from './client.js';
 
 // Run primitives re-exported from @weaveintel/client that appear in this

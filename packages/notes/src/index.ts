@@ -205,6 +205,24 @@ export {
   svgToSafeDataUri,
 } from './svg.js';
 
+// weaveNotes Phase 7 — the SHARED cross-platform note-document model (mobile ⇆ web doc_json).
+export {
+  type ParagraphBlock,
+  type HeadingBlock,
+  type BulletBlock,
+  type TodoBlock,
+  type InkBlock,
+  type UnsupportedBlock,
+  type NoteBlock,
+  MOBILE_EDITABLE_BLOCKS,
+  inkCanvasNode,
+  blocksToDoc,
+  docToBlocks,
+  blocksPlainText,
+  hasInk,
+  emptyNoteDoc,
+} from './note-doc.js';
+
 // weaveNotes Phase 6 — the SYSTEM TEMPLATES (ready-made notes as shared doc_json data).
 export {
   type PMNode,

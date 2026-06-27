@@ -448,6 +448,10 @@ export interface WeaveNotesSettingsRow {
   /** weaveNotes Phase 5: flashcards + spaced repetition. */
   flashcards_enabled: number;
   daily_new_card_limit: number;
+  /** weaveNotes Phase 7: mobile offline editing + ink + how many notes to cache on-device. */
+  mobile_offline_enabled: number;
+  mobile_ink_enabled: number;
+  mobile_offline_note_limit: number;
   enabled_ai_tools: string;
   updated_at: string;
 }

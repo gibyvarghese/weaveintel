@@ -244,6 +244,47 @@ export {
   type VoiceState,
 } from './voice/voice-session.js';
 
+// Notes — offline-first store + sync engine + ink capture (weaveNotes Phase 7, G7).
+export {
+  createInMemoryNotesStore,
+  type LocalNote,
+  type PendingOp,
+  type OpKind,
+  type NotesLocalStore,
+} from './notes/note-store.js';
+export {
+  createNoteOffline,
+  editNoteOffline,
+  deleteNoteOffline,
+  syncNotes,
+  noteSyncStatus,
+  pendingCount,
+  isLocalId,
+  type NotesSyncTransport,
+  type SyncEnv,
+  type SyncResult,
+  type SyncStatus,
+} from './notes/offline-sync.js';
+export {
+  PEN_COLORS,
+  HIGHLIGHTER_COLOR,
+  DEFAULT_PEN,
+  HIGHLIGHTER_PEN,
+  beginStroke,
+  extendStroke,
+  endStroke,
+  commitStroke,
+  undoStroke,
+  strokePath,
+  type PenSettings,
+} from './notes/ink-capture.js';
+export {
+  splitNoteForEditor,
+  composeNote,
+  preservedSummary,
+  type EditorModel,
+} from './notes/editor-model.js';
+
 // Push notification logic (M9) — device token storage + channel resolution.
 export {
   PUSH_TOKEN_STORE_KEY,

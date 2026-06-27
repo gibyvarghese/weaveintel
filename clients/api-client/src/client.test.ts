@@ -407,6 +407,37 @@ describe('memories', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Notes (Phase 7 mobile surface)
+// ---------------------------------------------------------------------------
+
+describe('notes', () => {
+  it('creates a note with doc_json (offline ink sync), lists, and reads capabilities', async () => {
+    const captured: Array<{ body?: unknown }> = [];
+    const transport = fakeTransport({
+      routes: {
+        'POST /api/me/notes': (req) => { captured.push({ body: req.body }); return { status: 201, body: { id: 'n1', title: 'Field note', icon: null, favorite: 0, sensitivity: 'normal', parent_note_id: null, created_at: 't', updated_at: 't' } }; },
+        'GET /api/me/notes': () => ({ status: 200, body: { notes: [{ id: 'n1', title: 'Field note', icon: null, favorite: 0, sensitivity: 'normal', parent_note_id: null, created_at: 't', updated_at: 't', archived_at: null }] } }),
+        'GET /api/me/notes/capabilities': () => ({ status: 200, body: { mobileOfflineEnabled: true, mobileInkEnabled: false, mobileOfflineNoteLimit: 150 } }),
+      },
+    });
+    const client = createGeneweaveClient({ host: 'https://x', tokenStore: new MemoryTokenStore(), transport });
+
+    const inkDoc = '{"type":"doc","content":[{"type":"inkCanvas","attrs":{"author":"user","strokes":[]}}]}';
+    const created = await client.createNote({ title: 'Field note', doc_json: inkDoc });
+    expect(created.id).toBe('n1');
+    expect((captured[0]!.body as { doc_json?: string }).doc_json).toBe(inkDoc); // doc_json forwarded
+
+    const list = await client.listNotes();
+    expect(list[0]!.archived_at).toBeNull();
+
+    const caps = await client.getNotesCapabilities();
+    expect(caps.mobileOfflineEnabled).toBe(true);
+    expect(caps.mobileInkEnabled).toBe(false);
+    expect(caps.mobileOfflineNoteLimit).toBe(150);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Response-shape validation
 // ---------------------------------------------------------------------------
 

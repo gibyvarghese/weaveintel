@@ -88,6 +88,16 @@ void createInMemoryNoteRepository; // keep the import available to embedders wit
  * without changing this file. Tests/embedders may inject their own repository via
  * `opts.noteRepository`.
  */
+/**
+ * weaveNotes Phase 7: which device a request came from, for activity provenance. The mobile app
+ * sends `X-Client-Version: geneweave-mobile/...`, so the AI's `read_note_activity` can tell that an
+ * edit happened on a phone (and was likely made offline + synced) when it reasons about a note.
+ */
+function clientProvenance(req: { headers?: Record<string, unknown> }): string {
+  const v = String(req.headers?.['x-client-version'] ?? '').toLowerCase();
+  return v.includes('mobile') ? ' on mobile' : '';
+}
+
 export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts: { noteRepository?: NoteRepository; aiGenerate?: NoteAiGenerate; imageGenerate?: import('../note-creative-sql.js').NoteImageGenerate; jwtSecret?: string; publicBaseUrl?: string } = {}): void {
   const notes = opts.noteRepository ?? createSqlNoteRepository(db);
   // weaveNotes Phase 3: the AI co-author service (suggestions, agent edits, AI blocks).
@@ -157,6 +167,19 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     });
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ templates }));
+  }, { auth: true });
+
+  // weaveNotes Phase 7: the client-relevant capability flags (drives the mobile app's offline + ink
+  // gating). Reads the Builder-governed weaveNotes settings; a workspace can disable offline or ink.
+  router.get('/api/me/notes/capabilities', async (_req, res, _params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const cfg = await noteSettings.getConfig();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      mobileOfflineEnabled: cfg.mobileOfflineEnabled,
+      mobileInkEnabled: cfg.mobileInkEnabled,
+      mobileOfflineNoteLimit: cfg.mobileOfflineNoteLimit,
+    }));
   }, { auth: true });
 
   // ── Single note ────────────────────────────────────────────────────────────
@@ -706,7 +729,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
 
     const note = await notes.getNote(id, auth.userId);
     // weaveNotes Phase 0: log the creation so the AI can later see what's been happening.
-    void noteSettings.recordActivity({ noteId: id, userId: auth.userId, tenantId: auth.tenantId ?? null, action: 'created', actor: 'user', summary: `Created “${note?.title ?? 'Untitled'}”` });
+    void noteSettings.recordActivity({ noteId: id, userId: auth.userId, tenantId: auth.tenantId ?? null, action: 'created', actor: 'user', summary: `Created “${note?.title ?? 'Untitled'}”${clientProvenance(req)}` });
     res.writeHead(201, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(note));
   }, { auth: true });
@@ -752,7 +775,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     if (!note) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
     // weaveNotes Phase 0: log the edit (title/content/etc.) so the AI understands recent changes.
     const changed = Object.keys(patch).filter((k) => k !== 'doc_json').concat(patch.doc_json !== undefined ? ['content'] : []);
-    void noteSettings.recordActivity({ noteId: params['id']!, userId: auth.userId, tenantId: auth.tenantId ?? null, action: 'updated', actor: 'user', summary: `Edited ${changed.length ? changed.join(', ') : 'the note'}` });
+    void noteSettings.recordActivity({ noteId: params['id']!, userId: auth.userId, tenantId: auth.tenantId ?? null, action: 'updated', actor: 'user', summary: `Edited ${changed.length ? changed.join(', ') : 'the note'}${clientProvenance(req)}` });
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(note));
   }, { auth: true });

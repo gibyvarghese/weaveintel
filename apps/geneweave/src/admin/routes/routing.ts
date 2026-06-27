@@ -481,6 +481,9 @@ export function registerAdminRoutingRoutes(
     if (body['image_model'] !== undefined) partial['imageModel'] = body['image_model'];
     if (body['flashcards_enabled'] !== undefined) partial['flashcardsEnabled'] = body['flashcards_enabled'];
     if (body['daily_new_card_limit'] !== undefined) partial['dailyNewCardLimit'] = body['daily_new_card_limit'];
+    if (body['mobile_offline_enabled'] !== undefined) partial['mobileOfflineEnabled'] = body['mobile_offline_enabled'];
+    if (body['mobile_ink_enabled'] !== undefined) partial['mobileInkEnabled'] = body['mobile_ink_enabled'];
+    if (body['mobile_offline_note_limit'] !== undefined) partial['mobileOfflineNoteLimit'] = body['mobile_offline_note_limit'];
     if (body['enabled_ai_tools'] !== undefined) {
       let arr: unknown = body['enabled_ai_tools'];
       try { if (typeof arr === 'string') arr = JSON.parse(arr); } catch { arr = []; }

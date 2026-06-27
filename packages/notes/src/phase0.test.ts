@@ -104,6 +104,15 @@ describe('weaveNotes config validator', () => {
     expect(Array.isArray(config.enabledAiTools)).toBe(true);
     expect(config.enabledAiTools.every((t) => (WEAVENOTES_AI_TOOLS as readonly string[]).includes(t))).toBe(true);
   });
+  it('Phase 7: mobile flags validate (booleans coerced, note-cache limit clamped)', () => {
+    expect(DEFAULT_WEAVENOTES_CONFIG.mobileOfflineEnabled).toBe(true);
+    expect(DEFAULT_WEAVENOTES_CONFIG.mobileInkEnabled).toBe(true);
+    const { config } = validateWeaveNotesConfig({ mobileOfflineEnabled: '0', mobileInkEnabled: 1, mobileOfflineNoteLimit: 999999 });
+    expect(config.mobileOfflineEnabled).toBe(false);   // '0' → false
+    expect(config.mobileInkEnabled).toBe(true);        // 1 → true
+    expect(config.mobileOfflineNoteLimit).toBe(5000);  // clamped to max
+    expect(validateWeaveNotesConfig({ mobileOfflineNoteLimit: 1 }).config.mobileOfflineNoteLimit).toBe(10); // clamped to min
+  });
   it('null/undefined input returns the safe defaults', () => {
     expect(validateWeaveNotesConfig(null).config).toEqual(DEFAULT_WEAVENOTES_CONFIG);
     expect(validateWeaveNotesConfig(undefined).config).toEqual(DEFAULT_WEAVENOTES_CONFIG);
