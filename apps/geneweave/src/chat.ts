@@ -397,6 +397,10 @@ export class ChatEngine {
       // generation; resolves the user's note access itself (no privilege escalation).
       noteEdit: (a: { userId: string; noteId: string; markdown: string; mode: 'direct' | 'suggest' }) =>
         withAiPresence(db, a.noteId, () => createNoteAiService(db, createModelTextGenerator(config)).agentEdit(a)),
+      // weaveNotes: wire the `restructure_note` tool so the agent can reorganise a whole note
+      // (reorder/group sections, fix hierarchy) and stage it as one suggestion. Resolves access itself.
+      noteRestructure: (a: { userId: string; noteId: string; outline?: string }) =>
+        withAiPresence(db, a.noteId, () => createNoteAiService(db, createModelTextGenerator(config)).agentRestructure(a)),
       // weaveNotes Phase 4: wire the `note_publish` tool so the agent can publish a note
       // as an artifact (privately — never auto-public). Resolves the user's note access +
       // the sensitivity gate itself (no privilege escalation; restricted refused).

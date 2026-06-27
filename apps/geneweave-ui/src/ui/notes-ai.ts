@@ -29,6 +29,7 @@ function suggestionLabel(action: string): string {
   if (action === 'create_diagram') return 'AI suggested a diagram';
   if (action === 'draw_ink' || action === 'recolor_ink') return 'AI suggested a drawing';
   if (action === 'create_illustration' || action === 'generate_image') return 'AI suggested an image';
+  if (action === 'restructure_note') return 'AI reorganised this note';
   if (action === 'apply_highlight' || action === 'apply_text_color' || action === 'colorize_semantic') return 'AI suggested colour';
   if (action === 'continue' || action === 'ai_block') return 'AI suggested an addition';
   return 'AI suggested an edit';
@@ -50,6 +51,21 @@ export function wireNoteAi(opts: { noteId: string; toolbarEl: HTMLElement; panel
       const res = await api.post(`/api/me/notes/${noteId}/ai/${action}`, body);
       if (!res.ok) { const e = await res.json().catch(() => ({})) as { error?: string }; alert(`AI ${action} failed: ${e.error ?? res.status}`); return; }
       await refresh(); // the new suggestion shows in the panel for review
+    } finally { setBusy(false); }
+  }
+
+  // Reorganise the WHOLE note. Optionally the user dictates a section outline (one heading per
+  // line); otherwise the AI picks the clearest structure. The result is staged as one suggestion.
+  async function restructure(): Promise<void> {
+    const outline = window.prompt('Reorganise this note. Optionally give a section order (one heading per line), or leave blank to let the AI choose the clearest structure:');
+    if (outline === null) return; // cancelled (blank string = AI chooses)
+    setBusy(true);
+    try {
+      const body: Record<string, unknown> = {};
+      if (outline.trim()) body['outline'] = outline.trim();
+      const res = await api.post(`/api/me/notes/${noteId}/ai/restructure`, body);
+      if (!res.ok) { const e = await res.json().catch(() => ({})) as { error?: string }; alert(`Restructure failed: ${e.error ?? res.status}`); return; }
+      await refresh(); // the reorganised note shows as a suggestion to review
     } finally { setBusy(false); }
   }
 
@@ -88,6 +104,7 @@ export function wireNoteAi(opts: { noteId: string; toolbarEl: HTMLElement; panel
       h('button', { className: 'notes-ai-btn notes-ai-rewrite', title: 'Rewrite the note', onClick: () => void runAction('rewrite') }, 'Rewrite'),
       h('button', { className: 'notes-ai-btn notes-ai-summarize', title: 'Summarize the note', onClick: () => void runAction('summarize') }, 'Summarize'),
       h('button', { className: 'notes-ai-btn notes-ai-ask', title: 'Ask the AI a question about this note', onClick: () => { const q = window.prompt('Ask the AI about this note:'); if (q) void runAction('ask', q); } }, 'Ask AI'),
+      h('button', { className: 'notes-ai-btn notes-ai-restructure', title: 'Reorganise the whole note — reorder sections, fix the structure', onClick: () => void restructure() }, '⇅ Restructure'),
       h('button', { className: 'notes-ai-btn notes-ai-insert', title: 'Insert a refreshable AI block', onClick: () => void insertBlock() }, '＋ AI block'),
       statusEl,
     ),
@@ -115,7 +132,7 @@ export function wireNoteAi(opts: { noteId: string; toolbarEl: HTMLElement; panel
       // Pending state: old (struck-through) when we have it, then new, then the action pills.
       const renderPending = (): void => {
         bodyEl.innerHTML = '';
-        if (s.before && s.before.trim()) bodyEl.appendChild(h('div', { className: 'notes-diff-old' }, s.before));
+        if (s.before && s.before.trim()) bodyEl.appendChild(h('div', { className: 'notes-diff-old' }, s.before.slice(0, 1200)));
         bodyEl.appendChild(h('div', { className: 'notes-diff-new' }, s.preview.slice(0, 1200)));
         bodyEl.appendChild(h('div', { className: 'notes-diff-actions' },
           h('button', { className: 'notes-diff-accept', onClick: () => void decide(s, 'accept') }, '✓ Accept'),

@@ -597,6 +597,22 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     res.end(JSON.stringify(r));
   }, { auth: true });
 
+  // Reorganise the WHOLE note: the AI rewrites it into a clearer structure and stages it as one
+  // track-changes suggestion. An optional `outline` lets the human dictate the section order.
+  //   POST /api/me/notes/:id/ai/restructure   { outline? }  → a whole-document suggestion
+  router.post('/api/me/notes/:id/ai/restructure', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    if (!noteAi) { res.writeHead(501); res.end(JSON.stringify({ error: 'AI features are not configured' })); return; }
+    const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    if (!roleAtLeast(access.role, 'collaborator')) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    const r = await withAiPresence(db, params['id']!, () => noteAi.restructure({ noteId: params['id']!, access, ...(typeof body['outline'] === 'string' && body['outline'].trim() ? { outline: body['outline'] } : {}) }));
+    res.writeHead(r.ok ? 201 : 400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(r));
+  }, { auth: true });
+
   // Phase 4 (creative expansion): SVG illustration, generated image, and the AUTO router.
   //   POST /api/me/notes/:id/ai/illustration { instruction }          → an SVG-illustration suggestion
   //   POST /api/me/notes/:id/ai/image        { instruction }          → a generated-image suggestion (if enabled)

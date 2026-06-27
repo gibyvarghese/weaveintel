@@ -77,13 +77,38 @@ export function createNoteCreativeService(db: NoteCreativeDb, generate: NoteAiGe
 
   type CreativeAction = 'create_diagram' | 'draw_ink' | 'create_illustration' | 'generate_image';
 
-  /** Insert a new creative atom as a STAGED suggestion; mirror its SVG (or use a pre-saved artifact). */
-  async function stageInsert(noteId: string, access: NoteAccess, action: CreativeAction, blockType: 'diagram' | 'inkCanvas' | 'image', attrs: Record<string, unknown>, preview: string, mirror: { svg?: string; artifactId?: string | null } = {}): Promise<CreativeResult> {
+  /**
+   * Ask the model WHERE a new block belongs, so a diagram/drawing/image is placed next to the most
+   * related content instead of always at the end. Returns the block id to insert AFTER, or null (=end).
+   * One cheap, focused call over the note's OUTLINE (it never sees raw block ids, only an index).
+   */
+  async function pickAnchorAfter(blocks: ReturnType<BlockDoc['blocks']>, description: string, access: NoteAccess): Promise<unknown | null> {
+    const items = blocks.map((b, i) => ({ i, b })).filter(({ b }) => (b.text && b.text.trim()) || b.type.startsWith('heading'));
+    if (items.length < 2) return null; // nothing meaningful to anchor to → end
+    const outline = items.map(({ i, b }) => `${i}: [${b.type}] ${(b.text || '').replace(/\s+/g, ' ').slice(0, 70)}`).join('\n');
+    try {
+      const reply = await generate({
+        system: 'You place new content in a note. Reply with ONLY a single number (an index from the outline) or the word END — nothing else.',
+        user: `Note outline (index: [type] "text"):\n${outline}\n\nWe are inserting: ${description}\nAfter which numbered line should it go so it sits with the most related content? Reply ONLY the number, or END for the very end.`,
+        userId: access.ownerId, tenantId: access.tenantId, temperature: 0, maxTokens: 6,
+      });
+      if (/end/i.test(reply)) return null;
+      const m = reply.match(/\d+/);
+      if (!m) return null;
+      const idx = parseInt(m[0], 10);
+      return (idx >= 0 && idx < blocks.length) ? blocks[idx]!.id : null;
+    } catch { return null; }
+  }
+
+  /** Insert a new creative atom as a STAGED suggestion; mirror its SVG (or use a pre-saved artifact).
+   *  `placeDescription` (when given) lets the AI choose WHERE to insert it instead of appending. */
+  async function stageInsert(noteId: string, access: NoteAccess, action: CreativeAction, blockType: 'diagram' | 'inkCanvas' | 'image', attrs: Record<string, unknown>, preview: string, mirror: { svg?: string; artifactId?: string | null } = {}, placeDescription?: string): Promise<CreativeResult> {
     const view = await relay.ensureDoc({ noteId, tenantId: access.tenantId, ownerId: access.ownerId, seedPm: await seedFor(noteId, access.ownerId) });
     const site = creativeSite(noteId, action);
     const shadow = BlockDoc.fromSnapshot(site, view.snapshot);
     const blocks = shadow.blocks();
-    const after = blocks.length ? blocks[blocks.length - 1]!.id : null;
+    let after = blocks.length ? blocks[blocks.length - 1]!.id : null;
+    if (placeDescription) { const anchored = await pickAnchorAfter(blocks, placeDescription, access); if (anchored) after = anchored as typeof after; }
     const { ops } = shadow.insertBlock(after, blockType, attrs);
     if (ops.length === 0) return { ok: false, error: 'no change produced', action };
 
@@ -110,7 +135,7 @@ export function createNoteCreativeService(db: NoteCreativeDb, generate: NoteAiGe
     if (scene.nodes.length === 0) return { ok: false, error: 'the model produced no diagram', action: 'create_diagram' };
     const svg = diagramToSvg(scene, { style: 'sketch' });
     const preview = `Diagram: ${scene.title ?? 'untitled'} (${scene.nodes.length} node${scene.nodes.length === 1 ? '' : 's'})`;
-    return stageInsert(input.noteId, input.access, 'create_diagram', 'diagram', { scene, title: scene.title ?? '', kind: scene.kind ?? 'flow', author: 'ai' }, preview, { svg });
+    return stageInsert(input.noteId, input.access, 'create_diagram', 'diagram', { scene, title: scene.title ?? '', kind: scene.kind ?? 'flow', author: 'ai' }, preview, { svg }, `a diagram titled "${scene.title ?? input.instruction.slice(0, 50)}"`);
   }
 
   /** The model AUTHORS a detailed SVG illustration; we sanitise it + embed it as an inert image. */
@@ -120,7 +145,7 @@ export function createNoteCreativeService(db: NoteCreativeDb, generate: NoteAiGe
     const svg = sanitizeSvg(reply.replace(/^```(?:svg|xml|html)?/i, '').replace(/```$/, '').trim());
     if (!svg) return { ok: false, error: 'the model did not produce a usable SVG', action: 'create_illustration' };
     const alt = input.instruction.slice(0, 80);
-    return stageInsert(input.noteId, input.access, 'create_illustration', 'image', { src: svgToDataUri(svg), alt, author: 'ai' }, `Illustration: ${alt}`, { svg });
+    return stageInsert(input.noteId, input.access, 'create_illustration', 'image', { src: svgToDataUri(svg), alt, author: 'ai' }, `Illustration: ${alt}`, { svg }, `an illustration of ${alt}`);
   }
 
   /** The image MODEL generates a raster picture; we store it as an artifact + embed it. */
@@ -137,7 +162,7 @@ export function createNoteCreativeService(db: NoteCreativeDb, generate: NoteAiGe
       artifactId = art.id;
     } catch { return { ok: false, error: 'could not store the generated image', action: 'generate_image' }; }
     const alt = input.instruction.slice(0, 80);
-    return stageInsert(input.noteId, input.access, 'generate_image', 'image', { src: `/api/artifacts/${artifactId}/data`, alt, author: 'ai' }, `Image: ${alt}`, { artifactId });
+    return stageInsert(input.noteId, input.access, 'generate_image', 'image', { src: `/api/artifacts/${artifactId}/data`, alt, author: 'ai' }, `Image: ${alt}`, { artifactId }, `an image of ${alt}`);
   }
 
   /** Heuristically pick the best visual KIND for a free-text request (when kind = 'auto'). */
@@ -157,7 +182,7 @@ export function createNoteCreativeService(db: NoteCreativeDb, generate: NoteAiGe
     const strokes: InkStroke[] = inkFromPrimitives(extractJson(reply, 'array'));
     if (strokes.length === 0) return { ok: false, error: 'the model produced no strokes', action: 'draw_ink' };
     const svg = strokesToSvg(strokes);
-    return stageInsert(input.noteId, input.access, 'draw_ink', 'inkCanvas', { strokes, author: 'ai' }, `Ink: ${input.instruction.slice(0, 48)}`, { svg });
+    return stageInsert(input.noteId, input.access, 'draw_ink', 'inkCanvas', { strokes, author: 'ai' }, `Ink: ${input.instruction.slice(0, 48)}`, { svg }, `a sketch: ${input.instruction.slice(0, 50)}`);
   }
 
   return {

@@ -204,6 +204,71 @@ export function createNoteAiService(db: NoteAiDb, generate: NoteAiGenerate, opts
       return { ok: true, suggestionId: id, preview: aiMarkdown, action };
     },
 
+    /**
+     * Reorganise the WHOLE note: the AI rewrites the document into a clearer structure
+     * (logical section order, consistent heading hierarchy, related points grouped) while
+     * keeping every piece of information — and stages the result as ONE track-changes
+     * suggestion the human accepts or rejects. An optional `outline` lets the human dictate
+     * the section order/structure and the AI rearranges the existing content to match it.
+     *
+     * Embedded atoms (diagrams, ink, images, tables) are PRESERVED in place by keeping any
+     * non-text block the model couldn't represent in Markdown — we diff against a target that
+     * splices the AI's reorganised text blocks together with the original non-text blocks at the
+     * end, so nothing visual is lost. (The model reorders prose; visuals stay attached.)
+     */
+    async restructure(input: { noteId: string; access: NoteAccess; outline?: string }): Promise<AiActionResult> {
+      const { noteId, access } = input;
+      const view = await relay.ensureDoc({ noteId, tenantId: access.tenantId, ownerId: access.ownerId, seedPm: await seedFor(noteId, access.ownerId) });
+      const original = view.markdown;
+      if (!original.trim()) return { ok: false, error: 'the note is empty — nothing to restructure' };
+
+      const guidance = input.outline?.trim()
+        ? `The human wants the note organised to THIS outline/section order. Rearrange the existing content to fit it (add a heading only if the outline names a section that has matching content). Do NOT invent new facts.\n\nDesired outline:\n${input.outline.trim()}`
+        : 'Reorganise it into the clearest possible structure: a logical section order, a consistent heading hierarchy (# then ## then ###), related points grouped together, and a one-line summary at the very top if it helps. Do NOT add new facts, drop any information, or change the meaning.';
+      const reorganised = (await generate({
+        system: 'You restructure a note. You keep EVERY piece of information from the original — you only reorder, regroup and fix the heading hierarchy. Output ONLY the reorganised note as GitHub-flavoured Markdown — no preamble, no commentary, no code fence around the whole thing.',
+        user: `Here is the note (Markdown):\n\n${original.slice(0, 12000)}\n\n${guidance}`,
+        userId: access.ownerId, tenantId: access.tenantId, temperature: 0.2, maxTokens: 4000,
+      })).trim();
+      if (!reorganised) return { ok: false, error: 'the model returned no content' };
+
+      // Build STAGED ops that transform the current doc into the reorganised one. We diff against
+      // (reorganised text blocks) + (original NON-text blocks the model can't render in Markdown),
+      // so diagrams / ink / images survive the reorg instead of being dropped by the round-trip.
+      const site = agentSite(noteId, 'restructure');
+      const shadow = BlockDoc.fromSnapshot(site, view.snapshot);
+      const TEXTUAL = new Set(['paragraph', 'heading', 'bulletList', 'orderedList', 'listItem', 'blockquote', 'codeBlock', 'horizontalRule', 'taskList', 'taskItem']);
+      const visuals: BlockSpec[] = shadow.blocks()
+        .filter((b) => !TEXTUAL.has(b.type) && !(b.text && b.text.trim()))
+        .map((b) => ({ type: b.type, attrs: b.attrs, text: b.text ?? '', marks: b.marks ?? [] }));
+      const target: BlockSpec[] = [...markdownToBlocks(reorganised), ...visuals];
+      const ops = diffBlocks(shadow, target);
+      if (ops.length === 0) return { ok: false, error: 'the note is already well-structured — no change' };
+
+      const id = newUUIDv7();
+      const row: NoteSuggestionRow = {
+        id, note_id: noteId, doc_id: view.docId, tenant_id: access.tenantId,
+        author_kind: 'agent', author_id: access.ownerId, author_site: site, action: 'restructure_note',
+        status: 'pending', ops_json: JSON.stringify(ops), preview_text: reorganised, before_text: original,
+        anchor_json: JSON.stringify({ kind: 'document' }), created_at: now(), resolved_at: null, resolved_by: null,
+      };
+      await db.createNoteSuggestion(row);
+      noteCoeditHub.broadcast(noteId, 'coedit.suggestion', { id, action: 'restructure_note', preview: reorganised });
+      return { ok: true, suggestionId: id, preview: reorganised, action: 'restructure_note' };
+    },
+
+    /**
+     * The `restructure_note` agent-tool entry point. Resolves access itself (the tool only
+     * knows the user + note id) so a prompt-injected agent cannot reorganise a note the user
+     * cannot edit. Stages the reorganised note as a suggestion for human accept/reject.
+     */
+    async agentRestructure(args: { userId: string; noteId: string; outline?: string }): Promise<AiActionResult> {
+      const access = await resolveNoteAccess(db, args.noteId, args.userId);
+      if (!access) return { ok: false, error: 'note not found or not accessible' };
+      if (!roleAtLeast(access.role, 'collaborator')) return { ok: false, error: 'forbidden: this note is read-only for you' };
+      return this.restructure({ noteId: args.noteId, access, ...(args.outline ? { outline: args.outline } : {}) });
+    },
+
     /** List a note's suggestions (default: pending only). */
     async list(noteId: string, status: 'pending' | 'accepted' | 'rejected' | 'all' = 'pending'): Promise<NoteSuggestionRow[]> {
       return db.listNoteSuggestions(noteId, status === 'all' ? undefined : status);

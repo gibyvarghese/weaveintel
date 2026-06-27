@@ -95,6 +95,7 @@ import { applyM112NotesMobile } from './m112-notes-mobile.js';
 import { applyM113NotesDesktop } from './m113-notes-desktop.js';
 import { applyM114NotesExport } from './m114-notes-export.js';
 import { applyM115SuggestionBeforeText } from './m115-suggestion-before-text.js';
+import { applyM116NoteRestructureTool } from './m116-note-restructure-tool.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -198,6 +199,7 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm113-notes-desktop', description: 'weaveNotes Phase 8: desktop (Tauri shell — offline cache, open-to-last-note, quick capture). Adds three Builder-editable weavenotes_settings flags (desktop_offline_enabled, quick_capture_enabled, desktop_offline_note_limit) gating the desktop offline cache + the global quick-capture hotkey, and registers the recent_notes tool ("what was I working on?") in tool_catalog + grants it to the weaveNotes Editor agent. Quick-capture reuses create-note; a desktop-stamped activity entry tells the AI a note was captured on desktop. Idempotent (safeExec ALTERs + INSERT OR IGNORE + JSON merges)', run: applyM113NotesDesktop },
   { id: 'm114-notes-export', description: 'weaveNotes Phase 10: sharing/export/polish — note EXPORT. Adds two Builder-editable weavenotes_settings (export_enabled + allowed_export_formats) that gate downloading a note as Markdown / HTML (print-ready) / Word (.doc) / lossless JSON, and registers the export_note tool ("export my note as markdown") in tool_catalog + grants it to the weaveNotes Editor agent. The export reuses @weaveintel/coedit serializers. Idempotent (safeExec ALTERs + INSERT OR IGNORE + JSON merges)', run: applyM114NotesExport },
   { id: 'm115-suggestion-before-text', description: 'weaveNotes: adds note_suggestions.before_text so an AI edit can render INLINE in the note as a real old→new diff (the design\'s track-changes card with ✓ Accept / ✕ Reject), instead of a plain text preview. Captured when a rewrite is staged; empty for append-only suggestions. Idempotent (safeExec ALTER)', run: applyM115SuggestionBeforeText },
+  { id: 'm116-note-restructure-tool', description: 'weaveNotes: the whole-note restructure tool. Registers restructure_note in tool_catalog (Builder-governable), grants it to the weaveNotes Editor worker agent, and enables it in weavenotes_settings.enabled_ai_tools. The AI reorganises a whole note — reorder/group sections, fix the heading hierarchy, or rearrange to a desired outline — keeping every fact, staged as ONE track-changes suggestion the human accepts or rejects (visuals like diagrams/ink/tables are preserved across the reorg). Idempotent (INSERT OR IGNORE + JSON merges)', run: applyM116NoteRestructureTool },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

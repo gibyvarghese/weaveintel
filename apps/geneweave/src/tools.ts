@@ -947,6 +947,13 @@ export interface ToolRegistryOptions {
    */
   noteEdit?: (args: { userId: string; noteId: string; markdown: string; mode: 'direct' | 'suggest' }) => Promise<{ ok: boolean; error?: string; applied?: number; suggestionId?: string }>;
   /**
+   * weaveNotes: note restructure callback. When set, the `restructure_note` built-in tool is
+   * available so the agent can reorganise a WHOLE note (reorder/group sections, fix the heading
+   * hierarchy) while keeping every fact — staged as one track-changes suggestion. An optional
+   * `outline` lets the user dictate the section order. Resolves the user's access itself.
+   */
+  noteRestructure?: (args: { userId: string; noteId: string; outline?: string }) => Promise<{ ok: boolean; error?: string; suggestionId?: string; preview?: string }>;
+  /**
    * weaveNotes Phase 4: note publish callback. When set, the `note_publish` built-in
    * tool is available so the agent can turn one of the user's notes into a shareable
    * artifact (Markdown/HTML). The callback resolves the user's note access + enforces
@@ -1585,6 +1592,28 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
         tags: ['notes', 'output'],
       }),
     } : {}),
+    // weaveNotes: whole-note restructure tool — available when noteRestructure callback is set.
+    ...(opts?.noteRestructure && opts.currentUserId ? {
+      restructure_note: weaveTool({
+        name: 'restructure_note',
+        description: 'Reorganise the WHOLE of one of the user\'s notes — reorder and group its sections, fix the heading hierarchy, and tidy the structure — while keeping every fact (nothing is added or removed). The result is staged as a single track-changes suggestion the user accepts or rejects. Use this when the user asks to "restructure / reorganise / reorder / tidy up / fix the structure of" a note, or gives an outline/section order they want it to follow. Optionally pass `outline` (a list of section headings, one per line) to dictate the order; otherwise the AI picks the clearest structure. You only need the note id.',
+        parameters: {
+          type: 'object',
+          properties: {
+            noteId: { type: 'string', description: 'The id of the note to restructure (the user must own it or be a collaborator).' },
+            outline: { type: 'string', description: 'Optional desired section order/structure — a list of headings, one per line. Omit to let the AI choose the clearest structure.' },
+          },
+          required: ['noteId'],
+        },
+        execute: async (args: { noteId: string; outline?: string }) => {
+          if (!opts.noteRestructure || !opts.currentUserId) return { content: 'Note restructuring is unavailable in this context.', isError: true };
+          const r = await opts.noteRestructure({ userId: opts.currentUserId, noteId: args.noteId, ...(args.outline ? { outline: args.outline } : {}) });
+          if (!r.ok) return { content: `restructure_note failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, suggestionId: r.suggestionId ?? null, staged: true });
+        },
+        tags: ['notes', 'output'],
+      }),
+    } : {}),
     // weaveNotes Phase 6: database column auto-fill — available when dbAutofill callback is set.
     ...(opts?.dbAutofill && opts.currentUserId ? {
       autofill_database: weaveTool({
@@ -2154,7 +2183,7 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
   // custom tool selection would otherwise never get them (and "create a note" would silently
   // fall back to emit_artifact). Skip any already registered from the selection above.
   for (const noteTool of [
-    'create_note', 'new_from_template', 'recent_notes', 'export_note', 'note_edit', 'note_publish',
+    'create_note', 'new_from_template', 'recent_notes', 'export_note', 'note_edit', 'note_publish', 'restructure_note',
     'find_related_notes', 'autofill_database', 'capture_web_page', 'workspace_search', 'read_note_activity',
     // weaveNotes Phase 2/4/5: the CREATIVE + study tools — so the assistant can draw a diagram, sketch
     // ink, colour-code, or make flashcards from a plain chat ("draw a diagram of this"), not only via

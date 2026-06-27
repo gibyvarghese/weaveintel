@@ -322,7 +322,7 @@ export interface NoteSuggestionRow {
   action: 'continue' | 'rewrite' | 'summarize' | 'ask' | 'note_edit' | 'ai_block'
     | 'apply_highlight' | 'apply_text_color' | 'colorize_semantic'
     | 'create_diagram' | 'draw_ink' | 'recolor_ink'
-    | 'create_illustration' | 'generate_image';
+    | 'create_illustration' | 'generate_image' | 'restructure_note';
   status: 'pending' | 'accepted' | 'rejected';
   ops_json: string;
   preview_text: string;
