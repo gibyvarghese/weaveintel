@@ -153,3 +153,19 @@ export {
   sanitizeColor,
   isKnownSwatch,
 } from './creative.js';
+
+// weaveNotes Phase 2 — the AI colour-coding contract: a pre-validated WCAG-AA palette,
+// the semantic colour schemes (topic/importance/status/sentiment), and phrase location.
+export {
+  type ColorScheme,
+  type SchemeBucket,
+  READING_INK,
+  HIGHLIGHT_PALETTE,
+  TEXT_COLOR_PALETTE,
+  COLOR_SCHEMES,
+  isColorScheme,
+  schemeLabels,
+  schemeColor,
+  assignTopicColors,
+  locatePhrase,
+} from './colorize.js';

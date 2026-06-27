@@ -993,6 +993,10 @@ export interface ToolRegistryOptions {
    * understand WHAT HAS BEEN HAPPENING before it acts. Owner-scoped, read-only.
    */
   readNoteActivity?: (args: { userId: string; tenantId?: string | null; noteId: string; limit?: number }) => Promise<{ ok: boolean; error?: string; noteId: string; events: Array<{ action: string; actor: string; summary: string | null; createdAt: string }> }>;
+  // weaveNotes Phase 2 — the AI selection card's colour tools (each stages a track-changes suggestion).
+  noteApplyHighlight?: (args: { userId: string; noteId: string; phrase: string; color?: string }) => Promise<{ ok: boolean; error?: string; suggestionId?: string; count?: number }>;
+  noteApplyTextColor?: (args: { userId: string; noteId: string; phrase: string; color?: string }) => Promise<{ ok: boolean; error?: string; suggestionId?: string; count?: number }>;
+  noteColorize?: (args: { userId: string; noteId: string; scheme: string; instruction?: string }) => Promise<{ ok: boolean; error?: string; suggestionId?: string; count?: number }>;
 }
 
 export function filterToolNamesByPersona(toolNames: string[], persona: string | null | undefined): string[] {
@@ -1599,6 +1603,73 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
           return JSON.stringify({ ok: true, noteId: r.noteId, count: r.events.length, events: r.events });
         },
         tags: ['notes', 'memory'],
+      }),
+    } : {}),
+    // weaveNotes Phase 2: the AI selection card's colour tools — each stages a track-changes suggestion.
+    ...(opts?.noteApplyHighlight && opts.currentUserId ? {
+      apply_highlight: weaveTool({
+        name: 'apply_highlight',
+        description: 'Highlight a specific phrase in one of the user\'s notes. Copy the phrase VERBATIM from the note so it can be located. Optionally pass a colour (a hex like "#FAC775", or leave blank for the default amber). Staged as a track-changes suggestion the user accepts or rejects.',
+        parameters: {
+          type: 'object',
+          properties: {
+            noteId: { type: 'string', description: 'The id of the note (the user must own it or be a collaborator).' },
+            phrase: { type: 'string', description: 'The exact phrase to highlight, copied verbatim from the note.' },
+            color: { type: 'string', description: 'Optional highlight colour as hex (e.g. "#9FE1CB"). Defaults to amber.' },
+          },
+          required: ['noteId', 'phrase'],
+        },
+        execute: async (args: { noteId: string; phrase: string; color?: string }) => {
+          if (!opts.noteApplyHighlight || !opts.currentUserId) return { content: 'Highlighting is unavailable in this context.', isError: true };
+          const r = await opts.noteApplyHighlight({ userId: opts.currentUserId, noteId: args.noteId, phrase: args.phrase, ...(args.color ? { color: args.color } : {}) });
+          if (!r.ok) return { content: `apply_highlight failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, suggestionId: r.suggestionId ?? null, count: r.count ?? 0 });
+        },
+        tags: ['notes', 'output'],
+      }),
+    } : {}),
+    ...(opts?.noteApplyTextColor && opts.currentUserId ? {
+      apply_text_color: weaveTool({
+        name: 'apply_text_color',
+        description: 'Colour the TEXT of a specific phrase in one of the user\'s notes. Copy the phrase VERBATIM. Optionally pass a hex colour (defaults to coral). Staged as a track-changes suggestion the user accepts or rejects.',
+        parameters: {
+          type: 'object',
+          properties: {
+            noteId: { type: 'string', description: 'The id of the note.' },
+            phrase: { type: 'string', description: 'The exact phrase to colour, copied verbatim from the note.' },
+            color: { type: 'string', description: 'Optional text colour as hex (e.g. "#1F5FA8"). Defaults to coral.' },
+          },
+          required: ['noteId', 'phrase'],
+        },
+        execute: async (args: { noteId: string; phrase: string; color?: string }) => {
+          if (!opts.noteApplyTextColor || !opts.currentUserId) return { content: 'Text colouring is unavailable in this context.', isError: true };
+          const r = await opts.noteApplyTextColor({ userId: opts.currentUserId, noteId: args.noteId, phrase: args.phrase, ...(args.color ? { color: args.color } : {}) });
+          if (!r.ok) return { content: `apply_text_color failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, suggestionId: r.suggestionId ?? null, count: r.count ?? 0 });
+        },
+        tags: ['notes', 'output'],
+      }),
+    } : {}),
+    ...(opts?.noteColorize && opts.currentUserId ? {
+      colorize_semantic: weaveTool({
+        name: 'colorize_semantic',
+        description: 'Colour-code one of the user\'s notes BY MEANING. Pick a scheme — "topic" (group related spans), "importance" (critical/high/normal/low), "status" (done/in_progress/blocked/todo), or "sentiment" (positive/neutral/negative). The AI chooses which phrases to mark and a pre-validated WCAG-AA colour for each. Staged as one track-changes suggestion the user accepts or rejects.',
+        parameters: {
+          type: 'object',
+          properties: {
+            noteId: { type: 'string', description: 'The id of the note to colour-code.' },
+            scheme: { type: 'string', enum: ['topic', 'importance', 'status', 'sentiment'], description: 'The colour-coding scheme.' },
+            instruction: { type: 'string', description: 'Optional extra guidance (e.g. "focus on the risks section").' },
+          },
+          required: ['noteId', 'scheme'],
+        },
+        execute: async (args: { noteId: string; scheme: string; instruction?: string }) => {
+          if (!opts.noteColorize || !opts.currentUserId) return { content: 'Colour-coding is unavailable in this context.', isError: true };
+          const r = await opts.noteColorize({ userId: opts.currentUserId, noteId: args.noteId, scheme: args.scheme, ...(args.instruction ? { instruction: args.instruction } : {}) });
+          if (!r.ok) return { content: `colorize_semantic failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, suggestionId: r.suggestionId ?? null, count: r.count ?? 0 });
+        },
+        tags: ['notes', 'output'],
       }),
     } : {}),
     // weaveNotes Phase 8: workspace RAG search — available when workspaceSearch callback is set.

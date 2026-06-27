@@ -54,6 +54,8 @@ import {
 } from '../note-coedit-sql.js';
 import { noteCoeditHub } from '../note-coedit-hub.js';
 import { createNoteAiService, type NoteAiGenerate, type AiAction } from '../note-ai-sql.js';
+import { createNoteColorizeService } from '../note-colorize-sql.js';
+import { isColorScheme } from '@weaveintel/notes';
 import { createNotePublishService, type PublishFormat } from '../note-publish-sql.js';
 import { createNoteGraphService } from '../note-graph-sql.js';
 import { createNoteDbService } from '../note-db-sql.js';
@@ -86,6 +88,9 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
   // weaveNotes Phase 3: the AI co-author service (suggestions, agent edits, AI blocks).
   // Only wired when the host provides an LLM generator (so unit/embedder setups stay LLM-free).
   const noteAi = opts.aiGenerate ? createNoteAiService(db, opts.aiGenerate) : null;
+  // weaveNotes Phase 2: the AI selection card's colour service (highlight / text-colour /
+  // colour-code by meaning). Same LLM-optional wiring as the co-author service.
+  const noteColorize = opts.aiGenerate ? createNoteColorizeService(db, opts.aiGenerate) : null;
   // weaveNotes Phase 4: the publish service (note → shareable artifact, sensitivity-gated).
   const publish = createNotePublishService(db, { jwtSecret: opts.jwtSecret ?? process.env['JWT_SECRET'] ?? 'insecure-dev-secret', ...(opts.publicBaseUrl ? { publicBaseUrl: opts.publicBaseUrl } : {}) });
   // weaveNotes Phase 5: the knowledge-graph service (wiki-links/backlinks, entity/relation
@@ -396,6 +401,41 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     if (!blockId || typeof blockId !== 'object') { res.writeHead(400); res.end(JSON.stringify({ error: 'blockId required' })); return; }
     const r = await noteAi.refreshAiBlock({ noteId: params['id']!, access, blockId: blockId as { counter: number; siteId: string } });
     res.writeHead(r.ok ? 200 : 400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(r));
+  }, { auth: true });
+
+  // weaveNotes Phase 2: the AI selection card's colour endpoints. Static paths registered
+  // BEFORE the `/ai/:action` param route so the router matches them exactly.
+  //   POST /api/me/notes/:id/ai/highlight   { phrase, color?, mark? }  → a highlight/text-colour suggestion
+  //   POST /api/me/notes/:id/ai/colorize    { scheme, instruction? }   → a colour-code-by-meaning suggestion
+  router.post('/api/me/notes/:id/ai/highlight', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    if (!noteColorize) { res.writeHead(501); res.end(JSON.stringify({ error: 'AI features are not configured' })); return; }
+    const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    if (!roleAtLeast(access.role, 'collaborator')) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    if (typeof body['phrase'] !== 'string' || !body['phrase'].trim()) { res.writeHead(400); res.end(JSON.stringify({ error: 'phrase required' })); return; }
+    const color = typeof body['color'] === 'string' ? body['color'] : undefined;
+    const r = body['mark'] === 'textColor'
+      ? await noteColorize.applyTextColor({ noteId: params['id']!, access, phrase: body['phrase'], ...(color ? { color } : {}) })
+      : await noteColorize.applyHighlight({ noteId: params['id']!, access, phrase: body['phrase'], ...(color ? { color } : {}) });
+    res.writeHead(r.ok ? 201 : 400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(r));
+  }, { auth: true });
+
+  router.post('/api/me/notes/:id/ai/colorize', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    if (!noteColorize) { res.writeHead(501); res.end(JSON.stringify({ error: 'AI features are not configured' })); return; }
+    const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    if (!roleAtLeast(access.role, 'collaborator')) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    const scheme = isColorScheme(body['scheme']) ? body['scheme'] : 'topic';
+    const r = await noteColorize.colorizeSemantic({ noteId: params['id']!, access, scheme, ...(typeof body['instruction'] === 'string' ? { instruction: body['instruction'] } : {}) });
+    res.writeHead(r.ok ? 201 : 400, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(r));
   }, { auth: true });
 

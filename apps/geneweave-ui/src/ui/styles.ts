@@ -1525,6 +1525,26 @@ input{font-family:inherit;outline:none}
 .notes-bubble-color-a{font-weight:800}
 .notes-bubble-colorwrap .notes-bubble-colordot{display:none;width:14px;height:14px;border-radius:50%;border:1px solid rgba(0,0,0,.12);cursor:pointer;padding:0}
 .notes-bubble-colorwrap.open .notes-bubble-colordot{display:inline-block}
+/* weaveNotes Phase 2 — the floating AI selection card (spec §4 / §10) */
+.notes-aicard-pill{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;font-weight:700;color:#fff;background:var(--accent,#0E9A6E);border:none;border-radius:999px;padding:6px 12px;cursor:pointer;box-shadow:0 8px 28px rgba(20,32,27,.18);pointer-events:all}
+.notes-aicard-pill:hover{background:var(--accent2,#0B7A57)}
+.notes-aicard-spark{color:#FAC775}
+.notes-aicard{width:344px;background:var(--surface,#fff);border:1px solid var(--mint-border,#DCEFE5);border-radius:16px;box-shadow:0 8px 28px rgba(20,32,27,.12);padding:10px;pointer-events:all;font-size:13px}
+.notes-aicard-prompt{display:flex;align-items:center;gap:7px;border:1px solid var(--hairline,#E7ECEA);border-radius:12px;padding:7px 10px;margin-bottom:8px}
+.notes-aicard-prompt .notes-aicard-spark{color:var(--accent,#0E9A6E);font-weight:800}
+.notes-aicard-input{flex:1;border:none;outline:none;background:transparent;font-size:13px;color:var(--ink,#14201B)}
+.notes-aicard-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:9px}
+.notes-aicard-chip{font-size:12px;font-weight:600;color:var(--ink,#14201B);background:var(--mint,#E8F5EE);border:1px solid var(--mint-deep,#DCEFE5);border-radius:999px;padding:5px 11px;cursor:pointer}
+.notes-aicard-chip:hover{background:var(--mint-deep,#DCEFE5)}
+.notes-aicard-chip:disabled{opacity:.5;cursor:default}
+.notes-aicard-colors{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding-top:8px;border-top:1px solid var(--hairline,#E7ECEA)}
+.notes-aicard-colorlabel{font-size:11.5px;font-weight:600;color:var(--muted,#5E6E67)}
+.notes-aicard-swatch{width:18px;height:18px;border-radius:50%;border:1px solid rgba(0,0,0,.12);cursor:pointer;padding:0}
+.notes-aicard-swatch:hover{transform:scale(1.12)}
+.notes-aicard-sep{width:1px;height:16px;background:var(--hairline,#E7ECEA);margin:0 2px}
+.notes-aicard-scheme{font-size:12px;border:1px solid var(--hairline,#E7ECEA);border-radius:8px;padding:3px 6px;background:var(--surface,#fff);color:var(--ink,#14201B)}
+.notes-aicard-go{padding:4px 10px}
+.notes-aicard-status{min-height:16px;margin-top:8px;font-size:11.5px;font-weight:600;color:var(--accent2,#0B7A57)}
 /* Slash menu */
 .notes-slash-menu{background:var(--bg1);border:1px solid var(--bg4);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:4px;min-width:200px;z-index:300}
 .notes-slash-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;cursor:pointer;font-size:13px;color:var(--fg1)}

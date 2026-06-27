@@ -55,6 +55,7 @@ import { DbToolAuditEmitter } from './tool-audit-emitter.js';
 import { DbToolApprovalGate } from './tool-approval-gate.js';
 import { createTemporalStore } from './temporal-store.js';
 import { createNoteAiService, createModelTextGenerator, agentCreateNote } from './note-ai-sql.js';
+import { createColorizeTools } from './note-colorize-sql.js';
 import { createNotePublishService } from './note-publish-sql.js';
 import { createNoteGraphService } from './note-graph-sql.js';
 import { createNoteDbService } from './note-db-sql.js';
@@ -417,6 +418,15 @@ export class ChatEngine {
       // weaveNotes Phase 0: wire the `read_note_activity` tool (recent change history → AI awareness).
       readNoteActivity: (a: { userId: string; tenantId?: string | null; noteId: string; limit?: number }) =>
         createNoteSettingsService(db).agentReadActivity(a),
+      // weaveNotes Phase 2: wire the AI selection card's colour tools. Each stages a
+      // track-changes suggestion (never a silent repaint); the AI picks a semantic label and
+      // the code maps it to a pre-validated WCAG-AA colour. Resolves note access itself.
+      noteApplyHighlight: (a: { userId: string; noteId: string; phrase: string; color?: string }) =>
+        createColorizeTools(db, createModelTextGenerator(config)).applyHighlight(a),
+      noteApplyTextColor: (a: { userId: string; noteId: string; phrase: string; color?: string }) =>
+        createColorizeTools(db, createModelTextGenerator(config)).applyTextColor(a),
+      noteColorize: (a: { userId: string; noteId: string; scheme: string; instruction?: string }) =>
+        createColorizeTools(db, createModelTextGenerator(config)).colorizeSemantic(a),
     };
   }
 

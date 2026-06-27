@@ -41,6 +41,8 @@ export interface WeaveNotesConfig {
 export const WEAVENOTES_AI_TOOLS = [
   'create_note', 'note_edit', 'find_related_notes', 'workspace_search',
   'capture_web_page', 'autofill_database', 'read_note_activity',
+  // Phase 2 — the AI selection card's colour tools.
+  'apply_highlight', 'apply_text_color', 'colorize_semantic',
 ] as const;
 
 export const DEFAULT_WEAVENOTES_CONFIG: WeaveNotesConfig = {

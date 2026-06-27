@@ -24,6 +24,7 @@ import { api } from './api.js';
 import { mountNotesEditor, type EditorInstance } from './notes-editor.js';
 import { wireNoteCoedit, createNoteShareLink, type NoteCoeditSession } from './notes-coedit.js';
 import { wireNoteAi, type NoteAiPanel } from './notes-ai.js';
+import { wireSelectionCard, type SelectionCard } from './notes-ai-card.js';
 import { wireNoteConnections, type NoteConnectionsPanel } from './notes-graph.js';
 import { renderDatabasesView } from './notes-database-view.js';
 import { renderCapturePanel } from './notes-capture.js';
@@ -37,6 +38,8 @@ import { wovenMarkSvg } from './notes-brand.js';
 let _activeCoedit: NoteCoeditSession | null = null;
 /** The AI co-author panel for the currently-open note (Phase 3). */
 let _activeAi: NoteAiPanel | null = null;
+/** The floating AI selection card for the currently-open note (Phase 2). */
+let _activeCard: SelectionCard | null = null;
 /** The knowledge-graph connections panel for the currently-open note (Phase 5). */
 let _activeConn: NoteConnectionsPanel | null = null;
 /** Phase 8 panels: version history, comments, synced blocks. */
@@ -46,6 +49,7 @@ let _activeSynced: SimplePanel | null = null;
 function teardownCoedit(): void {
   if (_activeCoedit) { _activeCoedit.close(); _activeCoedit = null; }
   if (_activeAi) { _activeAi.close(); _activeAi = null; }
+  if (_activeCard) { _activeCard.destroy(); _activeCard = null; }
   if (_activeConn) { _activeConn.close(); _activeConn = null; }
   if (_activeHistory) { _activeHistory.close(); _activeHistory = null; }
   if (_activeComments) { _activeComments.close(); _activeComments = null; }
@@ -435,6 +439,8 @@ function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLEle
     // suggestion (or inserting/refreshing an AI block) reloads the note so the
     // editor reflects the applied change.
     _activeAi = wireNoteAi({ noteId: note.id, toolbarEl: aiToolbar, panelEl: aiPanel, onApplied: () => { void loadNote(note.id).then(render); } });
+    // Phase 2: the floating AI selection card — select text → card → ask/colour → suggestion.
+    _activeCard = wireSelectionCard({ container: editorContainer, noteId: note.id, onSuggestion: () => { _railTab = 'assistant'; void _activeAi?.refresh(); } });
     // Phase 5: wire the knowledge-graph connections panel (hidden until the button opens it).
     _activeConn = wireNoteConnections({ noteId: note.id, panelEl: connPanel, onOpenNote: (id) => { void loadNote(id).then(render); } });
     // Phase 8: wire the version-history, comments, and synced-blocks panels (hidden until opened).

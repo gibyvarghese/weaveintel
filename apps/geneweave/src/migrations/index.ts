@@ -85,6 +85,7 @@ import { applyM102NoteGraph } from './m102-note-graph.js';
 import { applyM103NoteWorkspace } from './m103-note-workspace.js';
 import { applyM104WeaveNotesFoundation } from './m104-weavenotes-foundation.js';
 import { applyM105NotePageTheme } from './m105-note-page-theme.js';
+import { applyM106NoteColorTools } from './m106-note-color-tools.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -178,6 +179,7 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm103-note-workspace', description: 'weaveNotes Phase 8: workspace RAG + version history + comments + synced blocks — run_embeddings (one vector per chat run output, the run-side twin of note_embeddings, for cited workspace search over notes+runs) + note_versions (per-note doc_json snapshot timeline, restore-with-undo) + note_comments (threaded, block-anchored review comments mirroring m97 run_comments: stable CRDT-block anchor, raw markdown + sanitized html, soft-delete tombstones, thread resolve) + note_synced_blocks (transclusion: a block mirroring another note block, resolved read-through so source edits reflect everywhere)', run: applyM103NoteWorkspace },
   { id: 'm104-weavenotes-foundation', description: 'weaveNotes Phase 0: the configurable foundation — weavenotes_settings (single global config row seeded from @weaveintel/notes DEFAULT_WEAVENOTES_CONFIG: default theme, AI-approval, activity tracking + retention, per-edit token cap, enabled AI tools; Builder-editable) + note_activity (append-only "what changed" log so the AI understands recent edits before acting; owner-scoped) + registers the note AI tools in tool_catalog (create_note/note_edit/find_related_notes/workspace_search/capture_web_page/autofill_database/read_note_activity) + seeds the weaveNotes Editor worker agent that wields them', run: applyM104WeaveNotesFoundation },
   { id: 'm105-note-page-theme', description: 'weaveNotes Phase 1: per-note creative surface — adds notes.page_theme (pro|creative, the §10.6 theme a note opens in; new notes adopt weavenotes_settings.default_theme), notes.freeform_mode (0/1 free-canvas layout), and notes.cover_image_artifact_id (optional banner). Existing notes keep the safe pro/non-freeform/no-cover default — zero behaviour change; the editor theme toggle persists the per-note choice', run: applyM105NotePageTheme },
+  { id: 'm106-note-color-tools', description: 'weaveNotes Phase 2: the AI selection card colour tools — registers apply_highlight / apply_text_color / colorize_semantic in tool_catalog (Builder-governable), grants them to the weaveNotes Editor worker agent, and merges them into weavenotes_settings.enabled_ai_tools. The AI never picks a raw colour: it picks a semantic label and the code maps it to a pre-validated WCAG-AA colour; every colour change is a track-changes suggestion the user accepts or rejects. Idempotent (INSERT OR IGNORE + JSON merge)', run: applyM106NoteColorTools },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {
