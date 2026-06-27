@@ -113,6 +113,7 @@ import {
 import { renderCalendarView } from './ui/calendar-view.js';
 import { renderNotesView, loadNotesList } from './ui/notes-view.js';
 import { renderDesignSystemView } from './ui/design-system-view.js';
+import { renderBuilderView } from './ui/builder-view.js';
 import { loadActionFeed } from './ui/action-feed.js';
 import { loadCalendarItems, loadCalendarCategories } from './ui/agenda-api.js';
 import {
@@ -1733,6 +1734,13 @@ function renderApp() {
     wrap.appendChild(renderNotesView(render));
     return wrap;
   }
+  // Builder — the full-bleed three-pane "configure the assistant" app (its own nav),
+  // recreated from "GeneWeave Builder.dc.html" and wired to /api/admin/prompt-fragments.
+  if (state.view === 'builder') {
+    wrap.classList.add('app-fullbleed');
+    wrap.appendChild(renderBuilderView(render));
+    return wrap;
+  }
   wrap.appendChild(renderWorkspaceNav({
     render,
     openConnectorsView: () => { void openConnectorsView(render); },
@@ -1810,7 +1818,7 @@ function restoreUiStateFromStorage() {
     const raw = window.localStorage.getItem(UI_STATE_KEY);
     if (!raw) return;
     const saved = JSON.parse(raw) as any;
-    const allowedViews = new Set(['chat', 'connectors', 'admin', 'dashboard', 'preferences', 'scientific-validation', 'kaggle-competition', 'calendar', 'notes', 'design']);
+    const allowedViews = new Set(['chat', 'connectors', 'admin', 'dashboard', 'preferences', 'scientific-validation', 'kaggle-competition', 'calendar', 'notes', 'design', 'builder']);
 
     if (typeof saved?.view === 'string' && allowedViews.has(saved.view)) {
       state.view = saved.view;

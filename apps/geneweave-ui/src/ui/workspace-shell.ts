@@ -14,8 +14,9 @@ import { pushAdminHash } from './admin-ui.js';
 import { bucketItems, bucketLabel, BUCKET_ORDER, itemCategoryColor, formatItemTime, quickAddAgendaItem } from './agenda-api.js';
 import type { Chat } from './types.js';
 
-function renderSidebarIcon(kind: 'home' | 'connectors' | 'admin' | 'dashboard' | 'calendar' | 'notes' | 'design') {
+function renderSidebarIcon(kind: 'home' | 'connectors' | 'admin' | 'dashboard' | 'calendar' | 'notes' | 'design' | 'builder') {
   const iconMap: Record<string, string> = {
+    builder: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>',
     design: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="6.5" cy="10.5" r="2.5"/><circle cx="17" cy="15" r="2.5"/><path d="M8.5 9 11 8M9 12l5.5 2"/></svg>',
     home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.8V21h13V9.8"/><path d="M9.5 21v-6h5v6"/></svg>',
     connectors: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h4a2 2 0 0 1 2 2v0"/><path d="M17 17h-4a2 2 0 0 1-2-2v0"/><rect x="3" y="4" width="4" height="6" rx="1.2"/><rect x="17" y="14" width="4" height="6" rx="1.2"/></svg>',
@@ -132,6 +133,7 @@ export function renderWorkspaceNav(options: {
   menu.appendChild(navBtn('calendar', 'Calendar', renderSidebarIcon('calendar'), () => { state.view = 'calendar'; options.render(); }));
   menu.appendChild(navBtn('notes', 'Notes', renderSidebarIcon('notes'), () => { state.view = 'notes'; options.render(); }));
   menu.appendChild(navBtn('design', 'Design', renderSidebarIcon('design'), () => { state.view = 'design'; options.render(); }));
+  menu.appendChild(navBtn('builder', 'Builder', renderSidebarIcon('builder'), () => { state.view = 'builder'; options.render(); }));
   menu.appendChild(navBtn('dashboard', 'Dashboard', renderSidebarIcon('dashboard'), () => { state.view = 'dashboard'; void options.loadDashboard(); }));
   menu.appendChild(navBtn('connectors', 'Connectors', renderSidebarIcon('connectors'), () => { options.openConnectorsView(); }));
   menu.appendChild(h('button', {
