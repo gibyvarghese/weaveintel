@@ -2153,7 +2153,16 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
   // tool selection: mode policies only apply when `enabled_tools` is empty, so a user with a
   // custom tool selection would otherwise never get them (and "create a note" would silently
   // fall back to emit_artifact). Skip any already registered from the selection above.
-  for (const noteTool of ['create_note', 'new_from_template', 'recent_notes', 'export_note', 'note_edit', 'note_publish', 'find_related_notes', 'autofill_database', 'capture_web_page', 'workspace_search', 'read_note_activity'] as const) {
+  for (const noteTool of [
+    'create_note', 'new_from_template', 'recent_notes', 'export_note', 'note_edit', 'note_publish',
+    'find_related_notes', 'autofill_database', 'capture_web_page', 'workspace_search', 'read_note_activity',
+    // weaveNotes Phase 2/4/5: the CREATIVE + study tools — so the assistant can draw a diagram, sketch
+    // ink, colour-code, or make flashcards from a plain chat ("draw a diagram of this"), not only via
+    // the selection card. Each is built only when its callback is wired + gated by per-call config.
+    // (generate_image is intentionally NOT here — it costs money and stays opt-in.)
+    'create_diagram', 'draw_ink', 'recolor_ink', 'create_illustration', 'create_visual',
+    'make_flashcards', 'apply_highlight', 'apply_text_color', 'colorize_semantic',
+  ] as const) {
     const t = scopedTools[noteTool];
     if (t && !registeredFromSelection.has(noteTool) && canUseTool(actorPersona, noteTool)) registry.register(t);
   }
