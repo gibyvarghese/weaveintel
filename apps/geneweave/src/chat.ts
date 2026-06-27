@@ -56,6 +56,7 @@ import { DbToolApprovalGate } from './tool-approval-gate.js';
 import { createTemporalStore } from './temporal-store.js';
 import { createNoteAiService, createModelTextGenerator, agentCreateNote } from './note-ai-sql.js';
 import { createColorizeTools } from './note-colorize-sql.js';
+import { createCreativeTools } from './note-creative-sql.js';
 import { withAiPresence } from './note-ai-presence.js';
 import { createNotePublishService } from './note-publish-sql.js';
 import { createNoteGraphService } from './note-graph-sql.js';
@@ -428,6 +429,12 @@ export class ChatEngine {
         createColorizeTools(db, createModelTextGenerator(config)).applyTextColor(a),
       noteColorize: (a: { userId: string; noteId: string; scheme: string; instruction?: string }) =>
         createColorizeTools(db, createModelTextGenerator(config)).colorizeSemantic(a),
+      // weaveNotes Phase 4: wire the AI creative tools (diagram + ink). Each emits native,
+      // editable content as a track-changes suggestion + mirrors its SVG to an artifact.
+      noteCreateDiagram: (a: { userId: string; noteId: string; instruction: string }) =>
+        createCreativeTools(db, createModelTextGenerator(config)).createDiagram(a),
+      noteDrawInk: (a: { userId: string; noteId: string; instruction: string }) =>
+        createCreativeTools(db, createModelTextGenerator(config)).drawInk(a),
     };
   }
 

@@ -9,6 +9,11 @@
 // `author` attributes carry the agency-colour contract (Phase 0): a callout/sticker the
 // AI created renders mint; a human's stays neutral. The CSS lives in the canvas styles.
 import { Mark, Node, mergeAttributes } from '@tiptap/core';
+// The notes editor BUNDLE is esbuild-compiled, so it can import the weaveIntel renderers
+// (unlike the main tsc-built UI client) — Phase 4 ink + diagrams render via the shared,
+// tested @weaveintel/notes SVG renderers, so the picture is identical server-, share-, and
+// editor-side.
+import { diagramToSvg, validateDiagramScene, strokesToSvg, validateStrokes, type InkStroke } from '@weaveintel/notes';
 
 // Tiptap's RawCommands is augmented per-extension; we add commands without global
 // module augmentation, so cast the returned command bag. Localized + intentional.
@@ -206,6 +211,131 @@ export const WashiDivider = Node.create({
   addCommands() {
     return {
       setWashiDivider: (attrs: { pattern?: string }) => ({ commands }: any) => commands.insertContent({ type: 'washiDivider', attrs: attrs ?? {} }),
+    } as any;
+  },
+});
+
+// ─── Diagram node (Phase 4) — native, editable, colour-coded diagram (renders to SVG) ──────────
+export const DiagramNode = Node.create({
+  name: 'diagram',
+  group: 'block',
+  atom: true,
+  draggable: true,
+  addAttributes() {
+    return {
+      // The scene is structured JSON (nodes/edges). It round-trips as an object in doc_json; the
+      // data-scene HTML attr is only used for copy/paste fidelity.
+      scene: {
+        default: null,
+        parseHTML: (el: HTMLElement) => { try { return JSON.parse(el.getAttribute('data-scene') || 'null'); } catch { return null; } },
+        renderHTML: (a: { scene?: unknown }) => (a.scene ? { 'data-scene': JSON.stringify(a.scene) } : {}),
+      },
+      title: { default: '' },
+      kind: { default: 'flow' },
+      author: { default: null as string | null, parseHTML: (el: HTMLElement) => el.getAttribute('data-author'), renderHTML: (a: { author?: string | null }) => (a.author ? { 'data-author': a.author } : {}) },
+    };
+  },
+  parseHTML() { return [{ tag: 'figure[data-diagram]' }]; },
+  renderHTML({ HTMLAttributes }) { return ['figure', mergeAttributes(HTMLAttributes, { 'data-diagram': '', class: 'gw-diagram-block' })]; },
+  addNodeView() {
+    return ({ node }: any) => {
+      const dom = document.createElement('figure');
+      dom.className = 'gw-diagram-block';
+      if (node.attrs.author) dom.setAttribute('data-author', node.attrs.author);
+      try { dom.innerHTML = diagramToSvg(validateDiagramScene(node.attrs.scene)); }
+      catch { dom.textContent = '[diagram]'; }
+      return { dom };
+    };
+  },
+  addCommands() {
+    return {
+      setDiagram: (attrs: { scene?: unknown; title?: string; kind?: string; author?: string }) => ({ commands }: any) => commands.insertContent({ type: 'diagram', attrs: attrs ?? {} }),
+    } as any;
+  },
+});
+
+// ─── Ink canvas node (Phase 4) — real freehand strokes; AI- + human-drawable ───────────────────
+export const InkCanvasNode = Node.create({
+  name: 'inkCanvas',
+  group: 'block',
+  atom: true,
+  draggable: true,
+  addAttributes() {
+    return {
+      strokes: {
+        default: [],
+        parseHTML: (el: HTMLElement) => { try { return JSON.parse(el.getAttribute('data-strokes') || '[]'); } catch { return []; } },
+        renderHTML: (a: { strokes?: unknown }) => ({ 'data-strokes': JSON.stringify(a.strokes ?? []) }),
+      },
+      author: { default: null as string | null, parseHTML: (el: HTMLElement) => el.getAttribute('data-author'), renderHTML: (a: { author?: string | null }) => (a.author ? { 'data-author': a.author } : {}) },
+    };
+  },
+  parseHTML() { return [{ tag: 'figure[data-ink]' }]; },
+  renderHTML({ HTMLAttributes }) { return ['figure', mergeAttributes(HTMLAttributes, { 'data-ink': '', class: 'gw-ink-block' })]; },
+  addNodeView() {
+    return ({ node, editor, getPos }: any) => {
+      const dom = document.createElement('figure');
+      dom.className = 'gw-ink-block';
+      if (node.attrs.author) dom.setAttribute('data-author', node.attrs.author);
+      let strokes: InkStroke[] = validateStrokes(node.attrs.strokes);
+      let penColor = '#14201B';
+      let eraser = false;
+
+      const surface = document.createElement('div');
+      surface.className = 'gw-ink-surface';
+      const render = (): void => { surface.innerHTML = strokes.length ? strokesToSvg(strokes, { width: 480, height: 200 }) : '<div class="gw-ink-empty">Draw here ✎</div>'; };
+      render();
+
+      // A tiny pen toolbar (colour swatches + eraser + clear).
+      const bar = document.createElement('div');
+      bar.className = 'gw-ink-toolbar';
+      bar.setAttribute('contenteditable', 'false');
+      const persist = (): void => {
+        try { const pos = getPos(); editor.view.dispatch(editor.view.state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, strokes })); } catch { /* read-only / detached */ }
+      };
+      for (const c of ['#14201B', '#D85A30', '#3B6FB0', '#0B6B4F']) {
+        const sw = document.createElement('button');
+        sw.className = 'gw-ink-swatch'; sw.style.background = c; sw.title = 'Pen';
+        sw.onmousedown = (e) => { e.preventDefault(); penColor = c; eraser = false; };
+        bar.appendChild(sw);
+      }
+      const erBtn = document.createElement('button'); erBtn.className = 'gw-ink-erase'; erBtn.textContent = '⌫'; erBtn.title = 'Eraser';
+      erBtn.onmousedown = (e) => { e.preventDefault(); eraser = true; };
+      bar.appendChild(erBtn);
+      const clr = document.createElement('button'); clr.className = 'gw-ink-clear'; clr.textContent = 'Clear';
+      clr.onmousedown = (e) => { e.preventDefault(); strokes = []; render(); persist(); };
+      bar.appendChild(clr);
+
+      // Pointer drawing: collect points → one stroke per drag.
+      let drawing: InkStroke | null = null;
+      const ptr = (e: PointerEvent): { x: number; y: number; p: number } => {
+        const r = surface.getBoundingClientRect();
+        return { x: e.clientX - r.left, y: e.clientY - r.top, p: e.pressure || 0.5 };
+      };
+      surface.addEventListener('pointerdown', (e) => {
+        if (!editor.isEditable) return;
+        e.preventDefault();
+        const pt = ptr(e);
+        drawing = { points: [pt], color: penColor, width: eraser ? 16 : 3, tool: eraser ? 'eraser' : 'pen', author: 'user' };
+        try { surface.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+      });
+      surface.addEventListener('pointermove', (e) => { if (drawing) { drawing.points.push(ptr(e)); strokes = [...strokes.filter((s) => s !== drawing), drawing]; render(); } });
+      const end = (): void => { if (drawing) { drawing = null; persist(); } };
+      surface.addEventListener('pointerup', end);
+      surface.addEventListener('pointerleave', end);
+
+      dom.appendChild(bar);
+      dom.appendChild(surface);
+      return {
+        dom,
+        update: (updated: any) => { if (updated.type.name !== 'inkCanvas') return false; strokes = validateStrokes(updated.attrs.strokes); render(); return true; },
+        ignoreMutation: () => true,
+      };
+    };
+  },
+  addCommands() {
+    return {
+      setInkCanvas: (attrs: { strokes?: unknown; author?: string }) => ({ commands }: any) => commands.insertContent({ type: 'inkCanvas', attrs: attrs ?? { strokes: [] } }),
     } as any;
   },
 });

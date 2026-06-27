@@ -997,6 +997,9 @@ export interface ToolRegistryOptions {
   noteApplyHighlight?: (args: { userId: string; noteId: string; phrase: string; color?: string }) => Promise<{ ok: boolean; error?: string; suggestionId?: string; count?: number }>;
   noteApplyTextColor?: (args: { userId: string; noteId: string; phrase: string; color?: string }) => Promise<{ ok: boolean; error?: string; suggestionId?: string; count?: number }>;
   noteColorize?: (args: { userId: string; noteId: string; scheme: string; instruction?: string }) => Promise<{ ok: boolean; error?: string; suggestionId?: string; count?: number }>;
+  // weaveNotes Phase 4 — the AI creative tools (ink + diagrams; each stages a track-changes suggestion).
+  noteCreateDiagram?: (args: { userId: string; noteId: string; instruction: string }) => Promise<{ ok: boolean; error?: string; suggestionId?: string; artifactId?: string | null }>;
+  noteDrawInk?: (args: { userId: string; noteId: string; instruction: string }) => Promise<{ ok: boolean; error?: string; suggestionId?: string; artifactId?: string | null }>;
 }
 
 export function filterToolNamesByPersona(toolNames: string[], persona: string | null | undefined): string[] {
@@ -1668,6 +1671,49 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
           const r = await opts.noteColorize({ userId: opts.currentUserId, noteId: args.noteId, scheme: args.scheme, ...(args.instruction ? { instruction: args.instruction } : {}) });
           if (!r.ok) return { content: `colorize_semantic failed: ${r.error ?? 'unknown error'}`, isError: true };
           return JSON.stringify({ ok: true, suggestionId: r.suggestionId ?? null, count: r.count ?? 0 });
+        },
+        tags: ['notes', 'output'],
+      }),
+    } : {}),
+    // weaveNotes Phase 4: the AI creative tools — each stages a track-changes suggestion.
+    ...(opts?.noteCreateDiagram && opts.currentUserId ? {
+      create_diagram: weaveTool({
+        name: 'create_diagram',
+        description: 'Draw a native, editable, colour-coded DIAGRAM in one of the user\'s notes (a flow, mind-map, or graph). Describe what to diagram in plain words; the AI designs the nodes + edges and picks intentional WCAG-AA colours (e.g. colour the decision node amber). Staged as a track-changes suggestion the user accepts or rejects. Example: "draw a colour-coded flow of these 4 steps".',
+        parameters: {
+          type: 'object',
+          properties: {
+            noteId: { type: 'string', description: 'The id of the note to add the diagram to.' },
+            instruction: { type: 'string', description: 'What to diagram, in plain words (e.g. "a flow of: gather data, train, evaluate, deploy; colour the eval step amber").' },
+          },
+          required: ['noteId', 'instruction'],
+        },
+        execute: async (args: { noteId: string; instruction: string }) => {
+          if (!opts.noteCreateDiagram || !opts.currentUserId) return { content: 'Diagrams are unavailable in this context.', isError: true };
+          const r = await opts.noteCreateDiagram({ userId: opts.currentUserId, noteId: args.noteId, instruction: args.instruction });
+          if (!r.ok) return { content: `create_diagram failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, suggestionId: r.suggestionId ?? null, artifactId: r.artifactId ?? null });
+        },
+        tags: ['notes', 'output'],
+      }),
+    } : {}),
+    ...(opts?.noteDrawInk && opts.currentUserId ? {
+      draw_ink: weaveTool({
+        name: 'draw_ink',
+        description: 'Draw real, editable freehand INK in one of the user\'s notes — an underline, a line, an arrow, a box, a circle, or a check, in a chosen colour. Describe what to draw in plain words. Staged as a track-changes suggestion. Example: "underline this in blue ink" or "sketch an arrow pointing right".',
+        parameters: {
+          type: 'object',
+          properties: {
+            noteId: { type: 'string', description: 'The id of the note to draw in.' },
+            instruction: { type: 'string', description: 'What to draw, in plain words (e.g. "a blue underline", "a red circle around the total", "an arrow from left to right").' },
+          },
+          required: ['noteId', 'instruction'],
+        },
+        execute: async (args: { noteId: string; instruction: string }) => {
+          if (!opts.noteDrawInk || !opts.currentUserId) return { content: 'Ink is unavailable in this context.', isError: true };
+          const r = await opts.noteDrawInk({ userId: opts.currentUserId, noteId: args.noteId, instruction: args.instruction });
+          if (!r.ok) return { content: `draw_ink failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, suggestionId: r.suggestionId ?? null, artifactId: r.artifactId ?? null });
         },
         tags: ['notes', 'output'],
       }),

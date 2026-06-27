@@ -111,6 +111,9 @@ export function wireSelectionCard(opts: { container: HTMLElement; noteId: string
     () => void send(`ai/${action}`, { instruction, selectionText: savedText }, label);
   const highlight = (color: string) => () => void send('ai/highlight', { phrase: savedText, color }, 'highlighting');
   const colorize = (scheme: string) => () => void send('ai/colorize', { scheme }, 'colour-coding');
+  // Phase 4: turn the selection into a diagram, or draw ink, from the card.
+  const makeDiagram = () => void send('ai/diagram', { instruction: `Make a clear, colour-coded diagram of: ${savedText}` }, 'drawing a diagram');
+  const drawInk = () => void send('ai/ink', { instruction: savedText || 'a blue underline' }, 'drawing');
 
   function openCard(): void {
     if (!savedRect) return;
@@ -132,6 +135,8 @@ export function wireSelectionCard(opts: { container: HTMLElement; noteId: string
         chip('Expand', textAction('rewrite', 'Expand this passage with more detail.', 'expanding')),
         chip('Explain', textAction('ask', 'Explain this passage simply.', 'explaining')),
         chip('Continue', textAction('continue', '', 'continuing')),
+        chip('✦ Make a diagram', makeDiagram, 'notes-aicard-create'),
+        chip('✎ Draw ink', drawInk, 'notes-aicard-create'),
       ),
       h('div', { className: 'notes-aicard-colors' },
         h('span', { className: 'notes-aicard-colorlabel' }, 'Highlight'),

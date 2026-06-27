@@ -169,3 +169,31 @@ export {
   assignTopicColors,
   locatePhrase,
 } from './colorize.js';
+
+// weaveNotes Phase 4 — the creative INK model + renderer (freehand strokes → SVG).
+export {
+  type InkPoint,
+  type InkTool,
+  type InkStroke,
+  type InkPrimitive,
+  strokeToPath,
+  strokesToSvg,
+  strokesBounds,
+  validateStrokes,
+  inkFromPrimitives,
+  recolorStrokes,
+} from './ink.js';
+
+// weaveNotes Phase 4 — the native DIAGRAM model + renderer (nodes/edges → laid-out SVG).
+export {
+  type DiagramKind,
+  type NodeShape,
+  type DiagramNode,
+  type DiagramEdge,
+  type DiagramScene,
+  type PlacedNode,
+  type DiagramLayout,
+  validateDiagramScene,
+  layoutDiagram,
+  diagramToSvg,
+} from './diagram.js';

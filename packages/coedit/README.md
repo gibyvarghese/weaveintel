@@ -118,6 +118,11 @@ flattened back to a paragraph. `markdownToBlocks` also parses `==highlight==` an
 GitHub-style `> [!NOTE]` / `[!TIP]` / `[!WARNING]` callouts, so the AI co-author
 produces real coloured highlights + callouts from plain Markdown; `blocksToHtml`
 renders them with a strict colour/scheme allowlist (`safeCssColor`) for safe shares.
+The Phase 4 atoms `inkCanvas` (freehand strokes) and `diagram` (a `{nodes, edges}`
+scene) round-trip too — their structured JSON payload is kept verbatim in the block
+attrs, so an AI-drawn diagram survives a concurrent merge; `blocksToMarkdown` emits a
+short textual summary (e.g. `[diagram: Launch — Plan → Build → Ship]`) so the AI
+understands the picture when it reads the note back.
 
 **The agent as a block co-editor:** `createBlockAgentPeer(doc)` parses the model's
 Markdown into block ops and merges them — so the AI and a human build the same note

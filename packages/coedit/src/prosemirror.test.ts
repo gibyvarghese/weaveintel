@@ -255,6 +255,33 @@ describe('Phase 1 creative content — round-trip + CRDT preservation', () => {
     expect(html).toContain('<img src="https://example.com/a.png"');
   });
 
+  it('Phase 4: inkCanvas + diagram atoms round-trip with their nested JSON payload intact', () => {
+    const doc = {
+      type: 'doc', content: [
+        { type: 'inkCanvas', attrs: { author: 'ai', strokes: [{ points: [{ x: 0, y: 0 }, { x: 10, y: 10 }], color: '#3B6FB0', width: 3, tool: 'pen' }] } },
+        { type: 'diagram', attrs: { author: 'ai', title: 'Flow', kind: 'flow', scene: { nodes: [{ id: 'a', label: 'Plan', color: '#FAC775' }, { id: 'b', label: 'Ship', color: '#9FE1CB' }], edges: [{ from: 'a', to: 'b' }] } } },
+      ],
+    };
+    const blocks = pmToBlocks(doc);
+    expect(blocks.map((b) => b.type)).toEqual(['inkCanvas', 'diagram']);
+    // Through the CRDT and back.
+    const crdt = BlockDoc.fromBlocks('a', blocks);
+    const pm = blocksToProseMirror(crdt.blocks());
+    expect(pm.content.map((n) => n.type)).toEqual(['inkCanvas', 'diagram']);
+    const back = pmToBlocks(pm);
+    const ink = back[0]!.attrs as { strokes: Array<{ points: unknown[]; color: string }> };
+    expect(ink.strokes[0]!.color).toBe('#3B6FB0');
+    expect(ink.strokes[0]!.points).toHaveLength(2);
+    const diag = back[1]!.attrs as { scene: { nodes: Array<{ id: string; label: string }>; edges: unknown[] }; title: string };
+    expect(diag.title).toBe('Flow');
+    expect(diag.scene.nodes.map((n) => n.label)).toEqual(['Plan', 'Ship']);
+    expect(diag.scene.edges).toHaveLength(1);
+    // Markdown summary gives the AI useful context.
+    const md = blocksToMarkdown(renderViaBlockDoc(blocks));
+    expect(md).toContain('[diagram: Flow — Plan → Ship]');
+    expect(md).toContain('[ink drawing]');
+  });
+
   it('SECURITY: a hostile colour / image src cannot inject CSS or a bad scheme', () => {
     const hostile: NormalBlock[] = [
       { type: 'paragraph', attrs: {}, text: 'x', marks: [{ from: 0, to: 1, type: 'highlight', value: 'red;}body{display:none' }] },

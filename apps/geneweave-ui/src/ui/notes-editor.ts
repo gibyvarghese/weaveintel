@@ -40,6 +40,9 @@ type TiptapBundle = {
   ImageBlock: TiptapExtension;
   Sticker: TiptapExtension;
   WashiDivider: TiptapExtension;
+  // weaveNotes Phase 4 creative nodes.
+  DiagramNode: TiptapExtension;
+  InkCanvasNode: TiptapExtension;
 };
 
 type TiptapEditor = {
@@ -146,6 +149,9 @@ const SLASH_COMMANDS = [
   { label: 'Image embed', icon: '🖼', action: (editor: TiptapEditor) => { const src = window.prompt('Image URL (https:// or data:image)'); if (src) editor.chain().focus()['setImage']?.({ src, alt: '' }).run(); } },
   { label: 'Sticker ✨', icon: '✨', action: (editor: TiptapEditor) => { editor.chain().focus()['setSticker']?.({ emoji: '✨' }).run(); } },
   { label: 'Washi divider', icon: '🎀', action: (editor: TiptapEditor) => { editor.chain().focus()['setWashiDivider']?.({ pattern: 'tape' }).run(); } },
+  // weaveNotes Phase 4 creative blocks.
+  { label: 'Ink canvas', icon: '✏️', action: (editor: TiptapEditor) => { editor.chain().focus()['setInkCanvas']?.({ strokes: [], author: 'user' }).run(); } },
+  { label: 'Diagram', icon: '🔗', action: (editor: TiptapEditor) => { editor.chain().focus()['setDiagram']?.({ scene: { kind: 'flow', nodes: [{ id: 'a', label: 'Start' }, { id: 'b', label: 'Next' }], edges: [{ from: 'a', to: 'b' }] }, kind: 'flow' }).run(); } },
 ];
 
 function buildSlashMenu(editor: TiptapEditor, query: string, onClose: () => void): HTMLElement {
@@ -257,6 +263,9 @@ export async function mountNotesEditor(opts: {
       bundle.ImageBlock,
       bundle.Sticker,
       bundle.WashiDivider,
+      // weaveNotes Phase 4 creative nodes.
+      bundle.DiagramNode,
+      bundle.InkCanvasNode,
       bundle.Placeholder?.configure?.({ placeholder }) ?? bundle.Placeholder,
     ].filter(Boolean),
     onUpdate: ({ editor: ed }: { editor: TiptapEditor }) => {

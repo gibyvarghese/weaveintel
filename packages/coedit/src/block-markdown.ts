@@ -52,6 +52,14 @@ function inlineMarkdown(text: string, marks: NormalBlock['marks']): string {
   return out;
 }
 
+/** A short, plain-text summary of a diagram block (title + node labels) — useful AI context. */
+function diagramSummary(attrs: NormalBlock['attrs']): string {
+  const scene = attrs['scene'] as { title?: string; nodes?: Array<{ label?: string }> } | undefined;
+  const title = (scene?.title ?? (typeof attrs['title'] === 'string' ? attrs['title'] : '')) || 'Diagram';
+  const labels = Array.isArray(scene?.nodes) ? scene!.nodes.map((n) => (typeof n?.label === 'string' ? n.label : '')).filter(Boolean) : [];
+  return labels.length ? `[diagram: ${title} — ${labels.join(' → ')}]` : `[diagram: ${title}]`;
+}
+
 /** Serialize blocks to GitHub-flavoured Markdown. */
 export function blocksToMarkdown(blocks: NormalBlock[]): string {
   const lines: string[] = [];
@@ -72,6 +80,9 @@ export function blocksToMarkdown(blocks: NormalBlock[]): string {
       case 'image': { const src = typeof b.attrs['src'] === 'string' ? b.attrs['src'] : ''; const alt = typeof b.attrs['alt'] === 'string' ? b.attrs['alt'] : ''; lines.push(`![${alt}](${src})`); orderedIndex = 0; break; }
       case 'sticker': { const emoji = typeof b.attrs['emoji'] === 'string' ? b.attrs['emoji'] : '✨'; lines.push(emoji); orderedIndex = 0; break; }
       case 'washiDivider': lines.push('---'); orderedIndex = 0; break;
+      // Phase 4 creative atoms — a textual summary so the AI understands them when reading the note.
+      case 'diagram': lines.push(diagramSummary(b.attrs)); orderedIndex = 0; break;
+      case 'inkCanvas': lines.push('[ink drawing]'); orderedIndex = 0; break;
       default: lines.push(inline); orderedIndex = 0; break;
     }
   }
@@ -143,6 +154,9 @@ export function blocksToHtml(blocks: NormalBlock[]): string {
       case 'image': { const src = typeof b.attrs['src'] === 'string' && /^https?:\/\//.test(b.attrs['src']) ? b.attrs['src'] : ''; const alt = typeof b.attrs['alt'] === 'string' ? esc(b.attrs['alt']) : ''; parts.push(src ? `<figure><img src="${esc(src)}" alt="${alt}"></figure>` : `<figure><figcaption>${alt}</figcaption></figure>`); break; }
       case 'sticker': { const emoji = typeof b.attrs['emoji'] === 'string' ? esc(b.attrs['emoji']) : '✨'; parts.push(`<span class="gw-sticker">${emoji}</span>`); break; }
       case 'washiDivider': parts.push('<hr class="gw-washi">'); break;
+      // Phase 4 atoms — a safe placeholder for the public-share render (the editor draws the real SVG).
+      case 'diagram': parts.push(`<figure class="gw-diagram-embed"><figcaption>${esc(diagramSummary(b.attrs))}</figcaption></figure>`); break;
+      case 'inkCanvas': parts.push('<figure class="gw-ink-embed"><figcaption>Ink drawing</figcaption></figure>'); break;
       default: parts.push(`<p>${inlineHtml(b.text, b.marks)}</p>`); break;
     }
     i++;

@@ -45,7 +45,9 @@ export type BlockType =
   | 'paragraph' | 'heading' | 'bulletListItem' | 'orderedListItem' | 'taskItem'
   | 'codeBlock' | 'blockquote' | 'divider'
   // Phase 1 creative blocks (text-bearing: callout/toggle; attribute-only atoms: image/sticker/washiDivider).
-  | 'callout' | 'toggle' | 'image' | 'sticker' | 'washiDivider';
+  | 'callout' | 'toggle' | 'image' | 'sticker' | 'washiDivider'
+  // Phase 4 creative blocks (attribute-only atoms holding their scene/strokes JSON in attrs).
+  | 'inkCanvas' | 'diagram';
 
 /** A block's last-write-wins attribute bag (level, checked, listType, depth, language, …). */
 export type BlockAttrs = Record<string, unknown>;

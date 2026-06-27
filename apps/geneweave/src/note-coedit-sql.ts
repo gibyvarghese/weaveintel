@@ -141,7 +141,9 @@ export function createNoteCoeditRepo(db: NoteCoeditDb, opts: { now?: () => numbe
     async submitOps(docId: string, authorSiteId: string, rawOps: unknown): Promise<{ ok: true; applied: BlockOp[]; view: NoteCoeditView } | { ok: false; error: string }> {
       const row = await db.getNoteCoeditDoc(docId);
       if (!row) return { ok: false, error: 'doc not found' };
-      const valid = validateClientBlockOps(rawOps, { expectedSiteId: authorSiteId });
+      // Phase 4: creative atoms (a diagram `scene`, an ink `strokes` list) carry structured JSON in
+      // a block attr, which is legitimately larger than a text formatting value — allow up to 256KB.
+      const valid = validateClientBlockOps(rawOps, { expectedSiteId: authorSiteId, maxValueLen: 262_144 });
       if (!valid.ok) return { ok: false, error: valid.error ?? 'invalid ops' };
       const doc = loadDoc(row);
       const applied: BlockOp[] = [];

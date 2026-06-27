@@ -47,6 +47,8 @@ export const WEAVENOTES_AI_TOOLS = [
   'capture_web_page', 'autofill_database', 'read_note_activity',
   // Phase 2 — the AI selection card's colour tools.
   'apply_highlight', 'apply_text_color', 'colorize_semantic',
+  // Phase 4 — the AI creative tools (ink + diagrams).
+  'create_diagram', 'draw_ink', 'recolor_ink',
 ] as const;
 
 export const DEFAULT_WEAVENOTES_CONFIG: WeaveNotesConfig = {

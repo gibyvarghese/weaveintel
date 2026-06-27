@@ -55,6 +55,7 @@ import {
 import { noteCoeditHub } from '../note-coedit-hub.js';
 import { createNoteAiService, type NoteAiGenerate, type AiAction } from '../note-ai-sql.js';
 import { createNoteColorizeService } from '../note-colorize-sql.js';
+import { createNoteCreativeService } from '../note-creative-sql.js';
 import { isColorScheme } from '@weaveintel/notes';
 import { sanitizeAwarenessState } from '@weaveintel/coedit';
 import { withAiPresence } from '../note-ai-presence.js';
@@ -93,6 +94,8 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
   // weaveNotes Phase 2: the AI selection card's colour service (highlight / text-colour /
   // colour-code by meaning). Same LLM-optional wiring as the co-author service.
   const noteColorize = opts.aiGenerate ? createNoteColorizeService(db, opts.aiGenerate) : null;
+  // weaveNotes Phase 4: the AI creative service (diagrams + ink). Same LLM-optional wiring.
+  const noteCreative = opts.aiGenerate ? createNoteCreativeService(db, opts.aiGenerate) : null;
   // weaveNotes Phase 4: the publish service (note → shareable artifact, sensitivity-gated).
   const publish = createNotePublishService(db, { jwtSecret: opts.jwtSecret ?? process.env['JWT_SECRET'] ?? 'insecure-dev-secret', ...(opts.publicBaseUrl ? { publicBaseUrl: opts.publicBaseUrl } : {}) });
   // weaveNotes Phase 5: the knowledge-graph service (wiki-links/backlinks, entity/relation
@@ -449,6 +452,38 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
     const scheme = isColorScheme(body['scheme']) ? body['scheme'] : 'topic';
     const r = await noteColorize.colorizeSemantic({ noteId: params['id']!, access, scheme, ...(typeof body['instruction'] === 'string' ? { instruction: body['instruction'] } : {}) });
+    res.writeHead(r.ok ? 201 : 400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(r));
+  }, { auth: true });
+
+  // weaveNotes Phase 4: the AI creative endpoints (a diagram / freehand ink), registered BEFORE
+  // the `/ai/:action` param route. The "✦ Make a diagram" card chip + the slash menu call these.
+  //   POST /api/me/notes/:id/ai/diagram   { instruction }  → a diagram suggestion
+  //   POST /api/me/notes/:id/ai/ink       { instruction }  → an ink suggestion
+  router.post('/api/me/notes/:id/ai/diagram', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    if (!noteCreative) { res.writeHead(501); res.end(JSON.stringify({ error: 'AI features are not configured' })); return; }
+    const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    if (!roleAtLeast(access.role, 'collaborator')) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    const instruction = typeof body['instruction'] === 'string' && body['instruction'].trim() ? body['instruction'] : 'Make a clear diagram of this note.';
+    const r = await noteCreative.createDiagram({ noteId: params['id']!, access, instruction });
+    res.writeHead(r.ok ? 201 : 400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(r));
+  }, { auth: true });
+
+  router.post('/api/me/notes/:id/ai/ink', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    if (!noteCreative) { res.writeHead(501); res.end(JSON.stringify({ error: 'AI features are not configured' })); return; }
+    const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    if (!roleAtLeast(access.role, 'collaborator')) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    if (typeof body['instruction'] !== 'string' || !body['instruction'].trim()) { res.writeHead(400); res.end(JSON.stringify({ error: 'instruction required' })); return; }
+    const r = await noteCreative.drawInk({ noteId: params['id']!, access, instruction: body['instruction'] });
     res.writeHead(r.ok ? 201 : 400, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(r));
   }, { auth: true });

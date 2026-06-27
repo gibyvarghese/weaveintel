@@ -1553,6 +1553,19 @@ input{font-family:inherit;outline:none}
 .gw-presence-avatars .gw-avatar{margin-left:-6px;box-shadow:0 0 0 2px var(--surface,#fff)}
 .gw-presence-avatars .gw-avatar:first-child{margin-left:0}
 .gw-avatar-live{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;color:#fff;font-size:11px;font-weight:800}
+/* weaveNotes Phase 4 — diagram + ink blocks + the card's create chips */
+.notes-aicard-create{background:var(--mint,#E8F5EE);border-color:var(--accent,#0E9A6E);font-weight:700}
+.gw-canvas .notes-editor-mount .gw-diagram-block{display:block;margin:12px 0;padding:10px;border:1px solid var(--hairline,#E7ECEA);border-radius:12px;background:var(--surface,#fff);overflow-x:auto;text-align:center}
+.gw-canvas .notes-editor-mount .gw-diagram-block svg{max-width:100%;height:auto}
+.gw-canvas .notes-editor-mount .gw-diagram-block[data-author="ai"],
+.gw-canvas .notes-editor-mount .gw-ink-block[data-author="ai"]{border-color:var(--mint-border,#DCEFE5);background:var(--mint-wash,#F2FAF6);box-shadow:inset 3px 0 0 var(--accent,#0E9A6E)}
+.gw-canvas .notes-editor-mount .gw-ink-block{display:block;margin:12px 0;border:1px solid var(--hairline,#E7ECEA);border-radius:12px;background:var(--surface,#fff);overflow:hidden}
+.gw-ink-toolbar{display:flex;align-items:center;gap:5px;padding:6px 8px;border-bottom:1px solid var(--hairline,#E7ECEA);background:var(--canvas,#F6F8F7)}
+.gw-ink-swatch{width:16px;height:16px;border-radius:50%;border:1px solid rgba(0,0,0,.15);cursor:pointer;padding:0}
+.gw-ink-erase,.gw-ink-clear{font-size:11px;font-weight:600;border:1px solid var(--hairline,#E7ECEA);background:var(--surface,#fff);border-radius:6px;padding:2px 7px;cursor:pointer;color:var(--ink,#14201B)}
+.gw-ink-surface{position:relative;min-height:120px;touch-action:none;cursor:crosshair}
+.gw-ink-surface svg{display:block;max-width:100%}
+.gw-ink-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--fg3,#8A958F);font-size:13px;pointer-events:none}
 /* Slash menu */
 .notes-slash-menu{background:var(--bg1);border:1px solid var(--bg4);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:4px;min-width:200px;z-index:300}
 .notes-slash-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;cursor:pointer;font-size:13px;color:var(--fg1)}

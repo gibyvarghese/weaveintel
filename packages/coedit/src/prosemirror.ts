@@ -83,6 +83,21 @@ function pickAttrs(attrs: Record<string, unknown> | undefined, keys: string[]): 
   return out;
 }
 
+/**
+ * Keep whitelisted attrs INCLUDING nested JSON (arrays/objects) — for the Phase 4 creative atoms
+ * whose payload IS structured data (a diagram `scene`, an ink `strokes` list). Values are kept
+ * verbatim as long as they round-trip through JSON (so no functions / circular refs sneak in).
+ */
+function pickAttrsDeep(attrs: Record<string, unknown> | undefined, keys: string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const k of keys) {
+    const v = attrs?.[k];
+    if (v === undefined || v === null) continue;
+    try { out[k] = JSON.parse(JSON.stringify(v)); } catch { /* drop unserializable */ }
+  }
+  return out;
+}
+
 /** Flatten a ProseMirror doc JSON into an ordered list of {@link BlockSpec}s. */
 export function pmToBlocks(pm: unknown): BlockSpec[] {
   const doc = pm as PMNode;
@@ -120,6 +135,9 @@ export function pmToBlocks(pm: unknown): BlockSpec[] {
       case 'image': out.push({ type: 'image', attrs: pickAttrs(node.attrs, ['src', 'alt', 'author']) }); break;
       case 'sticker': out.push({ type: 'sticker', attrs: pickAttrs(node.attrs, ['emoji', 'author']) }); break;
       case 'washiDivider': out.push({ type: 'washiDivider', attrs: pickAttrs(node.attrs, ['pattern']) }); break;
+      // ── Phase 4 creative atoms (their payload is structured JSON kept verbatim) ──
+      case 'inkCanvas': out.push({ type: 'inkCanvas', attrs: pickAttrsDeep(node.attrs, ['strokes', 'author']) }); break;
+      case 'diagram': out.push({ type: 'diagram', attrs: pickAttrsDeep(node.attrs, ['scene', 'title', 'kind', 'author']) }); break;
       default:
         // Unknown block → pass through as a paragraph holding its text (never drop content).
         { const { text, marks } = inlineOf(node); if (text) out.push({ type: 'paragraph', attrs: { unknownType: node.type }, text, marks }); }
@@ -148,7 +166,7 @@ export function normalizeBlocks(blocks: NormalBlock[]): NormalBlock[] {
       out.push({ ...b, attrs: { ...b.attrs, level } });
     } else if (type === 'divider') {
       out.push({ type: 'divider', attrs: {}, text: '', marks: [] }); // dividers never carry text/marks
-    } else if (type === 'image' || type === 'sticker' || type === 'washiDivider') {
+    } else if (type === 'image' || type === 'sticker' || type === 'washiDivider' || type === 'inkCanvas' || type === 'diagram') {
       out.push({ ...b, text: '', marks: [] }); // attribute-only atoms never carry text/marks
     } else {
       out.push(b);
@@ -233,6 +251,10 @@ export function blocksToProseMirror(blocks: NormalBlock[]): { type: 'doc'; conte
       content.push({ type: 'sticker', attrs: pickAttrs(b.attrs, ['emoji', 'author']) });
     } else if (b.type === 'washiDivider') {
       content.push({ type: 'washiDivider', attrs: pickAttrs(b.attrs, ['pattern']) });
+    } else if (b.type === 'inkCanvas') {
+      content.push({ type: 'inkCanvas', attrs: pickAttrsDeep(b.attrs, ['strokes', 'author']) });
+    } else if (b.type === 'diagram') {
+      content.push({ type: 'diagram', attrs: pickAttrsDeep(b.attrs, ['scene', 'title', 'kind', 'author']) });
     } else if (b.type === 'divider') {
       content.push({ type: 'horizontalRule' });
     } else if (b.type === 'codeBlock') {

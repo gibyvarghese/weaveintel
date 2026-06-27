@@ -320,7 +320,8 @@ export interface NoteSuggestionRow {
   author_id: string;
   author_site: string;
   action: 'continue' | 'rewrite' | 'summarize' | 'ask' | 'note_edit' | 'ai_block'
-    | 'apply_highlight' | 'apply_text_color' | 'colorize_semantic';
+    | 'apply_highlight' | 'apply_text_color' | 'colorize_semantic'
+    | 'create_diagram' | 'draw_ink' | 'recolor_ink';
   status: 'pending' | 'accepted' | 'rejected';
   ops_json: string;
   preview_text: string;

@@ -22,4 +22,7 @@ export {
   ImageBlock,
   Sticker,
   WashiDivider,
+  // weaveNotes Phase 4 — native ink + diagram nodes (render via the @weaveintel/notes SVG renderers).
+  DiagramNode,
+  InkCanvasNode,
 } from './notes-creative-extensions.js';

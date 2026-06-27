@@ -29,6 +29,7 @@ import {
 const BLOCK_TYPES = new Set<BlockType>([
   'paragraph', 'heading', 'bulletListItem', 'orderedListItem', 'taskItem', 'codeBlock', 'blockquote', 'divider',
   'callout', 'toggle', 'image', 'sticker', 'washiDivider',
+  'inkCanvas', 'diagram',
 ]);
 /** The inline mark types the relay accepts (StarterKit + Phase 1 colour marks). */
 const MARK_TYPES = new Set<MarkType>(['bold', 'italic', 'code', 'strike', 'underline', 'link', 'highlight', 'textColor']);
