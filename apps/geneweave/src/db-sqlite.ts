@@ -9796,7 +9796,8 @@ export class SQLiteAdapter implements DatabaseAdapter {
     const limit = filter?.limit ?? 100;
     return this.d.prepare(
       `SELECT id, owner_user_id, tenant_id, title, icon, cover, parent_note_id,
-              sensitivity, is_template, template_key, favorite, created_at, updated_at
+              sensitivity, is_template, template_key, favorite,
+              page_theme, freeform_mode, cover_image_artifact_id, created_at, updated_at
        FROM notes WHERE ${conditions.join(' AND ')}
        ORDER BY favorite DESC, updated_at DESC LIMIT ?`,
     ).all(...params, limit) as import('./db-types/adapter-agenda-notes.js').NoteRow[];
@@ -9819,23 +9820,27 @@ export class SQLiteAdapter implements DatabaseAdapter {
     tenant_id?: string | null; icon?: string | null; cover?: string | null;
     parent_note_id?: string | null; sensitivity?: string;
     doc_json?: string; is_template?: number; template_key?: string | null; favorite?: number;
+    page_theme?: string; freeform_mode?: number; cover_image_artifact_id?: string | null;
   }): Promise<void> {
     this.d.prepare(`
       INSERT INTO notes
         (id, owner_user_id, tenant_id, title, icon, cover, parent_note_id,
-         sensitivity, doc_json, is_template, template_key, favorite)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         sensitivity, doc_json, is_template, template_key, favorite,
+         page_theme, freeform_mode, cover_image_artifact_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       row.id, row.owner_user_id, row.tenant_id ?? null, row.title,
       row.icon ?? null, row.cover ?? null, row.parent_note_id ?? null,
       row.sensitivity ?? 'normal',
       row.doc_json ?? '{"type":"doc","content":[]}',
       row.is_template ?? 0, row.template_key ?? null, row.favorite ?? 0,
+      row.page_theme ?? 'pro', row.freeform_mode ?? 0, row.cover_image_artifact_id ?? null,
     );
   }
 
   async updateNote(id: string, userId: string, patch: Partial<Pick<import('./db-types/adapter-agenda-notes.js').NoteRow,
     'title' | 'icon' | 'cover' | 'parent_note_id' | 'sensitivity' | 'doc_json' | 'favorite'
+    | 'page_theme' | 'freeform_mode' | 'cover_image_artifact_id'
   >>): Promise<void> {
     const fields: string[] = [];
     const values: unknown[] = [];
@@ -9847,6 +9852,9 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (patch.sensitivity !== undefined) set('sensitivity', patch.sensitivity);
     if (patch.doc_json !== undefined) set('doc_json', patch.doc_json);
     if (patch.favorite !== undefined) set('favorite', patch.favorite);
+    if (patch.page_theme !== undefined) set('page_theme', patch.page_theme);
+    if (patch.freeform_mode !== undefined) set('freeform_mode', patch.freeform_mode);
+    if (patch.cover_image_artifact_id !== undefined) set('cover_image_artifact_id', patch.cover_image_artifact_id);
     if (fields.length === 0) return;
     fields.push('updated_at = datetime(\'now\')');
     values.push(id, userId);

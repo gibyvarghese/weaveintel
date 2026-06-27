@@ -34,16 +34,29 @@ import { idGreater, idKey, type RgaId } from './rga.js';
 
 export type { RgaId };
 
-/** A block's structural type (the StarterKit subset weaveNotes targets first). */
+/**
+ * A block's structural type. The StarterKit subset weaveNotes Phase 0 targets,
+ * PLUS the Phase 1 creative blocks (callout / toggle / image / sticker / washi
+ * divider). Listing them here means the CRDT round-trip PRESERVES them (a
+ * concurrent merge never silently flattens a callout back to a paragraph); the
+ * web/desktop editors build their schema from the same set.
+ */
 export type BlockType =
   | 'paragraph' | 'heading' | 'bulletListItem' | 'orderedListItem' | 'taskItem'
-  | 'codeBlock' | 'blockquote' | 'divider';
+  | 'codeBlock' | 'blockquote' | 'divider'
+  // Phase 1 creative blocks (text-bearing: callout/toggle; attribute-only atoms: image/sticker/washiDivider).
+  | 'callout' | 'toggle' | 'image' | 'sticker' | 'washiDivider';
 
 /** A block's last-write-wins attribute bag (level, checked, listType, depth, language, …). */
 export type BlockAttrs = Record<string, unknown>;
 
-/** Inline mark types we round-trip (Tiptap StarterKit + link/underline/strike). */
-export type MarkType = 'bold' | 'italic' | 'code' | 'strike' | 'underline' | 'link';
+/**
+ * Inline mark types we round-trip. Phase 0: Tiptap StarterKit + link/underline/strike.
+ * Phase 1 adds the creative marks `highlight` (multi-colour highlighter) and `textColor`
+ * (coloured text) — both carry their colour in the mark's `value`, so authorship colour
+ * survives a concurrent merge intact.
+ */
+export type MarkType = 'bold' | 'italic' | 'code' | 'strike' | 'underline' | 'link' | 'highlight' | 'textColor';
 
 /** A rendered block (the read model the UI / serializers consume). */
 export interface RenderedBlock {

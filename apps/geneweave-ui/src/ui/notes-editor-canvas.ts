@@ -31,7 +31,7 @@ export interface EditorCanvasOpts {
   /** Handlers. */
   onSetTheme: (t: 'pro' | 'creative') => void;
   onAskAi: () => void;
-  format: { bold: () => void; italic: () => void; underline: () => void; highlight: (color: string) => void };
+  format: { bold: () => void; italic: () => void; underline: () => void; highlight: (color: string) => void; sticker?: () => void };
   insert: OverflowItem[];
   overflow: OverflowItem[];
 }
@@ -50,7 +50,14 @@ function dropdown(trigger: HTMLElement, items: OverflowItem[], align: 'left' | '
   return h('div', { className: 'gw-menu-anchor' }, trigger, menu);
 }
 
-const HIGHLIGHTERS = ['var(--hl-amber)', 'var(--hl-pink)', 'var(--hl-teal)', 'var(--hl-blue)'];
+// Display uses the theme token (so dark/light stays consistent); the command gets the
+// real hex (the Highlight mark refuses non-literal colours like a CSS var, for safety).
+const HIGHLIGHTERS = [
+  { css: 'var(--hl-amber)', hex: '#FAC775' },
+  { css: 'var(--hl-pink)', hex: '#F4C0D1' },
+  { css: 'var(--hl-teal)', hex: '#9FE1CB' },
+  { css: 'var(--hl-blue)', hex: '#B5D4F4' },
+];
 
 function toolBtn(label: string, title: string, onClick: () => void, extraClass = ''): HTMLElement {
   return h('button', { className: `gw-tool ${extraClass}`, title, onClick }, label);
@@ -100,14 +107,14 @@ export function renderEditorCanvas(opts: EditorCanvasOpts): HTMLElement {
     ),
     h('div', { className: 'gw-tool-group gw-highlighters' },
       ...HIGHLIGHTERS.map((c, i) => h('span', {
-        className: `gw-hl${i === 0 ? ' active' : ''}`, title: 'Highlight', style: `background:${c}`,
-        onClick: () => opts.format.highlight(c),
+        className: `gw-hl${i === 0 ? ' active' : ''}`, title: 'Highlight', style: `background:${c.css}`,
+        onClick: () => opts.format.highlight(c.hex),
       })),
     ),
     h('div', { className: 'gw-tool-group' },
       h('span', { className: 'gw-tool', title: 'Pen', innerHTML: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18z"/></svg>' }),
       h('span', { className: 'gw-tool', title: 'Shape', innerHTML: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>' }),
-      ...(opts.creative ? [h('span', { className: 'gw-tool', title: 'Sticker' }, '✨')] : []),
+      ...(opts.creative ? [h('span', { className: 'gw-tool gw-tool-sticker', title: 'Sticker', onClick: () => opts.format.sticker?.() }, '✨')] : []),
     ),
     h('button', { className: 'gw-ask-ai', onClick: opts.onAskAi },
       h('span', { className: 'gw-ask-mark', innerHTML: wovenMarkSvg(14, 'ai') }), ' Ask AI'),

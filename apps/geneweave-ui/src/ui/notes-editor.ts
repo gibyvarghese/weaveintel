@@ -32,6 +32,14 @@ type TiptapBundle = {
   TaskItem: TiptapExtension;
   Link: TiptapExtension;
   Underline: TiptapExtension;
+  // weaveNotes Phase 1 creative marks + nodes.
+  Highlight: TiptapExtension;
+  TextColor: TiptapExtension;
+  Callout: TiptapExtension;
+  Toggle: TiptapExtension;
+  ImageBlock: TiptapExtension;
+  Sticker: TiptapExtension;
+  WashiDivider: TiptapExtension;
 };
 
 type TiptapEditor = {
@@ -56,24 +64,65 @@ async function loadBundle(): Promise<TiptapBundle> {
 
 // ── Bubble toolbar ────────────────────────────────────────────────────────────
 
-function buildBubbleToolbar(editor: TiptapEditor): HTMLElement {
-  const buttons: Array<{ label: string; action: () => void; isActive?: () => boolean }> = [
-    { label: 'B', action: () => { editor.chain().focus()['toggleBold']?.().run(); }, isActive: () => false },
-    { label: 'I', action: () => { editor.chain().focus()['toggleItalic']?.().run(); }, isActive: () => false },
-    { label: 'S̶', action: () => { editor.chain().focus()['toggleStrike']?.().run(); }, isActive: () => false },
-    { label: 'U', action: () => { editor.chain().focus()['toggleUnderline']?.().run(); }, isActive: () => false },
-    { label: '<>', action: () => { editor.chain().focus()['toggleCode']?.().run(); }, isActive: () => false },
-  ];
+/** The four highlighter swatches (spec §10.2) — kept in sync with @weaveintel/notes HIGHLIGHTER_SWATCHES. */
+const HIGHLIGHT_SWATCHES = [
+  { key: 'amber', color: '#FAC775' },
+  { key: 'pink', color: '#F4C0D1' },
+  { key: 'teal', color: '#9FE1CB' },
+  { key: 'blue', color: '#B5D4F4' },
+];
+/** A small palette of accessible text colours (excludes the AI-reserved emerald/mint). */
+const TEXT_COLORS = ['#14201B', '#D85A30', '#D98A3D', '#0B7A57', '#3B6FB0', '#8254C8'];
 
+function buildBubbleToolbar(editor: TiptapEditor): HTMLElement {
   const toolbar = document.createElement('div');
   toolbar.className = 'notes-bubble-toolbar';
-  for (const btn of buttons) {
+
+  const addBtn = (label: string, action: () => void, title?: string) => {
     const el = document.createElement('button');
     el.className = 'notes-bubble-btn';
-    el.textContent = btn.label;
-    el.onmousedown = (e) => { e.preventDefault(); btn.action(); };
+    el.textContent = label;
+    if (title) el.title = title;
+    el.onmousedown = (e) => { e.preventDefault(); action(); };
+    toolbar.appendChild(el);
+    return el;
+  };
+
+  addBtn('B', () => editor.chain().focus()['toggleBold']?.().run(), 'Bold');
+  addBtn('I', () => editor.chain().focus()['toggleItalic']?.().run(), 'Italic');
+  addBtn('S̶', () => editor.chain().focus()['toggleStrike']?.().run(), 'Strikethrough');
+  addBtn('U', () => editor.chain().focus()['toggleUnderline']?.().run(), 'Underline');
+  addBtn('<>', () => editor.chain().focus()['toggleCode']?.().run(), 'Inline code');
+
+  const sep = document.createElement('span'); sep.className = 'notes-bubble-sep'; toolbar.appendChild(sep);
+
+  // Highlighter swatches (multi-colour) + clear.
+  for (const sw of HIGHLIGHT_SWATCHES) {
+    const el = document.createElement('button');
+    el.className = 'notes-bubble-swatch';
+    el.title = `Highlight ${sw.key}`;
+    el.style.background = sw.color;
+    el.onmousedown = (e) => { e.preventDefault(); editor.chain().focus()['toggleHighlight']?.({ color: sw.color }).run(); };
     toolbar.appendChild(el);
   }
+  addBtn('⌫', () => editor.chain().focus()['unsetHighlight']?.().run(), 'Clear highlight');
+
+  const sep2 = document.createElement('span'); sep2.className = 'notes-bubble-sep'; toolbar.appendChild(sep2);
+
+  // Text colour: a little "A" that opens a colour row.
+  const colorWrap = document.createElement('span');
+  colorWrap.className = 'notes-bubble-colorwrap';
+  const aBtn = addBtn('A', () => { colorWrap.classList.toggle('open'); }, 'Text colour');
+  aBtn.classList.add('notes-bubble-color-a');
+  for (const c of TEXT_COLORS) {
+    const dot = document.createElement('button');
+    dot.className = 'notes-bubble-colordot';
+    dot.style.background = c;
+    dot.onmousedown = (e) => { e.preventDefault(); editor.chain().focus()['setTextColor']?.(c).run(); colorWrap.classList.remove('open'); };
+    colorWrap.appendChild(dot);
+  }
+  toolbar.appendChild(colorWrap);
+
   return toolbar;
 }
 
@@ -89,6 +138,14 @@ const SLASH_COMMANDS = [
   { label: '" Blockquote', icon: '"', action: (editor: TiptapEditor) => { editor.chain().focus()['toggleBlockquote']?.().run(); } },
   { label: '``` Code block', icon: '<>', action: (editor: TiptapEditor) => { editor.chain().focus()['toggleCodeBlock']?.().run(); } },
   { label: '── Divider', icon: '──', action: (editor: TiptapEditor) => { editor.chain().focus()['setHorizontalRule']?.().run(); } },
+  // weaveNotes Phase 1 creative blocks.
+  { label: 'Callout — note', icon: '📝', action: (editor: TiptapEditor) => { editor.chain().focus()['setCallout']?.({ tone: 'note' }).run(); } },
+  { label: 'Callout — tip', icon: '💡', action: (editor: TiptapEditor) => { editor.chain().focus()['setCallout']?.({ tone: 'tip' }).run(); } },
+  { label: 'Callout — warning', icon: '⚠️', action: (editor: TiptapEditor) => { editor.chain().focus()['setCallout']?.({ tone: 'warning' }).run(); } },
+  { label: 'Toggle list', icon: '▸', action: (editor: TiptapEditor) => { editor.chain().focus()['setToggle']?.({ summary: 'Details' }).run(); } },
+  { label: 'Image embed', icon: '🖼', action: (editor: TiptapEditor) => { const src = window.prompt('Image URL (https:// or data:image)'); if (src) editor.chain().focus()['setImage']?.({ src, alt: '' }).run(); } },
+  { label: 'Sticker ✨', icon: '✨', action: (editor: TiptapEditor) => { editor.chain().focus()['setSticker']?.({ emoji: '✨' }).run(); } },
+  { label: 'Washi divider', icon: '🎀', action: (editor: TiptapEditor) => { editor.chain().focus()['setWashiDivider']?.({ pattern: 'tape' }).run(); } },
 ];
 
 function buildSlashMenu(editor: TiptapEditor, query: string, onClose: () => void): HTMLElement {
@@ -184,8 +241,16 @@ export async function mountNotesEditor(opts: {
       bundle.TaskItem,
       bundle.Underline,
       bundle.Link,
+      // weaveNotes Phase 1 creative marks + nodes.
+      bundle.Highlight,
+      bundle.TextColor,
+      bundle.Callout,
+      bundle.Toggle,
+      bundle.ImageBlock,
+      bundle.Sticker,
+      bundle.WashiDivider,
       bundle.Placeholder?.configure?.({ placeholder }) ?? bundle.Placeholder,
-    ],
+    ].filter(Boolean),
     onUpdate: ({ editor: ed }: { editor: TiptapEditor }) => {
       scheduleSave(ed);
     },

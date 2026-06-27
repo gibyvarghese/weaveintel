@@ -19,9 +19,16 @@ import type { BlockSpec, BlockType, MarkType, RenderedBlock } from './block-doc.
 
 // ─── ProseMirror → blocks ────────────────────────────────────────────────────────
 
-const PM_MARK_NAMES: Record<string, MarkType> = { bold: 'bold', strong: 'bold', italic: 'italic', em: 'italic', code: 'code', strike: 'strike', s: 'strike', underline: 'underline', link: 'link' };
+const PM_MARK_NAMES: Record<string, MarkType> = { bold: 'bold', strong: 'bold', italic: 'italic', em: 'italic', code: 'code', strike: 'strike', s: 'strike', underline: 'underline', link: 'link', highlight: 'highlight', textColor: 'textColor' };
 
 interface PMNode { type?: string; attrs?: Record<string, unknown>; content?: PMNode[]; text?: string; marks?: Array<{ type: string; attrs?: Record<string, unknown> }> }
+
+/** The `attrs` field a mark's `value` is read from / written to (Phase 1: colour marks carry their colour). */
+function markValueOf(type: MarkType, attrs: Record<string, unknown> | undefined): string | undefined {
+  if (type === 'link') return typeof attrs?.['href'] === 'string' ? (attrs['href'] as string) : undefined;
+  if (type === 'highlight' || type === 'textColor') return typeof attrs?.['color'] === 'string' ? (attrs['color'] as string) : undefined;
+  return undefined;
+}
 
 /** Extract the plain text + mark ranges of a node's inline content. */
 function inlineOf(node: PMNode): { text: string; marks: NonNullable<BlockSpec['marks']> } {
@@ -34,7 +41,7 @@ function inlineOf(node: PMNode): { text: string; marks: NonNullable<BlockSpec['m
     for (const mk of child.marks ?? []) {
       const type = PM_MARK_NAMES[mk.type];
       if (!type) continue;
-      const value = type === 'link' && typeof mk.attrs?.['href'] === 'string' ? (mk.attrs['href'] as string) : undefined;
+      const value = markValueOf(type, mk.attrs);
       marks.push({ from: start, to: text.length, type, ...(value !== undefined ? { value } : {}) });
     }
   }
@@ -45,6 +52,35 @@ function inlineOf(node: PMNode): { text: string; marks: NonNullable<BlockSpec['m
 function listItemInline(item: PMNode): { text: string; marks: NonNullable<BlockSpec['marks']> } {
   const para = (item.content ?? []).find((c) => c.type === 'paragraph');
   return para ? inlineOf(para) : { text: '', marks: [] };
+}
+
+/**
+ * The combined inline text + marks of a WRAPPER block (callout / toggle body) whose
+ * children are paragraphs. The flat block model holds one text per block, so a
+ * multi-paragraph callout collapses to a single newline-joined block — fine for the
+ * short callouts/toggles weaveNotes Phase 1 produces, and it never drops content.
+ */
+function wrapperInline(node: PMNode): { text: string; marks: NonNullable<BlockSpec['marks']> } {
+  let text = '';
+  const marks: NonNullable<BlockSpec['marks']> = [];
+  for (const child of node.content ?? []) {
+    if (text.length > 0) text += '\n';
+    const part = inlineOf(child);
+    const offset = text.length;
+    text += part.text;
+    for (const m of part.marks) marks.push({ ...m, from: m.from + offset, to: m.to + offset });
+  }
+  return { text, marks };
+}
+
+/** Keep only a whitelisted, string/boolean set of attrs (bounded + clean for the CRDT). */
+function pickAttrs(attrs: Record<string, unknown> | undefined, keys: string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const k of keys) {
+    const v = attrs?.[k];
+    if (typeof v === 'string' || typeof v === 'boolean' || typeof v === 'number') out[k] = v;
+  }
+  return out;
 }
 
 /** Flatten a ProseMirror doc JSON into an ordered list of {@link BlockSpec}s. */
@@ -78,6 +114,12 @@ export function pmToBlocks(pm: unknown): BlockSpec[] {
         for (const child of node.content ?? []) { const { text, marks } = inlineOf(child); out.push({ type: 'blockquote', attrs: {}, text, marks }); }
         break;
       case 'horizontalRule': case 'horizontal_rule': out.push({ type: 'divider', attrs: {} }); break;
+      // ── Phase 1 creative blocks ──────────────────────────────────────────────
+      case 'callout': { const { text, marks } = wrapperInline(node); out.push({ type: 'callout', attrs: pickAttrs(node.attrs, ['tone', 'author']), text, marks }); break; }
+      case 'toggle': { const { text, marks } = wrapperInline(node); out.push({ type: 'toggle', attrs: pickAttrs(node.attrs, ['summary', 'open', 'author']), text, marks }); break; }
+      case 'image': out.push({ type: 'image', attrs: pickAttrs(node.attrs, ['src', 'alt', 'author']) }); break;
+      case 'sticker': out.push({ type: 'sticker', attrs: pickAttrs(node.attrs, ['emoji', 'author']) }); break;
+      case 'washiDivider': out.push({ type: 'washiDivider', attrs: pickAttrs(node.attrs, ['pattern']) }); break;
       default:
         // Unknown block → pass through as a paragraph holding its text (never drop content).
         { const { text, marks } = inlineOf(node); if (text) out.push({ type: 'paragraph', attrs: { unknownType: node.type }, text, marks }); }
@@ -106,6 +148,8 @@ export function normalizeBlocks(blocks: NormalBlock[]): NormalBlock[] {
       out.push({ ...b, attrs: { ...b.attrs, level } });
     } else if (type === 'divider') {
       out.push({ type: 'divider', attrs: {}, text: '', marks: [] }); // dividers never carry text/marks
+    } else if (type === 'image' || type === 'sticker' || type === 'washiDivider') {
+      out.push({ ...b, text: '', marks: [] }); // attribute-only atoms never carry text/marks
     } else {
       out.push(b);
     }
@@ -140,7 +184,12 @@ function inlineNodes(text: string, marks: NormalBlock['marks']): PMNode[] {
     if (to <= from) continue;
     const active = merged.filter((m) => m.from <= from && m.to >= to);
     const node: PMNode = { type: 'text', text: text.slice(from, to) };
-    if (active.length) node.marks = active.map((m) => (m.type === 'link' ? { type: 'link', attrs: { href: m.value ?? '' } } : { type: m.type === 'bold' ? 'bold' : m.type }));
+    if (active.length) node.marks = active.map((m) => {
+      if (m.type === 'link') return { type: 'link', attrs: { href: m.value ?? '' } };
+      if (m.type === 'highlight') return { type: 'highlight', ...(m.value ? { attrs: { color: m.value } } : {}) };
+      if (m.type === 'textColor') return { type: 'textColor', attrs: { color: m.value ?? '' } };
+      return { type: m.type };
+    });
     nodes.push(node);
   }
   return nodes;
@@ -174,6 +223,16 @@ export function blocksToProseMirror(blocks: NormalBlock[]): { type: 'doc'; conte
     }
     if (b.type === 'blockquote') {
       content.push({ type: 'blockquote', content: [{ type: 'paragraph', content: inlineNodes(b.text, b.marks) }] });
+    } else if (b.type === 'callout') {
+      content.push({ type: 'callout', attrs: pickAttrs(b.attrs, ['tone', 'author']), content: [{ type: 'paragraph', content: inlineNodes(b.text, b.marks) }] });
+    } else if (b.type === 'toggle') {
+      content.push({ type: 'toggle', attrs: pickAttrs(b.attrs, ['summary', 'open', 'author']), content: [{ type: 'paragraph', content: inlineNodes(b.text, b.marks) }] });
+    } else if (b.type === 'image') {
+      content.push({ type: 'image', attrs: pickAttrs(b.attrs, ['src', 'alt', 'author']) });
+    } else if (b.type === 'sticker') {
+      content.push({ type: 'sticker', attrs: pickAttrs(b.attrs, ['emoji', 'author']) });
+    } else if (b.type === 'washiDivider') {
+      content.push({ type: 'washiDivider', attrs: pickAttrs(b.attrs, ['pattern']) });
     } else if (b.type === 'divider') {
       content.push({ type: 'horizontalRule' });
     } else if (b.type === 'codeBlock') {

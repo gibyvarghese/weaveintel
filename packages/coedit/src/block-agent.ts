@@ -38,8 +38,24 @@ export function markdownToBlocks(md: string): BlockSpec[] {
     if (bullet) { const { text, marks } = inlineMd(bullet[1]!); specs.push({ type: 'bulletListItem', attrs: {}, text, marks }); i++; continue; }
     const ordered = /^\s*\d+\.\s+(.*)$/.exec(line);
     if (ordered) { const { text, marks } = inlineMd(ordered[1]!); specs.push({ type: 'orderedListItem', attrs: {}, text, marks }); i++; continue; }
+    // Blockquote — or a GitHub-style callout `> [!note] …` (Phase 1). Gather the
+    // contiguous run of `>` lines, then decide: a leading `[!tone]` marker makes a
+    // single callout block (tone + body); otherwise each line is a blockquote block.
     const quote = /^>\s?(.*)$/.exec(line);
-    if (quote) { const { text, marks } = inlineMd(quote[1]!); specs.push({ type: 'blockquote', attrs: {}, text, marks }); i++; continue; }
+    if (quote) {
+      const quoted: string[] = [];
+      while (i < lines.length) { const q = /^>\s?(.*)$/.exec(lines[i]!); if (!q) break; quoted.push(q[1]!); i++; }
+      const tone = /^\[!(note|tip|warning|success|danger|info|important|caution)\]\s*(.*)$/i.exec(quoted[0] ?? '');
+      if (tone) {
+        const TONE_MAP: Record<string, string> = { note: 'note', info: 'note', tip: 'tip', success: 'success', warning: 'warning', caution: 'warning', important: 'warning', danger: 'danger' };
+        const body = [tone[2]!, ...quoted.slice(1)].filter((l) => l.length > 0).join('\n');
+        const { text, marks } = inlineMd(body);
+        specs.push({ type: 'callout', attrs: { tone: TONE_MAP[tone[1]!.toLowerCase()] ?? 'note', author: 'ai' }, text, marks });
+      } else {
+        for (const ql of quoted) { const { text, marks } = inlineMd(ql); specs.push({ type: 'blockquote', attrs: {}, text, marks }); }
+      }
+      continue;
+    }
     if (/^(---|\*\*\*|___)\s*$/.test(line)) { specs.push({ type: 'divider', attrs: {} }); i++; continue; }
     if (line.trim() === '') { i++; continue; } // blank line → block separator
     const { text, marks } = inlineMd(line);
@@ -49,7 +65,10 @@ export function markdownToBlocks(md: string): BlockSpec[] {
   return specs;
 }
 
-/** Parse inline `**bold**` / `_italic_` / `` `code` `` / `[text](href)` into text + mark ranges. */
+/** Inline delimiter pairs, longest-first so `**`/`__`/`==` win over their single-char forms. */
+const INLINE_TOKENS = [['**', 'bold'], ['__', 'bold'], ['~~', 'strike'], ['==', 'highlight'], ['*', 'italic'], ['_', 'italic'], ['`', 'code']] as const;
+
+/** Parse inline `**bold**` / `_italic_` / `` `code` `` / `==highlight==` / `[text](href)` into text + mark ranges. */
 function inlineMd(s: string): { text: string; marks: NonNullable<BlockSpec['marks']> } {
   const marks: NonNullable<BlockSpec['marks']> = [];
   let text = '';
@@ -58,7 +77,7 @@ function inlineMd(s: string): { text: string; marks: NonNullable<BlockSpec['mark
     // Link [text](href)
     const link = /^\[([^\]]*)\]\(([^)]*)\)/.exec(s.slice(i));
     if (link) { const start = text.length; text += link[1]!; marks.push({ from: start, to: text.length, type: 'link', value: link[2]! }); i += link[0].length; continue; }
-    for (const [token, type] of [['**', 'bold'], ['__', 'bold'], ['~~', 'strike'], ['*', 'italic'], ['_', 'italic'], ['`', 'code']] as const) {
+    for (const [token, type] of INLINE_TOKENS) {
       if (s.startsWith(token, i)) {
         const end = s.indexOf(token, i + token.length);
         if (end !== -1) { const start = text.length; text += s.slice(i + token.length, end); marks.push({ from: start, to: text.length, type }); i = end + token.length; }
@@ -68,7 +87,7 @@ function inlineMd(s: string): { text: string; marks: NonNullable<BlockSpec['mark
       }
     }
     // If no token matched above, advance one char (the for-loop `break` handled matches).
-    if (!['**', '__', '~~', '*', '_', '`'].some((t) => s.startsWith(t, i)) && !/^\[([^\]]*)\]\(([^)]*)\)/.test(s.slice(i))) { text += s[i]; i++; }
+    if (!INLINE_TOKENS.some(([t]) => s.startsWith(t, i)) && !/^\[([^\]]*)\]\(([^)]*)\)/.test(s.slice(i))) { text += s[i]; i++; }
   }
   return { text, marks };
 }

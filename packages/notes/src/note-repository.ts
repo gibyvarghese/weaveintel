@@ -44,6 +44,12 @@ export interface Note {
   is_template: number;
   template_key: string | null;
   favorite: number;
+  /** weaveNotes Phase 1: the page theme this note opens in — 'pro' | 'creative' (spec §10.6). */
+  page_theme: string;
+  /** weaveNotes Phase 1: freeform/canvas mode flag (0/1) — drop the column grid for a creative layout. */
+  freeform_mode: number;
+  /** weaveNotes Phase 1: optional cover-image artifact id (a generated/uploaded banner). */
+  cover_image_artifact_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -100,10 +106,14 @@ export interface CreateNoteInput {
   is_template?: number;
   template_key?: string | null;
   favorite?: number;
+  page_theme?: string;
+  freeform_mode?: number;
+  cover_image_artifact_id?: string | null;
 }
 
 export type UpdateNotePatch = Partial<Pick<Note,
   'title' | 'icon' | 'cover' | 'parent_note_id' | 'sensitivity' | 'doc_json' | 'favorite'
+  | 'page_theme' | 'freeform_mode' | 'cover_image_artifact_id'
 >>;
 
 export interface CreateNoteLinkInput { id: string; note_id: string; target_kind: NoteLinkTargetKind; target_id: string }
@@ -208,6 +218,8 @@ export function createInMemoryNoteRepository(opts: InMemoryNoteRepositoryOptions
         parent_note_id: input.parent_note_id ?? null, sensitivity: input.sensitivity ?? 'normal',
         doc_json: input.doc_json ?? DEFAULT_DOC, is_template: input.is_template ?? 0,
         template_key: input.template_key ?? null, favorite: input.favorite ?? 0,
+        page_theme: input.page_theme ?? 'pro', freeform_mode: input.freeform_mode ?? 0,
+        cover_image_artifact_id: input.cover_image_artifact_id ?? null,
         created_at: ts, updated_at: ts,
       });
     },

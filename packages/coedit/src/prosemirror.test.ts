@@ -4,6 +4,7 @@ import { pmToBlocks, blocksToProseMirror, normalizeBlocks, type NormalBlock } fr
 import { BlockDoc } from './block-doc.js';
 import { blocksToMarkdown, blocksToHtml } from './block-markdown.js';
 import { markdownToBlocks, createBlockAgentPeer } from './block-agent.js';
+import { validateClientBlockOps } from './block-validation.js';
 
 const RICH_DOC = {
   type: 'doc', content: [
@@ -171,6 +172,100 @@ describe('agent as a block co-editor', () => {
     expect(specs[1]!.marks!.some((m) => m.type === 'bold')).toBe(true);
     expect(specs[1]!.marks!.some((m) => m.type === 'italic')).toBe(true);
     expect(specs[2]!.text).toBe('code()');
+  });
+});
+
+// ─── Phase 1: creative marks + blocks survive the round-trip + the CRDT ────────────
+const CREATIVE_DOC = {
+  type: 'doc', content: [
+    { type: 'paragraph', content: [
+      { type: 'text', text: 'Plain then ' },
+      { type: 'text', text: 'highlighted', marks: [{ type: 'highlight', attrs: { color: '#FAC775' } }] },
+      { type: 'text', text: ' then ' },
+      { type: 'text', text: 'coloured', marks: [{ type: 'textColor', attrs: { color: '#D85A30' } }] },
+      { type: 'text', text: '.' },
+    ] },
+    { type: 'callout', attrs: { tone: 'warning', author: 'ai' }, content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Mind the gap' }] }] },
+    { type: 'toggle', attrs: { summary: 'More detail', open: false, author: 'user' }, content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Hidden body' }] }] },
+    { type: 'image', attrs: { src: 'https://example.com/a.png', alt: 'A diagram', author: 'user' } },
+    { type: 'sticker', attrs: { emoji: '✨', author: 'user' } },
+    { type: 'washiDivider', attrs: { pattern: 'dots' } },
+  ],
+};
+
+describe('Phase 1 creative content — round-trip + CRDT preservation', () => {
+  it('flattens highlight/textColor marks + creative blocks with their attrs', () => {
+    const blocks = pmToBlocks(CREATIVE_DOC);
+    expect(blocks.map((b) => b.type)).toEqual(['paragraph', 'callout', 'toggle', 'image', 'sticker', 'washiDivider']);
+    expect(blocks[0]!.marks!.find((m) => m.type === 'highlight')?.value).toBe('#FAC775');
+    expect(blocks[0]!.marks!.find((m) => m.type === 'textColor')?.value).toBe('#D85A30');
+    expect(blocks[1]!.attrs).toMatchObject({ tone: 'warning', author: 'ai' });
+    expect(blocks[1]!.text).toBe('Mind the gap');
+    expect(blocks[2]!.attrs).toMatchObject({ summary: 'More detail', open: false, author: 'user' });
+    expect(blocks[3]!.attrs).toMatchObject({ src: 'https://example.com/a.png', alt: 'A diagram' });
+    expect(blocks[3]!.text ?? '').toBe('');           // image is an attribute-only atom
+    expect(blocks[4]!.attrs).toMatchObject({ emoji: '✨' });
+    expect(blocks[5]!.attrs).toMatchObject({ pattern: 'dots' });
+  });
+
+  it('is a STABLE round-trip THROUGH the CRDT (colours + tones + atoms preserved)', () => {
+    const doc = BlockDoc.fromBlocks('a', pmToBlocks(CREATIVE_DOC));
+    const rebuilt = doc.blocks();
+    expect(rebuilt.map((b) => b.type)).toEqual(['paragraph', 'callout', 'toggle', 'image', 'sticker', 'washiDivider']);
+    const pm = blocksToProseMirror(rebuilt);
+    const back = pmToBlocks(pm);
+    expect(back[0]!.marks!.find((m) => m.type === 'highlight')?.value).toBe('#FAC775');
+    expect(back[0]!.marks!.find((m) => m.type === 'textColor')?.value).toBe('#D85A30');
+    expect(back[1]!.attrs!['tone']).toBe('warning');
+    expect(back[3]!.attrs!['src']).toBe('https://example.com/a.png');
+    // PM node types are the editor's real node names.
+    expect(pm.content.map((n) => n.type)).toEqual(['paragraph', 'callout', 'toggle', 'image', 'sticker', 'washiDivider']);
+  });
+
+  it('the relay validator ACCEPTS the new block + mark types', () => {
+    // Build ops the editor would submit and prove they pass the anti-forgery validator.
+    const doc = new BlockDoc('u:alice');
+    const { ops, blockId } = doc.insertBlock(null, 'callout', { tone: 'tip' });
+    const textOps = doc.insertText(blockId, 0, 'Hi');
+    const markOp = doc.addMark(blockId, 0, 2, 'highlight', '#9FE1CB');
+    const all = [...ops, ...textOps, ...(markOp ? [markOp] : [])];
+    const result = validateClientBlockOps(all, { expectedSiteId: 'u:alice' });
+    expect(result.ok).toBe(true);
+  });
+
+  it('the AI markdown parser produces highlights + callouts', () => {
+    const specs = markdownToBlocks('Here is ==important== text.\n\n> [!WARNING]\n> Do not skip this step.\n\n> a plain quote');
+    expect(specs[0]!.marks!.some((m) => m.type === 'highlight')).toBe(true);
+    const callout = specs.find((s) => s.type === 'callout');
+    expect(callout).toBeTruthy();
+    expect(callout!.attrs!['tone']).toBe('warning');
+    expect(callout!.text).toBe('Do not skip this step.');
+    expect(specs.some((s) => s.type === 'blockquote')).toBe(true); // plain quote stays a quote
+  });
+
+  it('Markdown + HTML serialize the creative blocks (HTML colour is sanitised)', () => {
+    const rendered = renderViaBlockDoc(pmToBlocks(CREATIVE_DOC));
+    const md = blocksToMarkdown(rendered);
+    expect(md).toContain('==highlighted==');
+    expect(md).toContain('> [!WARNING]');
+    expect(md).toContain('![A diagram](https://example.com/a.png)');
+    const html = blocksToHtml(rendered);
+    expect(html).toContain('<mark style="background:#FAC775">');
+    expect(html).toContain('gw-callout-warning');
+    expect(html).toContain('<img src="https://example.com/a.png"');
+  });
+
+  it('SECURITY: a hostile colour / image src cannot inject CSS or a bad scheme', () => {
+    const hostile: NormalBlock[] = [
+      { type: 'paragraph', attrs: {}, text: 'x', marks: [{ from: 0, to: 1, type: 'highlight', value: 'red;}body{display:none' }] },
+      { type: 'paragraph', attrs: {}, text: 'y', marks: [{ from: 0, to: 1, type: 'textColor', value: 'url(javascript:alert(1))' }] },
+      { type: 'image', attrs: { src: 'javascript:alert(1)', alt: 'bad' }, text: '', marks: [] },
+    ];
+    const html = blocksToHtml(hostile);
+    expect(html).not.toContain('display:none');
+    expect(html).not.toContain('url(');
+    expect(html).not.toContain('javascript:');
+    expect(html).toContain('<mark>');  // colour dropped → plain mark
   });
 });
 

@@ -104,7 +104,7 @@ export function applyM104WeaveNotesFoundation(db: BetterSqlite3.Database): void 
       'weaveNotes Editor',
       'Notes co-author',
       'Co-authors the user’s notes: creates and edits notes, searches the workspace with citations, captures web pages, fills databases, and reads a note’s recent activity so it understands what changed before acting. Every change it proposes is a reviewable suggestion the human accepts or rejects (colour encodes agency: AI content shows in mint with a woven mark).',
-      'You are the weaveNotes editor, a calm co-author inside the user’s notes. Before changing a note, read its recent activity to understand what just happened. Propose changes as suggestions for the human to accept or reject — never overwrite silently. Keep responses in sentence case. Cite sources when answering from the workspace.',
+      'You are the weaveNotes editor, a calm co-author inside the user’s notes. Before changing a note, read its recent activity to understand what just happened. Propose changes as suggestions for the human to accept or reject — never overwrite silently. Keep responses in sentence case. Cite sources when answering from the workspace. Use light creative formatting where it aids clarity: ==highlight== a key phrase, and put advisories in a callout with GitHub syntax (a line "> [!NOTE]" / "[!TIP]" / "[!WARNING]" followed by the body) — these render as real coloured highlights and callouts in the editor.',
       JSON.stringify(['create_note', 'note_edit', 'find_related_notes', 'workspace_search', 'capture_web_page', 'autofill_database', 'read_note_activity']),
     );
   } catch { /* ignore */ }

@@ -47,6 +47,22 @@ export function noteRepositoryContract(make: () => Promise<NoteRepository> | Not
       expect(n?.is_template).toBe(0);
       expect(typeof n?.doc_json).toBe('string');        // default doc
       expect(n?.created_at).not.toBe(undefined);
+      // weaveNotes Phase 1 page-theme defaults.
+      expect(n?.page_theme).toBe('pro');
+      expect(n?.freeform_mode).toBe(0);
+      expect(n?.cover_image_artifact_id ?? null).toBeNull();
+    });
+
+    it('persists the Phase 1 page theme + freeform flag (create + update)', async () => {
+      const id = await newNote({ title: 'Themed', page_theme: 'creative', freeform_mode: 1 });
+      const created = await repo.getNote(id, user);
+      expect(created?.page_theme).toBe('creative');
+      expect(created?.freeform_mode).toBe(1);
+      // Flip the theme back via updateNote.
+      await repo.updateNote(id, user, { page_theme: 'pro', freeform_mode: 0 });
+      const updated = await repo.getNote(id, user);
+      expect(updated?.page_theme).toBe('pro');
+      expect(updated?.freeform_mode).toBe(0);
     });
 
     it('getNote is owner-scoped (another user cannot read it) but resolves `_system` templates', async () => {

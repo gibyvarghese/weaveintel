@@ -75,6 +75,12 @@ export interface NoteRow {
   is_template: number;
   template_key: string | null;
   favorite: number;
+  /** weaveNotes Phase 1 (m105): page theme the note opens in — 'pro' | 'creative'. */
+  page_theme: string;
+  /** weaveNotes Phase 1 (m105): freeform/canvas layout flag (0/1). */
+  freeform_mode: number;
+  /** weaveNotes Phase 1 (m105): optional cover-image artifact id. */
+  cover_image_artifact_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -161,9 +167,11 @@ export interface IAgendaNotesStore {
     tenant_id?: string | null; icon?: string | null; cover?: string | null;
     parent_note_id?: string | null; sensitivity?: NoteSensitivity;
     doc_json?: string; is_template?: number; template_key?: string | null; favorite?: number;
+    page_theme?: string; freeform_mode?: number; cover_image_artifact_id?: string | null;
   }): Promise<void>;
   updateNote(id: string, userId: string, patch: Partial<Pick<NoteRow,
     'title' | 'icon' | 'cover' | 'parent_note_id' | 'sensitivity' | 'doc_json' | 'favorite'
+    | 'page_theme' | 'freeform_mode' | 'cover_image_artifact_id'
   >>): Promise<void>;
   deleteNote(id: string, userId: string): Promise<boolean>;
 

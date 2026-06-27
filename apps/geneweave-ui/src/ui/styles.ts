@@ -1193,9 +1193,31 @@ input{font-family:inherit;outline:none}
 /* the co-edit "updated" nudge: a floating bottom-left pill (only shown for real collaborators) */
 .gw-canvas>.notes-coedit-refresh{position:absolute;left:28px;bottom:18px;z-index:15;font-size:12px;font-weight:600;color:var(--accent2);background:var(--mint);border:1px solid var(--mint-deep);border-radius:999px;padding:6px 13px;cursor:pointer;box-shadow:var(--shadow-soft)}
 .gw-canvas{position:relative}
-/* editor content — highlight mark (Pro soft fill ↔ Creative underline), per the design */
-.gw-canvas .notes-editor-mount mark,.gw-canvas .notes-editor-mount [data-color]{background:#FCEFCF;border-radius:3px;padding:0 3px;color:inherit}
-.gw-canvas.creative .notes-editor-mount mark,.gw-canvas.creative .notes-editor-mount [data-color]{background:linear-gradient(transparent 62%, var(--hl-amber) 62%);border-radius:0;padding:0 1px}
+/* editor content — highlight mark. An UNCOLOURED highlight follows the theme treatment
+   (Pro soft fill ↔ Creative underline gradient, spec §10.6); a COLOURED highlight (a swatch)
+   carries its own inline background-color so the four-colour highlighter shows through. */
+.gw-canvas .notes-editor-mount mark:not([data-color]){background:#FCEFCF;border-radius:3px;padding:0 3px;color:inherit}
+.gw-canvas.creative .notes-editor-mount mark:not([data-color]){background:linear-gradient(transparent 62%, var(--hl-amber) 62%);border-radius:0;padding:0 1px}
+
+/* weaveNotes Phase 1 — creative blocks. Agency colour: an AI-authored callout/sticker
+   wears mint (data-author="ai"); a human's stays neutral (Phase 0 contract). */
+.gw-canvas .notes-editor-mount .gw-callout{display:block;margin:10px 0;padding:12px 14px 12px 16px;border-radius:12px;border-left:4px solid var(--muted);background:var(--canvas)}
+.gw-canvas .notes-editor-mount .gw-callout[data-tone="tip"]{border-left-color:var(--accent);background:var(--mint)}
+.gw-canvas .notes-editor-mount .gw-callout[data-tone="success"]{border-left-color:var(--accent);background:var(--mint)}
+.gw-canvas .notes-editor-mount .gw-callout[data-tone="warning"]{border-left-color:#D98A3D;background:#FCF3E6}
+.gw-canvas .notes-editor-mount .gw-callout[data-tone="danger"]{border-left-color:var(--coral,#D85A30);background:#FCF7F2}
+.gw-canvas .notes-editor-mount .gw-callout[data-author="ai"]{background:var(--mint);border-left-color:var(--accent)}
+.gw-canvas .notes-editor-mount .gw-callout p{margin:0}
+.gw-canvas .notes-editor-mount .gw-toggle{margin:8px 0;border:1px solid var(--hairline);border-radius:10px;overflow:hidden}
+.gw-canvas .notes-editor-mount .gw-toggle-summary{padding:8px 12px;font-weight:600;color:var(--ink);background:var(--canvas);cursor:default;user-select:none}
+.gw-canvas .notes-editor-mount .gw-toggle-body{padding:8px 12px}
+.gw-canvas .notes-editor-mount .gw-toggle[data-open="false"] .gw-toggle-body{display:none}
+.gw-canvas .notes-editor-mount .gw-image{margin:12px 0;text-align:center}
+.gw-canvas .notes-editor-mount .gw-image img{max-width:100%;border-radius:10px;box-shadow:var(--shadow-soft)}
+.gw-canvas .notes-editor-mount .gw-image figcaption{color:var(--muted);font-size:13px}
+.gw-canvas .notes-editor-mount .gw-sticker{display:inline-block;font-size:30px;line-height:1;margin:6px 2px;cursor:default}
+.gw-canvas .notes-editor-mount .gw-washi{height:12px;margin:14px 0;border:none;border-radius:6px;background:repeating-linear-gradient(45deg,var(--hl-amber) 0 10px,var(--hl-pink) 10px 20px)}
+.gw-canvas .notes-editor-mount .gw-washi[data-pattern="dots"]{background:radial-gradient(var(--hl-teal) 30%,transparent 32%) 0 0/14px 14px}
 /* AI-authored blocks (Phase 3 AI block, suggestions) — mint frame + byline, per the design */
 .gw-canvas .notes-ai-block,.gw-canvas .notes-suggestion{border:1.5px solid var(--mint-border);border-radius:16px;background:var(--mint-wash);overflow:hidden}
 .gw-canvas .notes-ai-block-byline,.gw-canvas .notes-suggestion-byline{display:flex;align-items:center;gap:7px;padding:10px 16px;border-bottom:1px solid var(--mint-deep);font-size:12px;font-weight:600;color:var(--accent2)}
@@ -1495,6 +1517,14 @@ input{font-family:inherit;outline:none}
 .notes-bubble-toolbar{display:flex;gap:2px;background:var(--bg1);border:1px solid var(--bg4);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.15);padding:3px;pointer-events:all}
 .notes-bubble-btn{font-size:12px;font-weight:700;padding:4px 8px;border-radius:5px;border:none;background:none;color:var(--fg1);cursor:pointer}
 .notes-bubble-btn:hover{background:var(--bg3)}
+/* weaveNotes Phase 1 — bubble highlighter swatches + text-colour picker */
+.notes-bubble-sep{width:1px;align-self:stretch;background:var(--bg4);margin:0 3px}
+.notes-bubble-swatch{width:16px;height:16px;border-radius:50%;border:1px solid rgba(0,0,0,.12);cursor:pointer;padding:0;align-self:center}
+.notes-bubble-swatch:hover{transform:scale(1.12)}
+.notes-bubble-colorwrap{display:inline-flex;align-items:center;gap:2px}
+.notes-bubble-color-a{font-weight:800}
+.notes-bubble-colorwrap .notes-bubble-colordot{display:none;width:14px;height:14px;border-radius:50%;border:1px solid rgba(0,0,0,.12);cursor:pointer;padding:0}
+.notes-bubble-colorwrap.open .notes-bubble-colordot{display:inline-block}
 /* Slash menu */
 .notes-slash-menu{background:var(--bg1);border:1px solid var(--bg4);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:4px;min-width:200px;z-index:300}
 .notes-slash-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;cursor:pointer;font-size:13px;color:var(--fg1)}

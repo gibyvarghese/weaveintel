@@ -131,3 +131,25 @@ export {
   aiCreatableNodes,
   editableNodes,
 } from './note-nodes.js';
+
+// weaveNotes Phase 1 — the creative layer: page themes, highlighter swatches, callout
+// tones, sticker presets, and the shared `sanitizeColor` colour gate.
+export {
+  type PageTheme,
+  type HighlighterTreatment,
+  type PageThemeTokens,
+  type Swatch,
+  type CalloutTone,
+  type CalloutToneSpec,
+  PAGE_THEMES,
+  PAGE_THEME_TOKENS,
+  pageThemeTokens,
+  coercePageTheme,
+  HIGHLIGHTER_SWATCHES,
+  DEFAULT_HIGHLIGHT,
+  CALLOUT_TONES,
+  coerceCalloutTone,
+  STICKER_PRESETS,
+  sanitizeColor,
+  isKnownSwatch,
+} from './creative.js';

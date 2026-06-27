@@ -57,6 +57,15 @@ export const api = {
     });
   },
 
+  // PATCH
+  patch: async (path: string, body: any = {}) => {
+    const url = path.startsWith('/api/') ? path : `/api${path.startsWith('/') ? path : '/' + path}`;
+    return fetchWithCsrf(url, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    });
+  },
+
   // DELETE
   del: async (path: string) => {
     const url = path.startsWith('/api/') ? path : `/api${path.startsWith('/') ? path : '/' + path}`;

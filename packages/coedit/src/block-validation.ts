@@ -25,12 +25,13 @@ import {
   type MarkType,
 } from './block-doc.js';
 
-/** The structural block types the relay accepts (the StarterKit subset). */
+/** The structural block types the relay accepts (StarterKit subset + Phase 1 creative blocks). */
 const BLOCK_TYPES = new Set<BlockType>([
   'paragraph', 'heading', 'bulletListItem', 'orderedListItem', 'taskItem', 'codeBlock', 'blockquote', 'divider',
+  'callout', 'toggle', 'image', 'sticker', 'washiDivider',
 ]);
-/** The inline mark types the relay accepts. */
-const MARK_TYPES = new Set<MarkType>(['bold', 'italic', 'code', 'strike', 'underline', 'link']);
+/** The inline mark types the relay accepts (StarterKit + Phase 1 colour marks). */
+const MARK_TYPES = new Set<MarkType>(['bold', 'italic', 'code', 'strike', 'underline', 'link', 'highlight', 'textColor']);
 
 export interface BlockOpValidationOptions {
   /** The site NAMESPACE this connection may author as (e.g. `u:<userId>`) — anti-forgery. */

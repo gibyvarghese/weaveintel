@@ -108,6 +108,16 @@ deterministic **schema repair** (`normalizeBlocks`) so a doc produced by a
 concurrent merge is valid ProseMirror; unknown block/mark types pass through
 verbatim so a schema-version skew never drops content.
 
+**Creative content survives the merge (weaveNotes Phase 1):** the block model
+round-trips the creative marks `highlight` + `textColor` (each carries its colour
+in the mark value) and the creative blocks `callout` / `toggle` / `image` /
+`sticker` / `washiDivider` — so a callout an AI wrote, or a phrase a teammate
+highlighted pink, is preserved through a concurrent co-edit instead of being
+flattened back to a paragraph. `markdownToBlocks` also parses `==highlight==` and
+GitHub-style `> [!NOTE]` / `[!TIP]` / `[!WARNING]` callouts, so the AI co-author
+produces real coloured highlights + callouts from plain Markdown; `blocksToHtml`
+renders them with a strict colour/scheme allowlist (`safeCssColor`) for safe shares.
+
 **The agent as a block co-editor:** `createBlockAgentPeer(doc)` parses the model's
 Markdown into block ops and merges them — so the AI and a human build the same note
 at once, converging, with no clobbering (the Phase 7 "agent as a CRDT peer" pattern

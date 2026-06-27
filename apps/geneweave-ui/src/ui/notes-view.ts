@@ -87,6 +87,9 @@ export async function loadNote(id: string): Promise<void> {
     const note = await res.json() as NoteDoc;
     state.currentNote = note;
     state.currentNoteId = note.id;
+    // weaveNotes Phase 1: adopt the note's persisted page theme (spec §10.6).
+    const theme = (note as { page_theme?: string }).page_theme;
+    state.notesTheme = theme === 'creative' ? 'creative' : 'pro';
   } catch (e) {
     console.warn('[notes-view] loadNote error', e);
   }
@@ -96,10 +99,16 @@ async function saveNote(id: string, docJson: string, title?: string): Promise<vo
   try {
     const body: Record<string, unknown> = { doc_json: docJson };
     if (title !== undefined) body['title'] = title;
-    await api.put(`/api/me/notes/${id}`, body);
+    await api.patch(`/api/me/notes/${id}`, body);
   } catch (e) {
     console.warn('[notes-view] saveNote error', e);
   }
+}
+
+/** weaveNotes Phase 1: persist the per-note page theme (the Pro ↔ Creative toggle). */
+async function saveNoteTheme(id: string, theme: 'pro' | 'creative'): Promise<void> {
+  try { await api.patch(`/api/me/notes/${id}`, { page_theme: theme }); }
+  catch (e) { console.warn('[notes-view] saveNoteTheme error', e); }
 }
 
 async function createNote(templateId?: string): Promise<NoteListItem | null> {
@@ -386,9 +395,14 @@ function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLEle
     iconEl, titleInput, editorContainer, presenceBadge,
     inlinePanels: [historyPanel, commentsPanel, syncedPanel],
     extractResult,
-    onSetTheme: (t) => { state.notesTheme = t; render(); },
+    onSetTheme: (t) => {
+      state.notesTheme = t;
+      if (state.currentNote) (state.currentNote as { page_theme?: string }).page_theme = t;
+      void saveNoteTheme(note.id, t);
+      render();
+    },
     onAskAi: () => { _railTab = 'assistant'; render(); },
-    format: { bold: () => fmt('toggleBold'), italic: () => fmt('toggleItalic'), underline: () => fmt('toggleUnderline'), highlight: (color) => fmt('toggleHighlight', { color }) },
+    format: { bold: () => fmt('toggleBold'), italic: () => fmt('toggleItalic'), underline: () => fmt('toggleUnderline'), highlight: (color) => fmt('toggleHighlight', { color }), sticker: () => fmt('setSticker', { emoji: '✨' }) },
     insert: buildInsertMenu(render),
     overflow,
   });

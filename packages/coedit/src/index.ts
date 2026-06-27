@@ -75,6 +75,7 @@ export {
 export {
   blocksToMarkdown,
   blocksToHtml,
+  safeCssColor,
 } from './block-markdown.js';
 export {
   markdownToBlocks,

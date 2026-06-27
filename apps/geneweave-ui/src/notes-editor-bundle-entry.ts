@@ -11,3 +11,15 @@ export { TaskList } from '@tiptap/extension-task-list';
 export { TaskItem } from '@tiptap/extension-task-item';
 export { Link } from '@tiptap/extension-link';
 export { Underline } from '@tiptap/extension-underline';
+
+// weaveNotes Phase 1 — hand-rolled creative marks + nodes (no extra installs). Names
+// match the @weaveintel/coedit round-trip so creative content survives co-editing.
+export {
+  Highlight,
+  TextColor,
+  Callout,
+  Toggle,
+  ImageBlock,
+  Sticker,
+  WashiDivider,
+} from './notes-creative-extensions.js';

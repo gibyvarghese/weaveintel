@@ -41,6 +41,7 @@ import {
   type NoteDatabaseSource,
   type NoteDatabaseViewType,
   type UpdateNotePatch,
+  coercePageTheme,
 } from '@weaveintel/notes';
 import { createSqlNoteRepository } from '../note-repository-sql.js';
 import { BlockDoc, pmToBlocks, blocksToProseMirror, blocksToMarkdown, blocksToHtml } from '@weaveintel/coedit';
@@ -494,6 +495,12 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     if (typeof body['doc_json'] === 'string') docJson = body['doc_json'];
     else if (body['doc_json'] && typeof body['doc_json'] === 'object') docJson = JSON.stringify(body['doc_json']);
 
+    // weaveNotes Phase 1: a new note opens in the workspace DEFAULT theme (weavenotes_settings),
+    // unless the client explicitly asks for one. The per-note choice is then persisted + toggled.
+    const cfg = await noteSettings.getConfig();
+    const pageTheme = body['page_theme'] !== undefined ? coercePageTheme(body['page_theme']) : cfg.defaultTheme;
+    const freeform = body['freeform_mode'] === true || body['freeform_mode'] === 1 ? 1 : 0;
+
     const id = newUUIDv7();
     await notes.createNote({
       id,
@@ -507,6 +514,8 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
       doc_json: docJson,
       is_template: 0,
       favorite: 0,
+      page_theme: pageTheme,
+      freeform_mode: freeform,
     });
 
     const note = await notes.getNote(id, auth.userId);
@@ -528,6 +537,10 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     if (typeof body['doc_json'] === 'string') patch.doc_json = body['doc_json'];
     else if (body['doc_json'] && typeof body['doc_json'] === 'object') patch.doc_json = JSON.stringify(body['doc_json']);
     if (typeof body['favorite'] === 'number') patch.favorite = body['favorite'];
+    // weaveNotes Phase 1: persist the per-note theme + freeform + cover-image choices.
+    if (body['page_theme'] !== undefined) patch.page_theme = coercePageTheme(body['page_theme']);
+    if (body['freeform_mode'] !== undefined) patch.freeform_mode = body['freeform_mode'] === true || body['freeform_mode'] === 1 ? 1 : 0;
+    if ('cover_image_artifact_id' in body) patch.cover_image_artifact_id = typeof body['cover_image_artifact_id'] === 'string' ? body['cover_image_artifact_id'] : null;
 
     // weaveNotes Phase 2: if this note is already being co-edited, a full-document
     // PATCH (the legacy single-user save) must NOT clobber concurrent edits — route
