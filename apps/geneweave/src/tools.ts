@@ -987,6 +987,12 @@ export interface ToolRegistryOptions {
    * Owner-scoped.
    */
   workspaceSearch?: (args: { userId: string; tenantId?: string | null; query: string; limit?: number }) => Promise<{ ok: boolean; query: string; context: string; sources: Array<{ n: number; id: string; kind: string; title: string }> }>;
+  /**
+   * weaveNotes Phase 0: note activity. When set, the `read_note_activity` tool is available so
+   * the agent can read a note's recent change history (created / updated / AI-edited) and
+   * understand WHAT HAS BEEN HAPPENING before it acts. Owner-scoped, read-only.
+   */
+  readNoteActivity?: (args: { userId: string; tenantId?: string | null; noteId: string; limit?: number }) => Promise<{ ok: boolean; error?: string; noteId: string; events: Array<{ action: string; actor: string; summary: string | null; createdAt: string }> }>;
 }
 
 export function filterToolNamesByPersona(toolNames: string[], persona: string | null | undefined): string[] {
@@ -1572,6 +1578,29 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
         tags: ['notes', 'database', 'output'],
       }),
     } : {}),
+    // weaveNotes Phase 0: read a note's recent activity — available when readNoteActivity is set.
+    ...(opts?.readNoteActivity && opts.currentUserId ? {
+      read_note_activity: weaveTool({
+        name: 'read_note_activity',
+        description: 'Read the recent change history of one of the user\'s notes — what was created, updated, or AI-edited, and by whom (you or the user) — so you understand what has been happening before you change it. Use this before editing a note to avoid redoing or undoing recent work, or when the user asks "what changed?". You only need the note id. Returns a list of recent events (action, actor, summary, time), newest first.',
+        parameters: {
+          type: 'object',
+          properties: {
+            noteId: { type: 'string', description: 'The id of the note whose activity to read.' },
+            limit: { type: 'number', description: 'Max events to return (default 20, max 100).' },
+          },
+          required: ['noteId'],
+        },
+        execute: async (args: { noteId: string; limit?: number }) => {
+          if (!opts.readNoteActivity || !opts.currentUserId) return { content: 'Note activity is unavailable in this context.', isError: true };
+          const limit = Math.max(1, Math.min(100, Number(args.limit ?? 20)));
+          const r = await opts.readNoteActivity({ userId: opts.currentUserId, tenantId: opts.currentTenantId ?? null, noteId: args.noteId, limit });
+          if (!r.ok) return { content: `read_note_activity failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, noteId: r.noteId, count: r.events.length, events: r.events });
+        },
+        tags: ['notes', 'memory'],
+      }),
+    } : {}),
     // weaveNotes Phase 8: workspace RAG search — available when workspaceSearch callback is set.
     ...(opts?.workspaceSearch && opts.currentUserId ? {
       workspace_search: weaveTool({
@@ -1856,7 +1885,7 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
   // tool selection: mode policies only apply when `enabled_tools` is empty, so a user with a
   // custom tool selection would otherwise never get them (and "create a note" would silently
   // fall back to emit_artifact). Skip any already registered from the selection above.
-  for (const noteTool of ['create_note', 'note_edit', 'note_publish', 'find_related_notes', 'autofill_database', 'capture_web_page', 'workspace_search'] as const) {
+  for (const noteTool of ['create_note', 'note_edit', 'note_publish', 'find_related_notes', 'autofill_database', 'capture_web_page', 'workspace_search', 'read_note_activity'] as const) {
     const t = scopedTools[noteTool];
     if (t && !registeredFromSelection.has(noteTool) && canUseTool(actorPersona, noteTool)) registry.register(t);
   }

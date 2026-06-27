@@ -57,6 +57,7 @@ import { createNotePublishService, type PublishFormat } from '../note-publish-sq
 import { createNoteGraphService } from '../note-graph-sql.js';
 import { createNoteDbService } from '../note-db-sql.js';
 import { createNoteCaptureService } from '../note-capture-sql.js';
+import { createNoteSettingsService } from '../note-settings-sql.js';
 import { createNoteWorkspaceService } from '../note-workspace-sql.js';
 import { createNoteVersionService } from '../note-version-sql.js';
 import { createNoteCommentService } from '../note-comment-sql.js';
@@ -94,6 +95,8 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
   const noteDb = createNoteDbService(db, opts.aiGenerate ? { generate: opts.aiGenerate } : {});
   // weaveNotes Phase 7: the capture service (run→note, web clip, email→note, daily jot).
   const noteCapture = createNoteCaptureService(db);
+  // weaveNotes Phase 0: settings + activity (record what happens to a note so the AI knows).
+  const noteSettings = createNoteSettingsService(db);
   // weaveNotes Phase 8: workspace RAG (cited search over notes+runs), version history,
   // block comments, and synced blocks (transclusion).
   const noteWorkspace = createNoteWorkspaceService(db);
@@ -507,6 +510,8 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     });
 
     const note = await notes.getNote(id, auth.userId);
+    // weaveNotes Phase 0: log the creation so the AI can later see what's been happening.
+    void noteSettings.recordActivity({ noteId: id, userId: auth.userId, tenantId: auth.tenantId ?? null, action: 'created', actor: 'user', summary: `Created “${note?.title ?? 'Untitled'}”` });
     res.writeHead(201, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(note));
   }, { auth: true });
@@ -546,8 +551,22 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     await notes.updateNote(params['id']!, auth.userId, patch);
     const note = await notes.getNote(params['id']!, auth.userId);
     if (!note) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    // weaveNotes Phase 0: log the edit (title/content/etc.) so the AI understands recent changes.
+    const changed = Object.keys(patch).filter((k) => k !== 'doc_json').concat(patch.doc_json !== undefined ? ['content'] : []);
+    void noteSettings.recordActivity({ noteId: params['id']!, userId: auth.userId, tenantId: auth.tenantId ?? null, action: 'updated', actor: 'user', summary: `Edited ${changed.length ? changed.join(', ') : 'the note'}` });
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(note));
+  }, { auth: true });
+
+  // weaveNotes Phase 0: read a note's activity (what changed) — used by the UI + mirrors the tool.
+  router.get('/api/me/notes/:id/activity', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const url = new URL(req.url ?? '/', 'http://x');
+    const limit = safePageInt(url.searchParams.get('limit'), 20, 1, 100);
+    const events = await noteSettings.readActivity({ noteId: params['id']!, userId: auth.userId, limit });
+    if (events === null) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ activity: events }));
   }, { auth: true });
 
   router.del('/api/me/notes/:id', async (_req, res, params, auth) => {

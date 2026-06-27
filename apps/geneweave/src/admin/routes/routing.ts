@@ -450,6 +450,46 @@ export function registerAdminRoutingRoutes(
     await runStreamConfigPut(req, res);
   }, { auth: true, csrf: true });
 
+  // ── Admin: weaveNotes Settings (Phase 0 single global config row) ──
+  // The notes-AI capability config; validated through @weaveintel/notes so a value can never
+  // be saved out of range or with an unknown tool. Edited via the Builder.
+  const noteSettings = (async () => (await import('../../note-settings-sql.js')).createNoteSettingsService(db))();
+  router.get('/api/admin/weavenotes-settings', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const row = await db.getWeaveNotesSettings();
+    json(res, 200, { 'weavenotes-settings': row ? [row] : [], config: row });
+  });
+  const weaveNotesSettingsPut = async (req: any, res: any) => {
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    // Map the admin form's snake_case columns → the camelCase config the validator expects.
+    const partial: Record<string, unknown> = {};
+    if (body['default_theme'] !== undefined) partial['defaultTheme'] = body['default_theme'];
+    if (body['agency_color_enabled'] !== undefined) partial['agencyColorEnabled'] = body['agency_color_enabled'];
+    if (body['ai_suggestions_require_approval'] !== undefined) partial['aiSuggestionsRequireApproval'] = body['ai_suggestions_require_approval'];
+    if (body['activity_tracking_enabled'] !== undefined) partial['activityTrackingEnabled'] = body['activity_tracking_enabled'];
+    if (body['activity_retention_days'] !== undefined) partial['activityRetentionDays'] = body['activity_retention_days'];
+    if (body['max_ai_tokens_per_edit'] !== undefined) partial['maxAiTokensPerEdit'] = body['max_ai_tokens_per_edit'];
+    if (body['local_model_for_sensitive'] !== undefined) partial['localModelForSensitive'] = body['local_model_for_sensitive'];
+    if (body['enabled_ai_tools'] !== undefined) {
+      let arr: unknown = body['enabled_ai_tools'];
+      try { if (typeof arr === 'string') arr = JSON.parse(arr); } catch { arr = []; }
+      partial['enabledAiTools'] = arr;
+    }
+    const { warnings } = await (await noteSettings).updateConfig(partial);
+    const row = await db.getWeaveNotesSettings();
+    json(res, 200, { 'weavenotes-settings': row, warnings });
+  };
+  router.put('/api/admin/weavenotes-settings', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await weaveNotesSettingsPut(req, res);
+  }, { auth: true, csrf: true });
+  router.put('/api/admin/weavenotes-settings/:id', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await weaveNotesSettingsPut(req, res);
+  }, { auth: true, csrf: true });
+
   // ── Admin: Agent Plan Cache Config (Phase 8 single global row) ──
   router.get('/api/admin/agent-plan-cache-config', async (_req, res, _params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }

@@ -422,6 +422,33 @@ export interface NoteSyncedBlockRow {
   created_at: number;
 }
 
+/** m104 — weaveNotes Phase 0: the single-row capability config (Builder-editable). */
+export interface WeaveNotesSettingsRow {
+  id: string;
+  default_theme: string;
+  agency_color_enabled: number;
+  ai_suggestions_require_approval: number;
+  activity_tracking_enabled: number;
+  activity_retention_days: number;
+  max_ai_tokens_per_edit: number;
+  local_model_for_sensitive: number;
+  enabled_ai_tools: string;
+  updated_at: string;
+}
+
+/** m104 — weaveNotes Phase 0: a "what changed" activity log row. */
+export interface NoteActivityRow {
+  id: string;
+  note_id: string;
+  user_id: string;
+  tenant_id: string | null;
+  action: string;
+  actor: string;
+  summary: string | null;
+  detail_json: string | null;
+  created_at: string;
+}
+
 export interface UserDeviceRow {
   id: string;
   user_id: string;
@@ -611,6 +638,11 @@ export interface IMeStore {
   getNoteSyncedBlock(id: string): Promise<NoteSyncedBlockRow | null>;
   listNoteSyncedBlocks(noteId: string): Promise<NoteSyncedBlockRow[]>;
   deleteNoteSyncedBlock(id: string, noteId: string): Promise<void>;
+  // weaveNotes Phase 0 — capability config + activity log
+  getWeaveNotesSettings(): Promise<WeaveNotesSettingsRow | null>;
+  updateWeaveNotesSettings(fields: Partial<Omit<WeaveNotesSettingsRow, 'id'>>): Promise<void>;
+  recordNoteActivity(row: NoteActivityRow): Promise<void>;
+  listNoteActivity(noteId: string, limit?: number): Promise<NoteActivityRow[]>;
   // Registered outbound webhook endpoints
   createWebhookEndpoint(row: { id: string; tenant_id?: string | null; user_id: string; url: string; signing_secret: string; created_at: number }): Promise<void>;
   listWebhookEndpoints(userId: string): Promise<WebhookEndpointRow[]>;

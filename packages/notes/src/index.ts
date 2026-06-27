@@ -81,3 +81,53 @@ export {
   buildCitedContext,
   parseCitedIds,
 } from './rag.js';
+
+// weaveNotes Phase 0 — foundation: the "colour encodes agency" contract.
+export {
+  type Author,
+  type AgencyStyle,
+  AGENCY_PALETTE,
+  authorStyle,
+  AI_BYLINE_PREFIX,
+  aiByline,
+  isAiSignalColor,
+  aiContentPalette,
+} from './agency.js';
+
+// weaveNotes Phase 0 — the AI-suggestion (tracked-changes) state machine.
+export {
+  type SuggestionKind,
+  type SuggestionState,
+  type Suggestion,
+  type SuggestionMap,
+  emptySuggestions,
+  addSuggestion,
+  resolveSuggestion,
+  acceptSuggestion,
+  rejectSuggestion,
+  resolveAll,
+  clearResolved,
+  pendingCount,
+  pendingQueue,
+  decisionTag,
+} from './suggestions.js';
+
+// weaveNotes Phase 0 — the weaveNotes capability configuration (DB-backed, Builder-editable).
+export {
+  type NotesTheme,
+  type WeaveNotesConfig,
+  WEAVENOTES_AI_TOOLS,
+  DEFAULT_WEAVENOTES_CONFIG,
+  validateWeaveNotesConfig,
+} from './notes-config.js';
+
+// weaveNotes Phase 0 — the note content-node registry (shared editor schema).
+export {
+  type NoteNodeType,
+  type NoteMarkType,
+  type NoteNodeSpec,
+  NOTE_NODE_REGISTRY,
+  noteNodeSpec,
+  aiCreatableNodes,
+  editableNodes,
+} from './note-nodes.js';

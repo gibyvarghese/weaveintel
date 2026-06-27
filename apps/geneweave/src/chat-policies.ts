@@ -187,6 +187,7 @@ const TOOL_POLICIES: Record<ChatMode, string[]> = {
     'autofill_database', // weaveNotes Phase 6: AI table column auto-fill
     'capture_web_page', // weaveNotes Phase 7: clip a web page into a structured note
     'workspace_search', // weaveNotes Phase 8: cited RAG over the user notes + runs
+    'read_note_activity', // weaveNotes Phase 0: read a note's recent change history
     'datetime', 'timezone_info',
     'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list',
     'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status',
@@ -206,6 +207,7 @@ const TOOL_POLICIES: Record<ChatMode, string[]> = {
     'autofill_database', // weaveNotes Phase 6: AI table column auto-fill
     'capture_web_page', // weaveNotes Phase 7: clip a web page into a structured note
     'workspace_search', // weaveNotes Phase 8: cited RAG over the user notes + runs
+    'read_note_activity', // weaveNotes Phase 0: read a note's recent change history
     'datetime', 'timezone_info', 'calculator', 'json_format', 'text_analysis',
     'agenda_list', 'agenda_create', 'agenda_update', 'agenda_delete',
   ],
@@ -220,6 +222,7 @@ const TOOL_POLICIES: Record<ChatMode, string[]> = {
     'autofill_database', // weaveNotes Phase 6: AI table column auto-fill
     'capture_web_page', // weaveNotes Phase 7: clip a web page into a structured note
     'workspace_search', // weaveNotes Phase 8: cited RAG over the user notes + runs
+    'read_note_activity', // weaveNotes Phase 0: read a note's recent change history
     'datetime', 'timezone_info',
     'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list',
     'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status',

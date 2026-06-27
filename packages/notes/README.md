@@ -39,6 +39,10 @@ shared contract pins every adapter to identical behaviour.
 | `PropertyDef` / `parseSchema` / `coerceValue` / `validateRow` / `computeRollup` / `VIEW_TYPES` | Phase 6 typed-database model (columns, validation, rollups, view types). |
 | `parseEmail` / `buildCaptureNote` / `dailyNoteTitle` | Phase 7 capture helpers: parse an email (fields or raw RFC822 → text), assemble a provenance-stamped capture note, and the daily-jots inbox title. |
 | `snippetAround` / `reciprocalRankFusion` / `buildCitedContext` / `parseCitedIds` | Phase 8 workspace-RAG helpers: query-centred excerpts, rank-fusion of multiple corpora, numbered "[n]" cited context for the LLM, and citation-marker parsing. |
+| `AGENCY_PALETTE` / `authorStyle` / `aiByline` / `aiContentPalette` | Phase 0 "colour encodes agency" contract: the geneWeave palette + the rule that user content is calm neutral, AI content is mint with a woven mark + byline, and human ink is coral. One source of truth for web/desktop/mobile. |
+| `Suggestion` / `addSuggestion` / `acceptSuggestion` / `rejectSuggestion` / `pendingQueue` | Phase 0 AI-suggestion (tracked-changes) state machine: every AI change is a reviewable suggestion the human accepts or rejects; a keyed map handles multiple queued edits. |
+| `WeaveNotesConfig` / `DEFAULT_WEAVENOTES_CONFIG` / `validateWeaveNotesConfig` | Phase 0 capability config: the typed settings that drive the notes AI (default theme, approval, activity tracking, token cap, enabled tools) + a safe validator (clamps + rejects unknowns). geneWeave stores it in a DB row edited via the Builder. |
+| `NOTE_NODE_REGISTRY` / `aiCreatableNodes` / `editableNodes` | Phase 0 content-node registry: the shared editor schema — which block types exist, which the AI can create, and which stay natively editable vs opaque. |
 
 ```ts
 import { createInMemoryNoteRepository, extractTaskItems } from '@weaveintel/notes';

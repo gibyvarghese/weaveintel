@@ -9,18 +9,21 @@
 
 /** Font role -> family name. Mobile (M3) maps these to loaded `expo-font` faces. */
 export interface FontFamilies {
-  /** Display / headings — Fraunces (serif, expressive). */
+  /** Display / headings — Plus Jakarta Sans (geneWeave, tracking −0.02 to −0.03em). */
   display: string;
-  /** Body / UI text — Plus Jakarta Sans. */
+  /** Body / UI text — Inter. */
   body: string;
-  /** Monospace — DM Mono (tool-call args, code). */
+  /** Metadata / code / keys / IDs — JetBrains Mono. */
   mono: string;
+  /** Handwriting — Caveat (Notes Creative mode: titles, diagram labels, doodles). */
+  hand: string;
 }
 
 export const fontFamilies: FontFamilies = {
-  display: 'Fraunces',
-  body: 'Plus Jakarta Sans',
-  mono: 'DM Mono',
+  display: 'Plus Jakarta Sans',
+  body: 'Inter',
+  mono: 'JetBrains Mono',
+  hand: 'Caveat',
 };
 
 /** Named font weights mapped to numeric values. */

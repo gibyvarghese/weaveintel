@@ -9377,6 +9377,26 @@ export class SQLiteAdapter implements DatabaseAdapter {
     this.d.prepare('DELETE FROM note_synced_blocks WHERE id = ? AND note_id = ?').run(id, noteId);
   }
 
+  // weaveNotes Phase 0 — capability config (single 'global' row) + activity log.
+  async getWeaveNotesSettings(): Promise<import('./db-types/adapter-me.js').WeaveNotesSettingsRow | null> {
+    return (this.d.prepare("SELECT * FROM weavenotes_settings WHERE id = 'global'").get() ?? null) as import('./db-types/adapter-me.js').WeaveNotesSettingsRow | null;
+  }
+  async updateWeaveNotesSettings(fields: Partial<Omit<import('./db-types/adapter-me.js').WeaveNotesSettingsRow, 'id'>>): Promise<void> {
+    const keys = Object.keys(fields);
+    if (!keys.length) return;
+    const set = keys.map((k) => `${k} = @${k}`).join(', ');
+    this.d.prepare(`UPDATE weavenotes_settings SET ${set}, updated_at = datetime('now') WHERE id = 'global'`).run(fields as Record<string, unknown>);
+  }
+  async recordNoteActivity(row: import('./db-types/adapter-me.js').NoteActivityRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO note_activity (id, note_id, user_id, tenant_id, action, actor, summary, detail_json, created_at)
+       VALUES (@id, @note_id, @user_id, @tenant_id, @action, @actor, @summary, @detail_json, COALESCE(@created_at, datetime('now')))`,
+    ).run(row);
+  }
+  async listNoteActivity(noteId: string, limit = 50): Promise<import('./db-types/adapter-me.js').NoteActivityRow[]> {
+    return this.d.prepare('SELECT * FROM note_activity WHERE note_id = ? ORDER BY created_at DESC, id DESC LIMIT ?').all(noteId, Math.max(1, Math.min(500, limit))) as import('./db-types/adapter-me.js').NoteActivityRow[];
+  }
+
   // Registered outbound webhook endpoints.
   async createWebhookEndpoint(row: { id: string; tenant_id?: string | null; user_id: string; url: string; signing_secret: string; created_at: number }): Promise<void> {
     this.d.prepare(

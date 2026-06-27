@@ -34,6 +34,8 @@ export interface AdminFieldDef {
 
 export interface AdminTabDef {
   singular: string;
+  /** Plural label for the collection title (defaults to `${singular}s`). */
+  plural?: string;
   apiPath: string;
   listKey: string;
   cols: string[];

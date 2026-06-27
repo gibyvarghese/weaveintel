@@ -531,6 +531,20 @@ export const PLATFORM_CAPABILITY_ADMIN_TABS: Record<string, AdminTabDef> = {
       { key: 'resume_window_seconds', label: 'Resume Window (seconds)', type: 'number', save: 'int', default: 900 },
     ],
   },
+  'weavenotes-settings': {
+    singular: 'weaveNotes Settings', plural: 'weaveNotes Settings', apiPath: 'admin/weavenotes-settings', listKey: 'weavenotes-settings',
+    cols: ['default_theme', 'agency_color_enabled', 'ai_suggestions_require_approval', 'activity_tracking_enabled', 'max_ai_tokens_per_edit'],
+    fields: [
+      { key: 'default_theme', label: 'Default theme', options: ['pro', 'creative'], default: 'pro' },
+      { key: 'agency_color_enabled', label: 'Colour encodes agency (AI = mint, human ink = coral)', type: 'checkbox', save: 'bool', default: true },
+      { key: 'ai_suggestions_require_approval', label: 'AI changes need your approval (track-changes)', type: 'checkbox', save: 'bool', default: true },
+      { key: 'activity_tracking_enabled', label: 'Keep a note activity log (so the AI knows what changed)', type: 'checkbox', save: 'bool', default: true },
+      { key: 'activity_retention_days', label: 'Activity kept for (days)', type: 'number', save: 'int', default: 90 },
+      { key: 'max_ai_tokens_per_edit', label: 'Cap per AI edit (tokens)', type: 'number', save: 'int', default: 4000 },
+      { key: 'local_model_for_sensitive', label: 'Use a local model for sensitive notes', type: 'checkbox', save: 'bool', default: false },
+      { key: 'enabled_ai_tools', label: 'Note AI tools the editor may use (JSON array)', textarea: true, save: 'json', rows: 3 },
+    ],
+  },
   'cache-metrics': {
     singular: 'Cache Metric', apiPath: 'admin/cache-metrics', listKey: 'cache-metrics',
     readOnly: true,

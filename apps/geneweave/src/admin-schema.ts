@@ -130,6 +130,9 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
     { key: 'reliability-policies', label: 'Reliability' },
     { key: 'sandbox-policies', label: 'Sandbox' },
   ]},
+  { label: 'weaveNotes', icon: '\uD83D\uDCDD', tabs: [
+    { key: 'weavenotes-settings', label: 'Settings' },
+  ]},
   { label: 'Monitoring', icon: '\uD83D\uDCCA', tabs: [
     { key: 'workflow-runs', label: 'Runs' },
     { key: 'guardrail-evals', label: 'Evals' },

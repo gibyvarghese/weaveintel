@@ -60,6 +60,7 @@ import { createNoteGraphService } from './note-graph-sql.js';
 import { createNoteDbService } from './note-db-sql.js';
 import { createNoteCaptureService } from './note-capture-sql.js';
 import { createNoteWorkspaceService } from './note-workspace-sql.js';
+import { createNoteSettingsService } from './note-settings-sql.js';
 import {
   applySkillsToPrompt,
   type SkillMatch,
@@ -413,6 +414,9 @@ export class ChatEngine {
       // weaveNotes Phase 8: wire the `workspace_search` tool (cited RAG over the user's notes + runs).
       workspaceSearch: (a: { userId: string; tenantId?: string | null; query: string; limit?: number }) =>
         createNoteWorkspaceService(db).agentWorkspaceSearch(a),
+      // weaveNotes Phase 0: wire the `read_note_activity` tool (recent change history → AI awareness).
+      readNoteActivity: (a: { userId: string; tenantId?: string | null; noteId: string; limit?: number }) =>
+        createNoteSettingsService(db).agentReadActivity(a),
     };
   }
 
