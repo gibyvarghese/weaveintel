@@ -17,13 +17,18 @@ import { api } from './api.js';
 
 export type CoeditRole = 'owner' | 'collaborator' | 'viewer';
 
+/** One peer's ephemeral awareness (cursor + identity) on the wire. */
+export interface AwarenessLike { name?: string; color?: string; status?: string; peerType?: string; cursor?: { anchor?: number; head?: number } | null; [k: string]: unknown }
+
 export interface NoteCoeditSession {
-  /** Resolves once the shared doc exists and we know our site id + role. */
-  ready: Promise<{ siteId: string; role: CoeditRole }>;
+  /** Resolves once the shared doc exists and we know our site id + role + whether live cursors are on. */
+  ready: Promise<{ siteId: string; role: CoeditRole; liveCursors: boolean }>;
   /** Save the whole editor document through the relay (diff-on-save; convergent). */
   save(docJson: unknown): Promise<boolean>;
   /** How many editors (including you) are currently in the room. */
   presenceCount(): number;
+  /** Broadcast my ephemeral awareness (cursor + identity) to the room (Phase 3). */
+  broadcastAwareness(state: AwarenessLike | null, clock: number): void;
   /** Tear down the live connection. */
   close(): void;
 }
@@ -34,33 +39,40 @@ export interface WireNoteCoeditOpts {
   onRemoteChange: () => void;
   /** Called when the set of live editors changes (presence). */
   onPresence: (count: number) => void;
+  /** Phase 3: called when a peer's awareness (cursor/identity) arrives, or they leave (entry.state=null). */
+  onAwareness?: (peerId: string, entry: { clock: number; state: AwarenessLike | null }) => void;
 }
 
 /** Connect a note to its live co-editing room. Safe to call once per opened note. */
 export function wireNoteCoedit(opts: WireNoteCoeditOpts): NoteCoeditSession {
   let role: CoeditRole = 'viewer';
   let siteId = '';
+  let liveCursors = false;
   let es: EventSource | null = null;
   let peers = new Set<string>();
   let closed = false;
 
-  const ready = (async (): Promise<{ siteId: string; role: CoeditRole }> => {
+  const ready = (async (): Promise<{ siteId: string; role: CoeditRole; liveCursors: boolean }> => {
     try {
       const res = await api.post(`/api/me/notes/${opts.noteId}/coedit`, {});
       if (res.ok) {
-        const data = (await res.json()) as { siteId?: string; role?: CoeditRole };
+        const data = (await res.json()) as { siteId?: string; role?: CoeditRole; liveCursors?: boolean };
         siteId = data.siteId ?? '';
         role = data.role ?? 'viewer';
+        liveCursors = data.liveCursors !== false;
       }
     } catch { /* fall back to viewer; offline-safe */ }
     if (!closed) connectStream();
-    return { siteId, role };
+    return { siteId, role, liveCursors };
   })();
 
   function connectStream(): void {
     try {
       es = new EventSource(`/api/me/notes/${opts.noteId}/coedit/events`, { withCredentials: true });
       es.addEventListener('coedit.op', () => { if (!closed) opts.onRemoteChange(); });
+      es.addEventListener('coedit.awareness', (e: MessageEvent) => {
+        try { const d = JSON.parse(e.data) as { peerId?: string; entry?: { clock: number; state: AwarenessLike | null } }; if (d.peerId && d.entry && !closed) opts.onAwareness?.(d.peerId, d.entry); } catch { /* ignore */ }
+      });
       es.addEventListener('presence.sync', (e: MessageEvent) => {
         try { const d = JSON.parse(e.data) as { peers?: string[] }; peers = new Set(d.peers ?? []); opts.onPresence(peers.size); } catch { /* ignore */ }
       });
@@ -68,7 +80,7 @@ export function wireNoteCoedit(opts: WireNoteCoeditOpts): NoteCoeditSession {
         try { const d = JSON.parse(e.data) as { peerId?: string }; if (d.peerId) peers.add(d.peerId); opts.onPresence(peers.size); } catch { /* ignore */ }
       });
       es.addEventListener('presence.leave', (e: MessageEvent) => {
-        try { const d = JSON.parse(e.data) as { peerId?: string }; if (d.peerId) peers.delete(d.peerId); opts.onPresence(peers.size); } catch { /* ignore */ }
+        try { const d = JSON.parse(e.data) as { peerId?: string }; if (d.peerId) { peers.delete(d.peerId); opts.onAwareness?.(d.peerId, { clock: Date.now(), state: null }); } opts.onPresence(peers.size); } catch { /* ignore */ }
       });
       es.onerror = () => { /* the durable op log + a reload always recover us */ };
     } catch { /* SSE unsupported — saves still work, just not live */ }
@@ -83,6 +95,11 @@ export function wireNoteCoedit(opts: WireNoteCoeditOpts): NoteCoeditSession {
       } catch { return false; }
     },
     presenceCount: () => peers.size,
+    broadcastAwareness(state: AwarenessLike | null, clock: number): void {
+      if (!siteId) return;
+      // Fire-and-forget; presence is best-effort chatter (no await, errors ignored).
+      void api.post(`/api/me/notes/${opts.noteId}/coedit/awareness`, { siteId, entry: { clock, state } }).catch(() => {});
+    },
     close(): void {
       closed = true;
       if (es) { es.close(); es = null; }

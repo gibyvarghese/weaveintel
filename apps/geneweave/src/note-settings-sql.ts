@@ -32,6 +32,8 @@ function rowToConfig(row: WeaveNotesSettingsRow | null): WeaveNotesConfig {
     activityRetentionDays: row.activity_retention_days,
     maxAiTokensPerEdit: row.max_ai_tokens_per_edit,
     localModelForSensitive: row.local_model_for_sensitive !== 0,
+    liveCursorsEnabled: row.live_cursors_enabled !== 0,   // undefined (pre-m107) → enabled
+    aiPresenceEnabled: row.ai_presence_enabled !== 0,
     enabledAiTools: tools,
   }).config;
 }
@@ -58,6 +60,8 @@ export function createNoteSettingsService(db: SettingsDb, opts: { now?: () => nu
       activity_retention_days: config.activityRetentionDays,
       max_ai_tokens_per_edit: config.maxAiTokensPerEdit,
       local_model_for_sensitive: config.localModelForSensitive ? 1 : 0,
+      live_cursors_enabled: config.liveCursorsEnabled ? 1 : 0,
+      ai_presence_enabled: config.aiPresenceEnabled ? 1 : 0,
       enabled_ai_tools: JSON.stringify(config.enabledAiTools),
     });
     return { config, warnings };

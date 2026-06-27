@@ -33,6 +33,10 @@ export interface WeaveNotesConfig {
   maxAiTokensPerEdit: number;
   /** Route sensitive notes to a local model (provider-ollama/llamacpp) instead of a cloud one. */
   localModelForSensitive: boolean;
+  /** Show live collaborator cursors (coloured carets + names) while co-editing (Phase 3). */
+  liveCursorsEnabled: boolean;
+  /** Show the AI as a live participant ("weaveIntel AI") while it edits a note (Phase 3). */
+  aiPresenceEnabled: boolean;
   /** The note AI tools the editor agent is allowed to use (subset of the catalog). */
   enabledAiTools: string[];
 }
@@ -53,6 +57,8 @@ export const DEFAULT_WEAVENOTES_CONFIG: WeaveNotesConfig = {
   activityRetentionDays: 90,
   maxAiTokensPerEdit: 4000,
   localModelForSensitive: false,
+  liveCursorsEnabled: true,
+  aiPresenceEnabled: true,
   enabledAiTools: [...WEAVENOTES_AI_TOOLS],
 };
 
@@ -107,6 +113,8 @@ export function validateWeaveNotesConfig(
       activityRetentionDays: retention,
       maxAiTokensPerEdit: maxTokens,
       localModelForSensitive: asBool(p.localModelForSensitive ?? base.localModelForSensitive, base.localModelForSensitive),
+      liveCursorsEnabled: asBool(p.liveCursorsEnabled ?? base.liveCursorsEnabled, base.liveCursorsEnabled),
+      aiPresenceEnabled: asBool(p.aiPresenceEnabled ?? base.aiPresenceEnabled, base.aiPresenceEnabled),
       enabledAiTools: tools,
     },
     warnings,

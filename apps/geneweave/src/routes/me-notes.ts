@@ -56,6 +56,8 @@ import { noteCoeditHub } from '../note-coedit-hub.js';
 import { createNoteAiService, type NoteAiGenerate, type AiAction } from '../note-ai-sql.js';
 import { createNoteColorizeService } from '../note-colorize-sql.js';
 import { isColorScheme } from '@weaveintel/notes';
+import { sanitizeAwarenessState } from '@weaveintel/coedit';
+import { withAiPresence } from '../note-ai-presence.js';
 import { createNotePublishService, type PublishFormat } from '../note-publish-sql.js';
 import { createNoteGraphService } from '../note-graph-sql.js';
 import { createNoteDbService } from '../note-db-sql.js';
@@ -139,7 +141,13 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
 
   router.get('/api/me/notes/:id', async (_req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
-    const note = await notes.getNote(params['id']!, auth.userId);
+    let note = await notes.getNote(params['id']!, auth.userId);
+    // Phase 3: a COLLABORATOR (a shared note they don't own) can also open it. getNote is
+    // owner-scoped, so fall back to the shared-access check and load it as the owner.
+    if (!note) {
+      const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+      if (access) note = await notes.getNote(params['id']!, access.ownerId);
+    }
     if (!note) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(note));
@@ -208,8 +216,10 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     const view = await coedit.ensureDoc({ noteId: params['id']!, tenantId: loaded.access.tenantId, ownerId: loaded.access.ownerId, seedPm: loaded.seedPm });
     // A per-tab site id UNDER the user's namespace (unique replicas, provable authorship).
     const siteId = `${userNoteSiteId(auth.userId)}:${newUUIDv7().slice(0, 8)}`;
+    // Phase 3: tell the client whether live cursors are enabled for this workspace.
+    const cfg = await noteSettings.getConfig();
     res.writeHead(201, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ...view, siteId, role: loaded.access.role }));
+    res.end(JSON.stringify({ ...view, siteId, role: loaded.access.role, liveCursors: cfg.liveCursorsEnabled, aiPresence: cfg.aiPresenceEnabled }));
   }, { auth: true });
 
   router.get('/api/me/notes/:id/coedit', async (_req, res, params, auth) => {
@@ -286,7 +296,11 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     const peerId = typeof body['siteId'] === 'string' && body['siteId'].startsWith(userNoteSiteId(auth.userId))
       ? (body['siteId'] as string)
       : userNoteSiteId(auth.userId);
-    const entry = (body['entry'] && typeof body['entry'] === 'object') ? body['entry'] : { state: null };
+    // Phase 3: presence is un-trusted chatter — sanitise the state (cap names, validate the
+    // colour, bound the cursor, drop unknown keys) before re-broadcasting it to everyone.
+    const rawEntry = (body['entry'] && typeof body['entry'] === 'object') ? body['entry'] as Record<string, unknown> : { state: null };
+    const clock = Number.isFinite(Number(rawEntry['clock'])) ? Number(rawEntry['clock']) : 0;
+    const entry = { clock, state: sanitizeAwarenessState(rawEntry['state']) };
     noteCoeditHub.broadcast(params['id']!, 'coedit.awareness', { peerId, entry });
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ ok: true }));
@@ -451,12 +465,13 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     let body: Record<string, unknown> = {};
     try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
     const selBlock = body['selectionBlockId'];
-    const result = await noteAi.propose({
+    // Phase 3: show the AI as a live participant ("composing") while it works.
+    const result = await withAiPresence(db, params['id']!, () => noteAi.propose({
       noteId: params['id']!, access, action: action as AiAction,
       ...(typeof body['instruction'] === 'string' ? { instruction: body['instruction'] } : {}),
       ...(typeof body['selectionText'] === 'string' ? { selectionText: body['selectionText'] } : {}),
       ...(selBlock && typeof selBlock === 'object' ? { selectionBlockId: selBlock as { counter: number; siteId: string } } : {}),
-    });
+    }));
     res.writeHead(result.ok ? 201 : 400, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(result));
   }, { auth: true });

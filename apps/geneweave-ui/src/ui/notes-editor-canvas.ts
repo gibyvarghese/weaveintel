@@ -26,6 +26,8 @@ export interface EditorCanvasOpts {
   titleInput: HTMLElement;
   editorContainer: HTMLElement;
   presenceBadge: HTMLElement;
+  /** Phase 3: live participant avatars (updated imperatively as people/AI join + leave). */
+  presenceAvatarsEl?: HTMLElement;
   inlinePanels: HTMLElement[];
   extractResult: string | null;
   /** Handlers. */
@@ -67,8 +69,10 @@ export function renderEditorCanvas(opts: EditorCanvasOpts): HTMLElement {
   // — presence cluster: "you" (ink G) + the AI woven-mark avatar —
   const presence = h('div', { className: 'gw-presence' },
     opts.presenceBadge,
-    h('span', { className: 'gw-avatar gw-avatar-you', title: 'You' }, 'G'),
-    h('span', { className: 'gw-avatar gw-avatar-ai', title: 'geneWeave AI', innerHTML: wovenMarkSvg(13, 'ai') }),
+    // Phase 3: live participant avatars (populated by the live-cursors wiring). Falls back to the
+    // static "you + AI" cluster until participants arrive, so the chrome never looks empty.
+    opts.presenceAvatarsEl ?? h('span', { className: 'gw-avatar gw-avatar-you', title: 'You' }, 'G'),
+    opts.presenceAvatarsEl ? null : h('span', { className: 'gw-avatar gw-avatar-ai', title: 'geneWeave AI', innerHTML: wovenMarkSvg(13, 'ai') }),
   );
 
   // — Pro/Creative theme toggle —

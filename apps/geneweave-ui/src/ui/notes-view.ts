@@ -25,6 +25,7 @@ import { mountNotesEditor, type EditorInstance } from './notes-editor.js';
 import { wireNoteCoedit, createNoteShareLink, type NoteCoeditSession } from './notes-coedit.js';
 import { wireNoteAi, type NoteAiPanel } from './notes-ai.js';
 import { wireSelectionCard, type SelectionCard } from './notes-ai-card.js';
+import { wireLiveCursors, peerColor, type LiveCursors, type Participant } from './notes-cursors.js';
 import { wireNoteConnections, type NoteConnectionsPanel } from './notes-graph.js';
 import { renderDatabasesView } from './notes-database-view.js';
 import { renderCapturePanel } from './notes-capture.js';
@@ -40,6 +41,8 @@ let _activeCoedit: NoteCoeditSession | null = null;
 let _activeAi: NoteAiPanel | null = null;
 /** The floating AI selection card for the currently-open note (Phase 2). */
 let _activeCard: SelectionCard | null = null;
+/** The live collaborative cursors for the currently-open note (Phase 3). */
+let _activeCursors: LiveCursors | null = null;
 /** The knowledge-graph connections panel for the currently-open note (Phase 5). */
 let _activeConn: NoteConnectionsPanel | null = null;
 /** Phase 8 panels: version history, comments, synced blocks. */
@@ -50,6 +53,7 @@ function teardownCoedit(): void {
   if (_activeCoedit) { _activeCoedit.close(); _activeCoedit = null; }
   if (_activeAi) { _activeAi.close(); _activeAi = null; }
   if (_activeCard) { _activeCard.destroy(); _activeCard = null; }
+  if (_activeCursors) { _activeCursors.destroy(); _activeCursors = null; }
   if (_activeConn) { _activeConn.close(); _activeConn = null; }
   if (_activeHistory) { _activeHistory.close(); _activeHistory = null; }
   if (_activeComments) { _activeComments.close(); _activeComments = null; }
@@ -278,6 +282,19 @@ function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLEle
   let lastLocalEditTs = 0;
   let mountTs = 0;
   const presenceBadge = h('span', { className: 'notes-presence-badge', title: 'People editing this note', style: 'display:none' }) as HTMLElement;
+  // Phase 3: live participant avatars (a coloured circle per person, the woven mark for the AI).
+  const presenceAvatarsEl = h('span', { className: 'gw-presence-avatars' }) as HTMLElement;
+  const renderAvatars = (list: Participant[]): void => {
+    presenceAvatarsEl.innerHTML = '';
+    for (const p of list.slice(0, 6)) {
+      if (p.peerType === 'ai') {
+        presenceAvatarsEl.appendChild(h('span', { className: 'gw-avatar gw-avatar-ai', title: p.name, innerHTML: wovenMarkSvg(13, 'ai') }));
+      } else {
+        const initial = (p.name || '?').trim().charAt(0).toUpperCase() || '?';
+        presenceAvatarsEl.appendChild(h('span', { className: 'gw-avatar gw-avatar-live', title: p.name, style: `background:${p.color}` }, initial));
+      }
+    }
+  };
   let peerCount = 1;
   const updatePresence = (count: number): void => {
     peerCount = count;
@@ -396,7 +413,7 @@ function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLEle
     creative,
     metaText: 'Edited just now',
     isLive: true,
-    iconEl, titleInput, editorContainer, presenceBadge,
+    iconEl, titleInput, editorContainer, presenceBadge, presenceAvatarsEl,
     inlinePanels: [historyPanel, commentsPanel, syncedPanel],
     extractResult,
     onSetTheme: (t) => {
@@ -434,7 +451,11 @@ function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLEle
     // the presence/op stream). Saves route through the relay's diff-on-save so two
     // people editing the same note merge instead of clobbering.
     teardownCoedit();
-    _activeCoedit = wireNoteCoedit({ noteId: note.id, onRemoteChange, onPresence: updatePresence });
+    _activeCoedit = wireNoteCoedit({
+      noteId: note.id, onRemoteChange, onPresence: updatePresence,
+      // Phase 3: feed every peer's awareness (cursor/identity) into the live-cursors renderer.
+      onAwareness: (peerId, entry) => _activeCursors?.applyAwareness(peerId, entry),
+    });
     // Phase 3: wire the AI co-author toolbar + suggestion review. Accepting a
     // suggestion (or inserting/refreshing an AI block) reloads the note so the
     // editor reflects the applied change.
@@ -452,6 +473,8 @@ function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLEle
       container: editorContainer,
       initialDocJson: note.doc_json,
       placeholder: 'Start writing… type / for commands, @ to mention',
+      // Phase 3: broadcast my caret whenever it moves (the live-cursors wiring throttles it).
+      onSelectionChange: () => _activeCursors?.onLocalSelectionChange(),
       onSave: async (docJson) => {
         lastLocalEditTs = Date.now();
         let parsed: unknown; try { parsed = JSON.parse(docJson); } catch { parsed = undefined; }
@@ -461,6 +484,17 @@ function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLEle
       },
     }).then((inst) => {
       _activeEditor = inst;
+      // Phase 3: once the editor + room are ready, wire LIVE CURSORS (if enabled for this workspace).
+      void _activeCoedit?.ready.then((info) => {
+        if (!info.liveCursors || !_activeCoedit) return;
+        const myName = (state.user as { name?: string } | null)?.name || 'You';
+        const userKey = info.siteId.split(':').slice(0, 2).join(':') || info.siteId;
+        _activeCursors = wireLiveCursors({
+          session: _activeCoedit, editor: inst, container: editorContainer,
+          me: { name: myName, color: peerColor(userKey) }, mySiteId: info.siteId,
+          onParticipants: renderAvatars,
+        });
+      });
     }).catch((err) => {
       editorContainer.innerHTML = `<div class="notes-editor-error">Editor failed to load: ${String(err)}</div>`;
     });

@@ -542,6 +542,8 @@ export const PLATFORM_CAPABILITY_ADMIN_TABS: Record<string, AdminTabDef> = {
       { key: 'activity_retention_days', label: 'Activity kept for (days)', type: 'number', save: 'int', default: 90 },
       { key: 'max_ai_tokens_per_edit', label: 'Cap per AI edit (tokens)', type: 'number', save: 'int', default: 4000 },
       { key: 'local_model_for_sensitive', label: 'Use a local model for sensitive notes', type: 'checkbox', save: 'bool', default: false },
+      { key: 'live_cursors_enabled', label: 'Show live collaborator cursors (coloured carets + names)', type: 'checkbox', save: 'bool', default: true },
+      { key: 'ai_presence_enabled', label: 'Show the AI as a live participant while it edits', type: 'checkbox', save: 'bool', default: true },
       { key: 'enabled_ai_tools', label: 'Note AI tools the editor may use (JSON array)', textarea: true, save: 'json', rows: 3 },
     ],
   },

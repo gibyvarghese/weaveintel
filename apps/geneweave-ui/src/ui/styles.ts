@@ -1545,6 +1545,14 @@ input{font-family:inherit;outline:none}
 .notes-aicard-scheme{font-size:12px;border:1px solid var(--hairline,#E7ECEA);border-radius:8px;padding:3px 6px;background:var(--surface,#fff);color:var(--ink,#14201B)}
 .notes-aicard-go{padding:4px 10px}
 .notes-aicard-status{min-height:16px;margin-top:8px;font-size:11.5px;font-weight:600;color:var(--accent2,#0B7A57)}
+/* weaveNotes Phase 3 — live collaborator cursors + presence avatars */
+.notes-cursors-overlay{position:absolute;inset:0;pointer-events:none;z-index:20;overflow:visible}
+.notes-cursor-caret{position:absolute;width:2px;border-radius:1px;pointer-events:none}
+.notes-cursor-label{position:absolute;top:-16px;left:-1px;font-size:10px;font-weight:700;color:#fff;padding:1px 5px;border-radius:6px 6px 6px 0;white-space:nowrap;line-height:1.4}
+.gw-presence-avatars{display:inline-flex;align-items:center}
+.gw-presence-avatars .gw-avatar{margin-left:-6px;box-shadow:0 0 0 2px var(--surface,#fff)}
+.gw-presence-avatars .gw-avatar:first-child{margin-left:0}
+.gw-avatar-live{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;color:#fff;font-size:11px;font-weight:800}
 /* Slash menu */
 .notes-slash-menu{background:var(--bg1);border:1px solid var(--bg4);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:4px;min-width:200px;z-index:300}
 .notes-slash-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;cursor:pointer;font-size:13px;color:var(--fg1)}

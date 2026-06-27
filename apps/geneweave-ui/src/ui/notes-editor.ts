@@ -184,6 +184,12 @@ function buildSlashMenu(editor: TiptapEditor, query: string, onClose: () => void
 export interface EditorInstance {
   destroy(): void;
   getJSON(): unknown;
+  /** weaveNotes Phase 3: the local caret/selection as ProseMirror positions (for live cursors). */
+  getSelection(): { anchor: number; head: number; empty: boolean } | null;
+  /** weaveNotes Phase 3: screen coordinates of a ProseMirror position (to draw a remote caret). */
+  coordsAtPos(pos: number): { left: number; top: number; bottom: number } | null;
+  /** weaveNotes Phase 3: the document size, to clamp a remote position that moved. */
+  docSize(): number;
 }
 
 export async function mountNotesEditor(opts: {
@@ -192,6 +198,8 @@ export async function mountNotesEditor(opts: {
   onSave: (docJson: string) => Promise<void>;
   placeholder?: string;
   readOnly?: boolean;
+  /** weaveNotes Phase 3: called whenever the local selection/caret moves (for cursor broadcast). */
+  onSelectionChange?: () => void;
 }): Promise<EditorInstance> {
   const { container, initialDocJson, onSave, placeholder = 'Start writing… type / for commands', readOnly = false } = opts;
 
@@ -264,6 +272,8 @@ export async function mountNotesEditor(opts: {
       } else {
         bubbleEl.style.display = 'none';
       }
+      // Phase 3: tell the host the caret moved (it broadcasts the live cursor).
+      opts.onSelectionChange?.();
     },
   });
 
@@ -307,6 +317,9 @@ export async function mountNotesEditor(opts: {
     if (slashMenu && !slashMenu.contains(e.target as Node)) closeSlashMenu();
   }, { once: false });
 
+  // Reach into the ProseMirror view/state for live-cursor read-out (Phase 3).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const pm = editor as any;
   return {
     destroy() {
       if (saveTimer) clearTimeout(saveTimer);
@@ -315,6 +328,24 @@ export async function mountNotesEditor(opts: {
     },
     getJSON() {
       return editor.getJSON();
+    },
+    getSelection() {
+      try {
+        const sel = pm.state?.selection;
+        if (!sel) return null;
+        return { anchor: Number(sel.from), head: Number(sel.to), empty: !!sel.empty };
+      } catch { return null; }
+    },
+    coordsAtPos(pos: number) {
+      try {
+        const size = pm.state?.doc?.content?.size ?? 0;
+        const p = Math.max(0, Math.min(pos, size));
+        const c = pm.view?.coordsAtPos(p);
+        return c ? { left: c.left, top: c.top, bottom: c.bottom } : null;
+      } catch { return null; }
+    },
+    docSize() {
+      try { return Number(pm.state?.doc?.content?.size ?? 0); } catch { return 0; }
     },
   };
 }

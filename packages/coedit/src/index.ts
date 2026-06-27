@@ -34,6 +34,18 @@ export {
   type AwarenessOptions,
 } from './awareness.js';
 
+// weaveNotes Phase 3 — live-presence helpers: stable per-peer cursor colours, the
+// synthetic AI participant identity, and a strict sanitiser for incoming awareness.
+export {
+  CURSOR_COLORS,
+  peerColor,
+  AI_PARTICIPANT,
+  aiPeerId,
+  isAiPeerId,
+  aiAwarenessState,
+  sanitizeAwarenessState,
+} from './presence-helpers.js';
+
 export {
   createAgentPeer,
   agentSiteId,

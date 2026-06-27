@@ -433,6 +433,10 @@ export interface WeaveNotesSettingsRow {
   activity_retention_days: number;
   max_ai_tokens_per_edit: number;
   local_model_for_sensitive: number;
+  /** weaveNotes Phase 3: show live collaborator cursors (0/1). */
+  live_cursors_enabled: number;
+  /** weaveNotes Phase 3: show the AI as a live participant while it edits (0/1). */
+  ai_presence_enabled: number;
   enabled_ai_tools: string;
   updated_at: string;
 }

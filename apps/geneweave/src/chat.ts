@@ -56,6 +56,7 @@ import { DbToolApprovalGate } from './tool-approval-gate.js';
 import { createTemporalStore } from './temporal-store.js';
 import { createNoteAiService, createModelTextGenerator, agentCreateNote } from './note-ai-sql.js';
 import { createColorizeTools } from './note-colorize-sql.js';
+import { withAiPresence } from './note-ai-presence.js';
 import { createNotePublishService } from './note-publish-sql.js';
 import { createNoteGraphService } from './note-graph-sql.js';
 import { createNoteDbService } from './note-db-sql.js';
@@ -393,7 +394,7 @@ export class ChatEngine {
       // user's notes (direct or as a suggestion). Shares the engine's model config for
       // generation; resolves the user's note access itself (no privilege escalation).
       noteEdit: (a: { userId: string; noteId: string; markdown: string; mode: 'direct' | 'suggest' }) =>
-        createNoteAiService(db, createModelTextGenerator(config)).agentEdit(a),
+        withAiPresence(db, a.noteId, () => createNoteAiService(db, createModelTextGenerator(config)).agentEdit(a)),
       // weaveNotes Phase 4: wire the `note_publish` tool so the agent can publish a note
       // as an artifact (privately — never auto-public). Resolves the user's note access +
       // the sensitivity gate itself (no privilege escalation; restricted refused).

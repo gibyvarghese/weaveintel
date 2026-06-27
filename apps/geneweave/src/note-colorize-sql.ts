@@ -38,6 +38,7 @@ import { noteCoeditHub } from './note-coedit-hub.js';
 import type { DatabaseAdapter } from './db-types.js';
 import type { NoteAiGenerate } from './note-ai-sql.js';
 import { createNoteSettingsService } from './note-settings-sql.js';
+import { withAiPresence } from './note-ai-presence.js';
 
 type NoteColorizeDb = DatabaseAdapter;
 
@@ -127,6 +128,12 @@ export function createNoteColorizeService(db: NoteColorizeDb, generate: NoteAiGe
      * assign distinct colours by order.
      */
     async colorizeSemantic(input: { noteId: string; access: NoteAccess; scheme: ColorScheme; instruction?: string }): Promise<ColorizeResult> {
+      // Show the AI as a live participant ("composing") while it reads + colour-codes the note.
+      return withAiPresence(db, input.noteId, () => colorizeSemanticInner(input));
+    },
+  };
+
+  async function colorizeSemanticInner(input: { noteId: string; access: NoteAccess; scheme: ColorScheme; instruction?: string }): Promise<ColorizeResult> {
       const { noteId, access } = input;
       const scheme: ColorScheme = isColorScheme(input.scheme) ? input.scheme : 'topic';
       const view = await relay.ensureDoc({ noteId, tenantId: access.tenantId, ownerId: access.ownerId, seedPm: await seedFor(noteId, access.ownerId) });
@@ -152,8 +159,7 @@ export function createNoteColorizeService(db: NoteColorizeDb, generate: NoteAiGe
       }
       if (marks.length === 0) return { ok: false, error: 'no usable spans (labels off-scheme)', action: 'colorize_semantic' };
       return stageMarks(noteId, access, 'colorize_semantic', marks, `Colour-code by ${scheme} (${marks.length} span${marks.length === 1 ? '' : 's'})`);
-    },
-  };
+  }
 }
 
 export type NoteColorizeService = ReturnType<typeof createNoteColorizeService>;
