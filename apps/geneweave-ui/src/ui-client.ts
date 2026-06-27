@@ -112,6 +112,7 @@ import {
 } from './ui/workspace-shell.js';
 import { renderCalendarView } from './ui/calendar-view.js';
 import { renderNotesView, loadNotesList } from './ui/notes-view.js';
+import { renderDesignSystemView } from './ui/design-system-view.js';
 import { loadActionFeed } from './ui/action-feed.js';
 import { loadCalendarItems, loadCalendarCategories } from './ui/agenda-api.js';
 import {
@@ -1790,6 +1791,8 @@ function renderApp() {
     main.appendChild(renderCalendarView(render));
   } else if (state.view === 'notes') {
     main.appendChild(renderNotesView(render));
+  } else if (state.view === 'design') {
+    main.appendChild(renderDesignSystemView(render));
   } else {
     main.appendChild(renderHomeWorkspace());
   }
@@ -1807,7 +1810,7 @@ function restoreUiStateFromStorage() {
     const raw = window.localStorage.getItem(UI_STATE_KEY);
     if (!raw) return;
     const saved = JSON.parse(raw) as any;
-    const allowedViews = new Set(['chat', 'connectors', 'admin', 'dashboard', 'preferences', 'scientific-validation', 'kaggle-competition', 'calendar', 'notes']);
+    const allowedViews = new Set(['chat', 'connectors', 'admin', 'dashboard', 'preferences', 'scientific-validation', 'kaggle-competition', 'calendar', 'notes', 'design']);
 
     if (typeof saved?.view === 'string' && allowedViews.has(saved.view)) {
       state.view = saved.view;

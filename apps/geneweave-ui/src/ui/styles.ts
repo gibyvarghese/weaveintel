@@ -1203,6 +1203,106 @@ input{font-family:inherit;outline:none}
 @media(max-width:760px){.gw-shell{grid-template-columns:1fr}.gw-left-rail{display:none}}
 
 .notes-loading{padding:16px;text-align:center;color:var(--fg3);font-size:12px}
+
+/* ════════════════ geneWeave Design System reference page (design handoff) ════════════════ */
+.ds-root{height:100%;background:var(--canvas)}
+.ds-scroll{height:100%;overflow-y:auto}
+.ds-doc{max-width:1040px;margin:0 auto;padding:64px 40px 120px;display:flex;flex-direction:column;gap:80px}
+.ds-eyebrow{font-family:var(--mono);font-size:12px;color:var(--accent);letter-spacing:.08em;text-transform:uppercase}
+.ds-section{display:flex;flex-direction:column;gap:24px}
+.ds-h2{font-family:var(--font-display);font-size:30px;font-weight:700;letter-spacing:-0.02em;margin:0;color:var(--ink)}
+/* cover */
+.ds-cover{display:flex;flex-direction:column;gap:18px}
+.ds-brand{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.ds-brand-word{font-family:var(--font-display);font-size:22px;font-weight:700;letter-spacing:-0.02em}
+.ds-display{font-family:var(--font-display);font-size:56px;line-height:1.08;font-weight:800;letter-spacing:-0.03em;margin:0;color:var(--ink)}
+.ds-lead{font-size:18px;line-height:1.6;color:var(--muted);max-width:620px;margin:0}
+.ds-chips{display:flex;gap:10px;margin-top:6px}
+.ds-chip{font-family:var(--mono);font-size:12px;color:var(--muted);background:var(--surface);border:1px solid var(--hairline);border-radius:999px;padding:6px 14px}
+.ds-chip-ai{color:var(--accent2);background:var(--mint);border-color:var(--mint-deep)}
+/* principle cards */
+.ds-two{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+.ds-card{background:var(--surface);border:1px solid var(--hairline);border-radius:14px;padding:24px;display:flex;flex-direction:column;gap:14px}
+.ds-card-ai{border-left:3px solid var(--accent)}
+.ds-card-head{display:flex;align-items:center;gap:10px}
+.ds-ink-square{width:22px;height:22px;border-radius:7px;background:var(--ink)}
+.ds-ai-square{width:22px;height:22px;border-radius:7px;background:var(--mint);display:inline-flex;align-items:center;justify-content:center}
+.ds-card-title{font-weight:600;font-size:15px;color:var(--ink)}
+.ds-card-body{font-size:14px;line-height:1.6;color:var(--muted);margin:0}
+.ds-bubble{align-self:flex-start;font-size:13px;border-radius:14px;padding:10px 14px}
+.ds-bubble-you{background:var(--ink);color:var(--surface)}
+.ds-bubble-ai{background:var(--mint);color:var(--ink)}
+/* logo lockups */
+.ds-logo-row{display:flex;gap:18px;flex-wrap:wrap}
+.ds-lockup{display:flex;flex-direction:column;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--hairline);border-radius:14px;padding:28px 40px}
+.ds-lockup-mint{background:var(--mint);border-color:var(--mint-deep)}
+.ds-lockup-ink{background:var(--ink)}
+.ds-lockup-cap{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.ds-cap-rev{color:var(--surface)}
+.ds-note{font-size:14px;line-height:1.6;color:var(--muted);margin:0;max-width:640px}
+/* color swatches */
+.ds-swatch-label{font-family:var(--mono);font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-top:8px}
+.ds-swatch-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.ds-swatch{display:flex;gap:12px;align-items:center;background:var(--surface);border:1px solid var(--hairline);border-radius:12px;padding:12px}
+.ds-swatch-chip{width:44px;height:44px;border-radius:10px;flex:none;box-shadow:inset 0 0 0 1px rgba(20,32,27,.08)}
+.ds-swatch-name{font-weight:600;font-size:13px;color:var(--ink)}
+.ds-swatch-hex{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.ds-swatch-use{font-size:11px;color:var(--fg3)}
+/* type */
+.ds-type-row{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.ds-type-card{background:var(--surface);border:1px solid var(--hairline);border-radius:12px;padding:20px;display:flex;flex-direction:column;gap:8px}
+.ds-type-sample{color:var(--ink)}
+.ds-type-display{font-family:var(--font-display);font-size:28px;font-weight:800;letter-spacing:-0.02em}
+.ds-type-body{font-family:var(--font);font-size:20px;font-weight:500}
+.ds-type-mono{font-family:var(--mono);font-size:16px}
+.ds-type-meta{font-size:12px;color:var(--muted)}
+/* spacing */
+.ds-scale{display:flex;flex-direction:column;gap:12px}
+.ds-scale-row{display:flex;align-items:center;gap:14px}
+.ds-scale-bar{height:14px;background:var(--accent);border-radius:3px}
+.ds-scale-cap{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.ds-radius-row{display:flex;gap:14px;margin-top:10px}
+.ds-radius{width:80px;height:80px;background:var(--mint);border:1px solid var(--mint-deep);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:12px;color:var(--accent2)}
+/* buttons & forms */
+.ds-btn-row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.ds-btn{font-size:13px;font-weight:600;border-radius:999px;padding:9px 18px;cursor:pointer;border:1px solid transparent}
+.ds-btn-primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.ds-btn-ghost{background:var(--surface);color:var(--muted);border-color:var(--hairline)}
+.ds-btn-mint{background:var(--mint);color:var(--accent2);border-color:var(--mint-deep);display:inline-flex;align-items:center;gap:7px}
+.ds-field-row{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:6px}
+.ds-input{flex:1;min-width:240px;padding:10px 14px;border:1px solid var(--hairline);border-radius:10px;background:var(--surface);color:var(--ink);font-size:14px}
+.ds-pill-on{font-size:12px;font-weight:600;color:var(--accent2);background:var(--mint);border-radius:999px;padding:5px 14px}
+.ds-pill-off{font-size:12px;font-weight:600;color:var(--fg3);background:var(--bg3);border-radius:999px;padding:5px 14px}
+/* agent action card */
+.ds-action-card{max-width:460px;background:var(--mint-wash);border:1.5px solid var(--mint-border);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:10px}
+.ds-action-byline{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;color:var(--accent2)}
+.ds-action-body{font-size:14px;line-height:1.6;color:var(--ink)}
+.ds-action-foot{display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11px;color:var(--muted)}
+.ds-done-dot{width:6px;height:6px;border-radius:50%;background:var(--accent)}
+/* plain-language table */
+.ds-table{background:var(--surface);border:1px solid var(--hairline);border-radius:12px;overflow:hidden}
+.ds-table-head{display:flex;justify-content:space-between;padding:12px 18px;border-bottom:1px solid var(--hairline);font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--fg3)}
+.ds-table-row{display:flex;align-items:center;gap:14px;padding:12px 18px;border-bottom:1px solid var(--hairline)}
+.ds-table-row:last-child{border-bottom:none}
+.ds-table-from{font-family:var(--mono);font-size:13px;color:var(--muted);flex:1}
+.ds-table-arrow{color:var(--accent)}
+.ds-table-to{font-size:14px;font-weight:600;color:var(--ink);flex:1}
+@media(max-width:760px){.ds-two,.ds-swatch-grid,.ds-type-row{grid-template-columns:1fr}.ds-display{font-size:40px}}
+
+/* ════════════════ Admin (Builder design alignment) ════════════════ */
+/* Active/selected record row: mint fill + a 2px emerald inset bar (the design's signature). */
+.admin-data-row.admin-data-row-selected{background:var(--mint);box-shadow:inset 2px 0 0 var(--accent)}
+.admin-data-row{cursor:pointer;transition:background .1s}
+.admin-data-row:hover{background:var(--bg3)}
+/* The "Administration / <type>" header → calm eyebrow + display title, like the design. */
+.dash-view>h2{font-family:var(--font-display);font-weight:700;letter-spacing:-0.02em}
+/* Record-editor action bar: the design's sticky save row — Cancel (ghost) + Save (emerald). */
+.admin-form-action-bar{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--surface) 88%,transparent);backdrop-filter:blur(6px)}
+.admin-form-btn-save{box-shadow:var(--shadow-soft)}
+/* Eyebrow treatment for the admin breadcrumb trail. */
+.admin-breadcrumbs{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--fg3)}
+.admin-breadcrumbs .crumb-current{color:var(--ink)}
+
 .notes-items{flex:1;overflow-y:auto;padding:0 8px 12px}
 .notes-section{margin-bottom:8px}
 .notes-section-label{font-size:10px;font-weight:700;color:var(--fg3);text-transform:uppercase;letter-spacing:.06em;padding:8px 6px 4px}
