@@ -42,6 +42,7 @@ import {
   type NoteDatabaseViewType,
   type UpdateNotePatch,
   coercePageTheme,
+  templateByKey,
 } from '@weaveintel/notes';
 import { createSqlNoteRepository } from '../note-repository-sql.js';
 import { BlockDoc, pmToBlocks, blocksToProseMirror, blocksToMarkdown, blocksToHtml } from '@weaveintel/coedit';
@@ -129,6 +130,8 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     const list = await notes.listNotes(auth.userId, {
       parentNoteId,
       favorite: url.searchParams.get('favorite') === '1',
+      // Phase 6: `?archived=1` returns the trash (archived notes) instead of active ones.
+      archived: url.searchParams.get('archived') === '1',
       search: url.searchParams.get('search') ?? undefined,
       limit: safePageInt(url.searchParams.get('limit'), 50, 1, 500),
     });
@@ -138,7 +141,20 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
 
   router.get('/api/me/notes/templates', async (_req, res, _params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
-    const templates = await notes.listTemplates();
+    const rows = await notes.listTemplates();
+    // Phase 6: enrich each seeded template row with the gallery metadata (category + description)
+    // from the @weaveintel/notes package, joined by template_key. User-made templates (no key /
+    // unknown key) keep a sensible default so the gallery still renders them.
+    const templates = rows.map((row) => {
+      const meta = row.template_key ? templateByKey(row.template_key) : undefined;
+      return {
+        ...row,
+        key: row.template_key ?? null,
+        // System templates carry their gallery category; legacy/user templates fall to "More".
+        category: meta?.category ?? 'More',
+        description: meta?.description ?? '',
+      };
+    });
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ templates }));
   }, { auth: true });
@@ -648,11 +664,19 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
     const body = JSON.parse(await readBody(req)) as Record<string, unknown>;
 
-    // Optional: instantiate from a template
+    // Optional: instantiate from a template.
+    // Phase 6: `template_key` selects a SYSTEM template by its stable key (e.g. 'meeting-minutes');
+    // `template_id` selects any note (system or user) by id. Either seeds the new note's content + icon.
     let docJson = '{"type":"doc","content":[]}';
+    let seededIcon: string | null = null;
+    let seededTitle: string | null = null;
+    if (typeof body['template_key'] === 'string') {
+      const tpl = templateByKey(body['template_key']);
+      if (tpl) { docJson = JSON.stringify(tpl.doc); seededIcon = tpl.icon; seededTitle = tpl.title; }
+    }
     if (typeof body['template_id'] === 'string') {
       const tmpl = await notes.getNote(body['template_id'], auth.userId);
-      if (tmpl) docJson = tmpl.doc_json;
+      if (tmpl) { docJson = tmpl.doc_json; seededIcon = tmpl.icon ?? seededIcon; seededTitle = tmpl.title; }
     }
     if (typeof body['doc_json'] === 'string') docJson = body['doc_json'];
     else if (body['doc_json'] && typeof body['doc_json'] === 'object') docJson = JSON.stringify(body['doc_json']);
@@ -668,8 +692,8 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
       id,
       owner_user_id: auth.userId,
       tenant_id: auth.tenantId ?? null,
-      title: typeof body['title'] === 'string' && body['title'].trim() ? body['title'] : 'Untitled',
-      icon: typeof body['icon'] === 'string' ? body['icon'] : null,
+      title: typeof body['title'] === 'string' && body['title'].trim() ? body['title'] : (seededTitle ?? 'Untitled'),
+      icon: typeof body['icon'] === 'string' ? body['icon'] : seededIcon,
       cover: typeof body['cover'] === 'string' ? body['cover'] : null,
       parent_note_id: typeof body['parent_note_id'] === 'string' ? body['parent_note_id'] : null,
       sensitivity: (['normal', 'confidential', 'restricted'].includes(String(body['sensitivity'] ?? '')) ? body['sensitivity'] : 'normal') as NoteSensitivity,
@@ -750,6 +774,26 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     if (!deleted) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ deleted: true }));
+  }, { auth: true });
+
+  // weaveNotes Phase 6: ARCHIVE (soft-delete) a note — it leaves the active list but is recoverable.
+  router.post('/api/me/notes/:id/archive', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const ok = await notes.archiveNote(params['id']!, auth.userId, new Date().toISOString().replace('T', ' ').replace(/\.\d+Z$/, ''));
+    if (!ok) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found or already archived' })); return; }
+    void noteSettings.recordActivity({ noteId: params['id']!, userId: auth.userId, tenantId: auth.tenantId ?? null, action: 'updated', actor: 'user', summary: 'Archived this note' });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ archived: true }));
+  }, { auth: true });
+
+  // weaveNotes Phase 6: RESTORE an archived note back to the active list.
+  router.post('/api/me/notes/:id/restore', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const ok = await notes.restoreNote(params['id']!, auth.userId);
+    if (!ok) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found or not archived' })); return; }
+    void noteSettings.recordActivity({ noteId: params['id']!, userId: auth.userId, tenantId: auth.tenantId ?? null, action: 'updated', actor: 'user', summary: 'Restored this note from the archive' });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ restored: true }));
   }, { auth: true });
 
   // ── Note links ─────────────────────────────────────────────────────────────

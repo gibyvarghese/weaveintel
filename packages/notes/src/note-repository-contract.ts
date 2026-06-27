@@ -132,6 +132,35 @@ export function noteRepositoryContract(make: () => Promise<NoteRepository> | Not
       expect(await repo.deleteNote('ghost', user)).toBe(false);               // unknown → false
     });
 
+    it('archive/restore: soft-deletes (owner-scoped), hidden from listNotes, shown by the archived filter', async () => {
+      const id = await newNote({ title: 'To archive' });
+      // Active by default.
+      expect((await repo.getNote(id, user))?.archived_at ?? null).toBeNull();
+      expect((await repo.listNotes(user)).some((n) => n.id === id)).toBe(true);
+      expect((await repo.listNotes(user, { archived: true })).some((n) => n.id === id)).toBe(false);
+
+      // Non-owner cannot archive.
+      expect(await repo.archiveNote(id, 'wrong-user', '2026-01-01 00:00:00')).toBe(false);
+      // Owner archives → hidden from the default list, shown by the archived filter.
+      expect(await repo.archiveNote(id, user, '2026-01-01 00:00:00')).toBe(true);
+      expect((await repo.getNote(id, user))?.archived_at).toBe('2026-01-01 00:00:00');
+      expect((await repo.listNotes(user)).some((n) => n.id === id)).toBe(false);
+      expect((await repo.listNotes(user, { archived: true })).some((n) => n.id === id)).toBe(true);
+      // Archiving an already-archived note → false (no change).
+      expect(await repo.archiveNote(id, user, '2026-02-02 00:00:00')).toBe(false);
+
+      // Non-owner cannot restore.
+      expect(await repo.restoreNote(id, 'wrong-user')).toBe(false);
+      // Owner restores → back in the default list.
+      expect(await repo.restoreNote(id, user)).toBe(true);
+      expect((await repo.getNote(id, user))?.archived_at ?? null).toBeNull();
+      expect((await repo.listNotes(user)).some((n) => n.id === id)).toBe(true);
+      // Restoring an active note → false (no change).
+      expect(await repo.restoreNote(id, user)).toBe(false);
+      // Unknown note → false.
+      expect(await repo.archiveNote('ghost', user, '2026-01-01 00:00:00')).toBe(false);
+    });
+
     it('links: create/list/backlinks/delete with correct ordering + scoping', async () => {
       const a = await newNote(); const b = await newNote();
       await repo.createLink({ id: nextId('lnk'), note_id: a, target_kind: 'run', target_id: 'run-X' });

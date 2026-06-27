@@ -36,6 +36,7 @@ import {
   type RgaId,
 } from '@weaveintel/coedit';
 import { newUUIDv7, weaveContext, type ModelRequest } from '@weaveintel/core';
+import { templateByKey, SYSTEM_TEMPLATES } from '@weaveintel/notes';
 import { roleAtLeast } from '@weaveintel/collaboration';
 import { getOrCreateModel, type ChatEngineConfig } from './chat-runtime.js';
 import { createNoteCoeditRepo, resolveNoteAccess, type NoteAccess } from './note-coedit-sql.js';
@@ -365,4 +366,32 @@ export async function agentCreateNote(
     return { ok: false, error: e instanceof Error ? e.message : 'failed to create note' };
   }
   return { ok: true, noteId: id };
+}
+
+/**
+ * weaveNotes Phase 6 — the `new_from_template` tool helper. Creates a new note for the user
+ * pre-filled with a SYSTEM template's content (e.g. meeting minutes, Cornell notes, a project
+ * brief). The templates are pure `doc_json` data from `@weaveintel/notes`, reused here, in the
+ * gallery, and in the seed migration. Owner-scoped; an unknown key returns the available keys.
+ */
+export async function agentNewFromTemplate(
+  db: Pick<DatabaseAdapter, 'createNote'>,
+  args: { userId: string; tenantId?: string | null; templateKey: string; title?: string },
+): Promise<{ ok: boolean; noteId?: string; title?: string; templateKey?: string; available?: string[]; error?: string }> {
+  const tpl = templateByKey((args.templateKey ?? '').trim());
+  if (!tpl) {
+    return { ok: false, error: `unknown template "${args.templateKey}"`, available: SYSTEM_TEMPLATES.map((t) => t.key) };
+  }
+  const title = (args.title ?? '').trim() || tpl.title;
+  const id = newUUIDv7();
+  try {
+    await db.createNote({
+      id, owner_user_id: args.userId, tenant_id: args.tenantId ?? null,
+      title, icon: tpl.icon, doc_json: JSON.stringify(tpl.doc),
+      is_template: 0, favorite: 0, sensitivity: 'normal', template_key: tpl.key,
+    });
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'failed to create note' };
+  }
+  return { ok: true, noteId: id, title, templateKey: tpl.key };
 }

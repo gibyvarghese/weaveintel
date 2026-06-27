@@ -120,16 +120,39 @@ async function saveNoteTheme(id: string, theme: 'pro' | 'creative'): Promise<voi
   catch (e) { console.warn('[notes-view] saveNoteTheme error', e); }
 }
 
-async function createNote(templateId?: string): Promise<NoteListItem | null> {
+async function createNote(template?: { id?: string; key?: string | null }): Promise<NoteListItem | null> {
   try {
-    const body: Record<string, unknown> = { title: 'Untitled' };
-    if (templateId) body['template_id'] = templateId;
+    const body: Record<string, unknown> = {};
+    // Phase 6: prefer the stable template KEY (system templates); fall back to a note id.
+    // When a template is chosen, omit the title so the server adopts the template's name.
+    if (template?.key) body['template_key'] = template.key;
+    else if (template?.id) body['template_id'] = template.id;
+    else body['title'] = 'Untitled';
     const res = await api.post('/api/me/notes', body);
     if (!res.ok) return null;
     return res.json() as Promise<NoteListItem>;
   } catch {
     return null;
   }
+}
+
+// ── weaveNotes Phase 6: archive / trash ────────────────────────────────────────
+
+async function loadArchivedNotes(): Promise<void> {
+  try {
+    const res = await api.get('/api/me/notes?archived=1');
+    if (!res.ok) return;
+    const { notes } = await res.json() as { notes: NoteListItem[] };
+    state.notesArchived = notes;
+  } catch { /* silent */ }
+}
+
+async function archiveNote(id: string): Promise<boolean> {
+  try { return (await api.post(`/api/me/notes/${id}/archive`, {})).ok; } catch { return false; }
+}
+
+async function restoreNote(id: string): Promise<boolean> {
+  try { return (await api.post(`/api/me/notes/${id}/restore`, {})).ok; } catch { return false; }
 }
 
 async function deleteNote(id: string): Promise<boolean> {
@@ -168,36 +191,86 @@ function destroyActiveEditor(): void {
 
 // ── Templates gallery ─────────────────────────────────────────────────────────
 
+// The design's gallery groups templates by purpose, in this reading order (spec §7).
+const TEMPLATE_CATEGORY_ORDER = ['Blank', 'Study', 'Meetings', 'Planning', 'Thinking'] as const;
+
 function renderTemplatesGallery(render: () => void): HTMLElement {
   const templates: NoteListItem[] = state.noteTemplates ?? [];
+
+  const startFrom = async (tmpl: NoteListItem): Promise<void> => {
+    const note = await createNote({ key: tmpl.key ?? tmpl.template_key, id: tmpl.id });
+    if (note) {
+      state.notesItems = [note as NoteListItem, ...(state.notesItems as NoteListItem[])];
+      await loadNote(note.id);
+      state.notesView = 'editor';
+      render();
+    }
+  };
+
+  const card = (tmpl: NoteListItem): HTMLElement =>
+    h('div', { className: 'notes-template-card', title: tmpl.description || tmpl.title, onClick: () => void startFrom(tmpl) },
+      h('div', { className: 'notes-template-icon' }, tmpl.icon ?? '📄'),
+      h('div', { className: 'notes-template-title' }, tmpl.title),
+      tmpl.description ? h('div', { className: 'notes-template-desc' }, tmpl.description) : null,
+    );
+
+  // Group by category, in the design's order; unknown categories fall to the end.
+  const groups = new Map<string, NoteListItem[]>();
+  for (const t of templates) {
+    const cat = t.category || 'Blank';
+    (groups.get(cat) ?? (groups.set(cat, []), groups.get(cat)!)).push(t);
+  }
+  const orderedCats = [
+    ...TEMPLATE_CATEGORY_ORDER.filter((c) => groups.has(c)),
+    ...[...groups.keys()].filter((c) => !TEMPLATE_CATEGORY_ORDER.includes(c as typeof TEMPLATE_CATEGORY_ORDER[number])),
+  ];
 
   return h('div', { className: 'notes-templates' },
     h('div', { className: 'notes-templates-header' },
       h('button', { className: 'notes-back-btn', onClick: () => { state.notesView = 'list'; render(); } }, '← Notes'),
       h('div', { className: 'notes-templates-title' }, 'Templates'),
+      h('div', { className: 'notes-templates-sub' }, 'Start a note from a ready-made layout.'),
     ),
-    h('div', { className: 'notes-template-grid' },
-      ...templates.map((tmpl) =>
-        h('div', {
-          className: 'notes-template-card',
-          onClick: async () => {
-            const note = await createNote(tmpl.id);
-            if (note) {
-              state.notesItems = [note as NoteListItem, ...(state.notesItems as NoteListItem[])];
-              await loadNote(note.id);
-              state.notesView = 'editor';
-              render();
-            }
-          },
-        },
-          h('div', { className: 'notes-template-icon' }, tmpl.icon ?? '📄'),
-          h('div', { className: 'notes-template-title' }, tmpl.title),
-        )
-      ),
-      templates.length === 0
-        ? h('div', { className: 'notes-empty' }, 'No templates available')
-        : null,
-    )
+    templates.length === 0
+      ? h('div', { className: 'notes-empty' }, 'No templates available')
+      : h('div', { className: 'notes-templates-cats' },
+          ...orderedCats.map((cat) =>
+            h('section', { className: 'notes-template-cat' },
+              h('div', { className: 'notes-template-cat-label' }, cat),
+              h('div', { className: 'notes-template-grid' }, ...(groups.get(cat) ?? []).map(card)),
+            )
+          ),
+        ),
+  );
+}
+
+// ── weaveNotes Phase 6: the Archived / trash view ──────────────────────────────
+
+function renderArchiveView(render: () => void): HTMLElement {
+  const archived: NoteListItem[] = state.notesArchived ?? [];
+
+  const row = (note: NoteListItem): HTMLElement =>
+    h('div', { className: 'notes-archive-row' },
+      h('span', { className: 'notes-archive-icon' }, note.icon ?? '📄'),
+      h('span', { className: 'notes-archive-title' }, note.title || 'Untitled'),
+      h('button', { className: 'notes-archive-restore', title: 'Restore to your notes', onClick: async () => {
+          if (await restoreNote(note.id)) { await loadArchivedNotes(); await loadNotesList(); render(); }
+        } }, '↩ Restore'),
+      h('button', { className: 'notes-archive-delete', title: 'Delete permanently', onClick: async () => {
+          if (!confirm('Permanently delete this note? This cannot be undone.')) return;
+          if (await deleteNote(note.id)) { await loadArchivedNotes(); render(); }
+        } }, '🗑 Delete forever'),
+    );
+
+  return h('div', { className: 'notes-archive' },
+    h('div', { className: 'notes-templates-header' },
+      h('button', { className: 'notes-back-btn', onClick: () => { state.notesView = 'list'; render(); } }, '← Notes'),
+      h('div', { className: 'notes-templates-title' }, 'Archived notes'),
+      h('div', { className: 'notes-templates-sub' }, 'Archived notes are hidden from your notebooks but can be restored anytime.'),
+    ),
+    archived.length === 0
+      ? h('div', { className: 'notes-empty' }, 'Nothing archived. Notes you archive will appear here.')
+      : h('div', { className: 'notes-archive-list' }, ...archived.map(row)),
   );
 }
 
@@ -230,6 +303,7 @@ function buildInsertMenu(render: () => void): OverflowItem[] {
       } },
     { label: '🗃 Databases', title: 'Tables with AI auto-fill', onClick: () => { state.currentDatabaseId = null; state.notesView = 'databases'; render(); } },
     { label: '📇 Study (flashcards)', title: 'Make + review flashcards from this note (spaced repetition)', onClick: () => { teardownCoedit(); state.notesView = 'study'; render(); } },
+    { label: '📥 Archived notes', title: 'View + restore archived notes', onClick: async () => { await loadArchivedNotes(); state.notesView = 'archive'; render(); } },
   ];
 }
 
@@ -377,6 +451,13 @@ function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLEle
     { label: '⊡ Extract to-dos', title: 'Extract to-dos as tasks', onClick: async () => {
         const result = await extractNote(note.id);
         if (result) { const count = result.extractedTasks.length; extractResult = count > 0 ? `${count} task${count === 1 ? '' : 's'} created` : 'No new to-dos found'; render(); }
+      } },
+    { label: '📥 Archive note', title: 'Move to the archive (recoverable)', onClick: async () => {
+        destroyActiveEditor();
+        if (await archiveNote(note.id)) {
+          state.currentNoteId = null; state.currentNote = null; state.notesView = 'list';
+          await loadNotesList(); render();
+        }
       } },
     { label: '🗑 Delete note', title: 'Delete note', danger: true, onClick: async () => {
         if (!confirm('Delete this note? This cannot be undone.')) return;
@@ -540,6 +621,8 @@ export function renderNotesView(render: () => void): HTMLElement {
     ? h('main', { className: 'gw-canvas' }, renderDatabasesView(render))
     : notesView === 'templates'
       ? h('main', { className: 'gw-canvas' }, renderTemplatesGallery(render))
+      : notesView === 'archive'
+      ? h('main', { className: 'gw-canvas' }, renderArchiveView(render))
       : composed
         ? composed.center
         : h('main', { className: 'gw-canvas' },
@@ -565,6 +648,7 @@ export function renderNotesView(render: () => void): HTMLElement {
       if (note) { state.notesItems = [note as NoteListItem, ...(state.notesItems as NoteListItem[])]; await loadNote(note.id); state.notesView = 'editor'; render(); }
     },
     onTemplates: async () => { await loadNoteTemplates(); state.notesView = 'templates'; render(); },
+    onArchived: async () => { await loadArchivedNotes(); state.notesView = 'archive'; render(); },
     onHome: () => { state.view = 'home'; render(); },
   });
 

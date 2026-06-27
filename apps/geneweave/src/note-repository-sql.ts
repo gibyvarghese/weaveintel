@@ -29,7 +29,7 @@ import type { DatabaseAdapter } from './db-types.js';
 
 /** The notes subset of the `DatabaseAdapter` this adapter needs. */
 type NotesDb = Pick<DatabaseAdapter,
-  'listNotes' | 'listNoteTemplates' | 'getNote' | 'createNote' | 'updateNote' | 'deleteNote' |
+  'listNotes' | 'listNoteTemplates' | 'getNote' | 'createNote' | 'updateNote' | 'archiveNote' | 'restoreNote' | 'deleteNote' |
   'listNoteLinks' | 'listNoteBacklinks' | 'createNoteLink' | 'deleteNoteLink' |
   'listNoteDatabases' | 'getNoteDatabase' | 'createNoteDatabase' | 'deleteNoteDatabase' |
   'listNoteDbRows' | 'createNoteDbRow' | 'updateNoteDbRow' | 'deleteNoteDbRow'>;
@@ -42,6 +42,8 @@ export function createSqlNoteRepository(db: NotesDb): NoteRepository {
     getNote: (id: string, userId: string) => db.getNote(id, userId) as Promise<Note | null>,
     createNote: (input: CreateNoteInput) => db.createNote(input),
     updateNote: (id: string, userId: string, patch: UpdateNotePatch) => db.updateNote(id, userId, patch),
+    archiveNote: (id: string, userId: string, at: string) => db.archiveNote(id, userId, at),
+    restoreNote: (id: string, userId: string) => db.restoreNote(id, userId),
     deleteNote: (id: string, userId: string) => db.deleteNote(id, userId),
 
     listLinks: (noteId: string) => db.listNoteLinks(noteId) as Promise<NoteLink[]>,

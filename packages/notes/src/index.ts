@@ -205,6 +205,19 @@ export {
   svgToSafeDataUri,
 } from './svg.js';
 
+// weaveNotes Phase 6 — the SYSTEM TEMPLATES (ready-made notes as shared doc_json data).
+export {
+  type PMNode,
+  type PMDoc,
+  type TemplateCategory,
+  type NoteTemplate,
+  SYSTEM_TEMPLATES,
+  TEMPLATE_NODE_TYPES,
+  templateByKey,
+  templateCategories,
+  listSystemTemplates,
+} from './templates.js';
+
 // weaveNotes Phase 5 — STUDY: flashcards + the SM-2 spaced-repetition scheduler.
 export {
   type ReviewRating,

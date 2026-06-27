@@ -1088,6 +1088,10 @@ input{font-family:inherit;outline:none}
 .gw-newnote-plus{font-size:15px;line-height:1}
 .gw-newnote-tmpl{margin-left:auto;font-size:11px;color:var(--fg3);font-weight:400}
 .gw-newnote-tmpl:hover{color:var(--accent2)}
+/* weaveNotes Phase 6 — the Archived shortcut under the New-note button */
+.gw-newnote-archived{display:flex;align-items:center;gap:7px;width:100%;font-family:var(--font);font-size:12px;font-weight:500;color:var(--fg3);background:transparent;border:none;border-radius:8px;padding:7px 12px;cursor:pointer;margin-top:2px}
+.gw-newnote-archived:hover{color:var(--accent2);background:var(--surface)}
+.gw-newnote-archived-ic{display:inline-flex;opacity:.8}
 /* — dropdown menus (Insert / overflow) + modal — */
 .gw-menu-anchor{position:relative;display:inline-flex}
 .gw-menu{position:absolute;top:38px;z-index:300;background:var(--surface);border:1px solid var(--hairline);border-radius:12px;box-shadow:var(--shadow-pop);padding:6px;min-width:210px;display:flex;flex-direction:column;gap:2px}
@@ -1477,7 +1481,20 @@ input{font-family:inherit;outline:none}
 .notes-template-card{display:flex;flex-direction:column;align-items:center;gap:8px;padding:20px 16px;border:1px solid var(--bg4);border-radius:12px;cursor:pointer;background:var(--bg2);transition:border-color .15s,box-shadow .15s}
 .notes-template-card:hover{border-color:var(--accent);box-shadow:0 2px 12px rgba(0,0,0,.08)}
 .notes-template-icon{font-size:28px}
-.notes-template-title{font-size:12px;font-weight:500;color:var(--fg1);text-align:center}
+.notes-template-title{font-size:12px;font-weight:600;color:var(--fg1);text-align:center}
+/* weaveNotes Phase 6 — gallery categories + descriptions */
+.notes-templates-sub{font-size:12px;color:var(--fg3);margin-left:auto}
+.notes-templates-cats{display:flex;flex-direction:column;gap:22px}
+.notes-template-cat-label{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--fg3);margin-bottom:10px}
+.notes-template-desc{font-size:11px;color:var(--fg3);text-align:center;line-height:1.4}
+/* weaveNotes Phase 6 — archived / trash view */
+.notes-archive-list{display:flex;flex-direction:column;gap:8px}
+.notes-archive-row{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--bg4);border-radius:10px;background:var(--bg2)}
+.notes-archive-icon{font-size:16px}
+.notes-archive-title{flex:1;font-size:13px;color:var(--fg1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.notes-archive-restore,.notes-archive-delete{font-size:12px;padding:5px 10px;border-radius:8px;border:1px solid var(--bg4);background:var(--bg1);color:var(--fg2);cursor:pointer}
+.notes-archive-restore:hover{border-color:var(--accent);color:var(--accent)}
+.notes-archive-delete:hover{border-color:var(--danger,#dc2626);color:var(--danger,#dc2626)}
 /* Editor panel */
 .notes-editor-panel{display:flex;flex-direction:column;height:100%;overflow:hidden}
 .notes-editor-top{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--bg4);flex-shrink:0}

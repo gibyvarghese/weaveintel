@@ -9788,6 +9788,8 @@ export class SQLiteAdapter implements DatabaseAdapter {
       }
     }
     if (filter?.favorite) { conditions.push('favorite = 1'); }
+    // weaveNotes Phase 6: by default show only ACTIVE notes; `archived` shows only the trash.
+    conditions.push(filter?.archived ? 'archived_at IS NOT NULL' : 'archived_at IS NULL');
     if (filter?.search) {
       conditions.push('(title LIKE ? OR doc_json LIKE ?)');
       const q = `%${filter.search}%`;
@@ -9797,7 +9799,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
     return this.d.prepare(
       `SELECT id, owner_user_id, tenant_id, title, icon, cover, parent_note_id,
               sensitivity, is_template, template_key, favorite,
-              page_theme, freeform_mode, cover_image_artifact_id, created_at, updated_at
+              page_theme, freeform_mode, cover_image_artifact_id, archived_at, created_at, updated_at
        FROM notes WHERE ${conditions.join(' AND ')}
        ORDER BY favorite DESC, updated_at DESC LIMIT ?`,
     ).all(...params, limit) as import('./db-types/adapter-agenda-notes.js').NoteRow[];
@@ -9859,6 +9861,23 @@ export class SQLiteAdapter implements DatabaseAdapter {
     fields.push('updated_at = datetime(\'now\')');
     values.push(id, userId);
     this.d.prepare(`UPDATE notes SET ${fields.join(', ')} WHERE id = ? AND owner_user_id = ?`).run(...values);
+  }
+
+  async archiveNote(id: string, userId: string, at: string): Promise<boolean> {
+    // Owner-scoped soft-delete; only flips an ACTIVE note (archived_at IS NULL) so re-archiving is a no-op.
+    const r = this.d.prepare(
+      `UPDATE notes SET archived_at = ?, updated_at = datetime('now')
+       WHERE id = ? AND owner_user_id = ? AND archived_at IS NULL`,
+    ).run(at, id, userId);
+    return r.changes > 0;
+  }
+
+  async restoreNote(id: string, userId: string): Promise<boolean> {
+    const r = this.d.prepare(
+      `UPDATE notes SET archived_at = NULL, updated_at = datetime('now')
+       WHERE id = ? AND owner_user_id = ? AND archived_at IS NOT NULL`,
+    ).run(id, userId);
+    return r.changes > 0;
   }
 
   async deleteNote(id: string, userId: string): Promise<boolean> {

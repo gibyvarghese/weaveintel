@@ -56,6 +56,12 @@ export interface NoteListItem {
   favorite: number;
   created_at: string;
   updated_at: string;
+  /** weaveNotes Phase 6: archive/trash timestamp (NULL = active). Present on list rows. */
+  archived_at?: string | null;
+  /** weaveNotes Phase 6: gallery metadata, only on the /templates response (joined from the package). */
+  key?: string | null;
+  category?: string;
+  description?: string;
 }
 
 /** Full note with document content */
@@ -130,9 +136,10 @@ export const state: any = {
   notesSearch: '' as string,
   currentNoteId: null as string | null,
   currentNote: null as NoteDoc | null,
-  notesView: 'list' as string,               // 'list' | 'editor' | 'templates' | 'databases'
+  notesView: 'list' as string,               // 'list' | 'editor' | 'templates' | 'databases' | 'archive'
   notesTheme: 'pro' as 'pro' | 'creative',   // design Pro/Creative page theme (Notes editor)
   noteTemplates: [] as NoteListItem[],
+  notesArchived: [] as NoteListItem[],        // weaveNotes Phase 6: the archived/trash list
   noteDatabases: [] as any[],
   currentDatabaseId: null as string | null,  // weaveNotes Phase 6: the open database
 

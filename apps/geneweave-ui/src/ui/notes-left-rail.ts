@@ -24,6 +24,7 @@ export interface LeftRailOpts {
   onToggleFav: (note: NoteListItem) => void;
   onNewNote: () => void;
   onTemplates: () => void;
+  onArchived: () => void;
   onHome: () => void;
 }
 
@@ -80,11 +81,15 @@ export function renderLeftRail(opts: LeftRailOpts): HTMLElement {
         ? h('div', { className: 'gw-tree-empty' }, 'No notes yet — start one below.')
         : null,
     ),
-    // footer: + New note (with a templates affordance)
+    // footer: + New note (with templates + archived affordances)
     h('button', { className: 'gw-newnote', onClick: opts.onNewNote },
       h('span', { className: 'gw-newnote-plus' }, '+'),
       h('span', null, 'New note'),
       h('span', { className: 'gw-newnote-tmpl', title: 'Start from a template', onClick: (e: Event) => { e.stopPropagation(); opts.onTemplates(); } }, 'templates'),
+    ),
+    h('button', { className: 'gw-newnote-archived', title: 'View + restore archived notes', onClick: opts.onArchived },
+      h('span', { className: 'gw-newnote-archived-ic', innerHTML: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4"/></svg>' }),
+      h('span', null, 'Archived'),
     ),
   );
 }

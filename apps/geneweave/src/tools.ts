@@ -963,6 +963,12 @@ export interface ToolRegistryOptions {
    */
   createNote?: (args: { userId: string; tenantId?: string | null; title: string; markdown?: string }) => Promise<{ ok: boolean; error?: string; noteId?: string }>;
   /**
+   * weaveNotes Phase 6: create a note from a ready-made TEMPLATE. When set, the `new_from_template`
+   * tool is available so the agent can start a meeting-minutes / Cornell / study-sheet / project-brief
+   * / daily-planner note (etc.) from the system template gallery. Returns the new note id.
+   */
+  noteNewFromTemplate?: (args: { userId: string; tenantId?: string | null; templateKey: string; title?: string }) => Promise<{ ok: boolean; error?: string; noteId?: string; title?: string; templateKey?: string; available?: string[] }>;
+  /**
    * weaveNotes Phase 5: semantic note search. When set, the `find_related_notes` tool is
    * available so the agent can find the user's notes most relevant to a query (knowledge-
    * graph navigation) before answering, editing, or linking. Owner-scoped.
@@ -1876,6 +1882,28 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
         tags: ['notes', 'output'],
       }),
     } : {}),
+    // weaveNotes Phase 6: start a note from a ready-made TEMPLATE — when noteNewFromTemplate is set.
+    ...(opts?.noteNewFromTemplate && opts.currentUserId ? {
+      new_from_template: weaveTool({
+        name: 'new_from_template',
+        description: 'Create a new note for the user from a ready-made TEMPLATE. Use this when the user asks to start a structured note like "meeting minutes", "Cornell notes", "a study sheet", "a project brief", "a daily planner", "a comparison", or "a Zettelkasten note". Pass the template `key` and an optional `title`. Known keys: blank, cornell, meeting-minutes, study-sheet, active-recall, outline, mind-map, comparison, zettelkasten, action-board, daily-planner, project-brief. If you pass an unknown key the tool returns the list of available keys so you can retry. Returns the new note id. (For a free-form note with content you write yourself, use create_note instead.)',
+        parameters: {
+          type: 'object',
+          properties: {
+            key: { type: 'string', description: 'The template key, e.g. "meeting-minutes", "cornell", "project-brief".' },
+            title: { type: 'string', description: 'Optional title for the new note. Defaults to the template name (e.g. "Meeting minutes").' },
+          },
+          required: ['key'],
+        },
+        execute: async (args: { key: string; title?: string }) => {
+          if (!opts.noteNewFromTemplate || !opts.currentUserId) return { content: 'Templates are unavailable in this context.', isError: true };
+          const r = await opts.noteNewFromTemplate({ userId: opts.currentUserId, tenantId: opts.currentTenantId ?? null, templateKey: args.key, ...(args.title ? { title: args.title } : {}) });
+          if (!r.ok) return { content: `new_from_template failed: ${r.error ?? 'unknown error'}${r.available ? ` (available keys: ${r.available.join(', ')})` : ''}`, isError: true };
+          return JSON.stringify({ ok: true, noteId: r.noteId, title: r.title, templateKey: r.templateKey });
+        },
+        tags: ['notes', 'templates', 'output'],
+      }),
+    } : {}),
     // weaveNotes Phase 4: note publish tool — available when notePublish callback is set.
     ...(opts?.notePublish && opts.currentUserId ? {
       note_publish: weaveTool({
@@ -2073,7 +2101,7 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
   // tool selection: mode policies only apply when `enabled_tools` is empty, so a user with a
   // custom tool selection would otherwise never get them (and "create a note" would silently
   // fall back to emit_artifact). Skip any already registered from the selection above.
-  for (const noteTool of ['create_note', 'note_edit', 'note_publish', 'find_related_notes', 'autofill_database', 'capture_web_page', 'workspace_search', 'read_note_activity'] as const) {
+  for (const noteTool of ['create_note', 'new_from_template', 'note_edit', 'note_publish', 'find_related_notes', 'autofill_database', 'capture_web_page', 'workspace_search', 'read_note_activity'] as const) {
     const t = scopedTools[noteTool];
     if (t && !registeredFromSelection.has(noteTool) && canUseTool(actorPersona, noteTool)) registry.register(t);
   }

@@ -50,6 +50,8 @@ export interface Note {
   freeform_mode: number;
   /** weaveNotes Phase 1: optional cover-image artifact id (a generated/uploaded banner). */
   cover_image_artifact_id: string | null;
+  /** weaveNotes Phase 6: when archived/trashed (a timestamp), or null when active. */
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -91,6 +93,8 @@ export interface NoteListFilter {
   favorite?: boolean;
   search?: string;
   limit?: number;
+  /** weaveNotes Phase 6: `true` = ONLY archived notes; default/false = only ACTIVE (non-archived). */
+  archived?: boolean;
 }
 
 export interface CreateNoteInput {
@@ -139,6 +143,10 @@ export interface NoteRepository {
   createNote(input: CreateNoteInput): Promise<void>;
   /** Update — owner-scoped; bumps `updated_at`; a no-op patch is a no-op. */
   updateNote(id: string, userId: string, patch: UpdateNotePatch): Promise<void>;
+  /** weaveNotes Phase 6: ARCHIVE (soft-delete) a note — owner-scoped; sets `archived_at`. Returns whether it changed. */
+  archiveNote(id: string, userId: string, at: string): Promise<boolean>;
+  /** weaveNotes Phase 6: RESTORE an archived note — owner-scoped; clears `archived_at`. Returns whether it changed. */
+  restoreNote(id: string, userId: string): Promise<boolean>;
   /** Delete a note + its one level of sub-pages + their links. Returns whether anything was deleted. */
   deleteNote(id: string, userId: string): Promise<boolean>;
 
@@ -191,6 +199,8 @@ export function createInMemoryNoteRepository(opts: InMemoryNoteRepositoryOptions
   return {
     async listNotes(userId, filter) {
       let out = [...notes.values()].filter((n) => n.owner_user_id === userId && n.is_template === 0);
+      // Phase 6: by default show only ACTIVE notes; `archived:true` shows only archived (trash).
+      out = filter?.archived ? out.filter((n) => n.archived_at !== null) : out.filter((n) => n.archived_at === null);
       if (filter?.parentNoteId !== undefined) {
         out = out.filter((n) => filter.parentNoteId === null ? n.parent_note_id === null : n.parent_note_id === filter.parentNoteId);
       }
@@ -220,6 +230,7 @@ export function createInMemoryNoteRepository(opts: InMemoryNoteRepositoryOptions
         template_key: input.template_key ?? null, favorite: input.favorite ?? 0,
         page_theme: input.page_theme ?? 'pro', freeform_mode: input.freeform_mode ?? 0,
         cover_image_artifact_id: input.cover_image_artifact_id ?? null,
+        archived_at: null,
         created_at: ts, updated_at: ts,
       });
     },
@@ -228,6 +239,18 @@ export function createInMemoryNoteRepository(opts: InMemoryNoteRepositoryOptions
       if (!n || n.owner_user_id !== userId) return; // owner-scoped, like the SQL WHERE
       if (Object.keys(patch).length === 0) return;  // no-op patch = no-op (matches SQL early return)
       notes.set(id, { ...n, ...patch, updated_at: now() });
+    },
+    async archiveNote(id, userId, at) {
+      const n = notes.get(id);
+      if (!n || n.owner_user_id !== userId || n.archived_at !== null) return false;
+      notes.set(id, { ...n, archived_at: at, updated_at: now() });
+      return true;
+    },
+    async restoreNote(id, userId) {
+      const n = notes.get(id);
+      if (!n || n.owner_user_id !== userId || n.archived_at === null) return false;
+      notes.set(id, { ...n, archived_at: null, updated_at: now() });
+      return true;
     },
     async deleteNote(id, userId) {
       const target = notes.get(id);

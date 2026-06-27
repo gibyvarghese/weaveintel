@@ -81,6 +81,8 @@ export interface NoteRow {
   freeform_mode: number;
   /** weaveNotes Phase 1 (m105): optional cover-image artifact id. */
   cover_image_artifact_id: string | null;
+  /** weaveNotes Phase 6 (m111): archive/trash timestamp — NULL = active, a timestamp = archived. */
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -140,6 +142,8 @@ export interface NoteListFilter {
   favorite?: boolean;
   search?: string;
   limit?: number;
+  /** weaveNotes Phase 6: `true` = ONLY archived (trash view); default/false = only active. */
+  archived?: boolean;
 }
 
 // ── Store interface ────────────────────────────────────────────────────────────
@@ -189,6 +193,10 @@ export interface IAgendaNotesStore {
     'title' | 'icon' | 'cover' | 'parent_note_id' | 'sensitivity' | 'doc_json' | 'favorite'
     | 'page_theme' | 'freeform_mode' | 'cover_image_artifact_id'
   >>): Promise<void>;
+  /** weaveNotes Phase 6: soft-delete (set archived_at). Returns false if not owned/not found/already archived. */
+  archiveNote(id: string, userId: string, at: string): Promise<boolean>;
+  /** weaveNotes Phase 6: restore an archived note (clear archived_at). False if not owned/not found/not archived. */
+  restoreNote(id: string, userId: string): Promise<boolean>;
   deleteNote(id: string, userId: string): Promise<boolean>;
 
   // ── Note links ─────────────────────────────────────────────────────────────
