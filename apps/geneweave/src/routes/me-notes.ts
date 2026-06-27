@@ -48,7 +48,7 @@ import {
   type NoteBlock,
 } from '@weaveintel/notes';
 import { createSqlNoteRepository } from '../note-repository-sql.js';
-import { BlockDoc, pmToBlocks, blocksToProseMirror, blocksToMarkdown, blocksToHtml } from '@weaveintel/coedit';
+import { BlockDoc, pmToBlocks, blocksToProseMirror, blocksToMarkdown, blocksToHtml, exportNote as coeditExportNote, isExportFormat, type ExportFormat } from '@weaveintel/coedit';
 import { roleAtLeast } from '@weaveintel/collaboration';
 import {
   createNoteCoeditRepo,
@@ -188,6 +188,9 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
       desktopOfflineEnabled: cfg.desktopOfflineEnabled,
       quickCaptureEnabled: cfg.quickCaptureEnabled,
       desktopOfflineNoteLimit: cfg.desktopOfflineNoteLimit,
+      // Phase 10 — note export (download as Markdown / HTML / Word / JSON).
+      exportEnabled: cfg.exportEnabled,
+      allowedExportFormats: cfg.allowedExportFormats,
     }));
   }, { auth: true });
 
@@ -218,6 +221,32 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     void noteSettings.recordActivity({ noteId: id, userId: auth.userId, tenantId: auth.tenantId ?? null, action: 'created', actor: 'user', summary: `Quick-captured “${title}”${clientProvenance(req)}` });
     res.writeHead(201, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(note));
+  }, { auth: true });
+
+  // weaveNotes Phase 10: EXPORT/download a note in a chosen format (Markdown / HTML / Word / lossless
+  // JSON). Reuses @weaveintel/coedit's serializers. Owner + collaborators (read access); gated by the
+  // Builder config (export on/off + the allowed-format list). Returns the file as a download.
+  router.get('/api/me/notes/:id/export', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const cfg = await noteSettings.getConfig();
+    if (!cfg.exportEnabled) { res.writeHead(403); res.end(JSON.stringify({ error: 'Export is disabled for this workspace' })); return; }
+    const url = new URL(req.url ?? '/', 'http://x');
+    const format = (url.searchParams.get('format') ?? 'markdown').toLowerCase();
+    if (!isExportFormat(format) || !cfg.allowedExportFormats.includes(format)) {
+      res.writeHead(400); res.end(JSON.stringify({ error: `Unsupported export format. Allowed: ${cfg.allowedExportFormats.join(', ')}` })); return;
+    }
+    const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    const note = await notes.getNote(params['id']!, access.ownerId);
+    if (!note) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    const out = coeditExportNote({ title: note.title, icon: note.icon, doc_json: note.doc_json }, format as ExportFormat);
+    void noteSettings.recordActivity({ noteId: params['id']!, userId: auth.userId, tenantId: auth.tenantId ?? null, action: 'updated', actor: 'user', summary: `Exported as ${format}${clientProvenance(req)}` });
+    res.writeHead(200, {
+      'Content-Type': out.mimeType,
+      'Content-Disposition': `attachment; filename="${out.filename}"`,
+      'Cache-Control': 'no-store',
+    });
+    res.end(out.content);
   }, { auth: true });
 
   // ── Single note ────────────────────────────────────────────────────────────

@@ -20,6 +20,11 @@ import type { WeaveNotesSettingsRow } from './db-types/adapter-me.js';
 
 type SettingsDb = DatabaseAdapter;
 
+/** Parse a JSON-array column, returning [] for anything malformed (validator re-applies defaults). */
+function safeJsonArray(raw: string): string[] {
+  try { const v = JSON.parse(raw); return Array.isArray(v) ? v.map(String) : []; } catch { return []; }
+}
+
 function rowToConfig(row: WeaveNotesSettingsRow | null): WeaveNotesConfig {
   if (!row) return DEFAULT_WEAVENOTES_CONFIG;
   let tools: unknown = DEFAULT_WEAVENOTES_CONFIG.enabledAiTools;
@@ -47,6 +52,8 @@ function rowToConfig(row: WeaveNotesSettingsRow | null): WeaveNotesConfig {
     desktopOfflineEnabled: row.desktop_offline_enabled !== 0,  // undefined (pre-m113) → enabled
     quickCaptureEnabled: row.quick_capture_enabled !== 0,
     ...(typeof row.desktop_offline_note_limit === 'number' ? { desktopOfflineNoteLimit: row.desktop_offline_note_limit } : {}),
+    exportEnabled: row.export_enabled !== 0,  // undefined (pre-m114) → enabled
+    ...(row.allowed_export_formats ? { allowedExportFormats: safeJsonArray(row.allowed_export_formats) } : {}),
     enabledAiTools: tools,
   }).config;
 }
@@ -88,6 +95,8 @@ export function createNoteSettingsService(db: SettingsDb, opts: { now?: () => nu
       desktop_offline_enabled: config.desktopOfflineEnabled ? 1 : 0,
       quick_capture_enabled: config.quickCaptureEnabled ? 1 : 0,
       desktop_offline_note_limit: config.desktopOfflineNoteLimit,
+      export_enabled: config.exportEnabled ? 1 : 0,
+      allowed_export_formats: JSON.stringify(config.allowedExportFormats),
       enabled_ai_tools: JSON.stringify(config.enabledAiTools),
     });
     return { config, warnings };

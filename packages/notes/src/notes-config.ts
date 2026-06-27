@@ -63,6 +63,10 @@ export interface WeaveNotesConfig {
   quickCaptureEnabled: boolean;
   /** Phase 8: how many notes the desktop app caches locally for offline use. */
   desktopOfflineNoteLimit: number;
+  /** Phase 10: let people EXPORT/download a note (Markdown / HTML / Word / lossless JSON). */
+  exportEnabled: boolean;
+  /** Phase 10: which export formats are offered (subset of markdown/html/word/json). */
+  allowedExportFormats: string[];
   /** The note AI tools the editor agent is allowed to use (subset of the catalog). */
   enabledAiTools: string[];
 }
@@ -80,6 +84,8 @@ export const WEAVENOTES_AI_TOOLS = [
   'make_flashcards',
   // Phase 8 — desktop: the AI can see what you have recently worked on.
   'recent_notes',
+  // Phase 10 — export: the AI can export/download a note in a chosen format.
+  'export_note',
 ] as const;
 
 export const DEFAULT_WEAVENOTES_CONFIG: WeaveNotesConfig = {
@@ -105,6 +111,8 @@ export const DEFAULT_WEAVENOTES_CONFIG: WeaveNotesConfig = {
   desktopOfflineEnabled: true,
   quickCaptureEnabled: true,
   desktopOfflineNoteLimit: 500,
+  exportEnabled: true,
+  allowedExportFormats: ['markdown', 'html', 'word', 'json'],
   enabledAiTools: [...WEAVENOTES_AI_TOOLS],
 };
 
@@ -150,6 +158,17 @@ export function validateWeaveNotesConfig(
     tools = valid;
   }
 
+  // Phase 10: the export-format allow-list (subset of the four known formats; defaults if none valid).
+  const KNOWN_FORMATS = new Set(['markdown', 'html', 'word', 'json']);
+  let formats = base.allowedExportFormats;
+  if (p.allowedExportFormats !== undefined) {
+    const arr = Array.isArray(p.allowedExportFormats) ? p.allowedExportFormats.map(String) : [];
+    const valid = [...new Set(arr.filter((f) => KNOWN_FORMATS.has(f)))];
+    const dropped = arr.filter((f) => !KNOWN_FORMATS.has(f));
+    if (dropped.length) warnings.push(`Ignored unknown export formats: ${[...new Set(dropped)].join(', ')}.`);
+    formats = valid.length ? valid : base.allowedExportFormats;
+  }
+
   return {
     config: {
       defaultTheme: theme,
@@ -174,6 +193,8 @@ export function validateWeaveNotesConfig(
       desktopOfflineEnabled: asBool(p.desktopOfflineEnabled ?? base.desktopOfflineEnabled, base.desktopOfflineEnabled),
       quickCaptureEnabled: asBool(p.quickCaptureEnabled ?? base.quickCaptureEnabled, base.quickCaptureEnabled),
       desktopOfflineNoteLimit: clampInt(p.desktopOfflineNoteLimit ?? base.desktopOfflineNoteLimit, 10, 10000, base.desktopOfflineNoteLimit),
+      exportEnabled: asBool(p.exportEnabled ?? base.exportEnabled, base.exportEnabled),
+      allowedExportFormats: formats,
       enabledAiTools: tools,
     },
     warnings,

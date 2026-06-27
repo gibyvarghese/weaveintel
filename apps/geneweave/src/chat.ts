@@ -54,7 +54,7 @@ import { DbToolPolicyResolver, DbToolRateLimiter, consoleAuditEmitter } from './
 import { DbToolAuditEmitter } from './tool-audit-emitter.js';
 import { DbToolApprovalGate } from './tool-approval-gate.js';
 import { createTemporalStore } from './temporal-store.js';
-import { createNoteAiService, createModelTextGenerator, agentCreateNote, agentNewFromTemplate, agentRecentNotes } from './note-ai-sql.js';
+import { createNoteAiService, createModelTextGenerator, agentCreateNote, agentNewFromTemplate, agentRecentNotes, agentExportNote } from './note-ai-sql.js';
 import { createColorizeTools } from './note-colorize-sql.js';
 import { createCreativeTools, createModelImageGenerator } from './note-creative-sql.js';
 import { createStudyTool } from './note-study-sql.js';
@@ -412,6 +412,14 @@ export class ChatEngine {
       // weaveNotes Phase 8: wire the `recent_notes` tool — what has the user recently worked on.
       noteRecentNotes: (a: { userId: string; tenantId?: string | null; limit?: number }) =>
         agentRecentNotes(db, a),
+      // weaveNotes Phase 10: wire the `export_note` tool — export a note (Markdown/HTML/Word/JSON).
+      // Records an AI-actor activity entry on success, so the note's history shows the assistant
+      // exported it (and the change is understandable to later tools like read_note_activity).
+      noteExport: async (a: { userId: string; tenantId?: string | null; noteId: string; format?: string }) => {
+        const r = await agentExportNote(db, a);
+        if (r.ok) void createNoteSettingsService(db).recordActivity({ noteId: a.noteId, userId: a.userId, tenantId: a.tenantId ?? null, action: 'updated', actor: 'ai', summary: `Exported as ${r.format} (assistant)` });
+        return r;
+      },
       // weaveNotes Phase 5: wire the `find_related_notes` tool (semantic note search).
       notesSearch: (a: { userId: string; tenantId?: string | null; query: string; limit?: number }) =>
         createNoteGraphService(db).searchNotes({ userId: a.userId, tenantId: a.tenantId ?? null }, a.query, a.limit ?? 5),

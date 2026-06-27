@@ -30,6 +30,9 @@ import {
   blocksToProseMirror,
   diffBlocks,
   pmToBlocks,
+  exportNote as coeditExportNote,
+  isExportFormat,
+  type ExportFormat,
   type BlockOp,
   type BlockDocSnapshot,
   type BlockSpec,
@@ -412,4 +415,21 @@ export async function agentRecentNotes(
     ok: true,
     notes: rows.map((r) => ({ noteId: r.id, title: r.title || 'Untitled', updatedAt: r.updated_at, favorite: r.favorite === 1 })),
   };
+}
+
+/**
+ * weaveNotes Phase 10 — the `export_note` tool helper. Exports one of the user's notes in a chosen
+ * format (Markdown / HTML / Word / lossless JSON), reusing `@weaveintel/coedit`'s serializers. Owner-
+ * scoped. Returns the exported CONTENT for the text formats (markdown/html/json) so the assistant can
+ * show or save it; for Word it returns the HTML body too (a `.doc` is HTML). Unknown format → markdown.
+ */
+export async function agentExportNote(
+  db: Pick<DatabaseAdapter, 'getNote'>,
+  args: { userId: string; noteId: string; format?: string },
+): Promise<{ ok: boolean; error?: string; format?: string; filename?: string; content?: string }> {
+  const note = await db.getNote(args.noteId, args.userId) as { title?: string; icon?: string | null; doc_json?: string } | null;
+  if (!note) return { ok: false, error: 'note not found or not accessible' };
+  const fmt = isExportFormat((args.format ?? '').toLowerCase()) ? (args.format!.toLowerCase() as ExportFormat) : 'markdown';
+  const out = coeditExportNote({ title: note.title ?? 'Untitled note', icon: note.icon ?? null, doc_json: note.doc_json ?? '{"type":"doc","content":[]}' }, fmt);
+  return { ok: true, format: out.format, filename: out.filename, content: out.content };
 }

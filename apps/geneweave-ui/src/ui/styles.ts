@@ -1106,6 +1106,13 @@ input{font-family:inherit;outline:none}
 .gw-qc-save{background:var(--accent2,#0f766e);color:#fff;border:none;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer}
 .gw-qc-save:hover{filter:brightness(1.05)}
 .gw-notes-offline{padding:7px 16px;background:#FEF3C7;color:#92400E;font-size:12px;font-weight:600;text-align:center}
+/* weaveNotes Phase 10 — export menu */
+.gw-export-menu{display:flex;flex-direction:column;gap:8px;padding:4px 2px}
+.gw-export-sub{font-size:12px;color:var(--fg3,#9ca3af);margin-bottom:2px}
+.gw-export-opt{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;width:100%;padding:10px 12px;border:1px solid var(--bg4,#e5e7eb);border-radius:10px;background:var(--bg2,#fafafa);cursor:pointer}
+.gw-export-opt:hover{border-color:var(--accent2,#0f766e);background:var(--surface,#fff)}
+.gw-export-opt-label{font-size:13px;font-weight:600;color:var(--fg1,#111827)}
+.gw-export-opt-hint{font-size:11px;color:var(--fg3,#9ca3af)}
 /* — dropdown menus (Insert / overflow) + modal — */
 .gw-menu-anchor{position:relative;display:inline-flex}
 .gw-menu{position:absolute;top:38px;z-index:300;background:var(--surface);border:1px solid var(--hairline);border-radius:12px;box-shadow:var(--shadow-pop);padding:6px;min-width:210px;display:flex;flex-direction:column;gap:2px}

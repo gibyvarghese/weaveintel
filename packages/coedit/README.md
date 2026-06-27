@@ -194,6 +194,27 @@ In geneWeave: `POST /api/me/notes/:id/emit-artifact` (and the `note_publish` age
 render → gate → redact → `saveArtifact` → optional public share token, so a stray key in a
 note never leaks the moment it is shared, and a `restricted` note can never be published.
 
+## Exporting a note in any format (weaveNotes Phase 10)
+
+`note-export.ts` turns a note's `doc_json` into a **downloadable file** — extending the serializers
+above rather than re-implementing them. `exportNote({ title, icon, doc_json }, format)` returns the
+content + the right filename + MIME for a download, in four formats:
+
+```ts
+import { exportNote, EXPORT_FORMATS, parseNoteExportBundle } from '@weaveintel/coedit';
+
+exportNote(note, 'markdown'); // → { filename: 'q3-plan.md',  mimeType: 'text/markdown', content }
+exportNote(note, 'html');     // → a self-contained, print-ready HTML document (Print → Save as PDF)
+exportNote(note, 'word');     // → Word-compatible HTML (.doc) — opens in Word / Google Docs
+exportNote(note, 'json');     // → a LOSSLESS bundle; parseNoteExportBundle() reads it back to re-import
+```
+
+`noteToMarkdown` / `noteToHtmlDocument` / `noteToWordHtml` / `noteToJson` are the individual
+serializers; the title is always HTML-escaped (no injection) and parsing is fail-safe. The
+conversion is O(n) — it maps `pmToBlocks` straight to `NormalBlock`s (no CRDT build), so even a
+5,000-block note exports instantly. In geneWeave: `GET /api/me/notes/:id/export?format=…` (a download)
+and the `export_note` agent tool both reuse this; the allowed formats are a Builder setting.
+
 ## Knowledge graph (weaveNotes Phase 5)
 
 Notes connect into a browsable web of meaning. The pieces live in sibling packages so they

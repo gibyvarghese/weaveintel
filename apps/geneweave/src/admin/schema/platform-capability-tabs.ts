@@ -557,6 +557,8 @@ export const PLATFORM_CAPABILITY_ADMIN_TABS: Record<string, AdminTabDef> = {
       { key: 'desktop_offline_enabled', label: 'Desktop app works offline + reopens your last note', type: 'checkbox', save: 'bool', default: true },
       { key: 'quick_capture_enabled', label: 'Global quick-capture hotkey (jot a note from anywhere)', type: 'checkbox', save: 'bool', default: true },
       { key: 'desktop_offline_note_limit', label: 'Notes cached on the desktop for offline use', type: 'number', save: 'int', default: 500 },
+      { key: 'export_enabled', label: 'People can export / download a note', type: 'checkbox', save: 'bool', default: true },
+      { key: 'allowed_export_formats', label: 'Export formats offered (JSON array: markdown/html/word/json)', textarea: true, save: 'json', rows: 2 },
       { key: 'enabled_ai_tools', label: 'Note AI tools the editor may use (JSON array)', textarea: true, save: 'json', rows: 3 },
     ],
   },

@@ -325,6 +325,50 @@ function openCenterModal(title: string, body: HTMLElement): void {
   document.body.appendChild(overlay);
 }
 
+// weaveNotes Phase 10 — note export (download in a chosen format).
+const EXPORT_OPTIONS: Array<{ key: string; label: string; hint: string }> = [
+  { key: 'markdown', label: 'Markdown (.md)', hint: 'Portable plain-text with formatting' },
+  { key: 'html', label: 'Web page (.html)', hint: 'Self-contained — Print → Save as PDF for a PDF' },
+  { key: 'word', label: 'Word (.doc)', hint: 'Opens in Microsoft Word / Google Docs' },
+  { key: 'json', label: 'Lossless backup (.json)', hint: 'Re-importable — nothing is lost' },
+];
+
+/** Fetch a note export from the server and trigger a browser download. */
+async function downloadNoteExport(noteId: string, format: string): Promise<boolean> {
+  try {
+    const res = await api.get(`/api/me/notes/${noteId}/export?format=${encodeURIComponent(format)}`);
+    if (!res.ok) return false;
+    const blob = await res.blob();
+    const cd = res.headers.get('Content-Disposition') ?? '';
+    const m = cd.match(/filename="(.+?)"/);
+    const filename = m?.[1] ?? `note.${format}`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.style.display = 'none';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return true;
+  } catch { return false; }
+}
+
+/** Open the export picker — a format menu that downloads the note when a format is clicked. */
+function openExportMenu(note: NoteDoc): void {
+  const body = h('div', { className: 'gw-export-menu' },
+    h('div', { className: 'gw-export-sub' }, 'Download a copy of this note:'),
+    ...EXPORT_OPTIONS.map((opt) =>
+      h('button', { className: 'gw-export-opt', 'data-format': opt.key, onClick: async () => {
+          const ok = await downloadNoteExport(note.id, opt.key);
+          if (!ok) alert('Could not export this note.');
+          else document.querySelector('.gw-modal-overlay')?.remove();
+        } },
+        h('span', { className: 'gw-export-opt-label' }, opt.label),
+        h('span', { className: 'gw-export-opt-hint' }, opt.hint),
+      ),
+    ),
+  );
+  openCenterModal('⬇ Export note', body);
+}
+
 function buildInsertMenu(render: () => void): OverflowItem[] {
   const openNote = async (id: string): Promise<void> => { await loadNote(id); state.notesView = 'editor'; render(); };
   return [
@@ -487,6 +531,7 @@ function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLEle
         if (data.shareUrl) { try { await navigator.clipboard.writeText(data.shareUrl); } catch { /* blocked */ } }
         prompt(`Published! Public link (copied to clipboard):${redactionNote}`, data.shareUrl ?? '(no link)');
       } },
+    { label: '⬇ Export', title: 'Download as Markdown / HTML / Word / JSON', onClick: () => openExportMenu(note) },
     { label: '⊡ Extract to-dos', title: 'Extract to-dos as tasks', onClick: async () => {
         const result = await extractNote(note.id);
         if (result) { const count = result.extractedTasks.length; extractResult = count > 0 ? `${count} task${count === 1 ? '' : 's'} created` : 'No new to-dos found'; render(); }

@@ -456,6 +456,9 @@ export interface WeaveNotesSettingsRow {
   desktop_offline_enabled: number;
   quick_capture_enabled: number;
   desktop_offline_note_limit: number;
+  /** weaveNotes Phase 10: note export on/off + the allowed formats (JSON array of markdown/html/word/json). */
+  export_enabled: number;
+  allowed_export_formats: string;
   enabled_ai_tools: string;
   updated_at: string;
 }

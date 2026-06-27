@@ -93,6 +93,7 @@ import { applyM110NoteFlashcards } from './m110-note-flashcards.js';
 import { applyM111NoteTemplates } from './m111-note-templates.js';
 import { applyM112NotesMobile } from './m112-notes-mobile.js';
 import { applyM113NotesDesktop } from './m113-notes-desktop.js';
+import { applyM114NotesExport } from './m114-notes-export.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -194,6 +195,7 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm111-note-templates', description: 'weaveNotes Phase 6: system templates + organisation — SEEDS the @weaveintel/notes SYSTEM_TEMPLATES as system-owned is_template=1 notes (Cornell, meeting minutes, study sheet, active-recall planner, outline, mind-map, comparison, Zettelkasten, action board, daily planner, project brief, blank) so the gallery + New-from-template + the AI new_from_template tool all share one definition; adds notes.archived_at (soft archive/trash — listNotes hides archived, an Archived view restores); registers new_from_template in tool_catalog + the weaveNotes Editor agent. "New note → Meeting minutes" opens a templated page whose action-items checklist feeds tasks. Idempotent (deterministic ids + INSERT OR IGNORE)', run: applyM111NoteTemplates },
   { id: 'm112-notes-mobile', description: 'weaveNotes Phase 7: mobile (offline editing + ink + sync). Adds three Builder-editable weavenotes_settings flags — mobile_offline_enabled, mobile_ink_enabled, mobile_offline_note_limit — that gate the offline-first mobile editor + freehand ink. No new tool: mobile edits sync via the same REST routes and the note activity log records "on mobile" provenance so read_note_activity already understands phone edits. Settings-only + idempotent (safeExec ALTERs)', run: applyM112NotesMobile },
   { id: 'm113-notes-desktop', description: 'weaveNotes Phase 8: desktop (Tauri shell — offline cache, open-to-last-note, quick capture). Adds three Builder-editable weavenotes_settings flags (desktop_offline_enabled, quick_capture_enabled, desktop_offline_note_limit) gating the desktop offline cache + the global quick-capture hotkey, and registers the recent_notes tool ("what was I working on?") in tool_catalog + grants it to the weaveNotes Editor agent. Quick-capture reuses create-note; a desktop-stamped activity entry tells the AI a note was captured on desktop. Idempotent (safeExec ALTERs + INSERT OR IGNORE + JSON merges)', run: applyM113NotesDesktop },
+  { id: 'm114-notes-export', description: 'weaveNotes Phase 10: sharing/export/polish — note EXPORT. Adds two Builder-editable weavenotes_settings (export_enabled + allowed_export_formats) that gate downloading a note as Markdown / HTML (print-ready) / Word (.doc) / lossless JSON, and registers the export_note tool ("export my note as markdown") in tool_catalog + grants it to the weaveNotes Editor agent. The export reuses @weaveintel/coedit serializers. Idempotent (safeExec ALTERs + INSERT OR IGNORE + JSON merges)', run: applyM114NotesExport },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

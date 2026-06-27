@@ -975,6 +975,11 @@ export interface ToolRegistryOptions {
    */
   noteRecentNotes?: (args: { userId: string; tenantId?: string | null; limit?: number }) => Promise<{ ok: boolean; notes: Array<{ noteId: string; title: string; updatedAt: string; favorite: boolean }> }>;
   /**
+   * weaveNotes Phase 10: export a note. When set, the `export_note` tool is available so the agent can
+   * export/download one of the user's notes as Markdown / HTML / Word / lossless JSON. Owner-scoped.
+   */
+  noteExport?: (args: { userId: string; tenantId?: string | null; noteId: string; format?: string }) => Promise<{ ok: boolean; error?: string; format?: string; filename?: string; content?: string }>;
+  /**
    * weaveNotes Phase 5: semantic note search. When set, the `find_related_notes` tool is
    * available so the agent can find the user's notes most relevant to a query (knowledge-
    * graph navigation) before answering, editing, or linking. Owner-scoped.
@@ -1929,6 +1934,28 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
         tags: ['notes', 'memory'],
       }),
     } : {}),
+    // weaveNotes Phase 10: export-note tool — available when noteExport callback is set.
+    ...(opts?.noteExport && opts.currentUserId ? {
+      export_note: weaveTool({
+        name: 'export_note',
+        description: 'Export one of the user\'s notes in a chosen format so they can keep a copy, share it, or open it in another app. Use when the user asks to "export", "download", or "save this note as" Markdown / a web page (HTML) / Word / a lossless JSON backup. Pass the note id and the format ("markdown" | "html" | "word" | "json"; default markdown). Returns the exported content (you can show it or save it).',
+        parameters: {
+          type: 'object',
+          properties: {
+            noteId: { type: 'string', description: 'The id of the note to export.' },
+            format: { type: 'string', enum: ['markdown', 'html', 'word', 'json'], description: 'Export format (default markdown).' },
+          },
+          required: ['noteId'],
+        },
+        execute: async (args: { noteId: string; format?: string }) => {
+          if (!opts.noteExport || !opts.currentUserId) return { content: 'Note export is unavailable in this context.', isError: true };
+          const r = await opts.noteExport({ userId: opts.currentUserId, tenantId: opts.currentTenantId ?? null, noteId: args.noteId, ...(args.format ? { format: args.format } : {}) });
+          if (!r.ok) return { content: `export_note failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, format: r.format, filename: r.filename, content: r.content });
+        },
+        tags: ['notes', 'output'],
+      }),
+    } : {}),
     // weaveNotes Phase 4: note publish tool — available when notePublish callback is set.
     ...(opts?.notePublish && opts.currentUserId ? {
       note_publish: weaveTool({
@@ -2126,7 +2153,7 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
   // tool selection: mode policies only apply when `enabled_tools` is empty, so a user with a
   // custom tool selection would otherwise never get them (and "create a note" would silently
   // fall back to emit_artifact). Skip any already registered from the selection above.
-  for (const noteTool of ['create_note', 'new_from_template', 'recent_notes', 'note_edit', 'note_publish', 'find_related_notes', 'autofill_database', 'capture_web_page', 'workspace_search', 'read_note_activity'] as const) {
+  for (const noteTool of ['create_note', 'new_from_template', 'recent_notes', 'export_note', 'note_edit', 'note_publish', 'find_related_notes', 'autofill_database', 'capture_web_page', 'workspace_search', 'read_note_activity'] as const) {
     const t = scopedTools[noteTool];
     if (t && !registeredFromSelection.has(noteTool) && canUseTool(actorPersona, noteTool)) registry.register(t);
   }

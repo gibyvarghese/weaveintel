@@ -487,6 +487,12 @@ export function registerAdminRoutingRoutes(
     if (body['desktop_offline_enabled'] !== undefined) partial['desktopOfflineEnabled'] = body['desktop_offline_enabled'];
     if (body['quick_capture_enabled'] !== undefined) partial['quickCaptureEnabled'] = body['quick_capture_enabled'];
     if (body['desktop_offline_note_limit'] !== undefined) partial['desktopOfflineNoteLimit'] = body['desktop_offline_note_limit'];
+    if (body['export_enabled'] !== undefined) partial['exportEnabled'] = body['export_enabled'];
+    if (body['allowed_export_formats'] !== undefined) {
+      let arr: unknown = body['allowed_export_formats'];
+      try { if (typeof arr === 'string') arr = JSON.parse(arr); } catch { arr = []; }
+      partial['allowedExportFormats'] = arr;
+    }
     if (body['enabled_ai_tools'] !== undefined) {
       let arr: unknown = body['enabled_ai_tools'];
       try { if (typeof arr === 'string') arr = JSON.parse(arr); } catch { arr = []; }

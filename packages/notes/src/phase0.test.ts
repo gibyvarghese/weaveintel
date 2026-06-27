@@ -122,6 +122,15 @@ describe('weaveNotes config validator', () => {
     expect(config.desktopOfflineNoteLimit).toBe(10000); // clamped to max
     expect(validateWeaveNotesConfig({ desktopOfflineNoteLimit: 1 }).config.desktopOfflineNoteLimit).toBe(10); // min
   });
+  it('Phase 10: export flags validate (allow-list filtered; bad list falls back to defaults)', () => {
+    expect(DEFAULT_WEAVENOTES_CONFIG.exportEnabled).toBe(true);
+    expect(DEFAULT_WEAVENOTES_CONFIG.allowedExportFormats).toEqual(['markdown', 'html', 'word', 'json']);
+    const { config } = validateWeaveNotesConfig({ exportEnabled: '0', allowedExportFormats: ['markdown', 'pdf', 'json', 'evil'] });
+    expect(config.exportEnabled).toBe(false);
+    expect(config.allowedExportFormats).toEqual(['markdown', 'json']); // unknown (pdf/evil) dropped
+    // An all-invalid list keeps the defaults rather than leaving zero formats.
+    expect(validateWeaveNotesConfig({ allowedExportFormats: ['nope'] }).config.allowedExportFormats).toEqual(['markdown', 'html', 'word', 'json']);
+  });
   it('null/undefined input returns the safe defaults', () => {
     expect(validateWeaveNotesConfig(null).config).toEqual(DEFAULT_WEAVENOTES_CONFIG);
     expect(validateWeaveNotesConfig(undefined).config).toEqual(DEFAULT_WEAVENOTES_CONFIG);
