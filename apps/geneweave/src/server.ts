@@ -293,6 +293,35 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     imageGenerate: createModelImageGenerator(chatEngine.modelConfig),
     jwtSecret,
     ...(publicBaseUrl ? { publicBaseUrl } : {}),
+    // Run a note action through the geneWeave SUPERVISOR, which DELEGATES to the weaveNotes Editor
+    // worker agent — the worker calls the create_diagram / restructure_note / … tool (its callbacks
+    // are wired into the worker's registry) → stages a suggestion. We give the supervisor ONLY the
+    // weaveNotes Editor worker (workersOverride) and NO direct note tools (toolsOverride: []), so it
+    // must hand the work to the specialist rather than calling the tool itself. Uses an ephemeral
+    // chat that is deleted afterwards so the user's chat history stays clean.
+    runNoteAgentAction: async ({ userId, noteId, instruction }) => {
+      const chatId = `note-agent-${noteId.slice(0, 8)}-${Math.random().toString(36).slice(2, 10)}`;
+      // Build the weaveNotes Editor worker definition from the seeded worker_agents row so the
+      // supervisor delegates to the same specialist that helps in chat.
+      let workersOverride: import('./chat-runtime.js').WorkerDef[] | undefined;
+      try {
+        const editor = (await db.listEnabledWorkerAgents()).find((w) => w.name === 'weavenotes_editor');
+        if (editor) {
+          let tools: string[]; try { tools = JSON.parse(editor.tool_names ?? '[]') as string[]; } catch { tools = []; }
+          workersOverride = [{ name: editor.name, description: editor.description ?? 'Co-authors the user’s notes.', tools, persona: editor.persona ?? 'agent_worker' }];
+        }
+      } catch { /* fall back to default supervisor topology below */ }
+      try {
+        await db.createChat({ id: chatId, userId, title: 'weaveNotes assistant', model: chatEngine.modelConfig.defaultModel, provider: chatEngine.modelConfig.defaultProvider });
+        const r = await chatEngine.sendMessage(userId, chatId, instruction, {
+          modeOverride: 'supervisor',
+          ...(workersOverride ? { workersOverride, toolsOverride: [] } : {}),
+        });
+        return { ok: Boolean(r.assistantContent?.trim()), content: r.assistantContent };
+      } finally {
+        try { await db.deleteChat(chatId, userId); } catch { /* best-effort cleanup */ }
+      }
+    },
   });
   registerMeComplianceRoutes(router, db, config.runtime);
   registerArtifactRoutes(router, db, { jwtSecret, publicBaseUrl });

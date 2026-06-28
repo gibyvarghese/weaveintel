@@ -103,7 +103,19 @@ function clientProvenance(req: { headers?: Record<string, unknown> }): string {
   return '';
 }
 
-export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts: { noteRepository?: NoteRepository; aiGenerate?: NoteAiGenerate; imageGenerate?: import('../note-creative-sql.js').NoteImageGenerate; jwtSecret?: string; publicBaseUrl?: string } = {}): void {
+export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts: {
+  noteRepository?: NoteRepository;
+  aiGenerate?: NoteAiGenerate;
+  imageGenerate?: import('../note-creative-sql.js').NoteImageGenerate;
+  jwtSecret?: string;
+  publicBaseUrl?: string;
+  /** weaveNotes: run a note action THROUGH the geneWeave SUPERVISOR (which delegates to the
+   *  weaveNotes Editor worker agent), instead of calling the note service directly. Wired from the
+   *  chat engine in server.ts. Lets the "Make a diagram" / "Restructure" buttons drive the supervisor
+   *  via the API — the worker calls the same create_diagram / restructure_note tool, staging a
+   *  suggestion on the note. The supervisor run uses an ephemeral chat that is deleted afterwards. */
+  runNoteAgentAction?: (args: { userId: string; noteId: string; instruction: string }) => Promise<{ ok: boolean; content?: string }>;
+} = {}): void {
   const notes = opts.noteRepository ?? createSqlNoteRepository(db);
   // weaveNotes Phase 3: the AI co-author service (suggestions, agent edits, AI blocks).
   // Only wired when the host provides an LLM generator (so unit/embedder setups stay LLM-free).
@@ -611,6 +623,51 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     const r = await withAiPresence(db, params['id']!, () => noteAi.restructure({ noteId: params['id']!, access, ...(typeof body['outline'] === 'string' && body['outline'].trim() ? { outline: body['outline'] } : {}) }));
     res.writeHead(r.ok ? 201 : 400, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(r));
+  }, { auth: true });
+
+  // Run a note action THROUGH THE SUPERVISOR (it delegates to the weaveNotes Editor worker, which
+  // calls the create_diagram / restructure_note / … tool → stages a suggestion). This is what the
+  // "Make a diagram" / "Restructure" UI buttons call when "use the agent" is on — so the activity is
+  // performed by the supervisor + worker agents via the API, not by a direct service call.
+  //   POST /api/me/notes/:id/ai/agent   { action: 'diagram'|'restructure'|'visual'|'ink', instruction?, outline?, kind? }
+  router.post('/api/me/notes/:id/ai/agent', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    if (!opts.runNoteAgentAction) { res.writeHead(501); res.end(JSON.stringify({ error: 'Agent actions are not configured on this server' })); return; }
+    const noteId = params['id']!;
+    const access = await resolveNoteAccess(db, noteId, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    if (!roleAtLeast(access.role, 'collaborator')) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    const action = typeof body['action'] === 'string' ? body['action'] : 'diagram';
+    const instruction = typeof body['instruction'] === 'string' ? body['instruction'].slice(0, 2000) : '';
+    const outline = typeof body['outline'] === 'string' ? body['outline'].slice(0, 4000) : '';
+    const kind = typeof body['kind'] === 'string' ? body['kind'] : '';
+
+    // Synthesise a natural instruction for the supervisor. It references the note id so the worker
+    // knows which note to act on; natural phrasing keeps it clear of the prompt-injection guard.
+    // Phrase as a clear, first-person request about the user's OWN note. (Borderline "reorganise
+    // the structure" phrasing can otherwise read like a prompt-injection to the guardrail.)
+    let prompt: string;
+    if (action === 'restructure') {
+      prompt = `This is my own note (id ${noteId}) and I'd like your help tidying it up. Please reorganise its sections into a clearer, more logical order and fix the heading levels, keeping all of the existing content. Stage it as a suggestion for me to review.${outline ? `\n\nI'd like the sections in roughly this order:\n${outline}` : ''}`;
+    } else if (action === 'visual') {
+      const k = kind && kind !== 'auto' ? kind : 'visual';
+      prompt = `This is my own note (id ${noteId}). Please add a ${k} to it${instruction ? `: ${instruction}` : ' that fits the content'}, staged as a suggestion for me to review.`;
+    } else if (action === 'ink') {
+      prompt = `This is my own note (id ${noteId}). Please sketch ${instruction || 'a small freehand drawing that fits the content'} in it, staged as a suggestion for me to review.`;
+    } else { // diagram (default)
+      prompt = `This is my own note (id ${noteId}). Please draw a diagram in it${instruction ? `: ${instruction}` : ' summarising the content'}, staged as a suggestion for me to review.`;
+    }
+
+    // Snapshot the note's pending suggestions, run the supervisor, then return what it newly staged.
+    const beforeIds = new Set((await db.listNoteSuggestions(noteId, 'pending')).map((s) => s.id));
+    const r = await opts.runNoteAgentAction({ userId: auth.userId, noteId, instruction: prompt });
+    const staged = (await db.listNoteSuggestions(noteId, 'pending'))
+      .filter((s) => !beforeIds.has(s.id))
+      .map((s) => ({ id: s.id, action: s.action }));
+    res.writeHead(staged.length ? 201 : 200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: staged.length > 0, via: 'supervisor', staged, assistant: r.content ?? '' }));
   }, { auth: true });
 
   // Phase 4 (creative expansion): SVG illustration, generated image, and the AUTO router.

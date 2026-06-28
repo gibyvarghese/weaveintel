@@ -55,16 +55,20 @@ export function wireNoteAi(opts: { noteId: string; toolbarEl: HTMLElement; panel
   }
 
   // Reorganise the WHOLE note. Optionally the user dictates a section outline (one heading per
-  // line); otherwise the AI picks the clearest structure. The result is staged as one suggestion.
+  // line); otherwise the AI picks the clearest structure. This runs THROUGH THE SUPERVISOR — it
+  // delegates to the weaveNotes Editor worker, which calls the restructure_note tool and stages the
+  // reorganised note as one suggestion to review.
   async function restructure(): Promise<void> {
     const outline = window.prompt('Reorganise this note. Optionally give a section order (one heading per line), or leave blank to let the AI choose the clearest structure:');
     if (outline === null) return; // cancelled (blank string = AI chooses)
     setBusy(true);
+    statusEl.textContent = 'The notes assistant is reorganising…';
     try {
-      const body: Record<string, unknown> = {};
+      const body: Record<string, unknown> = { action: 'restructure' };
       if (outline.trim()) body['outline'] = outline.trim();
-      const res = await api.post(`/api/me/notes/${noteId}/ai/restructure`, body);
-      if (!res.ok) { const e = await res.json().catch(() => ({})) as { error?: string }; alert(`Restructure failed: ${e.error ?? res.status}`); return; }
+      const res = await api.post(`/api/me/notes/${noteId}/ai/agent`, body);
+      const data = await res.json().catch(() => ({})) as { ok?: boolean; error?: string };
+      if (!res.ok || data.ok === false) { alert(`Restructure failed: ${data.error ?? 'the assistant did not produce a change'}`); return; }
       await refresh(); // the reorganised note shows as a suggestion to review
     } finally { setBusy(false); }
   }
