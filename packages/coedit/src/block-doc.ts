@@ -322,8 +322,15 @@ export class BlockDoc {
     for (const a of snap.attrs) {
       const bk = blockKey(a.block); const m = doc.#attrs.get(bk) ?? new Map();
       m.set(a.key, { value: a.value, lamport: a.lamport, siteId: a.siteId }); doc.#attrs.set(bk, m);
+      // Advance the mint clock past this attr op too — else a later setBlockAttr on the same site
+      // re-mints the SAME counter, ties on lamport, and the stale value wrongly wins (a second
+      // edit to a diagram/ink scene would be silently dropped after a reload).
+      doc.#bump({ counter: a.lamport, siteId: a.siteId });
     }
-    for (const mk of snap.marks) doc.#marks.set(`${idKey(mk.startId)}|${idKey(mk.endId)}|${mk.markType}`, { startId: mk.startId, endId: mk.endId, markType: mk.markType, ...(mk.markValue !== undefined ? { markValue: mk.markValue } : {}), removed: mk.removed, lamport: mk.opId.counter });
+    for (const mk of snap.marks) {
+      doc.#marks.set(`${idKey(mk.startId)}|${idKey(mk.endId)}|${mk.markType}`, { startId: mk.startId, endId: mk.endId, markType: mk.markType, ...(mk.markValue !== undefined ? { markValue: mk.markValue } : {}), removed: mk.removed, lamport: mk.opId.counter });
+      doc.#bump(mk.opId); // same reason: keep the mint clock ahead of restored mark ops
+    }
     return doc;
   }
 

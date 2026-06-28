@@ -1659,6 +1659,15 @@ input{font-family:inherit;outline:none}
 .gw-ink-surface{position:relative;min-height:120px;touch-action:none;cursor:crosshair}
 .gw-ink-surface svg{display:block;max-width:100%}
 .gw-ink-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--fg3,#8A958F);font-size:13px;pointer-events:none}
+/* weaveNotes — editable diagram: a click-to-edit node + a small editor toolbar under the canvas */
+.gw-diagram-canvas svg{display:block;max-width:100%;margin:0 auto}
+.gw-dnode-sel rect,.gw-dnode-sel polygon,.gw-dnode-sel ellipse,.gw-dnode-sel path{stroke:#0E9A6E !important;stroke-width:2.5 !important}
+.gw-diagram-editor{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:7px 8px;margin-top:6px;border-top:1px solid var(--hairline,#E7ECEA)}
+.gw-diagram-btn{font-size:11px;font-weight:600;border:1px solid var(--hairline,#E7ECEA);background:var(--surface,#fff);border-radius:6px;padding:3px 8px;cursor:pointer;color:var(--ink,#14201B)}
+.gw-diagram-btn:hover{background:var(--canvas,#F6F8F7)}
+.gw-diagram-label{font-size:12px;border:1px solid var(--hairline,#E7ECEA);border-radius:6px;padding:3px 7px;min-width:120px;color:var(--ink,#14201B);background:var(--surface,#fff)}
+.gw-diagram-swatch{width:16px;height:16px;border-radius:50%;border:1px solid rgba(0,0,0,.15);cursor:pointer;padding:0}
+.gw-diagram-hint{font-size:11px;color:var(--fg3,#8A958F)}
 /* weaveNotes Phase 4 (creative expansion) — the card Visualize row + AI illustrations/images */
 .notes-aicard-visual{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding-top:8px;border-top:1px solid var(--hairline,#E7ECEA);margin-top:8px}
 .notes-aicard-visual .notes-aicard-spark{color:var(--accent,#0E9A6E);font-weight:800}

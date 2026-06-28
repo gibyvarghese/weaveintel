@@ -13,7 +13,11 @@ import { Mark, Node, mergeAttributes } from '@tiptap/core';
 // (unlike the main tsc-built UI client) — Phase 4 ink + diagrams render via the shared,
 // tested @weaveintel/notes SVG renderers, so the picture is identical server-, share-, and
 // editor-side.
-import { diagramToSvg, validateDiagramScene, strokesToSvg, validateStrokes, type InkStroke } from '@weaveintel/notes';
+import { diagramToSvg, validateDiagramScene, strokesToSvg, validateStrokes, HIGHLIGHT_PALETTE, type InkStroke } from '@weaveintel/notes';
+
+// The recolour swatches in the diagram editor — a subset of the shared WCAG-AA highlight palette
+// (its labels resolve back to the same pastels in the renderer, so a recolour survives validation).
+const DIAGRAM_SWATCHES = HIGHLIGHT_PALETTE.filter((p) => ['amber', 'pink', 'teal', 'blue', 'lavender', 'sage'].includes(p.label));
 
 // Tiptap's RawCommands is augmented per-extension; we add commands without global
 // module augmentation, so cast the returned command bag. Localized + intentional.
@@ -240,14 +244,92 @@ export const DiagramNode = Node.create({
   parseHTML() { return [{ tag: 'figure[data-diagram]' }]; },
   renderHTML({ HTMLAttributes }) { return ['figure', mergeAttributes(HTMLAttributes, { 'data-diagram': '', class: 'gw-diagram-block' })]; },
   addNodeView() {
-    return ({ node }: any) => {
+    // An EDITABLE diagram: click a node to rename / recolour / delete it, or add a new node
+    // (connected to the selected one). The AI authors the same scene data, so "the AI drew it"
+    // and "I edited it" are the same object — every change persists back into the note's doc_json
+    // through the CRDT relay (same setNodeMarkup path the ink canvas uses).
+    return ({ node, editor, getPos }: any) => {
       const dom = document.createElement('figure');
       dom.className = 'gw-diagram-block';
       if (node.attrs.author) dom.setAttribute('data-author', node.attrs.author);
-      // Render diagrams in the HAND-DRAWN ("sketch") style to match the sketch-note aesthetic.
-      try { dom.innerHTML = diagramToSvg(validateDiagramScene(node.attrs.scene), { style: 'sketch' }); }
-      catch { dom.textContent = '[diagram]'; }
-      return { dom };
+      let scene: any = validateDiagramScene(node.attrs.scene);
+      let selectedId: string | null = null;
+
+      const canvas = document.createElement('div');
+      canvas.className = 'gw-diagram-canvas';
+      const panel = document.createElement('div');
+      panel.className = 'gw-diagram-editor';
+      panel.setAttribute('contenteditable', 'false');
+
+      const persist = (): void => {
+        try {
+          const pos = typeof getPos === 'function' ? getPos() : undefined;
+          if (typeof pos !== 'number') return; // detached node-view
+          editor.view.dispatch(editor.view.state.tr.setNodeMarkup(pos, undefined, { ...node.attrs, scene }));
+        } catch { /* read-only / detached */ }
+      };
+      // Re-render ONLY the SVG (keeps the editor panel — and its focused inputs — intact).
+      const drawCanvas = (): void => {
+        try { canvas.innerHTML = diagramToSvg(scene, { style: 'sketch' }); }
+        catch { canvas.textContent = '[diagram]'; return; }
+        if (!editor.isEditable) return;
+        canvas.querySelector('svg')?.querySelectorAll('[data-node-id]').forEach((g: Element) => {
+          const id = g.getAttribute('data-node-id');
+          (g as SVGElement).style.cursor = 'pointer';
+          if (id === selectedId) g.classList.add('gw-dnode-sel');
+          g.addEventListener('mousedown', (e) => { e.preventDefault(); selectedId = selectedId === id ? null : id; drawCanvas(); renderPanel(); });
+        });
+      };
+      const mutate = (fn: () => void): void => { fn(); scene = validateDiagramScene(scene); persist(); drawCanvas(); renderPanel(); };
+
+      function renderPanel(): void {
+        panel.innerHTML = '';
+        if (!editor.isEditable) return;
+        const btn = (label: string, title: string, on: () => void): HTMLButtonElement => {
+          const b = document.createElement('button'); b.className = 'gw-diagram-btn'; b.textContent = label; b.title = title;
+          b.onmousedown = (e) => { e.preventDefault(); on(); };
+          return b;
+        };
+        // Always-available: add a node (connected to the selection if one is picked).
+        panel.appendChild(btn('＋ Node', 'Add a node', () => {
+          const id = 'n' + Math.random().toString(36).slice(2, 8);
+          const from = selectedId;
+          mutate(() => { scene.nodes.push({ id, label: 'New node' }); if (from) scene.edges.push({ from, to: id }); });
+          selectedId = id; drawCanvas(); renderPanel();
+        }));
+
+        const sel = selectedId ? scene.nodes.find((n: any) => n.id === selectedId) : null;
+        if (!sel) { panel.appendChild(hint('Click a node to rename, recolour or delete it.')); return; }
+        // Rename (live) — only the canvas redraws on each keystroke, so the input keeps focus.
+        const input = document.createElement('input');
+        input.className = 'gw-diagram-label'; input.value = String(sel.label ?? ''); input.placeholder = 'Label';
+        input.oninput = () => { sel.label = input.value; persist(); drawCanvas(); };
+        panel.appendChild(input);
+        // Recolour swatches (palette labels resolve to WCAG-AA pastels in the renderer).
+        for (const p of DIAGRAM_SWATCHES) {
+          const sw = document.createElement('button');
+          sw.className = 'gw-diagram-swatch'; sw.title = p.label; sw.style.background = p.color;
+          sw.onmousedown = (e) => { e.preventDefault(); sel.color = p.label; mutate(() => {}); };
+          panel.appendChild(sw);
+        }
+        // Delete the selected node (its incident edges go too, via re-validation).
+        panel.appendChild(btn('🗑 Delete', 'Delete this node', () => {
+          const gone = selectedId; selectedId = null;
+          mutate(() => { scene.nodes = scene.nodes.filter((n: any) => n.id !== gone); scene.edges = scene.edges.filter((e: any) => e.from !== gone && e.to !== gone); });
+        }));
+      }
+      function hint(text: string): HTMLElement { const s = document.createElement('span'); s.className = 'gw-diagram-hint'; s.textContent = text; return s; }
+
+      drawCanvas();
+      renderPanel();
+      dom.appendChild(canvas);
+      dom.appendChild(panel);
+      return {
+        dom,
+        // Re-render when the scene changes underneath us (e.g. an accepted AI suggestion).
+        update: (updated: any) => { if (updated.type.name !== 'diagram') return false; scene = validateDiagramScene(updated.attrs.scene); drawCanvas(); renderPanel(); return true; },
+        ignoreMutation: () => true,
+      };
     };
   },
   addCommands() {

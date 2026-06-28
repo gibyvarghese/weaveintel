@@ -242,36 +242,39 @@ export function diagramToSvg(scene: DiagramScene, opts: { style?: DiagramStyle }
     }
     if (e.label) parts.push(`<text x="${mx}" y="${(y1 + y2) / 2 - 4}" text-anchor="middle" font-family="${labelFont}" font-size="${sketch ? 13 : 10}" fill="#5E6E67">${esc(e.label)}</text>`);
   }
-  // Nodes.
+  // Nodes. Each node is wrapped in a `<g data-node-id>` group so an editor can map a click to a
+  // node (rename / recolour / delete). The group is inert for share/export rendering.
   for (const n of layout.nodes) {
     const fill = n.color ?? HIGHLIGHT_PALETTE[0]!.color;
     const stroke = darken(fill);
     const cx = n.x + n.w / 2, cy = n.y + n.h / 2;
     const x = n.x, y = n.y, w = n.w, hh = n.h;
+    const shapeParts: string[] = [];
     if (sketch && (n.shape === undefined || n.shape === 'box' || n.shape === 'pill')) {
       // Hand-drawn rounded box: a soft solid fill underneath + a wobbly hand-drawn border on top.
       const r = rng(seedOf(x, y, w, hh));
       const rx = n.shape === 'pill' ? hh / 2 : 12;
-      parts.push(`<rect x="${x}" y="${y}" width="${w}" height="${hh}" rx="${rx}" fill="${fill}" opacity="0.92"/>`);
-      parts.push(`<path d="${roughRectPath(x, y, w, hh, r)}" fill="none" stroke="${stroke}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"/>`);
+      shapeParts.push(`<rect x="${x}" y="${y}" width="${w}" height="${hh}" rx="${rx}" fill="${fill}" opacity="0.92"/>`);
+      shapeParts.push(`<path d="${roughRectPath(x, y, w, hh, r)}" fill="none" stroke="${stroke}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"/>`);
     } else if (n.shape === 'diamond') {
-      parts.push(`<polygon points="${cx},${y} ${x + w},${cy} ${cx},${y + hh} ${x},${cy}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`);
+      shapeParts.push(`<polygon points="${cx},${y} ${x + w},${cy} ${cx},${y + hh} ${x},${cy}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`);
     } else if (n.shape === 'ellipse') {
-      parts.push(`<ellipse cx="${cx}" cy="${cy}" rx="${w / 2}" ry="${hh / 2}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`);
+      shapeParts.push(`<ellipse cx="${cx}" cy="${cy}" rx="${w / 2}" ry="${hh / 2}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`);
     } else if (n.shape === 'cylinder') {
       const ry = Math.min(8, hh / 4);
-      parts.push(`<path d="M ${x} ${y + ry} A ${w / 2} ${ry} 0 0 1 ${x + w} ${y + ry} L ${x + w} ${y + hh - ry} A ${w / 2} ${ry} 0 0 1 ${x} ${y + hh - ry} Z" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/><path d="M ${x} ${y + ry} A ${w / 2} ${ry} 0 0 0 ${x + w} ${y + ry}" fill="none" stroke="${stroke}" stroke-width="${sw}"/>`);
+      shapeParts.push(`<path d="M ${x} ${y + ry} A ${w / 2} ${ry} 0 0 1 ${x + w} ${y + ry} L ${x + w} ${y + hh - ry} A ${w / 2} ${ry} 0 0 1 ${x} ${y + hh - ry} Z" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/><path d="M ${x} ${y + ry} A ${w / 2} ${ry} 0 0 0 ${x + w} ${y + ry}" fill="none" stroke="${stroke}" stroke-width="${sw}"/>`);
     } else if (n.shape === 'parallelogram') {
       const sk = Math.min(16, w / 4);
-      parts.push(`<polygon points="${x + sk},${y} ${x + w},${y} ${x + w - sk},${y + hh} ${x},${y + hh}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`);
+      shapeParts.push(`<polygon points="${x + sk},${y} ${x + w},${y} ${x + w - sk},${y + hh} ${x},${y + hh}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`);
     } else if (n.shape === 'hexagon') {
       const sk = Math.min(16, w / 4);
-      parts.push(`<polygon points="${x + sk},${y} ${x + w - sk},${y} ${x + w},${cy} ${x + w - sk},${y + hh} ${x + sk},${y + hh} ${x},${cy}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`);
+      shapeParts.push(`<polygon points="${x + sk},${y} ${x + w - sk},${y} ${x + w},${cy} ${x + w - sk},${y + hh} ${x + sk},${y + hh} ${x},${cy}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`);
     } else {
       const rx = n.shape === 'pill' ? hh / 2 : 10;
-      parts.push(`<rect x="${x}" y="${y}" width="${w}" height="${hh}" rx="${rx}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`);
+      shapeParts.push(`<rect x="${x}" y="${y}" width="${w}" height="${hh}" rx="${rx}" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`);
     }
-    parts.push(`<text x="${cx}" y="${cy + 4}" text-anchor="middle" font-family="${labelFont}" font-size="${sketch ? 15 : 12}" font-weight="600" fill="${READING_INK}">${esc(n.label.length > 26 ? n.label.slice(0, 25) + '…' : n.label)}</text>`);
+    shapeParts.push(`<text x="${cx}" y="${cy + 4}" text-anchor="middle" font-family="${labelFont}" font-size="${sketch ? 15 : 12}" font-weight="600" fill="${READING_INK}">${esc(n.label.length > 26 ? n.label.slice(0, 25) + '…' : n.label)}</text>`);
+    parts.push(`<g class="gw-dnode" data-node-id="${esc(n.id)}">${shapeParts.join('')}</g>`);
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${layout.width} ${layout.height}" width="${layout.width}" height="${layout.height}" class="gw-diagram${sketch ? ' sketch' : ''}">${parts.join('')}</svg>`;
 }

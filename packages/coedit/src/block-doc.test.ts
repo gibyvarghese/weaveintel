@@ -144,4 +144,16 @@ describe('BlockDoc — sync + snapshot', () => {
     expect(summary(restored)).toBe(summary(a));
     expect(restored.blocks()[0]!.attrs['level']).toBe(1);
   });
+
+  it('a second setBlockAttr after a snapshot reload WINS (mint clock advances past restored attr ops)', () => {
+    // Regression: fromSnapshot bumped the mint clock from element ops only, not attr/mark ops. So a
+    // second edit to the SAME attr on the SAME site re-minted the same counter → lamport tie → the
+    // stale value wrongly won (a diagram/ink scene edit was silently dropped after a reload).
+    const doc = BlockDoc.fromBlocks('s', [{ type: 'diagram', attrs: { scene: { nodes: ['a'] } } }]);
+    const bid = doc.blocks()[0]!.id;
+    doc.apply(doc.setBlockAttr(bid, 'scene', { nodes: ['a', 'b'] })); // first edit (highest counter is now an attr op)
+    const reloaded = BlockDoc.fromSnapshot('s', doc.snapshot());      // reload under the SAME site
+    reloaded.apply(reloaded.setBlockAttr(bid, 'scene', { nodes: ['a', 'b', 'c'] })); // second edit
+    expect((reloaded.blocks()[0]!.attrs['scene'] as { nodes: string[] }).nodes).toEqual(['a', 'b', 'c']);
+  });
 });

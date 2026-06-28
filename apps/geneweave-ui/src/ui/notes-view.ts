@@ -439,6 +439,7 @@ function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLEle
   // A live "N editing" badge, a "refresh" nudge shown when a collaborator edits
   // while you're typing, and a Share button that mints an invite link.
   let lastLocalEditTs = 0;
+  let _saveChain: Promise<void> = Promise.resolve(); // serializes overlapping debounced saves (last-wins)
   let mountTs = 0;
   const presenceBadge = h('span', { className: 'notes-presence-badge', title: 'People editing this note', style: 'display:none' }) as HTMLElement;
   // Phase 3: live participant avatars (a coloured circle per person, the woven mark for the AI).
@@ -465,7 +466,11 @@ function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLEle
   // collaborator edit. (Also ignore the first ~1.5s while the seed op replays on join.)
   const onRemoteChange = (): void => {
     if (Date.now() - mountTs < 1500) return; // ignore the seed-op replay on join
-    const typingNow = editorContainer.contains(document.activeElement) && Date.now() - lastLocalEditTs < 2500;
+    // Defer a reconcile while an edit is in flight: either you are actively typing in the editor,
+    // OR a local edit happened very recently but hasn't saved yet (e.g. a diagram/ink toolbar button,
+    // which edits the doc WITHOUT focusing the contenteditable). Without the second clause a remote
+    // echo arriving in the 1.5s save window would reload + clobber the unsaved edit.
+    const typingNow = Date.now() - lastLocalEditTs < 2500;
     // Reconcile silently when idle; while you are mid-keystroke, defer until you pause (no
     // intrusive banner — the design has none, and a solo author only sees their own echo).
     if (!typingNow) { void loadNote(note.id).then(render); }
@@ -644,12 +649,22 @@ function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLEle
       placeholder: 'Start writing… type / for commands, @ to mention',
       // Phase 3: broadcast my caret whenever it moves (the live-cursors wiring throttles it).
       onSelectionChange: () => _activeCursors?.onLocalSelectionChange(),
-      onSave: async (docJson) => {
+      // Mark an edit as pending the instant it happens (the save is debounced) so a remote-echo
+      // reload can't clobber an unsaved edit that didn't focus the editor (a diagram/ink button).
+      onLocalEdit: () => { lastLocalEditTs = Date.now(); },
+      // Serialize saves: two debounced saves >1.5s apart can otherwise overlap, and since each
+      // sends the WHOLE document, a slower earlier (stale) snapshot landing after a newer one would
+      // revert it (e.g. a node-add right after a recolour). Chaining guarantees in-order, last-wins.
+      onSave: (docJson) => {
         lastLocalEditTs = Date.now();
-        let parsed: unknown; try { parsed = JSON.parse(docJson); } catch { parsed = undefined; }
-        // Prefer the convergent relay path; fall back to the legacy save if it's unavailable.
-        const merged = parsed !== undefined && _activeCoedit ? await _activeCoedit.save(parsed) : false;
-        if (!merged) await saveNote(note.id, docJson);
+        _saveChain = _saveChain.then(async () => {
+          lastLocalEditTs = Date.now();
+          let parsed: unknown; try { parsed = JSON.parse(docJson); } catch { parsed = undefined; }
+          // Prefer the convergent relay path; fall back to the legacy save if it's unavailable.
+          const merged = parsed !== undefined && _activeCoedit ? await _activeCoedit.save(parsed) : false;
+          if (!merged) await saveNote(note.id, docJson);
+        }).catch((e) => { console.warn('[notes-view] save failed', e); });
+        return _saveChain;
       },
     }).then((inst) => {
       _activeEditor = inst;

@@ -212,6 +212,10 @@ export async function mountNotesEditor(opts: {
   readOnly?: boolean;
   /** weaveNotes Phase 3: called whenever the local selection/caret moves (for cursor broadcast). */
   onSelectionChange?: () => void;
+  /** Called on EVERY local doc change (before the debounced save) so the host can mark an edit as
+   *  pending — e.g. so a remote-echo reload doesn't clobber an unsaved edit that didn't focus the
+   *  editor (a diagram/ink toolbar button). */
+  onLocalEdit?: () => void;
 }): Promise<EditorInstance> {
   const { container, initialDocJson, onSave, placeholder = 'Start writing… type / for commands', readOnly = false } = opts;
 
@@ -280,6 +284,7 @@ export async function mountNotesEditor(opts: {
       bundle.Placeholder?.configure?.({ placeholder }) ?? bundle.Placeholder,
     ].filter(Boolean),
     onUpdate: ({ editor: ed }: { editor: TiptapEditor }) => {
+      opts.onLocalEdit?.(); // mark an edit as pending immediately (the save is debounced 1.5s)
       scheduleSave(ed);
     },
     onSelectionUpdate: ({ editor: ed }: { editor: TiptapEditor }) => {
