@@ -562,6 +562,16 @@ export const PLATFORM_CAPABILITY_ADMIN_TABS: Record<string, AdminTabDef> = {
       { key: 'enabled_ai_tools', label: 'Note AI tools the editor may use (JSON array)', textarea: true, save: 'json', rows: 3 },
     ],
   },
+  'note-action-modes': {
+    singular: 'Note Action Routing', plural: 'Note Action Routing', apiPath: 'admin/note-action-modes', listKey: 'note-action-modes',
+    cols: ['tenant_id', 'action_key', 'mode', 'updated_at'],
+    fields: [
+      { key: 'tenant_id', label: 'Tenant ID (blank = global default for this action)' },
+      { key: 'action_key', label: 'Note action', options: ['diagram', 'ink', 'illustration', 'visual', 'restructure'], default: 'diagram' },
+      { key: 'mode', label: 'How it runs', options: ['direct', 'agent', 'supervisor'], default: 'direct' },
+      { key: 'updated_at', label: 'Updated At', readonly: true },
+    ],
+  },
   'cache-metrics': {
     singular: 'Cache Metric', apiPath: 'admin/cache-metrics', listKey: 'cache-metrics',
     readOnly: true,

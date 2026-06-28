@@ -511,6 +511,50 @@ export function registerAdminRoutingRoutes(
     await weaveNotesSettingsPut(req, res);
   }, { auth: true, csrf: true });
 
+  // ── Admin: weaveNotes Action Routing (per-tenant mode for each note AI action) ──
+  // Multi-row CRUD: each row sets, for one (tenant, action), whether it runs direct / agent /
+  // supervisor. tenant_id '' = the global default for that action. Resolution at call time:
+  // tenant row → global row → 'direct'. Edited via the Builder (weaveNotes → Action Routing).
+  const NOTE_ACTION_KEYS = ['diagram', 'ink', 'illustration', 'visual', 'restructure'];
+  const NOTE_ACTION_MODE_VALUES = ['direct', 'agent', 'supervisor'];
+  router.get('/api/admin/note-action-modes', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    json(res, 200, { 'note-action-modes': await db.listNoteActionModes() });
+  });
+  const readActionModeBody = async (req: any): Promise<{ tenant_id: string; action_key: string; mode: string } | { error: string }> => {
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(await readBody(req)); } catch { return { error: 'Invalid JSON' }; }
+    const action_key = String(body['action_key'] ?? '').trim();
+    const mode = String(body['mode'] ?? 'direct').trim();
+    const tenant_id = String(body['tenant_id'] ?? '').trim();
+    if (!NOTE_ACTION_KEYS.includes(action_key)) return { error: `action_key must be one of: ${NOTE_ACTION_KEYS.join(', ')}` };
+    if (!NOTE_ACTION_MODE_VALUES.includes(mode)) return { error: `mode must be one of: ${NOTE_ACTION_MODE_VALUES.join(', ')}` };
+    return { tenant_id, action_key, mode };
+  };
+  router.post('/api/admin/note-action-modes', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const parsed = await readActionModeBody(req);
+    if ('error' in parsed) { json(res, 400, { error: parsed.error }); return; }
+    const id = `noteact-${parsed.tenant_id || 'global'}-${parsed.action_key}`.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80);
+    await db.createNoteActionMode({ id, ...parsed });
+    // The upsert may have merged into an existing (tenant, action) row under its own id — return the
+    // resolved row by key, not by our computed id.
+    const row = (await db.listNoteActionModes()).find((r) => r.tenant_id === parsed.tenant_id && r.action_key === parsed.action_key) ?? null;
+    json(res, 200, { 'note-action-modes': row });
+  }, { auth: true, csrf: true });
+  router.put('/api/admin/note-action-modes/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const parsed = await readActionModeBody(req);
+    if ('error' in parsed) { json(res, 400, { error: parsed.error }); return; }
+    await db.updateNoteActionMode(params['id']!, parsed);
+    json(res, 200, { 'note-action-modes': await db.getNoteActionMode(params['id']!) });
+  }, { auth: true, csrf: true });
+  router.del('/api/admin/note-action-modes/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteNoteActionMode(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
   // ── Admin: Agent Plan Cache Config (Phase 8 single global row) ──
   router.get('/api/admin/agent-plan-cache-config', async (_req, res, _params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }

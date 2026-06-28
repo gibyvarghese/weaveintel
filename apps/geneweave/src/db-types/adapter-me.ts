@@ -478,6 +478,15 @@ export interface NoteActivityRow {
   created_at: string;
 }
 
+/** weaveNotes — per-tenant routing mode for one note AI action (Builder-editable). */
+export interface NoteActionModeRow {
+  id: string;
+  tenant_id: string;   // '' = global default for the action
+  action_key: string;  // diagram | ink | illustration | visual | restructure
+  mode: string;        // direct | agent | supervisor
+  updated_at: string;
+}
+
 export interface UserDeviceRow {
   id: string;
   user_id: string;
@@ -670,6 +679,13 @@ export interface IMeStore {
   // weaveNotes Phase 0 — capability config + activity log
   getWeaveNotesSettings(): Promise<WeaveNotesSettingsRow | null>;
   updateWeaveNotesSettings(fields: Partial<Omit<WeaveNotesSettingsRow, 'id'>>): Promise<void>;
+  // weaveNotes — per-tenant routing mode for each note AI action (direct | agent | supervisor)
+  resolveNoteActionMode(tenantId: string | null, actionKey: string): Promise<'direct' | 'agent' | 'supervisor'>;
+  listNoteActionModes(): Promise<NoteActionModeRow[]>;
+  getNoteActionMode(id: string): Promise<NoteActionModeRow | null>;
+  createNoteActionMode(row: { id: string; tenant_id: string; action_key: string; mode: string }): Promise<void>;
+  updateNoteActionMode(id: string, fields: Partial<Pick<NoteActionModeRow, 'tenant_id' | 'action_key' | 'mode'>>): Promise<void>;
+  deleteNoteActionMode(id: string): Promise<void>;
   recordNoteActivity(row: NoteActivityRow): Promise<void>;
   listNoteActivity(noteId: string, limit?: number): Promise<NoteActivityRow[]>;
   // Registered outbound webhook endpoints

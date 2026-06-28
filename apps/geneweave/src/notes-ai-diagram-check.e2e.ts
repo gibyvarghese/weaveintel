@@ -30,6 +30,13 @@ async function login(page: Page, email: string): Promise<void> {
 async function csrf(page: Page): Promise<string> {
   return (((await (await page.request.get('/api/auth/me')).json()) as { csrfToken?: string }).csrfToken) ?? '';
 }
+// Pin a note action's global routing mode (this test exercises the DIRECT service path).
+async function setActionDirect(page: Page, origin: string, action: string): Promise<void> {
+  const hdr = { 'x-csrf-token': await csrf(page) };
+  const rows = (await (await page.request.get(`${origin}/api/admin/note-action-modes`)).json() as { 'note-action-modes': Array<{ id: string; tenant_id: string; action_key: string }> })['note-action-modes'];
+  const row = rows.find((r) => r.tenant_id === '' && r.action_key === action);
+  if (row) await page.request.put(`${origin}/api/admin/note-action-modes/${row.id}`, { headers: hdr, data: { tenant_id: '', action_key: action, mode: 'direct' } });
+}
 async function clientFor(page: Page): Promise<RunClient> {
   const cookies = await page.context().cookies();
   const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join('; ');
@@ -56,6 +63,7 @@ test('AI diagram — real LLM designs it via geneWeave routing, stages a suggest
   await page.setViewportSize({ width: 1320, height: 1000 });
   const origin = new URL(page.url()).origin;
   const hdr = { 'x-csrf-token': await csrf(page) };
+  await setActionDirect(page, origin, 'diagram');
   const note = await (await page.request.post(`${origin}/api/me/notes`, { headers: hdr, data: { title: 'AI diagram test', doc_json: SEED } })).json() as { id: string };
 
   // The AI designs the diagram (real model call through geneWeave's routing).

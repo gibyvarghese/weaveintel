@@ -9387,6 +9387,36 @@ export class SQLiteAdapter implements DatabaseAdapter {
     const set = keys.map((k) => `${k} = @${k}`).join(', ');
     this.d.prepare(`UPDATE weavenotes_settings SET ${set}, updated_at = datetime('now') WHERE id = 'global'`).run(fields as Record<string, unknown>);
   }
+  // weaveNotes — per-tenant routing mode for a note AI action. Resolution: tenant row → global ('')
+  // row → 'direct'. So a tenant override wins, otherwise the global default, otherwise the safe fast path.
+  async resolveNoteActionMode(tenantId: string | null, actionKey: string): Promise<'direct' | 'agent' | 'supervisor'> {
+    const pick = (tid: string): string | undefined =>
+      (this.d.prepare('SELECT mode FROM note_action_modes WHERE tenant_id = ? AND action_key = ?').get(tid, actionKey) as { mode?: string } | undefined)?.mode;
+    const mode = (tenantId ? pick(tenantId) : undefined) ?? pick('') ?? 'direct';
+    return mode === 'agent' || mode === 'supervisor' ? mode : 'direct';
+  }
+  async listNoteActionModes(): Promise<import('./db-types/adapter-me.js').NoteActionModeRow[]> {
+    return this.d.prepare('SELECT * FROM note_action_modes ORDER BY tenant_id ASC, action_key ASC').all() as import('./db-types/adapter-me.js').NoteActionModeRow[];
+  }
+  async getNoteActionMode(id: string): Promise<import('./db-types/adapter-me.js').NoteActionModeRow | null> {
+    return (this.d.prepare('SELECT * FROM note_action_modes WHERE id = ?').get(id) ?? null) as import('./db-types/adapter-me.js').NoteActionModeRow | null;
+  }
+  async createNoteActionMode(row: { id: string; tenant_id: string; action_key: string; mode: string }): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO note_action_modes (id, tenant_id, action_key, mode, updated_at)
+         VALUES (@id, @tenant_id, @action_key, @mode, datetime('now'))
+       ON CONFLICT(tenant_id, action_key) DO UPDATE SET mode = excluded.mode, updated_at = datetime('now')`,
+    ).run(row);
+  }
+  async updateNoteActionMode(id: string, fields: Partial<Pick<import('./db-types/adapter-me.js').NoteActionModeRow, 'tenant_id' | 'action_key' | 'mode'>>): Promise<void> {
+    const keys = Object.keys(fields);
+    if (!keys.length) return;
+    const set = keys.map((k) => `${k} = @${k}`).join(', ');
+    this.d.prepare(`UPDATE note_action_modes SET ${set}, updated_at = datetime('now') WHERE id = @id`).run({ ...fields, id });
+  }
+  async deleteNoteActionMode(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM note_action_modes WHERE id = ?').run(id);
+  }
   async recordNoteActivity(row: import('./db-types/adapter-me.js').NoteActivityRow): Promise<void> {
     this.d.prepare(
       `INSERT INTO note_activity (id, note_id, user_id, tenant_id, action, actor, summary, detail_json, created_at)

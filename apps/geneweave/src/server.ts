@@ -299,24 +299,24 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     // weaveNotes Editor worker (workersOverride) and NO direct note tools (toolsOverride: []), so it
     // must hand the work to the specialist rather than calling the tool itself. Uses an ephemeral
     // chat that is deleted afterwards so the user's chat history stays clean.
-    runNoteAgentAction: async ({ userId, noteId, instruction }) => {
+    runNoteAgentAction: async ({ userId, noteId, instruction, mode }) => {
       const chatId = `note-agent-${noteId.slice(0, 8)}-${Math.random().toString(36).slice(2, 10)}`;
-      // Build the weaveNotes Editor worker definition from the seeded worker_agents row so the
-      // supervisor delegates to the same specialist that helps in chat.
-      let workersOverride: import('./chat-runtime.js').WorkerDef[] | undefined;
-      try {
-        const editor = (await db.listEnabledWorkerAgents()).find((w) => w.name === 'weavenotes_editor');
-        if (editor) {
-          let tools: string[]; try { tools = JSON.parse(editor.tool_names ?? '[]') as string[]; } catch { tools = []; }
-          workersOverride = [{ name: editor.name, description: editor.description ?? 'Co-authors the user’s notes.', tools, persona: editor.persona ?? 'agent_worker' }];
-        }
-      } catch { /* fall back to default supervisor topology below */ }
+      // In SUPERVISOR mode, give the supervisor ONLY the weaveNotes Editor worker (from the seeded
+      // worker_agents row) and NO direct note tools, so it MUST delegate to the specialist. In AGENT
+      // mode the single chat agent calls the note tool itself (the tools are force-registered).
+      let overrides: { workersOverride?: import('./chat-runtime.js').WorkerDef[]; toolsOverride?: string[] } = {};
+      if (mode === 'supervisor') {
+        try {
+          const editor = (await db.listEnabledWorkerAgents()).find((w) => w.name === 'weavenotes_editor');
+          if (editor) {
+            let tools: string[]; try { tools = JSON.parse(editor.tool_names ?? '[]') as string[]; } catch { tools = []; }
+            overrides = { workersOverride: [{ name: editor.name, description: editor.description ?? 'Co-authors the user’s notes.', tools, persona: editor.persona ?? 'agent_worker' }], toolsOverride: [] };
+          }
+        } catch { /* fall back to default supervisor topology */ }
+      }
       try {
         await db.createChat({ id: chatId, userId, title: 'weaveNotes assistant', model: chatEngine.modelConfig.defaultModel, provider: chatEngine.modelConfig.defaultProvider });
-        const r = await chatEngine.sendMessage(userId, chatId, instruction, {
-          modeOverride: 'supervisor',
-          ...(workersOverride ? { workersOverride, toolsOverride: [] } : {}),
-        });
+        const r = await chatEngine.sendMessage(userId, chatId, instruction, { modeOverride: mode, ...overrides });
         return { ok: Boolean(r.assistantContent?.trim()), content: r.assistantContent };
       } finally {
         try { await db.deleteChat(chatId, userId); } catch { /* best-effort cleanup */ }

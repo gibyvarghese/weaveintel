@@ -32,6 +32,14 @@ async function login(page: Page, email: string): Promise<void> {
 async function csrf(page: Page): Promise<string> {
   return (((await (await page.request.get('/api/auth/me')).json()) as { csrfToken?: string }).csrfToken) ?? '';
 }
+// Pin a note action's global routing mode to 'direct' (these tests exercise the DIRECT service path:
+// smart placement + restructure-to-outline). The agent-path tests below drive the chat agent directly.
+async function setActionDirect(page: Page, origin: string, action: string): Promise<void> {
+  const hdr = { 'x-csrf-token': await csrf(page) };
+  const rows = (await (await page.request.get(`${origin}/api/admin/note-action-modes`)).json() as { 'note-action-modes': Array<{ id: string; tenant_id: string; action_key: string }> })['note-action-modes'];
+  const row = rows.find((r) => r.tenant_id === '' && r.action_key === action);
+  if (row) await page.request.put(`${origin}/api/admin/note-action-modes/${row.id}`, { headers: hdr, data: { tenant_id: '', action_key: action, mode: 'direct' } });
+}
 async function clientFor(page: Page): Promise<RunClient> {
   const cookies = await page.context().cookies();
   const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join('; ');
@@ -79,6 +87,7 @@ test.describe('smart placement (real LLM)', () => {
     await login(page, OWNER);
     const origin = new URL(page.url()).origin;
     const hdr = { 'x-csrf-token': await csrf(page) };
+    await setActionDirect(page, origin, 'diagram');
     const note = await (await page.request.post(`${origin}/api/me/notes`, { headers: hdr, data: { title: 'Bio placement', doc_json: BIO } })).json() as { id: string };
 
     const r = await page.request.post(`${origin}/api/me/notes/${note.id}/ai/diagram`, { headers: hdr, data: { instruction: 'Draw a simple flow diagram of PHOTOSYNTHESIS: light + water + carbon dioxide → glucose + oxygen.' } });
@@ -109,6 +118,7 @@ test('AI restructure — reorganises the whole note to a desired outline, staged
   await page.setViewportSize({ width: 1320, height: 1100 });
   const origin = new URL(page.url()).origin;
   const hdr = { 'x-csrf-token': await csrf(page) };
+  await setActionDirect(page, origin, 'restructure');
   const note = await (await page.request.post(`${origin}/api/me/notes`, { headers: hdr, data: { title: 'Bio restructure', doc_json: BIO, page_theme: 'creative' } })).json() as { id: string };
 
   const outline = 'Photosynthesis\nRespiration\nThe cell\nGenetics\nEcology';

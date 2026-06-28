@@ -112,17 +112,11 @@ export function wireSelectionCard(opts: { container: HTMLElement; noteId: string
   const highlight = (color: string) => () => void send('ai/highlight', { phrase: savedText, color }, 'highlighting');
   const colorize = (scheme: string) => () => void send('ai/colorize', { scheme }, 'colour-coding');
   // Phase 4 (creative expansion): the one-stop "Visualize" — the AI picks the kind (or you force it).
-  // Diagram / sketch / auto run THROUGH THE SUPERVISOR (it delegates to the weaveNotes Editor worker,
-  // which calls create_diagram / draw_ink / create_visual). A realistic image stays on the direct
-  // path (its generate_image tool is intentionally not agent-registered — it costs money).
-  const visualize = (kind: string) => () => {
-    const label = kind === 'image' ? 'generating an image' : kind === 'illustration' ? 'illustrating' : kind === 'diagram' ? 'drawing a diagram' : kind === 'ink' ? 'sketching' : 'visualizing';
-    if (kind === 'image' || kind === 'illustration') {
-      return void send('ai/visual', { instruction: savedText || 'a visual for this note', kind }, label);
-    }
-    const action = kind === 'ink' ? 'ink' : kind === 'diagram' ? 'diagram' : 'visual';
-    return void send('ai/agent', { action, kind, instruction: savedText || '' }, `the assistant is ${label}`);
-  };
+  // The /ai/visual endpoint routes per the tenant's configured mode for that kind (direct / agent /
+  // supervisor — set in the Builder under weaveNotes → Action Routing). A realistic image is always
+  // direct (its generate_image tool is intentionally not agent-registered — it costs money).
+  const visualize = (kind: string) => () => void send('ai/visual', { instruction: savedText || 'a visual for this note', kind },
+    kind === 'image' ? 'generating an image' : kind === 'illustration' ? 'illustrating' : kind === 'diagram' ? 'drawing a diagram' : kind === 'ink' ? 'sketching' : 'visualizing');
 
   function openCard(): void {
     if (!savedRect) return;

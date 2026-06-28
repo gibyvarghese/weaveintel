@@ -132,6 +132,7 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
   ]},
   { label: 'weaveNotes', icon: '\uD83D\uDCDD', tabs: [
     { key: 'weavenotes-settings', label: 'Settings' },
+    { key: 'note-action-modes', label: 'Action Routing' },
   ]},
   { label: 'Monitoring', icon: '\uD83D\uDCCA', tabs: [
     { key: 'workflow-runs', label: 'Runs' },

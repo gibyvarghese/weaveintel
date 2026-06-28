@@ -114,7 +114,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
    *  chat engine in server.ts. Lets the "Make a diagram" / "Restructure" buttons drive the supervisor
    *  via the API — the worker calls the same create_diagram / restructure_note tool, staging a
    *  suggestion on the note. The supervisor run uses an ephemeral chat that is deleted afterwards. */
-  runNoteAgentAction?: (args: { userId: string; noteId: string; instruction: string }) => Promise<{ ok: boolean; content?: string }>;
+  runNoteAgentAction?: (args: { userId: string; noteId: string; instruction: string; mode: 'agent' | 'supervisor' }) => Promise<{ ok: boolean; content?: string }>;
 } = {}): void {
   const notes = opts.noteRepository ?? createSqlNoteRepository(db);
   // weaveNotes Phase 3: the AI co-author service (suggestions, agent edits, AI blocks).
@@ -577,8 +577,49 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     res.end(JSON.stringify(r));
   }, { auth: true });
 
+  // Build the natural, first-person instruction handed to the agent/supervisor for a note action.
+  // (First-person "my own note" phrasing keeps a benign "reorganise the structure" clear of the
+  // prompt-injection guardrail.) Referencing the note id tells the worker which note to act on.
+  function buildNoteAgentPrompt(action: string, noteId: string, o: { instruction?: string; outline?: string; kind?: string }): string {
+    const instruction = (o.instruction ?? '').slice(0, 2000);
+    const outline = (o.outline ?? '').slice(0, 4000);
+    const kind = o.kind ?? '';
+    if (action === 'restructure') return `This is my own note (id ${noteId}) and I'd like your help tidying it up. Please reorganise its sections into a clearer, more logical order and fix the heading levels, keeping all of the existing content. Stage it as a suggestion for me to review.${outline ? `\n\nI'd like the sections in roughly this order:\n${outline}` : ''}`;
+    if (action === 'visual') { const k = kind && kind !== 'auto' ? kind : 'visual'; return `This is my own note (id ${noteId}). Please add a ${k} to it${instruction ? `: ${instruction}` : ' that fits the content'}, staged as a suggestion for me to review.`; }
+    if (action === 'ink') return `This is my own note (id ${noteId}). Please sketch ${instruction || 'a small freehand drawing that fits the content'} in it, staged as a suggestion for me to review.`;
+    if (action === 'illustration') return `This is my own note (id ${noteId}). Please add an illustration to it${instruction ? `: ${instruction}` : ' that fits the content'}, staged as a suggestion for me to review.`;
+    return `This is my own note (id ${noteId}). Please draw a diagram in it${instruction ? `: ${instruction}` : ' summarising the content'}, staged as a suggestion for me to review.`;
+  }
+
+  /**
+   * Resolve the configured routing MODE for a note action (per tenant, Builder-editable) and run it:
+   *   - `direct`     → call the note service directly (one focused LLM call; fastest).
+   *   - `agent`      → the chat agent calls the note tool itself.
+   *   - `supervisor` → the supervisor delegates to the weaveNotes Editor worker.
+   * For agent/supervisor we snapshot the note's pending suggestions, run the engine, and return what
+   * the worker newly staged — so the response shape stays the same for the UI (a staged suggestion).
+   */
+  async function performNoteAiAction(
+    actionKey: string,
+    noteId: string,
+    access: NonNullable<Awaited<ReturnType<typeof resolveNoteAccess>>>,
+    directFn: () => Promise<{ ok: boolean; error?: string; suggestionId?: string; preview?: string; action?: string }>,
+    promptArgs: { instruction?: string; outline?: string; kind?: string },
+  ): Promise<{ status: number; body: Record<string, unknown> }> {
+    const mode = await db.resolveNoteActionMode(access.tenantId, actionKey);
+    if (mode === 'direct' || !opts.runNoteAgentAction) {
+      const r = await directFn();
+      return { status: r.ok ? 201 : 400, body: { ...r, via: 'direct' } };
+    }
+    const beforeIds = new Set((await db.listNoteSuggestions(noteId, 'pending')).map((s) => s.id));
+    const r = await opts.runNoteAgentAction({ userId: access.ownerId, noteId, instruction: buildNoteAgentPrompt(actionKey, noteId, promptArgs), mode });
+    const staged = (await db.listNoteSuggestions(noteId, 'pending')).filter((s) => !beforeIds.has(s.id)).map((s) => ({ id: s.id, action: s.action }));
+    return { status: staged.length ? 201 : 200, body: { ok: staged.length > 0, via: mode, staged, suggestionId: staged[0]?.id ?? null, action: staged[0]?.action, assistant: r.content ?? '' } };
+  }
+
   // weaveNotes Phase 4: the AI creative endpoints (a diagram / freehand ink), registered BEFORE
   // the `/ai/:action` param route. The "✦ Make a diagram" card chip + the slash menu call these.
+  // Each is CONFIG-DRIVEN: the per-tenant `note_action_modes` row decides direct / agent / supervisor.
   //   POST /api/me/notes/:id/ai/diagram   { instruction }  → a diagram suggestion
   //   POST /api/me/notes/:id/ai/ink       { instruction }  → an ink suggestion
   router.post('/api/me/notes/:id/ai/diagram', async (req, res, params, auth) => {
@@ -589,10 +630,12 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     if (!roleAtLeast(access.role, 'collaborator')) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
     let body: Record<string, unknown> = {};
     try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
-    const instruction = typeof body['instruction'] === 'string' && body['instruction'].trim() ? body['instruction'] : 'Make a clear diagram of this note.';
-    const r = await noteCreative.createDiagram({ noteId: params['id']!, access, instruction });
-    res.writeHead(r.ok ? 201 : 400, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(r));
+    const userInstruction = typeof body['instruction'] === 'string' && body['instruction'].trim() ? body['instruction'] : '';
+    const out = await performNoteAiAction('diagram', params['id']!, access,
+      () => noteCreative!.createDiagram({ noteId: params['id']!, access, instruction: userInstruction || 'Make a clear diagram of this note.' }),
+      { instruction: userInstruction });
+    res.writeHead(out.status, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(out.body));
   }, { auth: true });
 
   router.post('/api/me/notes/:id/ai/ink', async (req, res, params, auth) => {
@@ -604,9 +647,12 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     let body: Record<string, unknown> = {};
     try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
     if (typeof body['instruction'] !== 'string' || !body['instruction'].trim()) { res.writeHead(400); res.end(JSON.stringify({ error: 'instruction required' })); return; }
-    const r = await noteCreative.drawInk({ noteId: params['id']!, access, instruction: body['instruction'] });
-    res.writeHead(r.ok ? 201 : 400, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(r));
+    const inkInstruction = body['instruction'];
+    const out = await performNoteAiAction('ink', params['id']!, access,
+      () => noteCreative!.drawInk({ noteId: params['id']!, access, instruction: inkInstruction }),
+      { instruction: inkInstruction });
+    res.writeHead(out.status, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(out.body));
   }, { auth: true });
 
   // Reorganise the WHOLE note: the AI rewrites it into a clearer structure and stages it as one
@@ -620,9 +666,12 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     if (!roleAtLeast(access.role, 'collaborator')) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
     let body: Record<string, unknown> = {};
     try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
-    const r = await withAiPresence(db, params['id']!, () => noteAi.restructure({ noteId: params['id']!, access, ...(typeof body['outline'] === 'string' && body['outline'].trim() ? { outline: body['outline'] } : {}) }));
-    res.writeHead(r.ok ? 201 : 400, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(r));
+    const outline = typeof body['outline'] === 'string' && body['outline'].trim() ? body['outline'] : '';
+    const out = await performNoteAiAction('restructure', params['id']!, access,
+      () => withAiPresence(db, params['id']!, () => noteAi!.restructure({ noteId: params['id']!, access, ...(outline ? { outline } : {}) })),
+      { outline });
+    res.writeHead(out.status, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(out.body));
   }, { auth: true });
 
   // Run a note action THROUGH THE SUPERVISOR (it delegates to the weaveNotes Editor worker, which
@@ -640,29 +689,17 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     let body: Record<string, unknown> = {};
     try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
     const action = typeof body['action'] === 'string' ? body['action'] : 'diagram';
-    const instruction = typeof body['instruction'] === 'string' ? body['instruction'].slice(0, 2000) : '';
-    const outline = typeof body['outline'] === 'string' ? body['outline'].slice(0, 4000) : '';
-    const kind = typeof body['kind'] === 'string' ? body['kind'] : '';
-
-    // Synthesise a natural instruction for the supervisor. It references the note id so the worker
-    // knows which note to act on; natural phrasing keeps it clear of the prompt-injection guard.
-    // Phrase as a clear, first-person request about the user's OWN note. (Borderline "reorganise
-    // the structure" phrasing can otherwise read like a prompt-injection to the guardrail.)
-    let prompt: string;
-    if (action === 'restructure') {
-      prompt = `This is my own note (id ${noteId}) and I'd like your help tidying it up. Please reorganise its sections into a clearer, more logical order and fix the heading levels, keeping all of the existing content. Stage it as a suggestion for me to review.${outline ? `\n\nI'd like the sections in roughly this order:\n${outline}` : ''}`;
-    } else if (action === 'visual') {
-      const k = kind && kind !== 'auto' ? kind : 'visual';
-      prompt = `This is my own note (id ${noteId}). Please add a ${k} to it${instruction ? `: ${instruction}` : ' that fits the content'}, staged as a suggestion for me to review.`;
-    } else if (action === 'ink') {
-      prompt = `This is my own note (id ${noteId}). Please sketch ${instruction || 'a small freehand drawing that fits the content'} in it, staged as a suggestion for me to review.`;
-    } else { // diagram (default)
-      prompt = `This is my own note (id ${noteId}). Please draw a diagram in it${instruction ? `: ${instruction}` : ' summarising the content'}, staged as a suggestion for me to review.`;
-    }
-
-    // Snapshot the note's pending suggestions, run the supervisor, then return what it newly staged.
+    // Snapshot the note's pending suggestions, run the supervisor (explicit — this endpoint always
+    // delegates to the worker, regardless of the per-action config), then return what it newly staged.
     const beforeIds = new Set((await db.listNoteSuggestions(noteId, 'pending')).map((s) => s.id));
-    const r = await opts.runNoteAgentAction({ userId: auth.userId, noteId, instruction: prompt });
+    const r = await opts.runNoteAgentAction({
+      userId: auth.userId, noteId, mode: 'supervisor',
+      instruction: buildNoteAgentPrompt(action, noteId, {
+        instruction: typeof body['instruction'] === 'string' ? body['instruction'] : '',
+        outline: typeof body['outline'] === 'string' ? body['outline'] : '',
+        kind: typeof body['kind'] === 'string' ? body['kind'] : '',
+      }),
+    });
     const staged = (await db.listNoteSuggestions(noteId, 'pending'))
       .filter((s) => !beforeIds.has(s.id))
       .map((s) => ({ id: s.id, action: s.action }));
@@ -688,9 +725,46 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
       res.end(JSON.stringify(r));
     }, { auth: true });
 
-  creativeRoute('illustration', (noteId, access, body) => noteCreative!.createIllustration({ noteId, access, instruction: typeof body['instruction'] === 'string' && body['instruction'].trim() ? body['instruction'] : 'an illustration of this note' }));
+  // illustration + visual are CONFIG-DRIVEN (per-tenant note_action_modes). For "visual" the action
+  // key is the chosen kind (diagram/ink/illustration → that action's mode; auto → 'visual'). image is
+  // ALWAYS direct (its generate_image tool is intentionally not agent-registered — it costs money).
+  router.post('/api/me/notes/:id/ai/illustration', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    if (!noteCreative) { res.writeHead(501); res.end(JSON.stringify({ error: 'AI features are not configured' })); return; }
+    const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    if (!roleAtLeast(access.role, 'collaborator')) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    const instruction = typeof body['instruction'] === 'string' && body['instruction'].trim() ? body['instruction'] : '';
+    const out = await performNoteAiAction('illustration', params['id']!, access,
+      () => noteCreative!.createIllustration({ noteId: params['id']!, access, instruction: instruction || 'an illustration of this note' }),
+      { instruction });
+    res.writeHead(out.status, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(out.body));
+  }, { auth: true });
+
+  router.post('/api/me/notes/:id/ai/visual', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    if (!noteCreative) { res.writeHead(501); res.end(JSON.stringify({ error: 'AI features are not configured' })); return; }
+    const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    if (!roleAtLeast(access.role, 'collaborator')) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    const instruction = typeof body['instruction'] === 'string' && body['instruction'].trim() ? body['instruction'] : '';
+    const kind = typeof body['kind'] === 'string' ? body['kind'] : 'auto';
+    // The config key is the concrete kind (so an admin can route "diagram" but keep "illustration"
+    // direct); 'auto' resolves the generic 'visual' row. 'image' is never agent-routed.
+    const actionKey = kind === 'image' ? 'image' : (kind && kind !== 'auto' ? kind : 'visual');
+    const out = await performNoteAiAction(actionKey, params['id']!, access,
+      () => noteCreative!.createVisual({ noteId: params['id']!, access, instruction: instruction || 'a visual for this note', kind: kind as 'auto' | 'diagram' | 'ink' | 'illustration' | 'image' }),
+      { instruction, kind });
+    res.writeHead(out.status, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(out.body));
+  }, { auth: true });
+
   creativeRoute('image', (noteId, access, body) => noteCreative!.generateImage({ noteId, access, instruction: typeof body['instruction'] === 'string' && body['instruction'].trim() ? body['instruction'] : 'an image for this note' }));
-  creativeRoute('visual', (noteId, access, body) => noteCreative!.createVisual({ noteId, access, instruction: typeof body['instruction'] === 'string' && body['instruction'].trim() ? body['instruction'] : 'a visual for this note', ...(typeof body['kind'] === 'string' ? { kind: body['kind'] as 'auto' | 'diagram' | 'ink' | 'illustration' | 'image' } : {}) }));
 
   // ── weaveNotes Phase 5: flashcards + spaced repetition (active-recall study) ──
   //   POST /api/me/notes/:id/flashcards       make a deck from the note            (collaborator+)
