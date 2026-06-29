@@ -24,10 +24,12 @@ import {
   buildOpenverseUrl, buildWikimediaUrl, buildUnsplashUrl, buildPexelsUrl, buildPixabayUrl,
   parseOpenverse, parseWikimedia, parseUnsplash, parsePexels, parsePixabay,
   makeFence, fenceUntrusted, spotlightPreamble,
+  buildDiagramJudge, parseDiagramVerdict, diagramRegenFeedback, diagramAccept, VERIFY_EARLY_STOP_DELTA,
+  buildImageVerify, parseImageVerdict, imageAccept, type DiagramVerdict, type ImageVerdict,
 } from '@weaveintel/notes';
-import { newUUIDv7, weaveContext, hardenedFetch } from '@weaveintel/core';
+import { newUUIDv7, weaveContext, hardenedFetch, type ModelRequest } from '@weaveintel/core';
 import { roleAtLeast } from '@weaveintel/collaboration';
-import type { ChatEngineConfig } from './chat-runtime.js';
+import { getOrCreateModel, type ChatEngineConfig } from './chat-runtime.js';
 import { createNoteCoeditRepo, resolveNoteAccess, type NoteAccess } from './note-coedit-sql.js';
 import { isSafePublicUrl } from './note-capture-sql.js';
 import { noteCoeditHub } from './note-coedit-hub.js';
@@ -40,6 +42,9 @@ type NoteCreativeDb = DatabaseAdapter;
 
 /** Generate a raster image from a prompt; returns base64 PNG (no data-uri prefix) or null. */
 export type NoteImageGenerate = (opts: { prompt: string; model?: string; size?: string; userId?: string; tenantId?: string | null }) => Promise<string | null>;
+/** Phase 1: a MULTIMODAL model call — sends an image (base64) + a text prompt to a vision model and
+ *  returns its text reply. Used to verify a found/generated image actually depicts the subject. */
+export type NoteVisionVerify = (opts: { system: string; user: string; base64: string; mimeType: string; userId?: string; tenantId?: string | null }) => Promise<string>;
 
 export type VisualKind = 'auto' | 'diagram' | 'ink' | 'illustration' | 'image';
 
@@ -56,7 +61,7 @@ function extractJson(raw: string, kind: 'object' | 'array'): unknown {
   try { return JSON.parse(t.slice(start, end + 1)); } catch { return kind === 'array' ? [] : {}; }
 }
 
-export function createNoteCreativeService(db: NoteCreativeDb, generate: NoteAiGenerate, opts: { now?: () => number; generateImage?: NoteImageGenerate } = {}) {
+export function createNoteCreativeService(db: NoteCreativeDb, generate: NoteAiGenerate, opts: { now?: () => number; generateImage?: NoteImageGenerate; verifyVision?: NoteVisionVerify } = {}) {
   const now = opts.now ?? (() => Date.now());
   const relay = createNoteCoeditRepo(db, { now });
   const settings = createNoteSettingsService(db);
@@ -133,16 +138,56 @@ export function createNoteCreativeService(db: NoteCreativeDb, generate: NoteAiGe
   }
 
   /** The model produces a diagram SCENE; we validate (WCAG-AA colours) + stage it as a suggestion. */
+  const DIAGRAM_SYS = 'You design a small, clear diagram as JSON: {"kind":"flow|mindmap|graph","title":"…","nodes":[{"id":"…","label":"…","color":"…","shape":"box|pill|diamond|ellipse"}],"edges":[{"from":"id","to":"id","label":"…"}]}. Colours are ONE of: amber, pink, teal, blue, lavender, peach, sage, sky (pick with intent — e.g. a decision node amber). Keep it to at most 8 nodes. Output ONLY the JSON.';
+
+  /** Generate ONE diagram scene (optionally with a correction from the judge for a redraw). */
+  async function genDiagramScene(instruction: string, fence: string, markdown: string, access: NoteAccess, correction: string): Promise<DiagramScene> {
+    const user = `Request (untrusted data): ${fenceUntrusted(instruction, fence)}\n\nNote context (untrusted data):\n${fenceUntrusted(markdown.slice(0, 3000), fence)}${correction ? `\n\nCorrection from a quality check (apply it): ${correction}` : ''}`;
+    const reply = await generate({ system: `${spotlightPreamble(fence)}\n\n${DIAGRAM_SYS}`, user, userId: access.ownerId, tenantId: access.tenantId, temperature: correction ? 0.2 : 0.3, maxTokens: 1200 });
+    return validateDiagramScene(extractJson(reply, 'object'));
+  }
+
+  /** LLM-as-judge: score how well a diagram covers the request (Phase 1 visual verify). */
+  async function judgeDiagram(instruction: string, scene: DiagramScene, threshold: number): Promise<DiagramVerdict> {
+    const { system, user } = buildDiagramJudge(instruction, JSON.stringify({ kind: scene.kind, title: scene.title, nodes: scene.nodes.map((n) => ({ id: n.id, label: n.label })), edges: scene.edges }));
+    const reply = await generate({ system, user, temperature: 0, maxTokens: 700 });
+    return parseDiagramVerdict(reply, threshold);
+  }
+
+  /** Phase 1: produce a diagram SCENE, then VERIFY it against the request and REDRAW the weak ones
+   *  (feeding the judge's missing/extra deltas back), keeping the best attempt. Then stage it. */
   async function createDiagramInner(input: { noteId: string; access: NoteAccess; instruction: string }): Promise<CreativeResult> {
+    const config = await cfg();
     const view = await relay.ensureDoc({ noteId: input.noteId, tenantId: input.access.tenantId, ownerId: input.access.ownerId, seedPm: await seedFor(input.noteId, input.access.ownerId) });
     const fence = makeFence(); // Phase 0-D: spotlight the untrusted instruction + note context
-    const sys = `${spotlightPreamble(fence)}\n\nYou design a small, clear diagram as JSON: {"kind":"flow|mindmap|graph","title":"…","nodes":[{"id":"…","label":"…","color":"…","shape":"box|pill|diamond|ellipse"}],"edges":[{"from":"id","to":"id","label":"…"}]}. Colours are ONE of: amber, pink, teal, blue, lavender, peach, sage, sky (pick with intent — e.g. a decision node amber). Keep it to at most 8 nodes. Output ONLY the JSON.`;
-    const reply = await generate({ system: sys, user: `Request (untrusted data): ${fenceUntrusted(input.instruction, fence)}\n\nNote context (untrusted data):\n${fenceUntrusted(view.markdown.slice(0, 3000), fence)}`, userId: input.access.ownerId, tenantId: input.access.tenantId, temperature: 0.3, maxTokens: 1200 });
-    const scene: DiagramScene = validateDiagramScene(extractJson(reply, 'object'));
-    if (scene.nodes.length === 0) return { ok: false, error: 'the model produced no diagram', action: 'create_diagram' };
-    const svg = diagramToSvg(scene, { style: 'sketch' });
-    const preview = `Diagram: ${scene.title ?? 'untitled'} (${scene.nodes.length} node${scene.nodes.length === 1 ? '' : 's'})`;
-    return stageInsert(input.noteId, input.access, 'create_diagram', 'diagram', { scene, title: scene.title ?? '', kind: scene.kind ?? 'flow', author: 'ai' }, preview, { svg }, `a diagram titled "${scene.title ?? input.instruction.slice(0, 50)}"`);
+
+    let best: DiagramScene = await genDiagramScene(input.instruction, fence, view.markdown, input.access, '');
+    if (best.nodes.length === 0) return { ok: false, error: 'the model produced no diagram', action: 'create_diagram' };
+
+    let bestVerdict: DiagramVerdict | null = null;
+    if (config.visualVerifyEnabled) {
+      const threshold = config.visualVerifyThreshold;
+      let verdict = await judgeDiagram(input.instruction, best, threshold);
+      bestVerdict = verdict;
+      noteCoeditHub.broadcast(input.noteId, 'coedit.ai.progress', { action: 'create_diagram', stage: 'verifying', score: verdict.overall });
+      for (let attempt = 1; attempt <= config.visualVerifyMaxRetries && !diagramAccept(verdict, threshold); attempt++) {
+        noteCoeditHub.broadcast(input.noteId, 'coedit.ai.progress', { action: 'create_diagram', stage: 'redrawing', attempt, score: verdict.overall });
+        const redraw = await genDiagramScene(input.instruction, fence, view.markdown, input.access, diagramRegenFeedback(verdict));
+        if (redraw.nodes.length === 0) break; // model abstained (e.g. an anatomy request is not a diagram)
+        const v2 = await judgeDiagram(input.instruction, redraw, threshold);
+        if (v2.overall > bestVerdict.overall) { best = redraw; bestVerdict = v2; } // keep the best attempt
+        const improved = v2.overall - verdict.overall;
+        verdict = v2;
+        if (diagramAccept(v2, threshold) || improved < VERIFY_EARLY_STOP_DELTA) break; // accepted, or converged
+      }
+    }
+
+    const svg = diagramToSvg(best, { style: 'sketch' });
+    const fitPart = bestVerdict ? ` · fit ${Math.round(bestVerdict.overall * 100)}%` : '';
+    const preview = `Diagram: ${best.title ?? 'untitled'} (${best.nodes.length} node${best.nodes.length === 1 ? '' : 's'})${fitPart}`;
+    return stageInsert(input.noteId, input.access, 'create_diagram', 'diagram',
+      { scene: best, title: best.title ?? '', kind: best.kind ?? 'flow', author: 'ai', ...(bestVerdict ? { verifyScore: bestVerdict.overall } : {}) },
+      preview, { svg }, `a diagram titled "${best.title ?? input.instruction.slice(0, 50)}"`);
   }
 
   /** The model AUTHORS a detailed SVG illustration; we sanitise it + embed it as an inert image. */
@@ -302,13 +347,34 @@ export function createNoteCreativeService(db: NoteCreativeDb, generate: NoteAiGe
     // 3) Context-aware ranking: the model orders the candidates by fit to the request, note + language.
     const order = await rankCandidatesByContext(candidates, rawText.slice(0, 200), docContext, language);
 
-    // 4) Download in that order — a few tries — so a dead/blocked URL falls through to the next best.
-    let pick: ImageResult | null = null; let payload: { bytes: Buffer; mime: string } | null = null; let lastErr = '';
+    // 4) Download in rank order — a few tries — and (Phase 1) VISION-VERIFY each: a vision model
+    //    LOOKS at the image and confirms it actually depicts the subject (good quality + safe) before
+    //    we use it. Reject + try the next candidate otherwise. Better NO image than a WRONG image.
+    const wantVerify = config.imageVerifyEnabled && !!opts.verifyVision;
+    const subject = (queries[0] ?? rawText).slice(0, 200);
+    let pick: ImageResult | null = null; let payload: { bytes: Buffer; mime: string } | null = null; let lastErr = ''; let verdict: ImageVerdict | null = null;
+    let rejected = 0;
     for (const idx of order.slice(0, 5)) {
       const cand = candidates[idx]; if (!cand) continue;
-      try { payload = await downloadImage(cand.url); pick = cand; break; } catch (e) { lastErr = e instanceof Error ? e.message : 'error'; }
+      let p: { bytes: Buffer; mime: string };
+      try { p = await downloadImage(cand.url); } catch (e) { lastErr = e instanceof Error ? e.message : 'error'; continue; }
+      if (!wantVerify) { pick = cand; payload = p; break; }
+      noteCoeditHub.broadcast(input.noteId, 'coedit.ai.progress', { action: 'find_image', stage: 'checking_image' });
+      try {
+        const { system, user } = buildImageVerify(subject);
+        const reply = await opts.verifyVision!({ system, user, base64: p.bytes.toString('base64'), mimeType: p.mime, userId: input.access.ownerId, tenantId: input.access.tenantId });
+        const v = parseImageVerdict(reply);
+        if (imageAccept(v, config.imageVerifyMinConfidence)) { pick = cand; payload = p; verdict = v; break; }
+        rejected++; lastErr = `vision check: ${v.reason || 'did not clearly depict the subject'}`;
+      } catch {
+        // A flaky/unavailable verify must not block the feature — accept the download if the check itself errors.
+        pick = cand; payload = p; break;
+      }
     }
-    if (!pick || !payload) return { ok: false, error: `could not fetch a usable image: ${lastErr || 'no candidate worked'}`, action: 'find_image' };
+    if (!pick || !payload) {
+      const why = wantVerify && rejected > 0 ? `no free-to-use image clearly depicted "${subject}" (checked ${rejected})` : `could not fetch a usable image: ${lastErr || 'no candidate worked'}`;
+      return { ok: false, error: why, action: 'find_image' };
+    }
 
     let artifactId: string | null = null;
     try {
@@ -323,10 +389,11 @@ export function createNoteCreativeService(db: NoteCreativeDb, generate: NoteAiGe
 
     const attribution = buildAttribution(pick);
     const alt = (queries[0] ?? rawText).slice(0, 80);
+    const verifyNote = verdict ? ` · verified ${Math.round(verdict.confidence * 100)}%` : '';
     return stageInsert(
       input.noteId, input.access, 'find_image', 'image',
-      { src: `/api/artifacts/${artifactId}/data`, alt, caption: config.imageSearchRequireAttribution ? attribution : '', href: pick.sourceUrl ?? pick.licenseUrl ?? '', license: pick.license, author: 'ai' },
-      `Image: ${attribution}`, { artifactId }, `an image of ${alt.slice(0, 50)}`,
+      { src: `/api/artifacts/${artifactId}/data`, alt, caption: config.imageSearchRequireAttribution ? attribution : '', href: pick.sourceUrl ?? pick.licenseUrl ?? '', license: pick.license, author: 'ai', ...(verdict ? { verifyConfidence: verdict.confidence } : {}) },
+      `Image: ${attribution}${verifyNote}`, { artifactId }, `an image of ${alt.slice(0, 50)}`,
     );
   }
 
@@ -428,10 +495,37 @@ export function createModelImageGenerator(modelConfig: ChatEngineConfig): NoteIm
   };
 }
 
+/**
+ * Phase 1: a MULTIMODAL verifier — sends an image (base64) + a text question to the default chat model
+ * (gpt-4o-mini class models are vision-capable) and returns the reply. Used to verify that a found
+ * image actually depicts the requested subject. Throws on model error so the caller can decide to
+ * accept-on-failure rather than block the feature.
+ */
+export function createModelVisionVerifier(modelConfig: ChatEngineConfig): NoteVisionVerify {
+  return async ({ system, user, base64, mimeType, userId, tenantId }) => {
+    const provider = modelConfig.defaultProvider;
+    const model = await getOrCreateModel(provider, modelConfig.defaultModel, modelConfig.providers[provider] ?? {});
+    const ctx = weaveContext({ userId, tenantId: tenantId ?? undefined, runtime: modelConfig.runtime });
+    const request: ModelRequest = {
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: [
+          { type: 'text', text: user },
+          { type: 'image', base64, mimeType }, // the providers map this → OpenAI image_url / Anthropic image block
+        ] },
+      ],
+      maxTokens: 500,
+      temperature: 0,
+    };
+    const res = await model.generate(ctx, request);
+    return typeof res.content === 'string' ? res.content : '';
+  };
+}
+
 // ─── Agent-tool entry points (resolve access themselves; viewers refused) ───────────
 
 /** The creative TOOLS the chat agent can call. Each resolves note access itself (no escalation). */
-export function createCreativeTools(db: NoteCreativeDb, generate: NoteAiGenerate, opts: { now?: () => number; generateImage?: NoteImageGenerate } = {}) {
+export function createCreativeTools(db: NoteCreativeDb, generate: NoteAiGenerate, opts: { now?: () => number; generateImage?: NoteImageGenerate; verifyVision?: NoteVisionVerify } = {}) {
   const svc = createNoteCreativeService(db, generate, opts);
   async function access(userId: string, noteId: string): Promise<NoteAccess | { error: string }> {
     const a = await resolveNoteAccess(db, noteId, userId);

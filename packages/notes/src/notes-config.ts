@@ -50,6 +50,17 @@ export interface WeaveNotesConfig {
   imageGenerationEnabled: boolean;
   /** Phase 4: the image model used when image generation is enabled. */
   imageModel: string;
+  /** Phase 1 (visual correctness): CHECK an AI diagram against the request with an LLM judge and
+   *  redraw if it scores too low (so a diagram actually covers what you asked for). */
+  visualVerifyEnabled: boolean;
+  /** Accept a diagram when its 0–1 structural score is ≥ this (lower = more lenient). */
+  visualVerifyThreshold: number;
+  /** How many times to redraw a too-low diagram before keeping the best attempt (gains plateau after ~2). */
+  visualVerifyMaxRetries: number;
+  /** Phase 1: a vision model LOOKS at a found/AI image and confirms it depicts the subject before inserting. */
+  imageVerifyEnabled: boolean;
+  /** Accept an image when the vision check's 0–1 confidence is ≥ this (and it is good quality + safe). */
+  imageVerifyMinConfidence: number;
   /** Phase 5: let the AI turn a note into flashcards + schedule reviews (SM-2 spaced repetition). */
   flashcardsEnabled: boolean;
   /** Phase 5: cap how many NEW cards a study session introduces per day (active-recall pacing). */
@@ -119,6 +130,11 @@ export const DEFAULT_WEAVENOTES_CONFIG: WeaveNotesConfig = {
   illustrationEnabled: true,
   imageGenerationEnabled: false, // off by default: raster image generation costs money + needs an image model
   imageModel: 'gpt-image-1',
+  visualVerifyEnabled: true,
+  visualVerifyThreshold: 0.7,
+  visualVerifyMaxRetries: 2,
+  imageVerifyEnabled: true,
+  imageVerifyMinConfidence: 0.7,
   flashcardsEnabled: true,
   dailyNewCardLimit: 20,
   mobileOfflineEnabled: true,
@@ -172,6 +188,14 @@ export function validateWeaveNotesConfig(
   const aiRate = clampInt(p.aiRatePerMinPerUser ?? base.aiRatePerMinPerUser, 1, 100_000, base.aiRatePerMinPerUser);
   if (p.aiRatePerMinPerUser !== undefined && aiRate !== Math.trunc(Number(p.aiRatePerMinPerUser))) warnings.push(`AI rate clamped to ${aiRate} actions/min per user (1–100000).`);
 
+  const clamp01 = (v: unknown, fallback: number): number => { const n = Number(v); return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : fallback; };
+  const verifyThreshold = clamp01(p.visualVerifyThreshold ?? base.visualVerifyThreshold, base.visualVerifyThreshold);
+  if (p.visualVerifyThreshold !== undefined && verifyThreshold !== Number(p.visualVerifyThreshold)) warnings.push(`Diagram verify threshold clamped to ${verifyThreshold} (0–1).`);
+  const imageMinConf = clamp01(p.imageVerifyMinConfidence ?? base.imageVerifyMinConfidence, base.imageVerifyMinConfidence);
+  if (p.imageVerifyMinConfidence !== undefined && imageMinConf !== Number(p.imageVerifyMinConfidence)) warnings.push(`Image verify confidence clamped to ${imageMinConf} (0–1).`);
+  const verifyRetries = clampInt(p.visualVerifyMaxRetries ?? base.visualVerifyMaxRetries, 0, 5, base.visualVerifyMaxRetries);
+  if (p.visualVerifyMaxRetries !== undefined && verifyRetries !== Math.trunc(Number(p.visualVerifyMaxRetries))) warnings.push(`Diagram verify retries clamped to ${verifyRetries} (0–5).`);
+
   let tools = base.enabledAiTools;
   if (p.enabledAiTools !== undefined) {
     const arr = Array.isArray(p.enabledAiTools) ? p.enabledAiTools.map(String) : [];
@@ -223,6 +247,11 @@ export function validateWeaveNotesConfig(
       illustrationEnabled: asBool(p.illustrationEnabled ?? base.illustrationEnabled, base.illustrationEnabled),
       imageGenerationEnabled: asBool(p.imageGenerationEnabled ?? base.imageGenerationEnabled, base.imageGenerationEnabled),
       imageModel: typeof p.imageModel === 'string' && p.imageModel.trim() ? p.imageModel.trim().slice(0, 64) : base.imageModel,
+      visualVerifyEnabled: asBool(p.visualVerifyEnabled ?? base.visualVerifyEnabled, base.visualVerifyEnabled),
+      visualVerifyThreshold: verifyThreshold,
+      visualVerifyMaxRetries: verifyRetries,
+      imageVerifyEnabled: asBool(p.imageVerifyEnabled ?? base.imageVerifyEnabled, base.imageVerifyEnabled),
+      imageVerifyMinConfidence: imageMinConf,
       flashcardsEnabled: asBool(p.flashcardsEnabled ?? base.flashcardsEnabled, base.flashcardsEnabled),
       dailyNewCardLimit: clampInt(p.dailyNewCardLimit ?? base.dailyNewCardLimit, 1, 1000, base.dailyNewCardLimit),
       mobileOfflineEnabled: asBool(p.mobileOfflineEnabled ?? base.mobileOfflineEnabled, base.mobileOfflineEnabled),

@@ -15,6 +15,22 @@ export {
   spotlight,
 } from './prompt-safety.js';
 export {
+  type DiagramVerdict,
+  type ImageVerdict,
+  DIAGRAM_WEIGHTS,
+  DEFAULT_DIAGRAM_THRESHOLD,
+  DEFAULT_MAX_VERIFY_RETRIES,
+  VERIFY_EARLY_STOP_DELTA,
+  DEFAULT_IMAGE_MIN_CONFIDENCE,
+  buildDiagramJudge,
+  parseDiagramVerdict,
+  diagramRegenFeedback,
+  diagramAccept,
+  buildImageVerify,
+  parseImageVerdict,
+  imageAccept,
+} from './visual-verify.js';
+export {
   type NoteSensitivity,
   type NoteLinkTargetKind,
   type NoteDatabaseSource,

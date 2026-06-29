@@ -45,6 +45,11 @@ function rowToConfig(row: WeaveNotesSettingsRow | null): WeaveNotesConfig {
     illustrationEnabled: row.illustration_enabled !== 0,
     imageGenerationEnabled: row.image_generation_enabled === 1, // default OFF (undefined → off)
     ...(typeof row.image_model === 'string' && row.image_model ? { imageModel: row.image_model } : {}),
+    visualVerifyEnabled: row.visual_verify_enabled !== 0, // undefined (pre-m121) → enabled
+    ...(typeof row.visual_verify_threshold === 'number' ? { visualVerifyThreshold: row.visual_verify_threshold } : {}),
+    ...(typeof row.visual_verify_max_retries === 'number' ? { visualVerifyMaxRetries: row.visual_verify_max_retries } : {}),
+    imageVerifyEnabled: row.image_verify_enabled !== 0,
+    ...(typeof row.image_verify_min_confidence === 'number' ? { imageVerifyMinConfidence: row.image_verify_min_confidence } : {}),
     flashcardsEnabled: row.flashcards_enabled !== 0, // undefined (pre-m110) → enabled
     ...(typeof row.daily_new_card_limit === 'number' ? { dailyNewCardLimit: row.daily_new_card_limit } : {}),
     mobileOfflineEnabled: row.mobile_offline_enabled !== 0,  // undefined (pre-m112) → enabled
@@ -93,6 +98,11 @@ export function createNoteSettingsService(db: SettingsDb, opts: { now?: () => nu
       illustration_enabled: config.illustrationEnabled ? 1 : 0,
       image_generation_enabled: config.imageGenerationEnabled ? 1 : 0,
       image_model: config.imageModel,
+      visual_verify_enabled: config.visualVerifyEnabled ? 1 : 0,
+      visual_verify_threshold: config.visualVerifyThreshold,
+      visual_verify_max_retries: config.visualVerifyMaxRetries,
+      image_verify_enabled: config.imageVerifyEnabled ? 1 : 0,
+      image_verify_min_confidence: config.imageVerifyMinConfidence,
       flashcards_enabled: config.flashcardsEnabled ? 1 : 0,
       daily_new_card_limit: config.dailyNewCardLimit,
       mobile_offline_enabled: config.mobileOfflineEnabled ? 1 : 0,

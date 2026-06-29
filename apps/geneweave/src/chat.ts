@@ -56,7 +56,7 @@ import { DbToolApprovalGate } from './tool-approval-gate.js';
 import { createTemporalStore } from './temporal-store.js';
 import { createNoteAiService, createModelTextGenerator, agentCreateNote, agentNewFromTemplate, agentRecentNotes, agentExportNote } from './note-ai-sql.js';
 import { createColorizeTools } from './note-colorize-sql.js';
-import { createCreativeTools, createModelImageGenerator } from './note-creative-sql.js';
+import { createCreativeTools, createModelImageGenerator, createModelVisionVerifier } from './note-creative-sql.js';
 import { createStudyTool } from './note-study-sql.js';
 import { withAiPresence } from './note-ai-presence.js';
 import { createNotePublishService } from './note-publish-sql.js';
@@ -464,7 +464,7 @@ export class ChatEngine {
         createCreativeTools(db, createModelTextGenerator(config), { generateImage: createModelImageGenerator(config) }).createVisual(a as { userId: string; noteId: string; instruction: string; kind?: 'auto' | 'diagram' | 'ink' | 'illustration' | 'image' }),
       // weaveNotes: wire the find_image tool — source a real, free-to-use image from the web (hardened fetch).
       noteFindImage: (a: { userId: string; noteId: string; query: string }) =>
-        createCreativeTools(db, createModelTextGenerator(config), { generateImage: createModelImageGenerator(config) }).findImage(a),
+        createCreativeTools(db, createModelTextGenerator(config), { generateImage: createModelImageGenerator(config), verifyVision: createModelVisionVerifier(config) }).findImage(a),
       // weaveNotes Phase 5: wire the make_flashcards tool — turn a note into a spaced-repetition deck.
       noteMakeFlashcards: (a: { userId: string; noteId: string; count?: number }) =>
         createStudyTool(db, createModelTextGenerator(config)).makeFlashcards(a),

@@ -20,7 +20,7 @@ import { SQLiteAdapter } from './db-sqlite.js';
 import { createSqliteA2ATaskStore } from '@weaveintel/a2a';
 import type { ChatEngine } from './chat.js';
 import { createModelTextGenerator } from './note-ai-sql.js';
-import { createModelImageGenerator } from './note-creative-sql.js';
+import { createModelImageGenerator, createModelVisionVerifier } from './note-creative-sql.js';
 import type { VoiceEngine } from './voice-engine.js';
 import { DashboardService } from './dashboard.js';
 import { SPA_HTML, STYLES_CSP_HASH, SCRIPT_CSP_HASHES } from './ui-server.js';
@@ -291,6 +291,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   registerMeNotesRoutes(router, db, {
     aiGenerate: createModelTextGenerator(chatEngine.modelConfig),
     imageGenerate: createModelImageGenerator(chatEngine.modelConfig),
+    verifyVision: createModelVisionVerifier(chatEngine.modelConfig),
     jwtSecret,
     ...(publicBaseUrl ? { publicBaseUrl } : {}),
     // Run a note action through the geneWeave SUPERVISOR, which DELEGATES to the weaveNotes Editor

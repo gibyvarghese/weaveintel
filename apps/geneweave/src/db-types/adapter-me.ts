@@ -438,6 +438,12 @@ export interface WeaveNotesSettingsRow {
   max_ai_tokens_per_edit: number;
   /** weaveNotes Phase 0 hardening: per-user AI actions/minute cap (m120). Optional for old DBs. */
   ai_rate_per_min_per_user?: number;
+  /** weaveNotes Phase 1 visual-correctness verify dials (m121). Optional for old DBs. */
+  visual_verify_enabled?: number;
+  visual_verify_threshold?: number;
+  visual_verify_max_retries?: number;
+  image_verify_enabled?: number;
+  image_verify_min_confidence?: number;
   local_model_for_sensitive: number;
   /** weaveNotes Phase 3: show live collaborator cursors (0/1). */
   live_cursors_enabled: number;

@@ -480,6 +480,11 @@ export function registerAdminRoutingRoutes(
     if (body['illustration_enabled'] !== undefined) partial['illustrationEnabled'] = body['illustration_enabled'];
     if (body['image_generation_enabled'] !== undefined) partial['imageGenerationEnabled'] = body['image_generation_enabled'];
     if (body['image_model'] !== undefined) partial['imageModel'] = body['image_model'];
+    if (body['visual_verify_enabled'] !== undefined) partial['visualVerifyEnabled'] = body['visual_verify_enabled'];
+    if (body['visual_verify_threshold'] !== undefined) partial['visualVerifyThreshold'] = body['visual_verify_threshold'];
+    if (body['visual_verify_max_retries'] !== undefined) partial['visualVerifyMaxRetries'] = body['visual_verify_max_retries'];
+    if (body['image_verify_enabled'] !== undefined) partial['imageVerifyEnabled'] = body['image_verify_enabled'];
+    if (body['image_verify_min_confidence'] !== undefined) partial['imageVerifyMinConfidence'] = body['image_verify_min_confidence'];
     if (body['flashcards_enabled'] !== undefined) partial['flashcardsEnabled'] = body['flashcards_enabled'];
     if (body['daily_new_card_limit'] !== undefined) partial['dailyNewCardLimit'] = body['daily_new_card_limit'];
     if (body['mobile_offline_enabled'] !== undefined) partial['mobileOfflineEnabled'] = body['mobile_offline_enabled'];

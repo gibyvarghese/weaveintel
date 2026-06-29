@@ -113,6 +113,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
   noteRepository?: NoteRepository;
   aiGenerate?: NoteAiGenerate;
   imageGenerate?: import('../note-creative-sql.js').NoteImageGenerate;
+  verifyVision?: import('../note-creative-sql.js').NoteVisionVerify;
   jwtSecret?: string;
   publicBaseUrl?: string;
   /** weaveNotes: run a note action THROUGH the geneWeave SUPERVISOR (which delegates to the
@@ -130,7 +131,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
   // colour-code by meaning). Same LLM-optional wiring as the co-author service.
   const noteColorize = opts.aiGenerate ? createNoteColorizeService(db, opts.aiGenerate) : null;
   // weaveNotes Phase 4: the AI creative service (diagrams + ink). Same LLM-optional wiring.
-  const noteCreative = opts.aiGenerate ? createNoteCreativeService(db, opts.aiGenerate, opts.imageGenerate ? { generateImage: opts.imageGenerate } : {}) : null;
+  const noteCreative = opts.aiGenerate ? createNoteCreativeService(db, opts.aiGenerate, { ...(opts.imageGenerate ? { generateImage: opts.imageGenerate } : {}), ...(opts.verifyVision ? { verifyVision: opts.verifyVision } : {}) }) : null;
   // weaveNotes Phase 5: the AI study service (flashcards + SM-2 spaced repetition).
   const noteStudy = opts.aiGenerate ? createNoteStudyService(db, opts.aiGenerate) : null;
   // weaveNotes Phase 4: the publish service (note → shareable artifact, sensitivity-gated).
