@@ -46,6 +46,7 @@ import {
 } from './workflow-engine.js';
 import { startToolHealthJob } from './tool-health-job.js';
 import { startArtifactRetentionJob } from './artifact-retention-job.js';
+import { startNoteActivityRetentionJob } from './note-activity-retention-job.js';
 import {
   createTriggerDispatcher,
   createDurableTriggerRateLimiter,
@@ -637,6 +638,9 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
 
   // m77 Phase 1: Start artifact retention job (runs at startup + every 6 h)
   startArtifactRetentionJob(db);
+
+  // weaveNotes Phase 0-B: prune note activity older than the configured retention horizon.
+  startNoteActivityRetentionJob(db);
 
   // 5-EN. Phase 1 (Tenant Encryption): bootstrap the per-tenant key
   // manager wired to SQLite-backed EncryptionStore + audit emitter.

@@ -533,7 +533,7 @@ export const PLATFORM_CAPABILITY_ADMIN_TABS: Record<string, AdminTabDef> = {
   },
   'weavenotes-settings': {
     singular: 'weaveNotes Settings', plural: 'weaveNotes Settings', apiPath: 'admin/weavenotes-settings', listKey: 'weavenotes-settings',
-    cols: ['default_theme', 'agency_color_enabled', 'ai_suggestions_require_approval', 'activity_tracking_enabled', 'max_ai_tokens_per_edit'],
+    cols: ['default_theme', 'ai_suggestions_require_approval', 'activity_tracking_enabled', 'activity_retention_days', 'max_ai_tokens_per_edit', 'ai_rate_per_min_per_user'],
     fields: [
       { key: 'default_theme', label: 'Default theme', options: ['pro', 'creative'], default: 'pro' },
       { key: 'agency_color_enabled', label: 'Colour encodes agency (AI = mint, human ink = coral)', type: 'checkbox', save: 'bool', default: true },
@@ -575,6 +575,24 @@ export const PLATFORM_CAPABILITY_ADMIN_TABS: Record<string, AdminTabDef> = {
       { key: 'action_key', label: 'Note action', options: ['diagram', 'ink', 'illustration', 'visual', 'restructure', 'find_image'], default: 'diagram' },
       { key: 'mode', label: 'How it runs', options: ['direct', 'agent', 'supervisor'], default: 'direct' },
       { key: 'updated_at', label: 'Updated At', readonly: true },
+    ],
+  },
+  // Phase 0-B — the weaveNotes Activity / Audit feed: a read-only, tenant-scoped record of every note
+  // action (who/what/when, by a person or the AI). Keyset-paginated + CSV/JSON/JSONL export via
+  // /api/admin/note-activity. The same log the AI reads to understand "what changed" before it edits.
+  'note-activity': {
+    singular: 'Note Activity', plural: 'Note Activity', apiPath: 'admin/note-activity', listKey: 'note-activity',
+    readOnly: true,
+    cols: ['created_at', 'actor', 'action', 'note_title', 'summary', 'user_id'],
+    fields: [
+      { key: 'created_at', label: 'When', readonly: true },
+      { key: 'actor', label: 'Who (user / ai)', readonly: true },
+      { key: 'action', label: 'What', readonly: true },
+      { key: 'note_title', label: 'Note', readonly: true },
+      { key: 'summary', label: 'Summary', readonly: true, textarea: true, rows: 2 },
+      { key: 'user_id', label: 'User', readonly: true },
+      { key: 'note_id', label: 'Note ID', readonly: true },
+      { key: 'id', label: 'Event ID', readonly: true },
     ],
   },
   'cache-metrics': {

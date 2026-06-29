@@ -64,6 +64,46 @@ describe('svg — sanitizeSvg (SECURITY: strips every active vector)', () => {
   });
 });
 
+describe('svg — sanitizeSvg (Phase 0-D hardening: namespace + SMIL + data-URI + allowlist)', () => {
+  it('catches NAMESPACE-PREFIXED dangerous elements (<svg:script>, <x:foreignObject>)', () => {
+    const s = sanitizeSvg('<svg><svg:script>alert(1)</svg:script><x:foreignObject><b>hi</b></x:foreignObject><rect/></svg>')!;
+    expect(s.toLowerCase()).not.toContain('script');
+    expect(s.toLowerCase()).not.toContain('foreignobject');
+    expect(s).toContain('<rect');
+  });
+  it('strips ALL SMIL animation (animate can mutate an attr to javascript: after sanitising)', () => {
+    const s = sanitizeSvg('<svg><animate attributeName="href" values="javascript:alert(1)"/><set attributeName="onload" to="alert(1)"/><animateTransform/><mpath/><rect/></svg>')!;
+    for (const t of ['<animate', '<set', '<animatetransform', '<mpath']) expect(s.toLowerCase()).not.toContain(t);
+    expect(s).not.toContain('javascript:');
+  });
+  it('rejects data:text/html and data:image/svg+xml hrefs but keeps a safe raster data:image', () => {
+    const s = sanitizeSvg('<svg><a href="data:text/html,<script>alert(1)</script>"><rect/></a><image href="data:image/svg+xml;base64,PHN2Zz4="/><image href="data:image/png;base64,iVBORw0KGgo="/></svg>')!;
+    expect(s).not.toContain('data:text/html');
+    expect(s).not.toContain('data:image/svg+xml');
+    expect(s).toContain('data:image/png;base64'); // safe raster preserved
+  });
+  it('defangs control-char-obfuscated javascript: in href (java\\tscript:)', () => {
+    const s = sanitizeSvg('<svg><a href="java\tscript:alert(1)"><rect/></a></svg>')!;
+    expect(s.replace(/\s/g, '').toLowerCase()).not.toContain('javascript:alert');
+  });
+  it('strips vbscript: and an xmlns binding to the XHTML namespace', () => {
+    const s = sanitizeSvg('<svg xmlns:h="http://www.w3.org/1999/xhtml"><a href="vbscript:msgbox(1)"><rect/></a></svg>')!;
+    expect(s.toLowerCase()).not.toContain('vbscript:');
+    expect(s.toLowerCase()).not.toContain('1999/xhtml');
+  });
+  it('FAIL-CLOSED: an unknown/novel element has its tag stripped (allowlist)', () => {
+    const s = sanitizeSvg('<svg><weirdcustomtag onload="x()">text</weirdcustomtag><rect/></svg>')!;
+    expect(s.toLowerCase()).not.toContain('weirdcustomtag');
+    expect(s).not.toMatch(/onload/i);
+    expect(s).toContain('<rect'); // the safe element survives
+  });
+  it('keeps the full safe allowlist (gradients, filters, text) intact', () => {
+    const rich = '<svg viewBox="0 0 10 10"><defs><linearGradient id="g"><stop offset="0" stop-color="#fff"/></linearGradient><filter id="f"><feGaussianBlur stdDeviation="1"/></filter></defs><g><path d="M0 0L10 10"/><text x="1" y="9"><tspan>hi</tspan></text></g></svg>';
+    const s = sanitizeSvg(rich)!;
+    for (const el of ['lineargradient', 'stop', 'filter', 'fegaussianblur', '<g', '<path', '<text', '<tspan']) expect(s.toLowerCase()).toContain(el);
+  });
+});
+
 describe('svg — data URIs', () => {
   it('makes an inert data:image/svg+xml URI', () => {
     const uri = svgToDataUri('<svg><rect/></svg>');

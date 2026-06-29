@@ -9448,6 +9448,32 @@ export class SQLiteAdapter implements DatabaseAdapter {
   async listNoteActivity(noteId: string, limit = 50): Promise<import('./db-types/adapter-me.js').NoteActivityRow[]> {
     return this.d.prepare('SELECT * FROM note_activity WHERE note_id = ? ORDER BY created_at DESC, id DESC LIMIT ?').all(noteId, Math.max(1, Math.min(500, limit))) as import('./db-types/adapter-me.js').NoteActivityRow[];
   }
+  // Phase 0-B — TENANT-scoped audit feed for the admin/compliance viewer + export.
+  // KEYSET pagination on (created_at, id) DESC — NOT offset, which on a live append-only log would
+  // skip/duplicate rows as new events land. tenant_id is null-safe (`IS ?`). Joins the note title.
+  async listTenantNoteActivity(tenantId: string | null, opts: import('./db-types/adapter-me.js').NoteActivityQuery = {}): Promise<Array<import('./db-types/adapter-me.js').NoteActivityRow & { note_title?: string | null }>> {
+    const limit = Math.max(1, Math.min(1000, opts.limit ?? 100));
+    const where: string[] = ['a.tenant_id IS ?'];
+    const args: unknown[] = [tenantId ?? null];
+    if (opts.action) { where.push('a.action = ?'); args.push(opts.action); }
+    if (opts.actor) { where.push('a.actor = ?'); args.push(opts.actor); }
+    if (opts.userId) { where.push('a.user_id = ?'); args.push(opts.userId); }
+    if (opts.noteId) { where.push('a.note_id = ?'); args.push(opts.noteId); }
+    if (opts.fromDate) { where.push('a.created_at >= ?'); args.push(opts.fromDate); }
+    if (opts.toDate) { where.push('a.created_at <= ?'); args.push(opts.toDate); }
+    // Keyset cursor: fetch the page strictly OLDER than (beforeCreatedAt, beforeId).
+    if (opts.beforeCreatedAt && opts.beforeId) { where.push('(a.created_at, a.id) < (?, ?)'); args.push(opts.beforeCreatedAt, opts.beforeId); }
+    args.push(limit);
+    return this.d.prepare(
+      `SELECT a.*, n.title AS note_title FROM note_activity a LEFT JOIN notes n ON n.id = a.note_id
+       WHERE ${where.join(' AND ')} ORDER BY a.created_at DESC, a.id DESC LIMIT ?`,
+    ).all(...args as never[]) as Array<import('./db-types/adapter-me.js').NoteActivityRow & { note_title?: string | null }>;
+  }
+  // Phase 0-B — retention pruning. Deletes activity older than the cutoff ISO timestamp. Returns count.
+  async pruneNoteActivity(beforeIso: string): Promise<number> {
+    const info = this.d.prepare('DELETE FROM note_activity WHERE created_at < ?').run(beforeIso);
+    return info.changes ?? 0;
+  }
 
   // Registered outbound webhook endpoints.
   async createWebhookEndpoint(row: { id: string; tenant_id?: string | null; user_id: string; url: string; signing_secret: string; created_at: number }): Promise<void> {

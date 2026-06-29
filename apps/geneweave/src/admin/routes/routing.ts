@@ -564,6 +564,58 @@ export function registerAdminRoutingRoutes(
     json(res, 200, { ok: true });
   }, { auth: true, csrf: true });
 
+  // ── Admin: weaveNotes Activity / Audit (Phase 0-B) ──────────────────────────────────────────
+  // A read-only, TENANT-scoped compliance feed of every note action (who / what / when, user or AI),
+  // with KEYSET pagination (stable on a live append-only log) + filters, plus a CSV/JSON/JSONL export.
+  // Always scoped to the admin's own tenant (auth.tenantId) — never cross-tenant.
+  const buildActivityQuery = (req: IncomingMessage): import('../../db-types/adapter-me.js').NoteActivityQuery => {
+    const u = new URL(req.url ?? '', 'http://localhost');
+    const q: import('../../db-types/adapter-me.js').NoteActivityQuery = {};
+    const lim = Number.parseInt(u.searchParams.get('limit') ?? '', 10);
+    if (Number.isFinite(lim)) q.limit = lim;
+    for (const k of ['action', 'actor', 'userId', 'noteId', 'fromDate', 'toDate', 'beforeCreatedAt', 'beforeId'] as const) {
+      const v = u.searchParams.get(k);
+      if (v) (q as Record<string, unknown>)[k] = v;
+    }
+    return q;
+  };
+  router.get('/api/admin/note-activity', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const q = buildActivityQuery(req);
+    q.limit = Math.max(1, Math.min(500, q.limit ?? 100));
+    const rows = await db.listTenantNoteActivity(auth.tenantId ?? null, q);
+    // Keyset cursor for the NEXT (older) page: pass back the last row's (created_at, id).
+    const last = rows[rows.length - 1];
+    const nextCursor = rows.length >= q.limit && last ? { beforeCreatedAt: last.created_at, beforeId: last.id } : null;
+    json(res, 200, { 'note-activity': rows, nextCursor });
+  }, { auth: true });
+  router.get('/api/admin/note-activity/export', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const u = new URL(req.url ?? '', 'http://localhost');
+    const format = (u.searchParams.get('format') ?? 'csv').toLowerCase();
+    const q = buildActivityQuery(req);
+    q.limit = Math.max(1, Math.min(10000, q.limit ?? 10000)); // bounded export
+    const rows = await db.listTenantNoteActivity(auth.tenantId ?? null, q);
+    const cols = ['created_at', 'actor', 'action', 'user_id', 'note_id', 'note_title', 'summary', 'id'] as const;
+    if (format === 'json') {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Disposition': 'attachment; filename="note-activity.json"' });
+      res.end(JSON.stringify(rows, null, 2)); return;
+    }
+    if (format === 'jsonl') { // one JSON object per line — SIEM/stream-friendly, constant memory
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'Content-Disposition': 'attachment; filename="note-activity.jsonl"' });
+      res.end(rows.map((r) => JSON.stringify(r)).join('\n') + (rows.length ? '\n' : '')); return;
+    }
+    // CSV (default). Quote everything; defeat CSV FORMULA INJECTION by prefixing a leading =,+,-,@ with '.
+    const cell = (v: unknown): string => {
+      let s = v == null ? '' : String(v);
+      if (/^[=+\-@]/.test(s)) s = `'${s}`;
+      return `"${s.replace(/"/g, '""')}"`;
+    };
+    const csv = [cols.join(','), ...rows.map((r) => cols.map((c) => cell((r as unknown as Record<string, unknown>)[c])).join(','))].join('\n');
+    res.writeHead(200, { 'Content-Type': 'text/csv', 'Content-Disposition': 'attachment; filename="note-activity.csv"' });
+    res.end(csv);
+  }, { auth: true });
+
   // ── Admin: Agent Plan Cache Config (Phase 8 single global row) ──
   router.get('/api/admin/agent-plan-cache-config', async (_req, res, _params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }

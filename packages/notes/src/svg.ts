@@ -18,8 +18,36 @@
 
 const MAX_SVG = 200_000; // 200 KB — a generous cap for a hand-authored illustration
 
-/** Elements that can execute or escape the SVG sandbox — removed wholesale (with their content). */
-const DANGEROUS_ELEMENTS = ['script', 'foreignobject', 'iframe', 'embed', 'object', 'audio', 'video', 'animate', 'animatetransform', 'animatemotion', 'set', 'handler', 'listener'];
+/** Elements that can execute or escape the SVG sandbox — removed wholesale (with their content).
+ *  Includes SMIL animation (can mutate an attr to javascript: AFTER sanitising), <foreignObject>
+ *  (embeds HTML), media, and <style> (CSS @import/url()/expression). */
+const DANGEROUS_ELEMENTS = ['script', 'foreignobject', 'iframe', 'embed', 'object', 'audio', 'video', 'animate', 'animatetransform', 'animatemotion', 'mpath', 'set', 'handler', 'listener', 'style'];
+
+/** Allowlist of safe SVG drawing elements. After the denylist pass we FAIL CLOSED: any tag not in
+ *  this set has its tag stripped (its inert text content is kept). Mirrors DOMPurify's SVG profile.
+ *  NOTE: this is a hardened regex sanitizer for AI-/app-authored SVG. For arbitrary attacker-uploaded
+ *  SVG the gold standard is an allowlist XML PARSER (e.g. @xmldom/xmldom); tracked as a follow-up so
+ *  this package stays zero-dependency. */
+const ALLOWED_SVG_ELEMENTS = new Set([
+  'svg', 'g', 'defs', 'symbol', 'use', 'title', 'desc', 'metadata', 'switch', 'view',
+  'path', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon',
+  'text', 'tspan', 'textpath', 'tref',
+  'lineargradient', 'radialgradient', 'stop', 'clippath', 'mask', 'pattern', 'marker', 'image',
+  'filter', 'fegaussianblur', 'feoffset', 'feblend', 'fecolormatrix', 'femerge', 'femergenode',
+  'feflood', 'fecomposite', 'femorphology', 'fetile', 'feturbulence', 'fedropshadow', 'fedisplacementmap',
+]);
+
+/** A URL value is safe inside an SVG only if it is a same-document fragment (#id) or an inert raster
+ *  data URI. This rejects javascript:, external http(s)/file, data:text/html and data:image/svg+xml. */
+function isSafeSvgUrl(raw: string): boolean {
+  // Drop every char with code <= 0x20 (spaces, tabs, newlines, NULs) so a `java\tscript:` /
+  // `java\nscript:` style bypass can't hide the scheme; then lowercase and test.
+  let v = '';
+  for (const ch of raw) if (ch.charCodeAt(0) > 0x20) v += ch;
+  v = v.toLowerCase();
+  if (v.startsWith('#')) return true;
+  return /^data:image\/(?:png|jpe?g|gif|webp)[;,]/.test(v);
+}
 
 /**
  * Sanitise an untrusted SVG string. Returns inert, storable SVG markup, or `null` if it has no
@@ -49,25 +77,34 @@ export function sanitizeSvg(input: unknown): string | null {
   if (svgEnd === -1) return null;
   s = s.slice(svgStart, svgEnd + 6);
 
-  // Remove dangerous elements together with their content (handles nested + self-closing).
+  // Remove dangerous elements together with their content. The `(?:[\w.-]+:)?` matches an optional
+  // NAMESPACE PREFIX so `<svg:script>` / `<x:foreignObject>` (a classic filter bypass) are caught too.
   for (const el of DANGEROUS_ELEMENTS) {
-    s = s.replace(new RegExp(`<${el}\\b[\\s\\S]*?</${el}\\s*>`, 'gi'), '');
-    s = s.replace(new RegExp(`<${el}\\b[^>]*/>`, 'gi'), '');
-    s = s.replace(new RegExp(`<${el}\\b[^>]*>`, 'gi'), '');
+    s = s.replace(new RegExp(`<(?:[\\w.-]+:)?${el}\\b[\\s\\S]*?</(?:[\\w.-]+:)?${el}\\s*>`, 'gi'), '');
+    s = s.replace(new RegExp(`<(?:[\\w.-]+:)?${el}\\b[^>]*/>`, 'gi'), '');
+    s = s.replace(new RegExp(`<(?:[\\w.-]+:)?${el}\\b[^>]*>`, 'gi'), '');
   }
+
+  // FAIL-CLOSED allowlist pass: strip the TAG of any element NOT on the allowlist (keeping its inert
+  // text). Namespace-aware. This stops novel/unknown elements (and namespace-prefixed ones) slipping
+  // through the denylist above.
+  s = s.replace(/<\/?(?:[\w.-]+:)?([a-zA-Z][\w-]*)\b[^>]*>/g, (m, name: string) =>
+    ALLOWED_SVG_ELEMENTS.has(String(name).toLowerCase()) ? m : '');
 
   // Strip every event-handler attribute: on...="..." / on...='...' / on...=bare.
   s = s.replace(/\son[a-z0-9_-]+\s*=\s*"[^"]*"/gi, '');
   s = s.replace(/\son[a-z0-9_-]+\s*=\s*'[^']*'/gi, '');
   s = s.replace(/\son[a-z0-9_-]+\s*=\s*[^\s>]+/gi, '');
 
-  // Neutralise any href / xlink:href that is not a same-document fragment (#id). This kills
-  // javascript:, data:, and external URLs (which could leak / load remote content).
-  s = s.replace(/\s(?:xlink:)?href\s*=\s*"([^"]*)"/gi, (m, v: string) => (v.trim().startsWith('#') ? m : ''));
-  s = s.replace(/\s(?:xlink:)?href\s*=\s*'([^']*)'/gi, (m, v: string) => (v.trim().startsWith('#') ? m : ''));
+  // Neutralise any href / xlink:href that is not a same-document fragment (#id) or an inert raster
+  // data URI. This kills javascript:, external URLs, data:text/html and data:image/svg+xml.
+  s = s.replace(/\s(?:[\w-]+:)?href\s*=\s*"([^"]*)"/gi, (m, v: string) => (isSafeSvgUrl(v) ? m : ''));
+  s = s.replace(/\s(?:[\w-]+:)?href\s*=\s*'([^']*)'/gi, (m, v: string) => (isSafeSvgUrl(v) ? m : ''));
 
-  // Belt-and-braces: remove any literal `javascript:` left in an attribute value.
-  s = s.replace(/javascript:/gi, '');
+  // Belt-and-braces: remove any literal `javascript:`/`vbscript:` left anywhere.
+  s = s.replace(/(?:javascript|vbscript)\s*:/gi, '');
+  // Strip any xmlns binding to the HTML or MathML namespaces (foreign-content / mXSS vector).
+  s = s.replace(/\sxmlns:[\w-]+\s*=\s*"[^"]*(?:1999\/xhtml|mathml)[^"]*"/gi, '');
   // Remove `style="… url(…) …"` and `expression(` to stop CSS-based fetches/execution.
   s = s.replace(/\sstyle\s*=\s*"[^"]*(?:url\s*\(|expression\s*\()[^"]*"/gi, '');
   s = s.replace(/\sstyle\s*=\s*'[^']*(?:url\s*\(|expression\s*\()[^']*'/gi, '');

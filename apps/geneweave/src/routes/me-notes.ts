@@ -934,6 +934,9 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
     if (!roleAtLeast(access.role, 'collaborator')) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
     const r = await noteAi.accept(params['sid']!, auth.userId, access);
+    // Phase 0-B audit: when an AI suggestion is ACCEPTED, the AI change actually lands in the note —
+    // record it (actor 'ai') so the audit feed + the AI's own "what changed" context both see it.
+    if (r.ok) void noteSettings.recordActivity({ noteId: params['id']!, userId: auth.userId, tenantId: access.tenantId ?? null, action: 'ai_edit', actor: 'ai', summary: 'Accepted an AI suggestion' });
     res.writeHead(r.ok ? 200 : 400, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(r));
   }, { auth: true });
@@ -945,6 +948,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
     if (!roleAtLeast(access.role, 'collaborator')) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
     const r = await noteAi.reject(params['sid']!, auth.userId, access);
+    if (r.ok) void noteSettings.recordActivity({ noteId: params['id']!, userId: auth.userId, tenantId: access.tenantId ?? null, action: 'updated', actor: 'user', summary: 'Rejected an AI suggestion' });
     res.writeHead(r.ok ? 200 : 400, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(r));
   }, { auth: true });

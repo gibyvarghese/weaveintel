@@ -30,6 +30,9 @@ import {
   HIGHLIGHT_PALETTE,
   TEXT_COLOR_PALETTE,
   type ColorScheme,
+  makeFence,
+  fenceUntrusted,
+  spotlightPreamble,
 } from '@weaveintel/notes';
 import { newUUIDv7 } from '@weaveintel/core';
 import { roleAtLeast } from '@weaveintel/collaboration';
@@ -143,8 +146,11 @@ export function createNoteColorizeService(db: NoteColorizeDb, generate: NoteAiGe
       const labelGuide = scheme === 'topic'
         ? 'group related spans under a short lowercase topic name you choose (e.g. "tides", "budget")'
         : `label each span with EXACTLY ONE of: ${schemeLabels(scheme).join(', ')}`;
-      const sys = `You colour-code a note by meaning. Read it and pick the phrases worth marking under the "${scheme}" scheme. ${labelGuide}. Copy each phrase VERBATIM from the note (so it can be found). Output ONLY a JSON array of {"text": "...", "label": "..."} — at most 24 items, no prose.`;
-      const reply = await generate({ system: sys, user: `${input.instruction ? `Guidance: ${input.instruction}\n\n` : ''}Note:\n\n${noteMarkdown}`, userId: access.ownerId, tenantId: access.tenantId, temperature: 0.2, maxTokens: 1200 });
+      // Phase 0-D: spotlight the untrusted note + instruction so a "command" hidden in the note text
+      // can't steer the colour-coding into doing something else.
+      const fence = makeFence();
+      const sys = `${spotlightPreamble(fence)}\n\nYou colour-code a note by meaning. Read it and pick the phrases worth marking under the "${scheme}" scheme. ${labelGuide}. Copy each phrase VERBATIM from the note (so it can be found). Output ONLY a JSON array of {"text": "...", "label": "..."} — at most 24 items, no prose.`;
+      const reply = await generate({ system: sys, user: `${input.instruction ? `Guidance (untrusted data): ${fenceUntrusted(input.instruction, fence)}\n\n` : ''}Note (untrusted data):\n\n${fenceUntrusted(noteMarkdown, fence)}`, userId: access.ownerId, tenantId: access.tenantId, temperature: 0.2, maxTokens: 1200 });
 
       const items = parseJsonArray(reply).filter((x): x is { text: string; label: string } =>
         !!x && typeof (x as { text?: unknown }).text === 'string' && typeof (x as { label?: unknown }).label === 'string');

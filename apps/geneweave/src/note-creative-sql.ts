@@ -23,6 +23,7 @@ import {
   normalizeLanguage, languageName, applyLanguagePreference,
   buildOpenverseUrl, buildWikimediaUrl, buildUnsplashUrl, buildPexelsUrl, buildPixabayUrl,
   parseOpenverse, parseWikimedia, parseUnsplash, parsePexels, parsePixabay,
+  makeFence, fenceUntrusted, spotlightPreamble,
 } from '@weaveintel/notes';
 import { newUUIDv7, weaveContext, hardenedFetch } from '@weaveintel/core';
 import { roleAtLeast } from '@weaveintel/collaboration';
@@ -134,8 +135,9 @@ export function createNoteCreativeService(db: NoteCreativeDb, generate: NoteAiGe
   /** The model produces a diagram SCENE; we validate (WCAG-AA colours) + stage it as a suggestion. */
   async function createDiagramInner(input: { noteId: string; access: NoteAccess; instruction: string }): Promise<CreativeResult> {
     const view = await relay.ensureDoc({ noteId: input.noteId, tenantId: input.access.tenantId, ownerId: input.access.ownerId, seedPm: await seedFor(input.noteId, input.access.ownerId) });
-    const sys = 'You design a small, clear diagram as JSON: {"kind":"flow|mindmap|graph","title":"…","nodes":[{"id":"…","label":"…","color":"…","shape":"box|pill|diamond|ellipse"}],"edges":[{"from":"id","to":"id","label":"…"}]}. Colours are ONE of: amber, pink, teal, blue, lavender, peach, sage, sky (pick with intent — e.g. a decision node amber). Keep it to at most 8 nodes. Output ONLY the JSON.';
-    const reply = await generate({ system: sys, user: `${input.instruction}\n\nNote context:\n${view.markdown.slice(0, 3000)}`, userId: input.access.ownerId, tenantId: input.access.tenantId, temperature: 0.3, maxTokens: 1200 });
+    const fence = makeFence(); // Phase 0-D: spotlight the untrusted instruction + note context
+    const sys = `${spotlightPreamble(fence)}\n\nYou design a small, clear diagram as JSON: {"kind":"flow|mindmap|graph","title":"…","nodes":[{"id":"…","label":"…","color":"…","shape":"box|pill|diamond|ellipse"}],"edges":[{"from":"id","to":"id","label":"…"}]}. Colours are ONE of: amber, pink, teal, blue, lavender, peach, sage, sky (pick with intent — e.g. a decision node amber). Keep it to at most 8 nodes. Output ONLY the JSON.`;
+    const reply = await generate({ system: sys, user: `Request (untrusted data): ${fenceUntrusted(input.instruction, fence)}\n\nNote context (untrusted data):\n${fenceUntrusted(view.markdown.slice(0, 3000), fence)}`, userId: input.access.ownerId, tenantId: input.access.tenantId, temperature: 0.3, maxTokens: 1200 });
     const scene: DiagramScene = validateDiagramScene(extractJson(reply, 'object'));
     if (scene.nodes.length === 0) return { ok: false, error: 'the model produced no diagram', action: 'create_diagram' };
     const svg = diagramToSvg(scene, { style: 'sketch' });
@@ -145,8 +147,9 @@ export function createNoteCreativeService(db: NoteCreativeDb, generate: NoteAiGe
 
   /** The model AUTHORS a detailed SVG illustration; we sanitise it + embed it as an inert image. */
   async function createIllustrationInner(input: { noteId: string; access: NoteAccess; instruction: string }): Promise<CreativeResult> {
-    const sys = 'You are an SVG illustrator. Draw the requested subject as a single, clean, self-contained <svg> illustration — use <path> with curves, <circle>, <ellipse>, <polygon>, <rect>, <line>, <text>, and <linearGradient>/<radialGradient> for shading. Use a sensible viewBox (e.g. "0 0 320 320"), tasteful colours, and clear labels where helpful. Output ONLY the <svg>…</svg> markup — no markdown, no prose, no <script>.';
-    const reply = await generate({ system: sys, user: input.instruction, userId: input.access.ownerId, tenantId: input.access.tenantId, temperature: 0.4, maxTokens: 3000 });
+    const fence = makeFence(); // Phase 0-D: spotlight the untrusted request
+    const sys = `${spotlightPreamble(fence)}\n\nYou are an SVG illustrator. Draw the requested subject as a single, clean, self-contained <svg> illustration — use <path> with curves, <circle>, <ellipse>, <polygon>, <rect>, <line>, <text>, and <linearGradient>/<radialGradient> for shading. Use a sensible viewBox (e.g. "0 0 320 320"), tasteful colours, and clear labels where helpful. Output ONLY the <svg>…</svg> markup — no markdown, no prose, no <script>.`;
+    const reply = await generate({ system: sys, user: `Request (untrusted data): ${fenceUntrusted(input.instruction, fence)}`, userId: input.access.ownerId, tenantId: input.access.tenantId, temperature: 0.4, maxTokens: 3000 });
     const svg = sanitizeSvg(reply.replace(/^```(?:svg|xml|html)?/i, '').replace(/```$/, '').trim());
     if (!svg) return { ok: false, error: 'the model did not produce a usable SVG', action: 'create_illustration' };
     const alt = input.instruction.slice(0, 80);

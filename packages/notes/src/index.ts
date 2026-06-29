@@ -9,6 +9,12 @@
  * `NOTES_CRDT_AND_ARTIFACTS_ROADMAP_2026.md` for the full roadmap.
  */
 export {
+  makeFence,
+  fenceUntrusted,
+  spotlightPreamble,
+  spotlight,
+} from './prompt-safety.js';
+export {
   type NoteSensitivity,
   type NoteLinkTargetKind,
   type NoteDatabaseSource,

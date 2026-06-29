@@ -486,6 +486,20 @@ export interface NoteActivityRow {
   created_at: string;
 }
 
+/** weaveNotes Phase 0-B — filters + keyset cursor for the tenant-scoped admin/compliance audit feed. */
+export interface NoteActivityQuery {
+  limit?: number;
+  action?: string;
+  actor?: string;
+  userId?: string;
+  noteId?: string;
+  fromDate?: string;   // ISO; created_at >= fromDate
+  toDate?: string;     // ISO; created_at <= toDate
+  // Keyset cursor (page strictly OLDER than this row): pass the last row's created_at + id.
+  beforeCreatedAt?: string;
+  beforeId?: string;
+}
+
 /** weaveNotes — per-tenant routing mode for one note AI action (Builder-editable). */
 export interface NoteActionModeRow {
   id: string;
@@ -700,6 +714,9 @@ export interface IMeStore {
   deleteNoteActionMode(id: string): Promise<void>;
   recordNoteActivity(row: NoteActivityRow): Promise<void>;
   listNoteActivity(noteId: string, limit?: number): Promise<NoteActivityRow[]>;
+  // Phase 0-B — tenant-scoped audit feed (keyset-paginated, filterable) + retention pruning.
+  listTenantNoteActivity(tenantId: string | null, opts?: NoteActivityQuery): Promise<Array<NoteActivityRow & { note_title?: string | null }>>;
+  pruneNoteActivity(beforeIso: string): Promise<number>;
   // Registered outbound webhook endpoints
   createWebhookEndpoint(row: { id: string; tenant_id?: string | null; user_id: string; url: string; signing_secret: string; created_at: number }): Promise<void>;
   listWebhookEndpoints(userId: string): Promise<WebhookEndpointRow[]>;
