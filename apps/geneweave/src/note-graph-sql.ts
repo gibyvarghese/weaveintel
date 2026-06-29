@@ -138,7 +138,8 @@ export function createNoteGraphService(db: NoteGraphDb, opts: { generate?: NoteA
       const access: NoteAccess = { noteId: '', ownerId: owner.userId, tenantId: owner.tenantId ?? null, role: 'owner' };
       const vec = await embed(query, access);
       if (!vec) return [];
-      const all = await db.listUserNoteEmbeddings(owner.userId);
+      // SECURITY: tenant-scope the candidate embeddings (null-safe) — no cross-tenant related notes.
+      const all = await db.listUserNoteEmbeddings(owner.userId, owner.tenantId ?? null);
       const scored: RelatedNote[] = [];
       for (const row of all) {
         try {
@@ -178,7 +179,9 @@ export function createNoteGraphService(db: NoteGraphDb, opts: { generate?: NoteA
 
     /** Semantically related notes (cosine over note embeddings), best first. */
     async relatedNotes(noteId: string, access: NoteAccess, topK = 5): Promise<RelatedNote[]> {
-      const self = await db.getNoteEmbedding(noteId);
+      // The note we are relating-from is already tenant-checked by the caller's access; gate the
+      // self-embedding by tenant too so a mismatched-tenant note id can't seed a cross-tenant query.
+      const self = await db.getNoteEmbedding(noteId, access.tenantId ?? null);
       let vec: number[] | null = self ? (JSON.parse(self.embedding_json) as number[]) : null;
       if (!vec) {
         const note = await db.getNote(noteId, access.ownerId) as Note | null;
@@ -186,7 +189,8 @@ export function createNoteGraphService(db: NoteGraphDb, opts: { generate?: NoteA
         vec = await embed(`${note.title}\n${noteText(note, access.ownerId).text}`, access);
       }
       if (!vec) return [];
-      const all = await db.listUserNoteEmbeddings(access.ownerId);
+      // SECURITY: tenant-scope the candidate embeddings (null-safe) — no cross-tenant related notes.
+      const all = await db.listUserNoteEmbeddings(access.ownerId, access.tenantId ?? null);
       const scored: RelatedNote[] = [];
       for (const row of all) {
         if (row.note_id === noteId) continue;

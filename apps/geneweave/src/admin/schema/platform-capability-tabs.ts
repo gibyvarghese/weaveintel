@@ -541,6 +541,7 @@ export const PLATFORM_CAPABILITY_ADMIN_TABS: Record<string, AdminTabDef> = {
       { key: 'activity_tracking_enabled', label: 'Keep a note activity log (so the AI knows what changed)', type: 'checkbox', save: 'bool', default: true },
       { key: 'activity_retention_days', label: 'Activity kept for (days)', type: 'number', save: 'int', default: 90 },
       { key: 'max_ai_tokens_per_edit', label: 'Cap per AI edit (tokens)', type: 'number', save: 'int', default: 4000 },
+      { key: 'ai_rate_per_min_per_user', label: 'Max AI actions per person, per minute (abuse + cost guard; over it → 429)', type: 'number', save: 'int', default: 30 },
       { key: 'local_model_for_sensitive', label: 'Use a local model for sensitive notes', type: 'checkbox', save: 'bool', default: false },
       { key: 'live_cursors_enabled', label: 'Show live collaborator cursors (coloured carets + names)', type: 'checkbox', save: 'bool', default: true },
       { key: 'ai_presence_enabled', label: 'Show the AI as a live participant while it edits', type: 'checkbox', save: 'bool', default: true },

@@ -111,7 +111,9 @@ export function createNoteWorkspaceService(db: WorkspaceDb, opts: { now?: () => 
     // Rank notes (cosine over note_embeddings).
     const noteRanked: Array<{ id: string; title: string; score: number }> = [];
     if (scope !== 'runs') {
-      for (const row of await db.listUserNoteEmbeddings(input.userId)) {
+      // SECURITY: scope embeddings to the caller's tenant (null-safe) so workspace RAG can never
+      // surface another tenant's notes, even if a user id were ever shared/migrated across tenants.
+      for (const row of await db.listUserNoteEmbeddings(input.userId, input.tenantId ?? null)) {
         try {
           const v = JSON.parse(row.embedding_json) as number[];
           if (v.length !== qvec.length) continue;
@@ -124,7 +126,7 @@ export function createNoteWorkspaceService(db: WorkspaceDb, opts: { now?: () => 
     // Rank runs (cosine over run_embeddings; content is stored for snippets).
     const runRanked: Array<{ id: string; title: string; score: number; content: string }> = [];
     if (scope !== 'notes') {
-      for (const row of await db.listUserRunEmbeddings(input.userId)) {
+      for (const row of await db.listUserRunEmbeddings(input.userId, input.tenantId ?? null)) {
         try {
           const v = JSON.parse(row.embedding_json) as number[];
           if (v.length !== qvec.length) continue;

@@ -418,6 +418,26 @@ What's wrapped today:
 
 Apps subscribe to the signal bus to react (pause an endpoint, defer an agent, fall back to a cheaper model). See [`docs/RESILIENCE_PLAN.md`](docs/RESILIENCE_PLAN.md) for the full design.
 
+#### Per-subject rate limiting (`createKeyedRateLimiter`)
+
+The endpoint buckets above are *process-wide*. When you need **one bucket per subject** — per user, per tenant, per API key — use `createKeyedRateLimiter`. It wraps the same token bucket in an LRU-bounded map, so a single user exhausting their quota never blocks anyone else, and memory can't grow without bound.
+
+```typescript
+import { createKeyedRateLimiter } from '@weaveintel/resilience';
+
+// e.g. "each user may run at most 30 AI note actions per minute"
+const aiLimiter = createKeyedRateLimiter({ ratePerWindow: 30, windowMs: 60_000 });
+
+const decision = aiLimiter.check(userId);
+if (!decision.allowed) {
+  res.writeHead(429, { 'Retry-After': String(Math.ceil(decision.retryAfterMs / 1000)) });
+  res.end(JSON.stringify({ error: 'rate limited', retryAfterMs: decision.retryAfterMs }));
+  return;
+}
+```
+
+geneWeave uses this to cap per-user AI spend on every weaveNotes `/ai/*` endpoint (the limit is a Builder setting, `weaveNotes Settings → Max AI actions per person, per minute`). It's process-local (perfect for one node); for multi-node, back the same `KeyedRateLimiter` interface with Redis — call sites don't change.
+
 ---
 
 ### 8. Memory, RAG, and knowledge graphs

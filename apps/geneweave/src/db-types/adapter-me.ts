@@ -436,6 +436,8 @@ export interface WeaveNotesSettingsRow {
   activity_tracking_enabled: number;
   activity_retention_days: number;
   max_ai_tokens_per_edit: number;
+  /** weaveNotes Phase 0 hardening: per-user AI actions/minute cap (m120). Optional for old DBs. */
+  ai_rate_per_min_per_user?: number;
   local_model_for_sensitive: number;
   /** weaveNotes Phase 3: show live collaborator cursors (0/1). */
   live_cursors_enabled: number;
@@ -659,12 +661,13 @@ export interface IMeStore {
   replaceNoteRelations(noteId: string, rows: NoteRelationRow[]): Promise<void>;
   listNoteRelations(noteId: string): Promise<NoteRelationRow[]>;
   upsertNoteEmbedding(row: NoteEmbeddingRow): Promise<void>;
-  getNoteEmbedding(noteId: string): Promise<NoteEmbeddingRow | null>;
-  listUserNoteEmbeddings(userId: string): Promise<NoteEmbeddingRow[]>;
+  // tenantId is null-safe (`tenant_id IS ?`): pass it (incl. null) to gate by tenant; omit (undefined) only for internal callers that have already scoped by note/user.
+  getNoteEmbedding(noteId: string, tenantId?: string | null): Promise<NoteEmbeddingRow | null>;
+  listUserNoteEmbeddings(userId: string, tenantId?: string | null): Promise<NoteEmbeddingRow[]>;
   // weaveNotes Phase 8 — workspace RAG (run output embeddings)
   upsertRunEmbedding(row: RunEmbeddingRow): Promise<void>;
-  getRunEmbedding(runId: string): Promise<RunEmbeddingRow | null>;
-  listUserRunEmbeddings(userId: string): Promise<RunEmbeddingRow[]>;
+  getRunEmbedding(runId: string, tenantId?: string | null): Promise<RunEmbeddingRow | null>;
+  listUserRunEmbeddings(userId: string, tenantId?: string | null): Promise<RunEmbeddingRow[]>;
   // weaveNotes Phase 8 — per-note version history
   createNoteVersion(row: NoteVersionRow): Promise<void>;
   listNoteVersions(noteId: string): Promise<NoteVersionRow[]>;

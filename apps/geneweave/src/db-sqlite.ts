@@ -9298,11 +9298,18 @@ export class SQLiteAdapter implements DatabaseAdapter {
        ON CONFLICT(note_id) DO UPDATE SET embedding_json=excluded.embedding_json, dim=excluded.dim, content_hash=excluded.content_hash, title=excluded.title, updated_at=excluded.updated_at`,
     ).run(row);
   }
-  async getNoteEmbedding(noteId: string): Promise<import('./db-types/adapter-me.js').NoteEmbeddingRow | null> {
-    return (this.d.prepare('SELECT * FROM note_embeddings WHERE note_id = ?').get(noteId) ?? null) as import('./db-types/adapter-me.js').NoteEmbeddingRow | null;
+  async getNoteEmbedding(noteId: string, tenantId?: string | null): Promise<import('./db-types/adapter-me.js').NoteEmbeddingRow | null> {
+    // tenant_id IS ? is null-safe (matches NULL rows when tenantId is null). When tenantId is
+    // undefined we skip the tenant gate for backward-compatible internal callers.
+    const row = tenantId === undefined
+      ? this.d.prepare('SELECT * FROM note_embeddings WHERE note_id = ?').get(noteId)
+      : this.d.prepare('SELECT * FROM note_embeddings WHERE note_id = ? AND tenant_id IS ?').get(noteId, tenantId ?? null);
+    return (row ?? null) as import('./db-types/adapter-me.js').NoteEmbeddingRow | null;
   }
-  async listUserNoteEmbeddings(userId: string): Promise<import('./db-types/adapter-me.js').NoteEmbeddingRow[]> {
-    return this.d.prepare('SELECT * FROM note_embeddings WHERE user_id = ?').all(userId) as import('./db-types/adapter-me.js').NoteEmbeddingRow[];
+  async listUserNoteEmbeddings(userId: string, tenantId?: string | null): Promise<import('./db-types/adapter-me.js').NoteEmbeddingRow[]> {
+    return (tenantId === undefined
+      ? this.d.prepare('SELECT * FROM note_embeddings WHERE user_id = ?').all(userId)
+      : this.d.prepare('SELECT * FROM note_embeddings WHERE user_id = ? AND tenant_id IS ?').all(userId, tenantId ?? null)) as import('./db-types/adapter-me.js').NoteEmbeddingRow[];
   }
 
   // weaveNotes Phase 8 — run output embeddings (workspace RAG over runs).
@@ -9313,11 +9320,16 @@ export class SQLiteAdapter implements DatabaseAdapter {
        ON CONFLICT(run_id) DO UPDATE SET embedding_json=excluded.embedding_json, dim=excluded.dim, content_hash=excluded.content_hash, title=excluded.title, content=excluded.content, updated_at=excluded.updated_at`,
     ).run(row);
   }
-  async getRunEmbedding(runId: string): Promise<import('./db-types/adapter-me.js').RunEmbeddingRow | null> {
-    return (this.d.prepare('SELECT * FROM run_embeddings WHERE run_id = ?').get(runId) ?? null) as import('./db-types/adapter-me.js').RunEmbeddingRow | null;
+  async getRunEmbedding(runId: string, tenantId?: string | null): Promise<import('./db-types/adapter-me.js').RunEmbeddingRow | null> {
+    const row = tenantId === undefined
+      ? this.d.prepare('SELECT * FROM run_embeddings WHERE run_id = ?').get(runId)
+      : this.d.prepare('SELECT * FROM run_embeddings WHERE run_id = ? AND tenant_id IS ?').get(runId, tenantId ?? null);
+    return (row ?? null) as import('./db-types/adapter-me.js').RunEmbeddingRow | null;
   }
-  async listUserRunEmbeddings(userId: string): Promise<import('./db-types/adapter-me.js').RunEmbeddingRow[]> {
-    return this.d.prepare('SELECT * FROM run_embeddings WHERE user_id = ?').all(userId) as import('./db-types/adapter-me.js').RunEmbeddingRow[];
+  async listUserRunEmbeddings(userId: string, tenantId?: string | null): Promise<import('./db-types/adapter-me.js').RunEmbeddingRow[]> {
+    return (tenantId === undefined
+      ? this.d.prepare('SELECT * FROM run_embeddings WHERE user_id = ?').all(userId)
+      : this.d.prepare('SELECT * FROM run_embeddings WHERE user_id = ? AND tenant_id IS ?').all(userId, tenantId ?? null)) as import('./db-types/adapter-me.js').RunEmbeddingRow[];
   }
 
   // weaveNotes Phase 8 — per-note version history.

@@ -105,6 +105,31 @@ describe('BlockDoc — CONVERGENCE', () => {
     expect(summary(a)).toBe(summary(b));                    // converged
   });
 
+  it('concurrent CONFLICTING marks (same span+type) converge by (lamport, siteId) tiebreak', () => {
+    // Two replicas highlight the SAME span with DIFFERENT colours at the SAME lamport. The LWW
+    // tiebreak must pick the SAME winner on both — deterministically the higher siteId ('bob' > 'alice').
+    // Before the fix (siteId compared to '') the winner depended on apply ORDER → divergence.
+    const seed = BlockDoc.fromBlocks('seed', [{ type: 'paragraph', text: 'highlight me' }]);
+    const snap = seed.snapshot();
+    const alice = BlockDoc.fromSnapshot('alice', snap);
+    const bob = BlockDoc.fromSnapshot('bob', snap);
+    const aOps = [alice.addMark(alice.blocks()[0]!.id, 0, 9, 'highlight', 'amber')!];
+    const bOps = [bob.addMark(bob.blocks()[0]!.id, 0, 9, 'highlight', 'teal')!];
+    alice.applyMany(bOps); bob.applyMany(aOps);
+
+    const aMark = alice.blocks()[0]!.marks.find((m) => m.type === 'highlight');
+    const bMark = bob.blocks()[0]!.marks.find((m) => m.type === 'highlight');
+    expect(aMark?.value).toBe(bMark?.value);   // both replicas AGREE
+    expect(aMark?.value).toBe('teal');         // and it's deterministically the higher siteId's value
+
+    // The winner SURVIVES a snapshot round-trip identically (siteId is preserved, not blanked).
+    const reloaded = BlockDoc.fromSnapshot('carol', alice.snapshot());
+    expect(reloaded.blocks()[0]!.marks.find((m) => m.type === 'highlight')?.value).toBe('teal');
+    // Re-applying the LOSING op after reload must NOT flip the winner (tiebreak still deterministic).
+    reloaded.applyMany(aOps);
+    expect(reloaded.blocks()[0]!.marks.find((m) => m.type === 'highlight')?.value).toBe('teal');
+  });
+
   it('fuzz: N replicas with random block + text ops all converge', () => {
     function rng(seed: number) { let s = seed >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 0xffffffff; }; }
     for (let trial = 0; trial < 6; trial++) {

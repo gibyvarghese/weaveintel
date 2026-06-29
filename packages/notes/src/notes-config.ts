@@ -31,6 +31,9 @@ export interface WeaveNotesConfig {
   activityRetentionDays: number;
   /** Cap the tokens a single AI note edit may spend (cost guard). */
   maxAiTokensPerEdit: number;
+  /** Cap how many AI note actions ONE person may run per minute (abuse + runaway-cost guard).
+   *  Applies across every /ai/* note endpoint; over the limit returns HTTP 429 + Retry-After. */
+  aiRatePerMinPerUser: number;
   /** Route sensitive notes to a local model (provider-ollama/llamacpp) instead of a cloud one. */
   localModelForSensitive: boolean;
   /** Show live collaborator cursors (coloured carets + names) while co-editing (Phase 3). */
@@ -107,6 +110,7 @@ export const DEFAULT_WEAVENOTES_CONFIG: WeaveNotesConfig = {
   activityTrackingEnabled: true,
   activityRetentionDays: 90,
   maxAiTokensPerEdit: 4000,
+  aiRatePerMinPerUser: 30, // generous for a human; stops a script/runaway agent from hammering AI endpoints
   localModelForSensitive: false,
   liveCursorsEnabled: true,
   aiPresenceEnabled: true,
@@ -165,6 +169,9 @@ export function validateWeaveNotesConfig(
   const maxTokens = clampInt(p.maxAiTokensPerEdit ?? base.maxAiTokensPerEdit, 256, 200_000, base.maxAiTokensPerEdit);
   if (p.maxAiTokensPerEdit !== undefined && maxTokens !== Math.trunc(Number(p.maxAiTokensPerEdit))) warnings.push(`Max AI tokens per edit clamped to ${maxTokens} (256–200000).`);
 
+  const aiRate = clampInt(p.aiRatePerMinPerUser ?? base.aiRatePerMinPerUser, 1, 100_000, base.aiRatePerMinPerUser);
+  if (p.aiRatePerMinPerUser !== undefined && aiRate !== Math.trunc(Number(p.aiRatePerMinPerUser))) warnings.push(`AI rate clamped to ${aiRate} actions/min per user (1–100000).`);
+
   let tools = base.enabledAiTools;
   if (p.enabledAiTools !== undefined) {
     const arr = Array.isArray(p.enabledAiTools) ? p.enabledAiTools.map(String) : [];
@@ -207,6 +214,7 @@ export function validateWeaveNotesConfig(
       activityTrackingEnabled: asBool(p.activityTrackingEnabled ?? base.activityTrackingEnabled, base.activityTrackingEnabled),
       activityRetentionDays: retention,
       maxAiTokensPerEdit: maxTokens,
+      aiRatePerMinPerUser: aiRate,
       localModelForSensitive: asBool(p.localModelForSensitive ?? base.localModelForSensitive, base.localModelForSensitive),
       liveCursorsEnabled: asBool(p.liveCursorsEnabled ?? base.liveCursorsEnabled, base.liveCursorsEnabled),
       aiPresenceEnabled: asBool(p.aiPresenceEnabled ?? base.aiPresenceEnabled, base.aiPresenceEnabled),

@@ -21,6 +21,12 @@ export {
   createTokenBucket,
 } from './token-bucket.js';
 export {
+  type KeyedRateLimiter,
+  type KeyedRateLimiterOptions,
+  type RateDecision,
+  createKeyedRateLimiter,
+} from './keyed-rate-limiter.js';
+export {
   type CircuitBreaker,
   type CircuitBreakerOptions,
   type CircuitState,

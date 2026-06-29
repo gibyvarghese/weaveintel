@@ -29,8 +29,9 @@
  */
 
 import { newUUIDv7 } from '@weaveintel/core';
-import type { Router } from '../server-core.js';
+import type { Router, Handler } from '../server-core.js';
 import { readBody } from '../server-core.js';
+import { createKeyedRateLimiter, type KeyedRateLimiter } from '@weaveintel/resilience';
 import type { DatabaseAdapter } from '../db-types.js';
 import {
   createInMemoryNoteRepository, // (re-exported for tests/embedders that want a fake)
@@ -150,6 +151,34 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
   const noteVersions = createNoteVersionService(db);
   const noteComments = createNoteCommentService(db);
   const noteSynced = createNoteSyncedService(db);
+
+  // ── Phase 0 hardening: per-USER AI rate limit ───────────────────────────────
+  // Every note AI action costs a model call. `aiPost` wraps an AI endpoint so ONE person can't run
+  // more than the Builder-configured `aiRatePerMinPerUser` actions/minute — over the limit it returns
+  // HTTP 429 + Retry-After (covering EVERY /ai/* endpoint in one place). Stops a runaway script or a
+  // prompt-injected agent loop from running up cost. In-memory token bucket per user (per-node); a
+  // Redis-backed limiter is the multi-node upgrade (the KeyedRateLimiter interface stays the same).
+  let aiLimiter: KeyedRateLimiter | null = null;
+  let aiLimiterRate = -1;
+  const aiPost = (path: string, handler: Handler, postOpts?: { auth?: boolean; csrf?: boolean }): void => {
+    router.post(path, async (req, res, params, auth) => {
+      if (auth) {
+        const cfg = await noteSettings.getConfig();
+        if (!aiLimiter || cfg.aiRatePerMinPerUser !== aiLimiterRate) {
+          aiLimiter = createKeyedRateLimiter({ ratePerWindow: cfg.aiRatePerMinPerUser, windowMs: 60_000 });
+          aiLimiterRate = cfg.aiRatePerMinPerUser;
+        }
+        const decision = aiLimiter.check(auth.userId);
+        if (!decision.allowed) {
+          const retryS = Math.max(1, Math.ceil(decision.retryAfterMs / 1000));
+          res.writeHead(429, { 'Content-Type': 'application/json', 'Retry-After': String(retryS) });
+          res.end(JSON.stringify({ ok: false, code: 'rate_limited', retryAfterMs: decision.retryAfterMs, error: `AI rate limit reached: at most ${decision.limit} note AI actions per minute. Try again in ${retryS}s.` }));
+          return;
+        }
+      }
+      await handler(req, res, params, auth);
+    }, postOpts);
+  };
 
   // ── Notes list ─────────────────────────────────────────────────────────────
 
@@ -518,7 +547,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
   // NOTE: register the STATIC `/ai/insert-block` + `/ai/refresh-block` routes BEFORE
   // the `/ai/:action` param route, so the router matches them exactly (the param
   // route would otherwise capture "insert-block" as an unknown action).
-  router.post('/api/me/notes/:id/ai/insert-block', async (req, res, params, auth) => {
+  aiPost('/api/me/notes/:id/ai/insert-block', async (req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
     if (!noteAi) { res.writeHead(501); res.end(JSON.stringify({ error: 'AI features are not configured' })); return; }
     const access = await resolveNoteAccess(db, params['id']!, auth.userId);
@@ -532,7 +561,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     res.end(JSON.stringify(r));
   }, { auth: true });
 
-  router.post('/api/me/notes/:id/ai/refresh-block', async (req, res, params, auth) => {
+  aiPost('/api/me/notes/:id/ai/refresh-block', async (req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
     if (!noteAi) { res.writeHead(501); res.end(JSON.stringify({ error: 'AI features are not configured' })); return; }
     const access = await resolveNoteAccess(db, params['id']!, auth.userId);
@@ -551,7 +580,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
   // BEFORE the `/ai/:action` param route so the router matches them exactly.
   //   POST /api/me/notes/:id/ai/highlight   { phrase, color?, mark? }  → a highlight/text-colour suggestion
   //   POST /api/me/notes/:id/ai/colorize    { scheme, instruction? }   → a colour-code-by-meaning suggestion
-  router.post('/api/me/notes/:id/ai/highlight', async (req, res, params, auth) => {
+  aiPost('/api/me/notes/:id/ai/highlight', async (req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
     if (!noteColorize) { res.writeHead(501); res.end(JSON.stringify({ error: 'AI features are not configured' })); return; }
     const access = await resolveNoteAccess(db, params['id']!, auth.userId);
@@ -568,7 +597,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     res.end(JSON.stringify(r));
   }, { auth: true });
 
-  router.post('/api/me/notes/:id/ai/colorize', async (req, res, params, auth) => {
+  aiPost('/api/me/notes/:id/ai/colorize', async (req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
     if (!noteColorize) { res.writeHead(501); res.end(JSON.stringify({ error: 'AI features are not configured' })); return; }
     const access = await resolveNoteAccess(db, params['id']!, auth.userId);
@@ -628,7 +657,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
   // Each is CONFIG-DRIVEN: the per-tenant `note_action_modes` row decides direct / agent / supervisor.
   //   POST /api/me/notes/:id/ai/diagram   { instruction }  → a diagram suggestion
   //   POST /api/me/notes/:id/ai/ink       { instruction }  → an ink suggestion
-  router.post('/api/me/notes/:id/ai/diagram', async (req, res, params, auth) => {
+  aiPost('/api/me/notes/:id/ai/diagram', async (req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
     if (!noteCreative) { res.writeHead(501); res.end(JSON.stringify({ error: 'AI features are not configured' })); return; }
     const access = await resolveNoteAccess(db, params['id']!, auth.userId);
@@ -644,7 +673,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     res.end(JSON.stringify(out.body));
   }, { auth: true });
 
-  router.post('/api/me/notes/:id/ai/ink', async (req, res, params, auth) => {
+  aiPost('/api/me/notes/:id/ai/ink', async (req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
     if (!noteCreative) { res.writeHead(501); res.end(JSON.stringify({ error: 'AI features are not configured' })); return; }
     const access = await resolveNoteAccess(db, params['id']!, auth.userId);
@@ -665,7 +694,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
   // attribution. Config-driven (note_action_modes 'find_image'). The provider search + image download
   // run through the HARDENED, SSRF-guarded fetch; only public images under allowed licences are used.
   //   POST /api/me/notes/:id/ai/find-image   { query }  → an image suggestion (with a licence caption)
-  router.post('/api/me/notes/:id/ai/find-image', async (req, res, params, auth) => {
+  aiPost('/api/me/notes/:id/ai/find-image', async (req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
     if (!noteCreative) { res.writeHead(501); res.end(JSON.stringify({ error: 'AI features are not configured' })); return; }
     const access = await resolveNoteAccess(db, params['id']!, auth.userId);
@@ -707,7 +736,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
   // Reorganise the WHOLE note: the AI rewrites it into a clearer structure and stages it as one
   // track-changes suggestion. An optional `outline` lets the human dictate the section order.
   //   POST /api/me/notes/:id/ai/restructure   { outline? }  → a whole-document suggestion
-  router.post('/api/me/notes/:id/ai/restructure', async (req, res, params, auth) => {
+  aiPost('/api/me/notes/:id/ai/restructure', async (req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
     if (!noteAi) { res.writeHead(501); res.end(JSON.stringify({ error: 'AI features are not configured' })); return; }
     const access = await resolveNoteAccess(db, params['id']!, auth.userId);
@@ -728,7 +757,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
   // "Make a diagram" / "Restructure" UI buttons call when "use the agent" is on — so the activity is
   // performed by the supervisor + worker agents via the API, not by a direct service call.
   //   POST /api/me/notes/:id/ai/agent   { action: 'diagram'|'restructure'|'visual'|'ink', instruction?, outline?, kind? }
-  router.post('/api/me/notes/:id/ai/agent', async (req, res, params, auth) => {
+  aiPost('/api/me/notes/:id/ai/agent', async (req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
     if (!opts.runNoteAgentAction) { res.writeHead(501); res.end(JSON.stringify({ error: 'Agent actions are not configured on this server' })); return; }
     const noteId = params['id']!;
@@ -777,7 +806,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
   // illustration + visual are CONFIG-DRIVEN (per-tenant note_action_modes). For "visual" the action
   // key is the chosen kind (diagram/ink/illustration → that action's mode; auto → 'visual'). image is
   // ALWAYS direct (its generate_image tool is intentionally not agent-registered — it costs money).
-  router.post('/api/me/notes/:id/ai/illustration', async (req, res, params, auth) => {
+  aiPost('/api/me/notes/:id/ai/illustration', async (req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
     if (!noteCreative) { res.writeHead(501); res.end(JSON.stringify({ error: 'AI features are not configured' })); return; }
     const access = await resolveNoteAccess(db, params['id']!, auth.userId);
@@ -793,7 +822,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     res.end(JSON.stringify(out.body));
   }, { auth: true });
 
-  router.post('/api/me/notes/:id/ai/visual', async (req, res, params, auth) => {
+  aiPost('/api/me/notes/:id/ai/visual', async (req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
     if (!noteCreative) { res.writeHead(501); res.end(JSON.stringify({ error: 'AI features are not configured' })); return; }
     const access = await resolveNoteAccess(db, params['id']!, auth.userId);
@@ -862,7 +891,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     res.end(JSON.stringify(r));
   }, { auth: true });
 
-  router.post('/api/me/notes/:id/ai/:action', async (req, res, params, auth) => {
+  aiPost('/api/me/notes/:id/ai/:action', async (req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
     if (!noteAi) { res.writeHead(501); res.end(JSON.stringify({ error: 'AI features are not configured on this server' })); return; }
     const action = params['action']!;

@@ -471,6 +471,7 @@ export function registerAdminRoutingRoutes(
     if (body['activity_tracking_enabled'] !== undefined) partial['activityTrackingEnabled'] = body['activity_tracking_enabled'];
     if (body['activity_retention_days'] !== undefined) partial['activityRetentionDays'] = body['activity_retention_days'];
     if (body['max_ai_tokens_per_edit'] !== undefined) partial['maxAiTokensPerEdit'] = body['max_ai_tokens_per_edit'];
+    if (body['ai_rate_per_min_per_user'] !== undefined) partial['aiRatePerMinPerUser'] = body['ai_rate_per_min_per_user'];
     if (body['local_model_for_sensitive'] !== undefined) partial['localModelForSensitive'] = body['local_model_for_sensitive'];
     if (body['live_cursors_enabled'] !== undefined) partial['liveCursorsEnabled'] = body['live_cursors_enabled'];
     if (body['ai_presence_enabled'] !== undefined) partial['aiPresenceEnabled'] = body['ai_presence_enabled'];

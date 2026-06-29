@@ -139,8 +139,8 @@ export class BlockDoc {
   #log: BlockOp[] = [];
   /** LWW attributes: blockKey → attrKey → {value, lamport, siteId}. */
   #attrs = new Map<string, Map<string, { value: unknown; lamport: number; siteId: string }>>();
-  /** Marks keyed by opId, the latest add/remove winning per (start,end,type) by lamport. */
-  #marks = new Map<string, { startId: RgaId; endId: RgaId; markType: MarkType; markValue?: string; removed: boolean; lamport: number }>();
+  /** Marks keyed by opId, the latest add/remove winning per (start,end,type) by (lamport, siteId). */
+  #marks = new Map<string, { startId: RgaId; endId: RgaId; markType: MarkType; markValue?: string; removed: boolean; lamport: number; siteId: string }>();
 
   constructor(siteId: string) {
     if (!siteId) throw new Error('BlockDoc requires a non-empty siteId');
@@ -259,8 +259,12 @@ export class BlockDoc {
         const k = `${idKey(op.startId)}|${idKey(op.endId)}|${op.markType}`;
         const cur = this.#marks.get(k);
         const lamport = op.opId.counter;
-        if (!cur || lamport > cur.lamport || (lamport === cur.lamport && op.opId.siteId > '')) {
-          this.#marks.set(k, { startId: op.startId, endId: op.endId, markType: op.markType, ...(op.markValue !== undefined ? { markValue: op.markValue } : {}), removed: op.remove, lamport });
+        // LWW tiebreak: higher lamport wins; on a TIE the higher siteId wins. This MUST compare
+        // against the current winner's siteId (cur.siteId), not against '' — comparing to '' made
+        // any non-empty siteId "win", so two replicas applying the same concurrent marks in a
+        // different order could disagree (a CRDT-convergence bug). Matches lwwWins() above.
+        if (!cur || lamport > cur.lamport || (lamport === cur.lamport && op.opId.siteId > cur.siteId)) {
+          this.#marks.set(k, { startId: op.startId, endId: op.endId, markType: op.markType, ...(op.markValue !== undefined ? { markValue: op.markValue } : {}), removed: op.remove, lamport, siteId: op.opId.siteId });
         }
         this.#record(op);
         return true;
@@ -303,7 +307,9 @@ export class BlockDoc {
     for (const [bk, m] of this.#attrs) for (const [key, v] of m) {
       attrs.push({ block: bk === LEADING ? null : this.#parseBlockKey(bk), key, value: v.value, lamport: v.lamport, siteId: v.siteId });
     }
-    const marks: BlockDocSnapshot['marks'] = [...this.#marks.values()].map((mk) => ({ opId: { counter: mk.lamport, siteId: '' }, startId: mk.startId, endId: mk.endId, markType: mk.markType, ...(mk.markValue !== undefined ? { markValue: mk.markValue } : {}), removed: mk.removed }));
+    // Preserve the winning mark's siteId so a reload tiebreaks identically to a live replica
+    // (writing '' here used to discard it, making the LWW tiebreak lossy across save/reload).
+    const marks: BlockDocSnapshot['marks'] = [...this.#marks.values()].map((mk) => ({ opId: { counter: mk.lamport, siteId: mk.siteId }, startId: mk.startId, endId: mk.endId, markType: mk.markType, ...(mk.markValue !== undefined ? { markValue: mk.markValue } : {}), removed: mk.removed }));
     return {
       elements: this.#elems.map((e) => ({ id: { ...e.id }, originId: e.originId ? { ...e.originId } : null, deleted: e.deleted, kind: e.kind, ...(e.char !== undefined ? { char: e.char } : {}), ...(e.blockType !== undefined ? { blockType: e.blockType } : {}) })),
       attrs, marks,
@@ -328,7 +334,7 @@ export class BlockDoc {
       doc.#bump({ counter: a.lamport, siteId: a.siteId });
     }
     for (const mk of snap.marks) {
-      doc.#marks.set(`${idKey(mk.startId)}|${idKey(mk.endId)}|${mk.markType}`, { startId: mk.startId, endId: mk.endId, markType: mk.markType, ...(mk.markValue !== undefined ? { markValue: mk.markValue } : {}), removed: mk.removed, lamport: mk.opId.counter });
+      doc.#marks.set(`${idKey(mk.startId)}|${idKey(mk.endId)}|${mk.markType}`, { startId: mk.startId, endId: mk.endId, markType: mk.markType, ...(mk.markValue !== undefined ? { markValue: mk.markValue } : {}), removed: mk.removed, lamport: mk.opId.counter, siteId: mk.opId.siteId });
       doc.#bump(mk.opId); // same reason: keep the mint clock ahead of restored mark ops
     }
     return doc;

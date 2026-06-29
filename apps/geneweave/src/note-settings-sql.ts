@@ -36,6 +36,7 @@ function rowToConfig(row: WeaveNotesSettingsRow | null): WeaveNotesConfig {
     activityTrackingEnabled: row.activity_tracking_enabled !== 0,
     activityRetentionDays: row.activity_retention_days,
     maxAiTokensPerEdit: row.max_ai_tokens_per_edit,
+    ...(typeof row.ai_rate_per_min_per_user === 'number' ? { aiRatePerMinPerUser: row.ai_rate_per_min_per_user } : {}),
     localModelForSensitive: row.local_model_for_sensitive !== 0,
     liveCursorsEnabled: row.live_cursors_enabled !== 0,   // undefined (pre-m107) → enabled
     aiPresenceEnabled: row.ai_presence_enabled !== 0,
@@ -83,6 +84,7 @@ export function createNoteSettingsService(db: SettingsDb, opts: { now?: () => nu
       activity_tracking_enabled: config.activityTrackingEnabled ? 1 : 0,
       activity_retention_days: config.activityRetentionDays,
       max_ai_tokens_per_edit: config.maxAiTokensPerEdit,
+      ai_rate_per_min_per_user: config.aiRatePerMinPerUser,
       local_model_for_sensitive: config.localModelForSensitive ? 1 : 0,
       live_cursors_enabled: config.liveCursorsEnabled ? 1 : 0,
       ai_presence_enabled: config.aiPresenceEnabled ? 1 : 0,
