@@ -45,8 +45,13 @@ import {
   templateByKey,
   parseQuickCapture,
   blocksToDoc,
+  normalizeLanguage,
+  LANGUAGE_NAMES,
   type NoteBlock,
 } from '@weaveintel/notes';
+
+/** The image-label languages offered for the per-user preference (code → English name). */
+const NOTE_IMAGE_LANGUAGES = LANGUAGE_NAMES;
 import { createSqlNoteRepository } from '../note-repository-sql.js';
 import { BlockDoc, pmToBlocks, blocksToProseMirror, blocksToMarkdown, blocksToHtml, exportNote as coeditExportNote, isExportFormat, type ExportFormat } from '@weaveintel/coedit';
 import { roleAtLeast } from '@weaveintel/collaboration';
@@ -670,11 +675,33 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
     const query = typeof body['query'] === 'string' && body['query'].trim() ? body['query'] : (typeof body['instruction'] === 'string' ? body['instruction'] : '');
     if (!query.trim()) { res.writeHead(400); res.end(JSON.stringify({ error: 'query required' })); return; }
+    // The user's preferred image-label language (DB-backed, default 'en') — steers search + ranking.
+    const language = await db.getNoteImageLanguage(auth.userId).catch(() => 'en');
     const out = await performNoteAiAction('find_image', params['id']!, access,
-      () => noteCreative!.findImage({ noteId: params['id']!, access, query }),
+      () => noteCreative!.findImage({ noteId: params['id']!, access, query, language }),
       { instruction: query });
     res.writeHead(out.status, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(out.body));
+  }, { auth: true });
+
+  // The user's preferred LANGUAGE for sourced images (per-user, DB-backed, default 'en'). Steers the
+  // find_image search query, candidate ranking, and the filename-language filter.
+  //   GET /api/me/notes-image-language          → { language }
+  //   PUT /api/me/notes-image-language { language }
+  router.get('/api/me/notes-image-language', async (_req, res, _params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const language = await db.getNoteImageLanguage(auth.userId).catch(() => 'en');
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ language, languages: NOTE_IMAGE_LANGUAGES }));
+  }, { auth: true });
+  router.put('/api/me/notes-image-language', async (req, res, _params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    const language = normalizeLanguage(typeof body['language'] === 'string' ? body['language'] : 'en');
+    await db.setNoteImageLanguage(auth.userId, language);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, language }));
   }, { auth: true });
 
   // Reorganise the WHOLE note: the AI rewrites it into a clearer structure and stages it as one

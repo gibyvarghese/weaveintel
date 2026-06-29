@@ -100,6 +100,24 @@ test('find_image — a LONG selected passage is summarised into a focused query 
   void after;
 });
 
+test('find_image — per-user image language defaults to English and is configurable (DB-backed)', async ({ page }) => {
+  test.setTimeout(120_000);
+  const { origin, H } = await login(page);
+  // Default is English.
+  const g0 = await (await page.request.get(`${origin}/api/me/notes-image-language`)).json() as { language: string; languages: Record<string, string> };
+  expect(g0.language).toBe('en');
+  expect(g0.languages['fr']).toBe('French');
+  // Set + read back (normalised from a name/locale).
+  await page.request.put(`${origin}/api/me/notes-image-language`, { headers: H, data: { language: 'French' } });
+  expect(((await (await page.request.get(`${origin}/api/me/notes-image-language`)).json()) as { language: string }).language).toBe('fr');
+  await page.request.put(`${origin}/api/me/notes-image-language`, { headers: H, data: { language: 'en-GB' } });
+  expect(((await (await page.request.get(`${origin}/api/me/notes-image-language`)).json()) as { language: string }).language).toBe('en');
+  // find_image still works with the preference set (default en restored above).
+  const note = await (await page.request.post(`${origin}/api/me/notes`, { headers: H, data: { title: 'Lang note', doc_json: HEART } })).json() as { id: string };
+  const r = await page.request.post(`${origin}/api/me/notes/${note.id}/ai/find-image`, { headers: H, data: { query: 'human heart' } });
+  expect((await r.json() as { ok: boolean }).ok).toBe(true);
+});
+
 test('find_image — catalogued tool granted to the weavenotes_editor agent', async ({ page }) => {
   test.setTimeout(60_000);
   const { origin } = await login(page);

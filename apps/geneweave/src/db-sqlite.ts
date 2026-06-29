@@ -9395,6 +9395,16 @@ export class SQLiteAdapter implements DatabaseAdapter {
     const mode = (tenantId ? pick(tenantId) : undefined) ?? pick('') ?? 'direct';
     return mode === 'agent' || mode === 'supervisor' ? mode : 'direct';
   }
+  async getNoteImageLanguage(userId: string): Promise<string> {
+    const row = this.d.prepare('SELECT notes_image_language FROM user_preferences WHERE user_id = ?').get(userId) as { notes_image_language?: string } | undefined;
+    return (typeof row?.notes_image_language === 'string' && row.notes_image_language.trim()) ? row.notes_image_language : 'en';
+  }
+  async setNoteImageLanguage(userId: string, language: string): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO user_preferences (user_id, notes_image_language) VALUES (?, ?)
+         ON CONFLICT(user_id) DO UPDATE SET notes_image_language = excluded.notes_image_language, updated_at = datetime('now')`,
+    ).run(userId, language);
+  }
   async listNoteActionModes(): Promise<import('./db-types/adapter-me.js').NoteActionModeRow[]> {
     return this.d.prepare('SELECT * FROM note_action_modes ORDER BY tenant_id ASC, action_key ASC').all() as import('./db-types/adapter-me.js').NoteActionModeRow[];
   }

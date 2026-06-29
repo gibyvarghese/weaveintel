@@ -687,6 +687,9 @@ export interface IMeStore {
   updateWeaveNotesSettings(fields: Partial<Omit<WeaveNotesSettingsRow, 'id'>>): Promise<void>;
   // weaveNotes — per-tenant routing mode for each note AI action (direct | agent | supervisor)
   resolveNoteActionMode(tenantId: string | null, actionKey: string): Promise<'direct' | 'agent' | 'supervisor'>;
+  // weaveNotes — per-USER preferred language for sourced images (default 'en').
+  getNoteImageLanguage(userId: string): Promise<string>;
+  setNoteImageLanguage(userId: string, language: string): Promise<void>;
   listNoteActionModes(): Promise<NoteActionModeRow[]>;
   getNoteActionMode(id: string): Promise<NoteActionModeRow | null>;
   createNoteActionMode(row: { id: string; tenant_id: string; action_key: string; mode: string }): Promise<void>;

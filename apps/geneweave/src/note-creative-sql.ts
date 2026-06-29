@@ -20,6 +20,7 @@ import {
   inkFromPrimitives, strokesToSvg, validateStrokes, recolorStrokes, type InkStroke,
   sanitizeSvg, svgToDataUri, type WeaveNotesConfig,
   type ImageResult, type LicenseId, DEFAULT_ALLOWED_LICENSES, LICENSE_LABELS, rankImageResults, buildAttribution,
+  normalizeLanguage, languageName, applyLanguagePreference,
   buildOpenverseUrl, buildWikimediaUrl, buildUnsplashUrl, buildPexelsUrl, buildPixabayUrl,
   parseOpenverse, parseWikimedia, parseUnsplash, parsePexels, parsePixabay,
 } from '@weaveintel/notes';
@@ -222,13 +223,14 @@ export function createNoteCreativeService(db: NoteCreativeDb, generate: NoteAiGe
   /** Turn the user's text (a short request OR a long selection) + the note context into 1–3 SHORT,
    *  focused image-search queries — best first. Summarises a long selection into search terms and
    *  offers a couple of variants to try, so we don't just search the raw paragraph. */
-  async function deriveImageQueries(rawText: string, docContext: string): Promise<string[]> {
+  async function deriveImageQueries(rawText: string, docContext: string, language: string): Promise<string[]> {
     const text = rawText.trim().slice(0, 4000);
     const fallback = text.split(/\s+/).slice(0, 8).join(' ').slice(0, 80) || text.slice(0, 80);
+    const lang = languageName(language);
     try {
       const reply = await generate({
-        system: 'You turn a request for a picture (which may be a long passage the user selected) into SHORT web image-search queries. Output ONLY a JSON array of 1-3 strings, BEST first, each 2-6 plain words, concrete and visual — no punctuation, no quotes, no commentary.',
-        user: `The user wants an image related to this text:\n"""${text}"""\n\nNote context (for disambiguation):\n${docContext.slice(0, 1500)}\n\nGive 1-3 short image-search queries.`,
+        system: `You turn a request for a picture (which may be a long passage the user selected) into SHORT web image-search queries IN ${lang}. Output ONLY a JSON array of 1-3 strings, BEST first, each 2-6 plain ${lang} words, concrete and visual — no punctuation, no quotes, no commentary.`,
+        user: `The user wants an image (with any labels in ${lang}) related to this text:\n"""${text}"""\n\nNote context (for disambiguation):\n${docContext.slice(0, 1500)}\n\nGive 1-3 short ${lang} image-search queries.`,
         temperature: 0.3, maxTokens: 120,
       });
       const arr = extractJson(reply, 'array');
@@ -241,14 +243,15 @@ export function createNoteCreativeService(db: NoteCreativeDb, generate: NoteAiGe
   /** Order the candidate images BEST-first by how well they fit the request + the note context. The
    *  model sees each candidate's title / creator / licence / provider — a context-aware pick over a
    *  few options, not "whatever came first". Returns indices into `candidates`. */
-  async function rankCandidatesByContext(candidates: ImageResult[], want: string, docContext: string): Promise<number[]> {
+  async function rankCandidatesByContext(candidates: ImageResult[], want: string, docContext: string, language: string): Promise<number[]> {
     const natural = candidates.map((_, i) => i);
     if (candidates.length <= 1) return natural;
+    const lang = languageName(language);
     const list = candidates.map((c, i) => `${i}: "${(c.title || 'untitled').slice(0, 80)}" — ${LICENSE_LABELS[c.license]} via ${c.provider}${c.creator ? ` by ${String(c.creator).slice(0, 40)}` : ''}`).join('\n');
     try {
       const reply = await generate({
-        system: 'You pick the most suitable image for a note. Reply with ONLY a JSON array of the candidate numbers, BEST match first. Judge by how well each title fits what is wanted AND the note context — prefer clear, accurate, on-topic, appropriate images. List the strong candidates (you may omit obviously irrelevant ones).',
-        user: `Wanted: an image of "${want.slice(0, 200)}".\nNote context:\n${docContext.slice(0, 1200)}\n\nCandidates:\n${list}\n\nOrder them best-first (numbers only).`,
+        system: `You pick the most suitable image for a note. Reply with ONLY a JSON array of the candidate numbers, BEST match first. Judge by how well each title fits what is wanted AND the note context — prefer clear, accurate, on-topic, appropriate images. Strongly PREFER images whose labels/text are in ${lang}, and deprioritise any clearly in another language. List the strong candidates (you may omit obviously irrelevant ones).`,
+        user: `Wanted: an image (with labels in ${lang}) of "${want.slice(0, 200)}".\nNote context:\n${docContext.slice(0, 1200)}\n\nCandidates:\n${list}\n\nOrder them best-first (numbers only).`,
         temperature: 0, maxTokens: 120,
       });
       const arr = extractJson(reply, 'array');
@@ -264,23 +267,24 @@ export function createNoteCreativeService(db: NoteCreativeDb, generate: NoteAiGe
    *  Goes through a few tries to identify the RIGHT image: it summarises the request into focused
    *  queries, gathers several candidates across them, lets the model pick the best by the document
    *  context, then downloads in that order (falling through on a dead/blocked URL). */
-  async function findImageInner(input: { noteId: string; access: NoteAccess; query: string }): Promise<CreativeResult> {
+  async function findImageInner(input: { noteId: string; access: NoteAccess; query: string; language?: string }): Promise<CreativeResult> {
     const config = await cfg();
     if (!config.imageSearchEnabled) return { ok: false, error: 'web image search is disabled in weaveNotes settings', action: 'find_image' };
     if (!db.saveArtifact) return { ok: false, error: 'artifact storage is unavailable', action: 'find_image' };
     const rawText = input.query.trim();
     if (!rawText) return { ok: false, error: 'no search query', action: 'find_image' };
     const allowed = (config.imageSearchAllowedLicenses?.length ? config.imageSearchAllowedLicenses : DEFAULT_ALLOWED_LICENSES) as LicenseId[];
+    const language = normalizeLanguage(input.language); // the user's preferred image-label language (default 'en')
 
     // The note's text — used to summarise the request AND to judge which candidate fits the document.
     const view = await relay.ensureDoc({ noteId: input.noteId, tenantId: input.access.tenantId, ownerId: input.access.ownerId, seedPm: await seedFor(input.noteId, input.access.ownerId) });
     const docContext = view.markdown ?? '';
 
-    // 1) Focused queries (summarise a long selection + a couple of variants to try).
-    const queries = await deriveImageQueries(rawText, docContext);
+    // 1) Focused queries (summarise a long selection + a couple of variants), written in the language.
+    const queries = await deriveImageQueries(rawText, docContext, language);
 
     // 2) Gather candidates across the queries (dedupe by URL; only allowed "free to use" licences).
-    const candidates: ImageResult[] = [];
+    let candidates: ImageResult[] = [];
     for (const q of queries) {
       let res: ImageResult[] = [];
       try { res = await searchProviders(config.imageSearchProvider, q, allowed); } catch { /* try next query */ }
@@ -289,8 +293,11 @@ export function createNoteCreativeService(db: NoteCreativeDb, generate: NoteAiGe
     }
     if (candidates.length === 0) return { ok: false, error: `no free-to-use image found for "${queries[0]}"`, action: 'find_image' };
 
-    // 3) Context-aware ranking: the model orders the candidates by fit to the request + the note.
-    const order = await rankCandidatesByContext(candidates, rawText.slice(0, 200), docContext);
+    // Sink clearly-other-language titles (e.g. a "…-fr.svg" diagram) below same/neutral-language ones.
+    candidates = applyLanguagePreference(candidates, language);
+
+    // 3) Context-aware ranking: the model orders the candidates by fit to the request, note + language.
+    const order = await rankCandidatesByContext(candidates, rawText.slice(0, 200), docContext, language);
 
     // 4) Download in that order — a few tries — so a dead/blocked URL falls through to the next best.
     let pick: ImageResult | null = null; let payload: { bytes: Buffer; mime: string } | null = null; let lastErr = '';
@@ -354,7 +361,7 @@ export function createNoteCreativeService(db: NoteCreativeDb, generate: NoteAiGe
       return withAiPresence(db, input.noteId, () => generateImageInner(input));
     },
     /** Source a real, free-to-use image from the web (with attribution) and stage it as a suggestion. */
-    findImage(input: { noteId: string; access: NoteAccess; query: string }): Promise<CreativeResult> {
+    findImage(input: { noteId: string; access: NoteAccess; query: string; language?: string }): Promise<CreativeResult> {
       return withAiPresence(db, input.noteId, () => findImageInner(input));
     },
     /** The unified router: pick (or honour) the visual kind, gate by config, dispatch. */
@@ -450,9 +457,11 @@ export function createCreativeTools(db: NoteCreativeDb, generate: NoteAiGenerate
       const a = await access(args.userId, args.noteId); if ('error' in a) return { ok: false, error: a.error };
       return svc.createVisual({ noteId: args.noteId, access: a, instruction: args.instruction, ...(args.kind ? { kind: args.kind } : {}) });
     },
-    async findImage(args: { userId: string; noteId: string; query: string }): Promise<CreativeResult> {
+    async findImage(args: { userId: string; noteId: string; query: string; language?: string }): Promise<CreativeResult> {
       const a = await access(args.userId, args.noteId); if ('error' in a) return { ok: false, error: a.error };
-      return svc.findImage({ noteId: args.noteId, access: a, query: args.query });
+      // Default to the user's preferred image-label language (DB-backed; default 'en') when not given.
+      const language = args.language ?? await db.getNoteImageLanguage(args.userId).catch(() => 'en');
+      return svc.findImage({ noteId: args.noteId, access: a, query: args.query, language });
     },
   };
 }

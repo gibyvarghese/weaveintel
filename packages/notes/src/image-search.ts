@@ -83,6 +83,54 @@ export const LICENSE_LABELS: Record<LicenseId, string> = {
   unsplash: 'Unsplash licence', pexels: 'Pexels licence', pixabay: 'Pixabay licence', unknown: 'Unknown licence',
 };
 
+// ─── Language preference (an image's labels — esp. diagrams — may be in any language) ──────────────
+
+/** Common image-label languages: code → English name. 'en' is the default everywhere. */
+export const LANGUAGE_NAMES: Record<string, string> = {
+  en: 'English', fr: 'French', de: 'German', es: 'Spanish', it: 'Italian', pt: 'Portuguese', nl: 'Dutch',
+  ru: 'Russian', zh: 'Chinese', ja: 'Japanese', ko: 'Korean', ar: 'Arabic', hi: 'Hindi', pl: 'Polish',
+  sv: 'Swedish', tr: 'Turkish', fa: 'Persian', cs: 'Czech', el: 'Greek', he: 'Hebrew', uk: 'Ukrainian',
+  vi: 'Vietnamese', th: 'Thai', id: 'Indonesian', ro: 'Romanian', hu: 'Hungarian', fi: 'Finnish', da: 'Danish', no: 'Norwegian',
+};
+const NAME_TO_CODE: Record<string, string> = Object.fromEntries(Object.entries(LANGUAGE_NAMES).map(([c, n]) => [n.toLowerCase(), c]));
+
+/** Normalise a user language preference to a 2-letter code (default 'en'). */
+export function normalizeLanguage(raw: string | undefined | null): string {
+  const s = String(raw ?? '').trim().toLowerCase();
+  if (!s) return 'en';
+  if (LANGUAGE_NAMES[s]) return s;                 // already a code
+  if (NAME_TO_CODE[s]) return NAME_TO_CODE[s];     // a name → code
+  const two = s.slice(0, 2);                        // e.g. 'en-gb' → 'en'
+  return LANGUAGE_NAMES[two] ? two : 'en';
+}
+
+export function languageName(code: string): string { return LANGUAGE_NAMES[normalizeLanguage(code)] ?? 'English'; }
+
+/** Detect a language SIGNALLED by a filename/title (Wikimedia diagrams often encode it), '' if none.
+ *  e.g. "Heart diagram-fr.svg" → 'fr'; "Heart (German).png" → 'de'. */
+export function detectTitleLanguage(title: string): string {
+  const t = String(title ?? '').toLowerCase();
+  const suffix = t.match(/[-_ ]([a-z]{2,3})(?:\.[a-z0-9]{2,4})?\s*$/); // ...-fr.svg / ..._de / ...-en (end)
+  if (suffix && LANGUAGE_NAMES[suffix[1] as string]) return suffix[1] as string;
+  for (const [name, code] of Object.entries(NAME_TO_CODE)) { if (new RegExp(`\\b${name}\\b`).test(t)) return code; }
+  return '';
+}
+
+/** True when the title clearly signals a DIFFERENT language than the target (→ deprioritise it). */
+export function titleLanguageMismatch(title: string, lang: string): boolean {
+  const detected = detectTitleLanguage(title);
+  return detected !== '' && detected !== normalizeLanguage(lang);
+}
+
+/** Stable reorder so candidates whose title is clearly ANOTHER language sink to the bottom (kept as
+ *  fallbacks, not dropped — a relevant image with no language signal still ranks above a wrong-language one). */
+export function applyLanguagePreference(candidates: ImageResult[], lang: string): ImageResult[] {
+  return candidates
+    .map((c, i) => ({ c, i, bad: titleLanguageMismatch(c.title, lang) ? 1 : 0 }))
+    .sort((a, b) => a.bad - b.bad || a.i - b.i)
+    .map((x) => x.c);
+}
+
 /** Keep only allowed licences, then prefer public-domain (no attribution) — stable within each tier. */
 export function rankImageResults(results: ImageResult[], allowed: LicenseId[] = DEFAULT_ALLOWED_LICENSES): ImageResult[] {
   const ok = results.filter((r) => r.url && isLicenseAllowed(r.license, allowed));

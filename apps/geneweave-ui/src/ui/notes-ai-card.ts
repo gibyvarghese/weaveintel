@@ -143,6 +143,15 @@ export function wireSelectionCard(opts: { container: HTMLElement; noteId: string
       h('option', { value: 'image' }, 'image (AI, realistic)'),
     ) as HTMLSelectElement;
 
+    // Per-user preferred LANGUAGE for sourced web images (default English; saved in the DB).
+    const IMAGE_LANGS: Array<[string, string]> = [['en', 'English'], ['fr', 'French'], ['de', 'German'], ['es', 'Spanish'], ['it', 'Italian'], ['pt', 'Portuguese'], ['nl', 'Dutch'], ['ru', 'Russian'], ['zh', 'Chinese'], ['ja', 'Japanese'], ['ar', 'Arabic'], ['hi', 'Hindi']];
+    const langSel = h('select', { className: 'notes-aicard-scheme', title: 'Language for found images (saved to your account)' },
+      ...IMAGE_LANGS.map(([code, name]) => h('option', { value: code }, name)),
+    ) as HTMLSelectElement;
+    // Load the saved preference, and persist any change.
+    void api.get('/me/notes-image-language').then(async (r) => { try { const d = await r.json() as { language?: string }; if (d.language) langSel.value = d.language; } catch { /* default en */ } }).catch(() => {});
+    langSel.onchange = () => void api.put('/me/notes-image-language', { language: langSel.value }).catch(() => {});
+
     card = h('div', { className: 'notes-aicard', onMouseDown: (e: MouseEvent) => e.stopPropagation() },
       h('div', { className: 'notes-aicard-prompt' }, h('span', { className: 'notes-aicard-spark' }, '✦'), promptInput),
       h('div', { className: 'notes-aicard-chips' },
@@ -161,10 +170,13 @@ export function wireSelectionCard(opts: { container: HTMLElement; noteId: string
         chip('Go', () => colorize(schemeSel.value)(), 'notes-aicard-go'),
       ),
       // Phase 4: the one-stop Visualize row — pick a kind (or Auto) → the AI draws it.
+      // For a real web photo, a language selector (saved per-user) sets the image-label language.
       h('div', { className: 'notes-aicard-visual' },
         h('span', { className: 'notes-aicard-spark' }, '✦'),
         h('span', { className: 'notes-aicard-colorlabel' }, 'Visualize'),
         visualSel,
+        h('span', { className: 'notes-aicard-colorlabel' }, 'lang'),
+        langSel,
         chip('Draw', () => visualize(visualSel.value)(), 'notes-aicard-create'),
       ),
       h('div', { className: 'notes-aicard-status' }),

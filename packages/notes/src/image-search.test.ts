@@ -3,6 +3,7 @@ import {
   normalizeLicense, isLicenseAllowed, requiresAttribution, rankImageResults, buildAttribution,
   buildOpenverseUrl, buildWikimediaUrl, buildPixabayUrl, parseOpenverse, parseWikimedia, parsePexels,
   DEFAULT_ALLOWED_LICENSES, type ImageResult,
+  normalizeLanguage, languageName, detectTitleLanguage, titleLanguageMismatch, applyLanguagePreference,
 } from './image-search.js';
 
 describe('image-search — licence normalisation', () => {
@@ -108,5 +109,38 @@ describe('image-search — response parsers', () => {
 
   it('the default allow-list is exactly the free-to-use set (no NC/ND)', () => {
     expect(DEFAULT_ALLOWED_LICENSES).toEqual(['cc0', 'pdm', 'by', 'by-sa', 'unsplash', 'pexels', 'pixabay']);
+  });
+});
+
+describe('image-search — language preference (default English)', () => {
+  it('normalises codes / names / locales, defaulting to en', () => {
+    expect(normalizeLanguage(undefined)).toBe('en');
+    expect(normalizeLanguage('')).toBe('en');
+    expect(normalizeLanguage('en')).toBe('en');
+    expect(normalizeLanguage('FR')).toBe('fr');
+    expect(normalizeLanguage('German')).toBe('de');
+    expect(normalizeLanguage('en-GB')).toBe('en');
+    expect(normalizeLanguage('klingon')).toBe('en'); // unknown → default
+    expect(languageName('de')).toBe('German');
+    expect(languageName('xx')).toBe('English');
+  });
+  it('detects a language signalled by a filename/title', () => {
+    expect(detectTitleLanguage('Heart diagram-fr.svg')).toBe('fr');
+    expect(detectTitleLanguage('Heart_diagram_de.png')).toBe('de');
+    expect(detectTitleLanguage('Diagram of the heart (German)')).toBe('de');
+    expect(detectTitleLanguage('Heart diagram-en.svg')).toBe('en');
+    expect(detectTitleLanguage('Anatomy of the heart')).toBe(''); // no signal
+  });
+  it('flags a clear other-language title as a mismatch', () => {
+    expect(titleLanguageMismatch('Heart diagram-fr.svg', 'en')).toBe(true);
+    expect(titleLanguageMismatch('Heart diagram-en.svg', 'en')).toBe(false);
+    expect(titleLanguageMismatch('Anatomy of the heart', 'en')).toBe(false); // neutral, not penalised
+    expect(titleLanguageMismatch('Coeur humain-fr.svg', 'fr')).toBe(false);  // matches target
+  });
+  it('sinks clear other-language images below same/neutral ones (kept as fallbacks)', () => {
+    const mk = (title: string): ImageResult => ({ url: `https://x/${title}`, title, license: 'cc0', provider: 'wikimedia' });
+    const out = applyLanguagePreference([mk('Heart-fr.svg'), mk('Anatomy of the heart'), mk('Heart-de.png'), mk('Heart-en.svg')], 'en');
+    // English + neutral first (original order preserved), other-languages last.
+    expect(out.map((r) => r.title)).toEqual(['Anatomy of the heart', 'Heart-en.svg', 'Heart-fr.svg', 'Heart-de.png']);
   });
 });
