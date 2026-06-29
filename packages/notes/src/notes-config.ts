@@ -67,6 +67,16 @@ export interface WeaveNotesConfig {
   exportEnabled: boolean;
   /** Phase 10: which export formats are offered (subset of markdown/html/word/json). */
   allowedExportFormats: string[];
+  /** Let the AI SOURCE a real, free-to-use image from the web (Openverse/Wikimedia/…) when asked
+   *  for a picture — instead of synthesising one. On by default: the default provider needs no key. */
+  imageSearchEnabled: boolean;
+  /** Which free-image provider to search first: openverse | wikimedia | unsplash | pexels | pixabay. */
+  imageSearchProvider: string;
+  /** Which licences count as "free to use" (canonical ids: cc0/pdm/by/by-sa/unsplash/pexels/pixabay).
+   *  Non-commercial (nc) / no-derivatives (nd) are excluded by default. */
+  imageSearchAllowedLicenses: string[];
+  /** Show the attribution + licence caption under sourced images (required for CC-BY/BY-SA). */
+  imageSearchRequireAttribution: boolean;
   /** The note AI tools the editor agent is allowed to use (subset of the catalog). */
   enabledAiTools: string[];
 }
@@ -80,6 +90,8 @@ export const WEAVENOTES_AI_TOOLS = [
   // Phase 4 — the AI creative tools (ink + diagrams + illustrations + images).
   'create_diagram', 'draw_ink', 'recolor_ink',
   'create_illustration', 'generate_image', 'create_visual',
+  // Source a real, free-to-use image from the web (with attribution).
+  'find_image',
   // Phase 5 — AI study: turn a note into flashcards.
   'make_flashcards',
   // Phase 8 — desktop: the AI can see what you have recently worked on.
@@ -113,6 +125,10 @@ export const DEFAULT_WEAVENOTES_CONFIG: WeaveNotesConfig = {
   desktopOfflineNoteLimit: 500,
   exportEnabled: true,
   allowedExportFormats: ['markdown', 'html', 'word', 'json'],
+  imageSearchEnabled: true, // on by default: the default provider (Openverse) needs no API key
+  imageSearchProvider: 'openverse',
+  imageSearchAllowedLicenses: ['cc0', 'pdm', 'by', 'by-sa', 'unsplash', 'pexels', 'pixabay'],
+  imageSearchRequireAttribution: true,
   enabledAiTools: [...WEAVENOTES_AI_TOOLS],
 };
 
@@ -169,6 +185,20 @@ export function validateWeaveNotesConfig(
     formats = valid.length ? valid : base.allowedExportFormats;
   }
 
+  // Free-image search: provider (one of the known five) + the "free to use" licence allow-list.
+  const KNOWN_PROVIDERS = new Set(['openverse', 'wikimedia', 'unsplash', 'pexels', 'pixabay']);
+  const provider = typeof p.imageSearchProvider === 'string' && KNOWN_PROVIDERS.has(p.imageSearchProvider) ? p.imageSearchProvider : base.imageSearchProvider;
+  if (p.imageSearchProvider !== undefined && !KNOWN_PROVIDERS.has(String(p.imageSearchProvider))) warnings.push(`Unknown image provider "${p.imageSearchProvider}" — kept ${provider}.`);
+  const KNOWN_LICENSES = new Set(['cc0', 'pdm', 'by', 'by-sa', 'by-nc', 'by-nd', 'by-nc-sa', 'by-nc-nd', 'unsplash', 'pexels', 'pixabay']);
+  let licenses = base.imageSearchAllowedLicenses;
+  if (p.imageSearchAllowedLicenses !== undefined) {
+    const arr = Array.isArray(p.imageSearchAllowedLicenses) ? p.imageSearchAllowedLicenses.map(String) : [];
+    const valid = [...new Set(arr.filter((l) => KNOWN_LICENSES.has(l)))];
+    const dropped = arr.filter((l) => !KNOWN_LICENSES.has(l));
+    if (dropped.length) warnings.push(`Ignored unknown licences: ${[...new Set(dropped)].join(', ')}.`);
+    licenses = valid.length ? valid : base.imageSearchAllowedLicenses;
+  }
+
   return {
     config: {
       defaultTheme: theme,
@@ -195,6 +225,10 @@ export function validateWeaveNotesConfig(
       desktopOfflineNoteLimit: clampInt(p.desktopOfflineNoteLimit ?? base.desktopOfflineNoteLimit, 10, 10000, base.desktopOfflineNoteLimit),
       exportEnabled: asBool(p.exportEnabled ?? base.exportEnabled, base.exportEnabled),
       allowedExportFormats: formats,
+      imageSearchEnabled: asBool(p.imageSearchEnabled ?? base.imageSearchEnabled, base.imageSearchEnabled),
+      imageSearchProvider: provider,
+      imageSearchAllowedLicenses: licenses,
+      imageSearchRequireAttribution: asBool(p.imageSearchRequireAttribution ?? base.imageSearchRequireAttribution, base.imageSearchRequireAttribution),
       enabledAiTools: tools,
     },
     warnings,

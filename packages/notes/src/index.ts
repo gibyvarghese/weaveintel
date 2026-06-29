@@ -269,3 +269,26 @@ export {
   studyStats,
   validateFlashcards,
 } from './study.js';
+
+// Free-to-use IMAGE SEARCH (pure helpers; the app does the hardened fetch + storage).
+export type { ImageProvider, LicenseId, ImageResult } from './image-search.js';
+export {
+  DEFAULT_ALLOWED_LICENSES,
+  PUBLIC_DOMAIN_LICENSES,
+  LICENSE_LABELS,
+  requiresAttribution,
+  isLicenseAllowed,
+  normalizeLicense,
+  buildAttribution,
+  rankImageResults,
+  buildOpenverseUrl,
+  buildWikimediaUrl,
+  buildUnsplashUrl,
+  buildPexelsUrl,
+  buildPixabayUrl,
+  parseOpenverse,
+  parseWikimedia,
+  parseUnsplash,
+  parsePexels,
+  parsePixabay,
+} from './image-search.js';

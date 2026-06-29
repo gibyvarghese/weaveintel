@@ -498,6 +498,14 @@ export function registerAdminRoutingRoutes(
       try { if (typeof arr === 'string') arr = JSON.parse(arr); } catch { arr = []; }
       partial['enabledAiTools'] = arr;
     }
+    if (body['image_search_enabled'] !== undefined) partial['imageSearchEnabled'] = body['image_search_enabled'];
+    if (body['image_search_provider'] !== undefined) partial['imageSearchProvider'] = body['image_search_provider'];
+    if (body['image_search_require_attribution'] !== undefined) partial['imageSearchRequireAttribution'] = body['image_search_require_attribution'];
+    if (body['image_search_allowed_licenses'] !== undefined) {
+      let arr: unknown = body['image_search_allowed_licenses'];
+      try { if (typeof arr === 'string') arr = JSON.parse(arr); } catch { arr = []; }
+      partial['imageSearchAllowedLicenses'] = arr;
+    }
     const { warnings } = await (await noteSettings).updateConfig(partial);
     const row = await db.getWeaveNotesSettings();
     json(res, 200, { 'weavenotes-settings': row, warnings });
@@ -515,7 +523,7 @@ export function registerAdminRoutingRoutes(
   // Multi-row CRUD: each row sets, for one (tenant, action), whether it runs direct / agent /
   // supervisor. tenant_id '' = the global default for that action. Resolution at call time:
   // tenant row → global row → 'direct'. Edited via the Builder (weaveNotes → Action Routing).
-  const NOTE_ACTION_KEYS = ['diagram', 'ink', 'illustration', 'visual', 'restructure'];
+  const NOTE_ACTION_KEYS = ['diagram', 'ink', 'illustration', 'visual', 'restructure', 'find_image'];
   const NOTE_ACTION_MODE_VALUES = ['direct', 'agent', 'supervisor'];
   router.get('/api/admin/note-action-modes', async (_req, res, _params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }

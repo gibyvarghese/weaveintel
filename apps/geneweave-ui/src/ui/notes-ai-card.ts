@@ -115,8 +115,13 @@ export function wireSelectionCard(opts: { container: HTMLElement; noteId: string
   // The /ai/visual endpoint routes per the tenant's configured mode for that kind (direct / agent /
   // supervisor — set in the Builder under weaveNotes → Action Routing). A realistic image is always
   // direct (its generate_image tool is intentionally not agent-registered — it costs money).
-  const visualize = (kind: string) => () => void send('ai/visual', { instruction: savedText || 'a visual for this note', kind },
-    kind === 'image' ? 'generating an image' : kind === 'illustration' ? 'illustrating' : kind === 'diagram' ? 'drawing a diagram' : kind === 'ink' ? 'sketching' : 'visualizing');
+  const visualize = (kind: string) => () => {
+    // "Real photo / image (web)" sources a free-to-use image from the web (Openverse/Wikimedia/…) with
+    // attribution — far better than an AI-drawn blob for a real subject (an organ, a place, an object).
+    if (kind === 'web') return void send('ai/find-image', { query: savedText || 'image for this note' }, 'finding a free image');
+    return void send('ai/visual', { instruction: savedText || 'a visual for this note', kind },
+      kind === 'image' ? 'generating an image' : kind === 'illustration' ? 'illustrating' : kind === 'diagram' ? 'drawing a diagram' : kind === 'ink' ? 'sketching' : 'visualizing');
+  };
 
   function openCard(): void {
     if (!savedRect) return;
@@ -134,7 +139,8 @@ export function wireSelectionCard(opts: { container: HTMLElement; noteId: string
       h('option', { value: 'diagram' }, 'diagram'),
       h('option', { value: 'illustration' }, 'illustration'),
       h('option', { value: 'ink' }, 'sketch / ink'),
-      h('option', { value: 'image' }, 'image (realistic)'),
+      h('option', { value: 'web' }, 'real photo (web, free)'),
+      h('option', { value: 'image' }, 'image (AI, realistic)'),
     ) as HTMLSelectElement;
 
     card = h('div', { className: 'notes-aicard', onMouseDown: (e: MouseEvent) => e.stopPropagation() },

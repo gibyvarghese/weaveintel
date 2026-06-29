@@ -585,6 +585,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     const outline = (o.outline ?? '').slice(0, 4000);
     const kind = o.kind ?? '';
     if (action === 'restructure') return `This is my own note (id ${noteId}) and I'd like your help tidying it up. Please reorganise its sections into a clearer, more logical order and fix the heading levels, keeping all of the existing content. Stage it as a suggestion for me to review.${outline ? `\n\nI'd like the sections in roughly this order:\n${outline}` : ''}`;
+    if (action === 'find_image') return `This is my own note (id ${noteId}). Please find a real, free-to-use image of ${instruction || 'the topic of this note'} on the web and add it to the note, staged as a suggestion for me to review.`;
     if (action === 'visual') { const k = kind && kind !== 'auto' ? kind : 'visual'; return `This is my own note (id ${noteId}). Please add a ${k} to it${instruction ? `: ${instruction}` : ' that fits the content'}, staged as a suggestion for me to review.`; }
     if (action === 'ink') return `This is my own note (id ${noteId}). Please sketch ${instruction || 'a small freehand drawing that fits the content'} in it, staged as a suggestion for me to review.`;
     if (action === 'illustration') return `This is my own note (id ${noteId}). Please add an illustration to it${instruction ? `: ${instruction}` : ' that fits the content'}, staged as a suggestion for me to review.`;
@@ -651,6 +652,27 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     const out = await performNoteAiAction('ink', params['id']!, access,
       () => noteCreative!.drawInk({ noteId: params['id']!, access, instruction: inkInstruction }),
       { instruction: inkInstruction });
+    res.writeHead(out.status, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(out.body));
+  }, { auth: true });
+
+  // Source a REAL, free-to-use image from the web (Openverse/Wikimedia/…) and insert it WITH
+  // attribution. Config-driven (note_action_modes 'find_image'). The provider search + image download
+  // run through the HARDENED, SSRF-guarded fetch; only public images under allowed licences are used.
+  //   POST /api/me/notes/:id/ai/find-image   { query }  → an image suggestion (with a licence caption)
+  router.post('/api/me/notes/:id/ai/find-image', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    if (!noteCreative) { res.writeHead(501); res.end(JSON.stringify({ error: 'AI features are not configured' })); return; }
+    const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    if (!roleAtLeast(access.role, 'collaborator')) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    const query = typeof body['query'] === 'string' && body['query'].trim() ? body['query'] : (typeof body['instruction'] === 'string' ? body['instruction'] : '');
+    if (!query.trim()) { res.writeHead(400); res.end(JSON.stringify({ error: 'query required' })); return; }
+    const out = await performNoteAiAction('find_image', params['id']!, access,
+      () => noteCreative!.findImage({ noteId: params['id']!, access, query }),
+      { instruction: query });
     res.writeHead(out.status, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(out.body));
   }, { auth: true });

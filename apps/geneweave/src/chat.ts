@@ -462,6 +462,9 @@ export class ChatEngine {
         createCreativeTools(db, createModelTextGenerator(config), { generateImage: createModelImageGenerator(config) }).generateImage(a),
       noteCreateVisual: (a: { userId: string; noteId: string; instruction: string; kind?: string }) =>
         createCreativeTools(db, createModelTextGenerator(config), { generateImage: createModelImageGenerator(config) }).createVisual(a as { userId: string; noteId: string; instruction: string; kind?: 'auto' | 'diagram' | 'ink' | 'illustration' | 'image' }),
+      // weaveNotes: wire the find_image tool — source a real, free-to-use image from the web (hardened fetch).
+      noteFindImage: (a: { userId: string; noteId: string; query: string }) =>
+        createCreativeTools(db, createModelTextGenerator(config), { generateImage: createModelImageGenerator(config) }).findImage(a),
       // weaveNotes Phase 5: wire the make_flashcards tool — turn a note into a spaced-repetition deck.
       noteMakeFlashcards: (a: { userId: string; noteId: string; count?: number }) =>
         createStudyTool(db, createModelTextGenerator(config)).makeFlashcards(a),

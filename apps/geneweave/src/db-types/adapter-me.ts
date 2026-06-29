@@ -322,7 +322,7 @@ export interface NoteSuggestionRow {
   action: 'continue' | 'rewrite' | 'summarize' | 'ask' | 'note_edit' | 'ai_block'
     | 'apply_highlight' | 'apply_text_color' | 'colorize_semantic'
     | 'create_diagram' | 'draw_ink' | 'recolor_ink'
-    | 'create_illustration' | 'generate_image' | 'restructure_note';
+    | 'create_illustration' | 'generate_image' | 'restructure_note' | 'find_image';
   status: 'pending' | 'accepted' | 'rejected';
   ops_json: string;
   preview_text: string;
@@ -461,6 +461,12 @@ export interface WeaveNotesSettingsRow {
   /** weaveNotes Phase 10: note export on/off + the allowed formats (JSON array of markdown/html/word/json). */
   export_enabled: number;
   allowed_export_formats: string;
+  /** weaveNotes: source a real free-to-use image from the web — enabled / provider / allowed-licences
+   *  (JSON array) / require-attribution. Columns are optional (added by m118; may be absent on read). */
+  image_search_enabled?: number;
+  image_search_provider?: string;
+  image_search_allowed_licenses?: string;
+  image_search_require_attribution?: number;
   enabled_ai_tools: string;
   updated_at: string;
 }

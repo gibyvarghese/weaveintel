@@ -1259,6 +1259,8 @@ input{font-family:inherit;outline:none}
 .gw-canvas .notes-editor-mount .gw-image{margin:12px 0;text-align:center}
 .gw-canvas .notes-editor-mount .gw-image img{max-width:100%;border-radius:10px;box-shadow:var(--shadow-soft)}
 .gw-canvas .notes-editor-mount .gw-image figcaption{color:var(--muted);font-size:13px}
+.gw-canvas .notes-editor-mount .gw-image .gw-image-credit{margin-top:5px;font-size:11px;color:var(--fg3,#8A958F);line-height:1.3}
+.gw-canvas .notes-editor-mount .gw-image .gw-image-credit a{color:var(--fg3,#8A958F);text-decoration:underline}
 .gw-canvas .notes-editor-mount .gw-sticker{display:inline-block;font-size:30px;line-height:1;margin:6px 2px;cursor:default}
 .gw-canvas .notes-editor-mount .gw-washi{height:12px;margin:14px 0;border:none;border-radius:6px;background:repeating-linear-gradient(45deg,var(--hl-amber) 0 10px,var(--hl-pink) 10px 20px)}
 

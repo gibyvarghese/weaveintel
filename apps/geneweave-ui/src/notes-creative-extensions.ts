@@ -156,21 +156,31 @@ export const ImageBlock = Node.create({
     return {
       src: { default: null as string | null },
       alt: { default: null as string | null },
+      // Attribution caption + source/licence link, for images SOURCED from the web (find_image).
+      caption: { default: null as string | null, parseHTML: (el: HTMLElement) => el.getAttribute('data-caption'), renderHTML: (a: { caption?: string | null }) => (a.caption ? { 'data-caption': a.caption } : {}) },
+      href: { default: null as string | null, parseHTML: (el: HTMLElement) => el.getAttribute('data-href'), renderHTML: (a: { href?: string | null }) => (a.href ? { 'data-href': a.href } : {}) },
+      license: { default: null as string | null, parseHTML: (el: HTMLElement) => el.getAttribute('data-license'), renderHTML: (a: { license?: string | null }) => (a.license ? { 'data-license': a.license } : {}) },
       author: { default: null as string | null, parseHTML: (el: HTMLElement) => el.getAttribute('data-author'), renderHTML: (a: { author?: string | null }) => (a.author ? { 'data-author': a.author } : {}) },
     };
   },
-  parseHTML() { return [{ tag: 'figure[data-image] img' }, { tag: 'img[src]' }]; },
+  parseHTML() { return [{ tag: 'figure[data-image]' }, { tag: 'figure[data-image] img' }, { tag: 'img[src]' }]; },
   renderHTML({ node, HTMLAttributes }) {
-    const attrs = node.attrs as { src?: string; alt?: string };
+    const attrs = node.attrs as { src?: string; alt?: string; caption?: string; href?: string };
     const src = safeSrc(attrs.src);
-    const inner = src
+    const children: unknown[] = [src
       ? ['img', mergeAttributes(HTMLAttributes, { src, alt: attrs.alt ?? '' })]
-      : ['figcaption', {}, attrs.alt ?? 'image'];
-    return ['figure', { 'data-image': '', class: 'gw-image' }, inner];
+      : ['figcaption', {}, attrs.alt ?? 'image']];
+    // A visible attribution caption (with a source link when present) — required for CC-BY/BY-SA.
+    if (attrs.caption && attrs.caption.trim()) {
+      const safeHref = attrs.href && /^https?:\/\//i.test(attrs.href) ? attrs.href : null;
+      children.push(['figcaption', { class: 'gw-image-credit' },
+        safeHref ? ['a', { href: safeHref, target: '_blank', rel: 'noopener nofollow' }, attrs.caption] : attrs.caption]);
+    }
+    return ['figure', { 'data-image': '', class: 'gw-image' }, ...children];
   },
   addCommands() {
     return {
-      setImage: (attrs: { src?: string; alt?: string; author?: string }) => ({ commands }: any) => {
+      setImage: (attrs: { src?: string; alt?: string; author?: string; caption?: string; href?: string; license?: string }) => ({ commands }: any) => {
         const src = safeSrc(attrs.src);
         if (!src) return false;
         return commands.insertContent({ type: 'image', attrs: { ...attrs, src } });

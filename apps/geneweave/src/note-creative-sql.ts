@@ -19,11 +19,15 @@ import {
   validateDiagramScene, diagramToSvg, type DiagramScene,
   inkFromPrimitives, strokesToSvg, validateStrokes, recolorStrokes, type InkStroke,
   sanitizeSvg, svgToDataUri, type WeaveNotesConfig,
+  type ImageResult, type LicenseId, DEFAULT_ALLOWED_LICENSES, rankImageResults, buildAttribution,
+  buildOpenverseUrl, buildWikimediaUrl, buildUnsplashUrl, buildPexelsUrl, buildPixabayUrl,
+  parseOpenverse, parseWikimedia, parseUnsplash, parsePexels, parsePixabay,
 } from '@weaveintel/notes';
-import { newUUIDv7, weaveContext } from '@weaveintel/core';
+import { newUUIDv7, weaveContext, hardenedFetch } from '@weaveintel/core';
 import { roleAtLeast } from '@weaveintel/collaboration';
 import type { ChatEngineConfig } from './chat-runtime.js';
 import { createNoteCoeditRepo, resolveNoteAccess, type NoteAccess } from './note-coedit-sql.js';
+import { isSafePublicUrl } from './note-capture-sql.js';
 import { noteCoeditHub } from './note-coedit-hub.js';
 import { createNoteSettingsService } from './note-settings-sql.js';
 import { withAiPresence } from './note-ai-presence.js';
@@ -75,7 +79,7 @@ export function createNoteCreativeService(db: NoteCreativeDb, generate: NoteAiGe
     } catch { return null; }
   }
 
-  type CreativeAction = 'create_diagram' | 'draw_ink' | 'create_illustration' | 'generate_image';
+  type CreativeAction = 'create_diagram' | 'draw_ink' | 'create_illustration' | 'generate_image' | 'find_image';
 
   /**
    * Ask the model WHERE a new block belongs, so a diagram/drawing/image is placed next to the most
@@ -158,11 +162,102 @@ export function createNoteCreativeService(db: NoteCreativeDb, generate: NoteAiGe
     if (!b64) return { ok: false, error: 'the image model returned no image', action: 'generate_image' };
     let artifactId: string | null = null;
     try {
-      const art = await db.saveArtifact({ name: input.instruction.slice(0, 80) || 'image', type: 'image', mimeType: 'image/png', data: b64, scope: 'user', userId: input.access.ownerId, ...(input.access.tenantId ? { tenantId: input.access.tenantId } : {}), tags: ['note', 'creative', 'image'], metadata: { source: 'note', noteId: input.noteId, kind: 'image', model: config.imageModel, encoding: 'base64' } });
+      // Decode the model's base64 to raw BYTES so the artifact is stored as a binary blob (served as
+      // a real image), not as base64 text labelled image/png (which renders broken).
+      const art = await db.saveArtifact({ name: input.instruction.slice(0, 80) || 'image', type: 'image', mimeType: 'image/png', data: Buffer.from(b64, 'base64'), scope: 'user', userId: input.access.ownerId, ...(input.access.tenantId ? { tenantId: input.access.tenantId } : {}), tags: ['note', 'creative', 'image'], metadata: { source: 'note', noteId: input.noteId, kind: 'image', model: config.imageModel } });
       artifactId = art.id;
     } catch { return { ok: false, error: 'could not store the generated image', action: 'generate_image' }; }
     const alt = input.instruction.slice(0, 80);
     return stageInsert(input.noteId, input.access, 'generate_image', 'image', { src: `/api/artifacts/${artifactId}/data`, alt, author: 'ai' }, `Image: ${alt}`, { artifactId }, `an image of ${alt}`);
+  }
+
+  // ── Free-to-use IMAGE SEARCH ─────────────────────────────────────────────────────────────────
+  // Search a free-image provider through the HARDENED (SSRF-guarded) fetch, then download the chosen
+  // image — again through the hardened fetch — store it as an artifact, and insert it WITH attribution.
+
+  /** Hardened JSON GET for a provider's search API (SSRF guard + HTTPS + timeout + size cap). */
+  async function searchJson(url: string, headers?: Record<string, string>): Promise<unknown> {
+    const res = await hardenedFetch(url, { headers: { 'User-Agent': 'weaveintel-notes/1.0', ...(headers ?? {}) } }, { errorTag: 'note-image-search', timeoutMs: 15000, maxBytes: 4 * 1024 * 1024 });
+    if (!res.ok) throw new Error(`provider returned ${res.status}`);
+    return res.json();
+  }
+
+  /** Query ONE provider → normalised results. Keyed providers return [] when no key is configured. */
+  async function searchOne(provider: string, query: string): Promise<ImageResult[]> {
+    switch (provider) {
+      case 'openverse': return parseOpenverse(await searchJson(buildOpenverseUrl(query)));
+      case 'wikimedia': return parseWikimedia(await searchJson(buildWikimediaUrl(query)));
+      case 'unsplash': { const k = process.env['UNSPLASH_ACCESS_KEY']; return k ? parseUnsplash(await searchJson(buildUnsplashUrl(query), { Authorization: `Client-ID ${k}` })) : []; }
+      case 'pexels': { const k = process.env['PEXELS_API_KEY']; return k ? parsePexels(await searchJson(buildPexelsUrl(query), { Authorization: k })) : []; }
+      case 'pixabay': { const k = process.env['PIXABAY_API_KEY']; return k ? parsePixabay(await searchJson(buildPixabayUrl(query, k))) : []; }
+      default: return [];
+    }
+  }
+
+  /** Search the configured provider; if it yields no allowed result, fall back to the no-key ones. */
+  async function searchProviders(provider: string, query: string, allowed: LicenseId[]): Promise<ImageResult[]> {
+    let primary: ImageResult[] = [];
+    try { primary = await searchOne(provider, query); } catch { primary = []; }
+    if (rankImageResults(primary, allowed).length > 0) return primary;
+    for (const fb of ['openverse', 'wikimedia']) {
+      if (fb === provider) continue;
+      try { const r = await searchOne(fb, query); if (rankImageResults(r, allowed).length > 0) return r; } catch { /* try next */ }
+    }
+    return primary;
+  }
+
+  /** Download the chosen image through the hardened fetch; validate it is really an image, capped.
+   *  Returns the raw BYTES (a Buffer → stored as a binary artifact blob, not base64 text). */
+  async function downloadImage(url: string): Promise<{ bytes: Buffer; mime: string }> {
+    if (!isSafePublicUrl(url)) throw new Error('unsafe image URL'); // defence-in-depth (hardenedFetch also blocks)
+    const res = await hardenedFetch(url, { headers: { 'User-Agent': 'weaveintel-notes/1.0' } }, { errorTag: 'note-image-fetch', timeoutMs: 20000, maxBytes: 12 * 1024 * 1024 });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const mime = (res.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase();
+    if (!mime.startsWith('image/')) throw new Error(`not an image (${mime || 'unknown type'})`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length === 0) throw new Error('empty image');
+    return { bytes: buf, mime };
+  }
+
+  /** Source a REAL, free-to-use image from the web (with attribution) and stage it as a suggestion. */
+  async function findImageInner(input: { noteId: string; access: NoteAccess; query: string }): Promise<CreativeResult> {
+    const config = await cfg();
+    if (!config.imageSearchEnabled) return { ok: false, error: 'web image search is disabled in weaveNotes settings', action: 'find_image' };
+    if (!db.saveArtifact) return { ok: false, error: 'artifact storage is unavailable', action: 'find_image' };
+    const query = input.query.trim().slice(0, 200);
+    if (!query) return { ok: false, error: 'no search query', action: 'find_image' };
+    const allowed = (config.imageSearchAllowedLicenses?.length ? config.imageSearchAllowedLicenses : DEFAULT_ALLOWED_LICENSES) as LicenseId[];
+
+    let results: ImageResult[];
+    try { results = await searchProviders(config.imageSearchProvider, query, allowed); }
+    catch (e) { return { ok: false, error: `image search failed: ${e instanceof Error ? e.message : 'error'}`, action: 'find_image' }; }
+    const ranked = rankImageResults(results, allowed);
+    if (ranked.length === 0) return { ok: false, error: `no free-to-use image found for "${query}"`, action: 'find_image' };
+
+    // Try the top results in order (some direct URLs may 404 / not be an image).
+    let pick: ImageResult | null = null; let payload: { bytes: Buffer; mime: string } | null = null; let lastErr = '';
+    for (const r of ranked.slice(0, 4)) {
+      try { payload = await downloadImage(r.url); pick = r; break; } catch (e) { lastErr = e instanceof Error ? e.message : 'error'; }
+    }
+    if (!pick || !payload) return { ok: false, error: `could not fetch a usable image: ${lastErr || 'no candidate worked'}`, action: 'find_image' };
+
+    let artifactId: string | null = null;
+    try {
+      const art = await db.saveArtifact({
+        name: (pick.title || query).slice(0, 80), type: 'image', mimeType: payload.mime, data: payload.bytes, scope: 'user',
+        userId: input.access.ownerId, ...(input.access.tenantId ? { tenantId: input.access.tenantId } : {}),
+        tags: ['note', 'image', 'web'],
+        metadata: { source: 'note', noteId: input.noteId, kind: 'find_image', provider: pick.provider, license: pick.license, sourceUrl: pick.sourceUrl ?? '' },
+      });
+      artifactId = art.id;
+    } catch { return { ok: false, error: 'could not store the sourced image', action: 'find_image' }; }
+
+    const attribution = buildAttribution(pick);
+    return stageInsert(
+      input.noteId, input.access, 'find_image', 'image',
+      { src: `/api/artifacts/${artifactId}/data`, alt: query, caption: config.imageSearchRequireAttribution ? attribution : '', href: pick.sourceUrl ?? pick.licenseUrl ?? '', license: pick.license, author: 'ai' },
+      `Image: ${attribution}`, { artifactId }, `an image of ${query.slice(0, 50)}`,
+    );
   }
 
   /** Heuristically pick the best visual KIND for a free-text request (when kind = 'auto'). */
@@ -197,6 +292,10 @@ export function createNoteCreativeService(db: NoteCreativeDb, generate: NoteAiGe
     },
     generateImage(input: { noteId: string; access: NoteAccess; instruction: string }): Promise<CreativeResult> {
       return withAiPresence(db, input.noteId, () => generateImageInner(input));
+    },
+    /** Source a real, free-to-use image from the web (with attribution) and stage it as a suggestion. */
+    findImage(input: { noteId: string; access: NoteAccess; query: string }): Promise<CreativeResult> {
+      return withAiPresence(db, input.noteId, () => findImageInner(input));
     },
     /** The unified router: pick (or honour) the visual kind, gate by config, dispatch. */
     async createVisual(input: { noteId: string; access: NoteAccess; instruction: string; kind?: VisualKind }): Promise<CreativeResult> {
@@ -290,6 +389,10 @@ export function createCreativeTools(db: NoteCreativeDb, generate: NoteAiGenerate
     async createVisual(args: { userId: string; noteId: string; instruction: string; kind?: VisualKind }): Promise<CreativeResult> {
       const a = await access(args.userId, args.noteId); if ('error' in a) return { ok: false, error: a.error };
       return svc.createVisual({ noteId: args.noteId, access: a, instruction: args.instruction, ...(args.kind ? { kind: args.kind } : {}) });
+    },
+    async findImage(args: { userId: string; noteId: string; query: string }): Promise<CreativeResult> {
+      const a = await access(args.userId, args.noteId); if ('error' in a) return { ok: false, error: a.error };
+      return svc.findImage({ noteId: args.noteId, access: a, query: args.query });
     },
   };
 }

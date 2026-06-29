@@ -54,6 +54,10 @@ function rowToConfig(row: WeaveNotesSettingsRow | null): WeaveNotesConfig {
     ...(typeof row.desktop_offline_note_limit === 'number' ? { desktopOfflineNoteLimit: row.desktop_offline_note_limit } : {}),
     exportEnabled: row.export_enabled !== 0,  // undefined (pre-m114) → enabled
     ...(row.allowed_export_formats ? { allowedExportFormats: safeJsonArray(row.allowed_export_formats) } : {}),
+    imageSearchEnabled: row.image_search_enabled !== 0,  // undefined (pre-m118) → enabled
+    ...(typeof row.image_search_provider === 'string' && row.image_search_provider ? { imageSearchProvider: row.image_search_provider } : {}),
+    ...(row.image_search_allowed_licenses ? { imageSearchAllowedLicenses: safeJsonArray(row.image_search_allowed_licenses) } : {}),
+    imageSearchRequireAttribution: row.image_search_require_attribution !== 0,
     enabledAiTools: tools,
   }).config;
 }
@@ -97,6 +101,10 @@ export function createNoteSettingsService(db: SettingsDb, opts: { now?: () => nu
       desktop_offline_note_limit: config.desktopOfflineNoteLimit,
       export_enabled: config.exportEnabled ? 1 : 0,
       allowed_export_formats: JSON.stringify(config.allowedExportFormats),
+      image_search_enabled: config.imageSearchEnabled ? 1 : 0,
+      image_search_provider: config.imageSearchProvider,
+      image_search_allowed_licenses: JSON.stringify(config.imageSearchAllowedLicenses),
+      image_search_require_attribution: config.imageSearchRequireAttribution ? 1 : 0,
       enabled_ai_tools: JSON.stringify(config.enabledAiTools),
     });
     return { config, warnings };

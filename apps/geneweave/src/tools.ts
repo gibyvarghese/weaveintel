@@ -1028,6 +1028,8 @@ export interface ToolRegistryOptions {
   noteCreateIllustration?: (args: { userId: string; noteId: string; instruction: string }) => Promise<{ ok: boolean; error?: string; suggestionId?: string; artifactId?: string | null }>;
   noteGenerateImage?: (args: { userId: string; noteId: string; instruction: string }) => Promise<{ ok: boolean; error?: string; suggestionId?: string; artifactId?: string | null }>;
   noteCreateVisual?: (args: { userId: string; noteId: string; instruction: string; kind?: string }) => Promise<{ ok: boolean; error?: string; suggestionId?: string; artifactId?: string | null; kind?: string }>;
+  // weaveNotes — source a REAL, free-to-use image from the web (with attribution) into a note.
+  noteFindImage?: (args: { userId: string; noteId: string; query: string }) => Promise<{ ok: boolean; error?: string; suggestionId?: string; artifactId?: string | null }>;
   // weaveNotes Phase 5 — turn a note into flashcards (active recall + SM-2 spaced repetition).
   noteMakeFlashcards?: (args: { userId: string; noteId: string; count?: number }) => Promise<{ ok: boolean; error?: string; created?: number }>;
 }
@@ -1813,6 +1815,28 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
         tags: ['notes', 'output'],
       }),
     } : {}),
+    // weaveNotes: find a REAL, free-to-use image from the web — available when noteFindImage is set.
+    ...(opts?.noteFindImage && opts.currentUserId ? {
+      find_image: weaveTool({
+        name: 'find_image',
+        description: 'Find a REAL, free-to-use image on the web (Openverse / Wikimedia / Unsplash / Pexels / Pixabay) and insert it into one of the user\'s notes WITH its licence + attribution. Use this when the user asks to "show / add / insert / find a picture/photo/image of …", OR when they ask to "draw" something that is far better shown as a real picture than as boxes-and-arrows — e.g. an anatomical organ ("draw the human heart"), an animal, a place, a real object. (For a process / flow / relationship, use create_diagram instead.) The fetch is SSRF-hardened and only public images under allowed licences are used. Staged as a track-changes suggestion. You only need the note id and a short search query.',
+        parameters: {
+          type: 'object',
+          properties: {
+            noteId: { type: 'string', description: 'The id of the note to add the image to.' },
+            query: { type: 'string', description: 'A short image search query, e.g. "human heart anatomy" or "golden gate bridge".' },
+          },
+          required: ['noteId', 'query'],
+        },
+        execute: async (args: { noteId: string; query: string }) => {
+          if (!opts.noteFindImage || !opts.currentUserId) return { content: 'Image search is unavailable in this context.', isError: true };
+          const r = await opts.noteFindImage({ userId: opts.currentUserId, noteId: args.noteId, query: args.query });
+          if (!r.ok) return { content: `find_image failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, suggestionId: r.suggestionId ?? null, artifactId: r.artifactId ?? null });
+        },
+        tags: ['notes', 'output'],
+      }),
+    } : {}),
     // weaveNotes Phase 5: turn a note into flashcards — available when noteMakeFlashcards is set.
     ...(opts?.noteMakeFlashcards && opts.currentUserId ? {
       make_flashcards: weaveTool({
@@ -2189,7 +2213,7 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
     // ink, colour-code, or make flashcards from a plain chat ("draw a diagram of this"), not only via
     // the selection card. Each is built only when its callback is wired + gated by per-call config.
     // (generate_image is intentionally NOT here — it costs money and stays opt-in.)
-    'create_diagram', 'draw_ink', 'recolor_ink', 'create_illustration', 'create_visual',
+    'create_diagram', 'draw_ink', 'recolor_ink', 'create_illustration', 'create_visual', 'find_image',
     'make_flashcards', 'apply_highlight', 'apply_text_color', 'colorize_semantic',
   ] as const) {
     const t = scopedTools[noteTool];

@@ -97,6 +97,7 @@ import { applyM114NotesExport } from './m114-notes-export.js';
 import { applyM115SuggestionBeforeText } from './m115-suggestion-before-text.js';
 import { applyM116NoteRestructureTool } from './m116-note-restructure-tool.js';
 import { applyM117NoteActionModes } from './m117-note-action-modes.js';
+import { applyM118NoteImageSearch } from './m118-note-image-search.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -202,6 +203,7 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm115-suggestion-before-text', description: 'weaveNotes: adds note_suggestions.before_text so an AI edit can render INLINE in the note as a real old→new diff (the design\'s track-changes card with ✓ Accept / ✕ Reject), instead of a plain text preview. Captured when a rewrite is staged; empty for append-only suggestions. Idempotent (safeExec ALTER)', run: applyM115SuggestionBeforeText },
   { id: 'm116-note-restructure-tool', description: 'weaveNotes: the whole-note restructure tool. Registers restructure_note in tool_catalog (Builder-governable), grants it to the weaveNotes Editor worker agent, and enables it in weavenotes_settings.enabled_ai_tools. The AI reorganises a whole note — reorder/group sections, fix the heading hierarchy, or rearrange to a desired outline — keeping every fact, staged as ONE track-changes suggestion the human accepts or rejects (visuals like diagrams/ink/tables are preserved across the reorg). Idempotent (INSERT OR IGNORE + JSON merges)', run: applyM116NoteRestructureTool },
   { id: 'm117-note-action-modes', description: 'weaveNotes: per-tenant routing mode for each note AI action — note_action_modes (tenant_id, action_key, mode) lets an operator choose, per action (diagram/ink/illustration/visual/restructure) and per tenant, whether it runs direct (fast service call), via the chat agent, or via the supervisor (which delegates to the weaveNotes Editor worker). Resolution: tenant row → global row → direct. Seeds the global defaults to the shipped behaviour (diagram/ink/visual/restructure=supervisor, illustration=direct). Builder-editable. Idempotent (CREATE IF NOT EXISTS + INSERT OR IGNORE)', run: applyM117NoteActionModes },
+  { id: 'm118-note-image-search', description: 'weaveNotes: source a real FREE-TO-USE image from the web (find_image). Adds image-search settings to weavenotes_settings (enabled/provider/allowed-licences/require-attribution, Builder-editable), seeds the find_image routing row in note_action_modes (default direct), registers the find_image tool in tool_catalog + grants it to the weaveNotes Editor worker + enables it. The provider search + image download run through the HARDENED SSRF-guarded fetch; only public images under allowed licences are used, inserted as a track-changes suggestion with a licence + attribution caption. Idempotent (safeExec ALTERs + INSERT OR IGNORE + JSON merges)', run: applyM118NoteImageSearch },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

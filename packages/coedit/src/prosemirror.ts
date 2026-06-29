@@ -132,7 +132,7 @@ export function pmToBlocks(pm: unknown): BlockSpec[] {
       // ── Phase 1 creative blocks ──────────────────────────────────────────────
       case 'callout': { const { text, marks } = wrapperInline(node); out.push({ type: 'callout', attrs: pickAttrs(node.attrs, ['tone', 'author']), text, marks }); break; }
       case 'toggle': { const { text, marks } = wrapperInline(node); out.push({ type: 'toggle', attrs: pickAttrs(node.attrs, ['summary', 'open', 'author']), text, marks }); break; }
-      case 'image': out.push({ type: 'image', attrs: pickAttrs(node.attrs, ['src', 'alt', 'author']) }); break;
+      case 'image': out.push({ type: 'image', attrs: pickAttrs(node.attrs, ['src', 'alt', 'author', 'caption', 'href', 'license']) }); break;
       case 'sticker': out.push({ type: 'sticker', attrs: pickAttrs(node.attrs, ['emoji', 'author']) }); break;
       case 'washiDivider': out.push({ type: 'washiDivider', attrs: pickAttrs(node.attrs, ['pattern']) }); break;
       // ── Phase 4 creative atoms (their payload is structured JSON kept verbatim) ──
@@ -246,7 +246,7 @@ export function blocksToProseMirror(blocks: NormalBlock[]): { type: 'doc'; conte
     } else if (b.type === 'toggle') {
       content.push({ type: 'toggle', attrs: pickAttrs(b.attrs, ['summary', 'open', 'author']), content: [{ type: 'paragraph', content: inlineNodes(b.text, b.marks) }] });
     } else if (b.type === 'image') {
-      content.push({ type: 'image', attrs: pickAttrs(b.attrs, ['src', 'alt', 'author']) });
+      content.push({ type: 'image', attrs: pickAttrs(b.attrs, ['src', 'alt', 'author', 'caption', 'href', 'license']) });
     } else if (b.type === 'sticker') {
       content.push({ type: 'sticker', attrs: pickAttrs(b.attrs, ['emoji', 'author']) });
     } else if (b.type === 'washiDivider') {
