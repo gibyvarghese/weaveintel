@@ -74,6 +74,32 @@ test('find_image — sources a real free-to-use heart image with attribution (ha
   await page.screenshot({ path: `${SHOT}/heart-find-image.png`, fullPage: true });
 });
 
+test('find_image — a LONG selected passage is summarised into a focused query (not searched raw)', async ({ page }) => {
+  test.setTimeout(120_000);
+  const { origin, H } = await login(page);
+  const note = await (await page.request.post(`${origin}/api/me/notes`, { headers: H, data: { title: 'Long sel', doc_json: HEART } })).json() as { id: string };
+  // Simulate selecting a big paragraph (what the selection card would send as the query).
+  const longSelection = 'The human heart is a hollow, muscular organ roughly the size of a clenched fist, located slightly left of the centre of the chest between the lungs. It is divided into four chambers — the right and left atria above and the right and left ventricles below — separated by valves that keep blood moving in one direction. Deoxygenated blood returns from the body through the venae cavae into the right atrium, passes to the right ventricle, and is pumped to the lungs via the pulmonary artery, while oxygenated blood returns to the left atrium and is pumped out to the body through the aorta.';
+  const r = await page.request.post(`${origin}/api/me/notes/${note.id}/ai/find-image`, { headers: H, data: { query: longSelection } });
+  const body = await r.json() as { ok: boolean };
+  expect(body.ok).toBe(true);
+  const after = await (await page.request.get(`${origin}/api/me/notes/${note.id}`)).json() as { doc_json: string };
+  // Find the staged image (accept first).
+  const pend = await (await page.request.get(`${origin}/api/me/notes/${note.id}/suggestions?status=pending`)).json() as { suggestions: Array<{ id: string; action: string }> };
+  const sug = pend.suggestions.find((s) => s.action === 'find_image');
+  expect(sug).toBeTruthy();
+  await page.request.post(`${origin}/api/me/notes/${note.id}/suggestions/${sug!.id}/accept`, { headers: H, data: {} });
+  const doc = await (await page.request.get(`${origin}/api/me/notes/${note.id}`)).json() as { doc_json: string };
+  const img = imageNode(doc.doc_json);
+  // The alt is the DERIVED query — short, focused, NOT the raw 500+ char paragraph.
+  // eslint-disable-next-line no-console
+  console.log('[find-image] derived alt for long selection:', JSON.stringify(img?.alt));
+  expect((img?.alt ?? '').length).toBeLessThan(80);
+  expect((img?.alt ?? '').length).toBeLessThan(longSelection.length / 4);
+  expect(img?.src).toMatch(/^\/api\/artifacts\//);
+  void after;
+});
+
 test('find_image — catalogued tool granted to the weavenotes_editor agent', async ({ page }) => {
   test.setTimeout(60_000);
   const { origin } = await login(page);

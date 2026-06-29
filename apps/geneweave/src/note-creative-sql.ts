@@ -19,7 +19,7 @@ import {
   validateDiagramScene, diagramToSvg, type DiagramScene,
   inkFromPrimitives, strokesToSvg, validateStrokes, recolorStrokes, type InkStroke,
   sanitizeSvg, svgToDataUri, type WeaveNotesConfig,
-  type ImageResult, type LicenseId, DEFAULT_ALLOWED_LICENSES, rankImageResults, buildAttribution,
+  type ImageResult, type LicenseId, DEFAULT_ALLOWED_LICENSES, LICENSE_LABELS, rankImageResults, buildAttribution,
   buildOpenverseUrl, buildWikimediaUrl, buildUnsplashUrl, buildPexelsUrl, buildPixabayUrl,
   parseOpenverse, parseWikimedia, parseUnsplash, parsePexels, parsePixabay,
 } from '@weaveintel/notes';
@@ -219,44 +219,104 @@ export function createNoteCreativeService(db: NoteCreativeDb, generate: NoteAiGe
     return { bytes: buf, mime };
   }
 
-  /** Source a REAL, free-to-use image from the web (with attribution) and stage it as a suggestion. */
+  /** Turn the user's text (a short request OR a long selection) + the note context into 1–3 SHORT,
+   *  focused image-search queries — best first. Summarises a long selection into search terms and
+   *  offers a couple of variants to try, so we don't just search the raw paragraph. */
+  async function deriveImageQueries(rawText: string, docContext: string): Promise<string[]> {
+    const text = rawText.trim().slice(0, 4000);
+    const fallback = text.split(/\s+/).slice(0, 8).join(' ').slice(0, 80) || text.slice(0, 80);
+    try {
+      const reply = await generate({
+        system: 'You turn a request for a picture (which may be a long passage the user selected) into SHORT web image-search queries. Output ONLY a JSON array of 1-3 strings, BEST first, each 2-6 plain words, concrete and visual — no punctuation, no quotes, no commentary.',
+        user: `The user wants an image related to this text:\n"""${text}"""\n\nNote context (for disambiguation):\n${docContext.slice(0, 1500)}\n\nGive 1-3 short image-search queries.`,
+        temperature: 0.3, maxTokens: 120,
+      });
+      const arr = extractJson(reply, 'array');
+      const queries = Array.isArray(arr) ? [...new Set(arr.map((s) => String(s).trim().replace(/^["']|["']$/g, '')).filter((s) => s.length > 1).slice(0, 3))] : [];
+      if (queries.length) return queries;
+    } catch { /* fall through to the heuristic */ }
+    return [fallback];
+  }
+
+  /** Order the candidate images BEST-first by how well they fit the request + the note context. The
+   *  model sees each candidate's title / creator / licence / provider — a context-aware pick over a
+   *  few options, not "whatever came first". Returns indices into `candidates`. */
+  async function rankCandidatesByContext(candidates: ImageResult[], want: string, docContext: string): Promise<number[]> {
+    const natural = candidates.map((_, i) => i);
+    if (candidates.length <= 1) return natural;
+    const list = candidates.map((c, i) => `${i}: "${(c.title || 'untitled').slice(0, 80)}" — ${LICENSE_LABELS[c.license]} via ${c.provider}${c.creator ? ` by ${String(c.creator).slice(0, 40)}` : ''}`).join('\n');
+    try {
+      const reply = await generate({
+        system: 'You pick the most suitable image for a note. Reply with ONLY a JSON array of the candidate numbers, BEST match first. Judge by how well each title fits what is wanted AND the note context — prefer clear, accurate, on-topic, appropriate images. List the strong candidates (you may omit obviously irrelevant ones).',
+        user: `Wanted: an image of "${want.slice(0, 200)}".\nNote context:\n${docContext.slice(0, 1200)}\n\nCandidates:\n${list}\n\nOrder them best-first (numbers only).`,
+        temperature: 0, maxTokens: 120,
+      });
+      const arr = extractJson(reply, 'array');
+      const order = Array.isArray(arr) ? arr.map((n) => parseInt(String(n), 10)).filter((n) => Number.isInteger(n) && n >= 0 && n < candidates.length) : [];
+      const seen = new Set(order);
+      for (const i of natural) if (!seen.has(i)) order.push(i); // keep any the model dropped, as fallbacks
+      if (order.length) return order;
+    } catch { /* fall through to natural order */ }
+    return natural;
+  }
+
+  /** Source a REAL, free-to-use image from the web (with attribution) and stage it as a suggestion.
+   *  Goes through a few tries to identify the RIGHT image: it summarises the request into focused
+   *  queries, gathers several candidates across them, lets the model pick the best by the document
+   *  context, then downloads in that order (falling through on a dead/blocked URL). */
   async function findImageInner(input: { noteId: string; access: NoteAccess; query: string }): Promise<CreativeResult> {
     const config = await cfg();
     if (!config.imageSearchEnabled) return { ok: false, error: 'web image search is disabled in weaveNotes settings', action: 'find_image' };
     if (!db.saveArtifact) return { ok: false, error: 'artifact storage is unavailable', action: 'find_image' };
-    const query = input.query.trim().slice(0, 200);
-    if (!query) return { ok: false, error: 'no search query', action: 'find_image' };
+    const rawText = input.query.trim();
+    if (!rawText) return { ok: false, error: 'no search query', action: 'find_image' };
     const allowed = (config.imageSearchAllowedLicenses?.length ? config.imageSearchAllowedLicenses : DEFAULT_ALLOWED_LICENSES) as LicenseId[];
 
-    let results: ImageResult[];
-    try { results = await searchProviders(config.imageSearchProvider, query, allowed); }
-    catch (e) { return { ok: false, error: `image search failed: ${e instanceof Error ? e.message : 'error'}`, action: 'find_image' }; }
-    const ranked = rankImageResults(results, allowed);
-    if (ranked.length === 0) return { ok: false, error: `no free-to-use image found for "${query}"`, action: 'find_image' };
+    // The note's text — used to summarise the request AND to judge which candidate fits the document.
+    const view = await relay.ensureDoc({ noteId: input.noteId, tenantId: input.access.tenantId, ownerId: input.access.ownerId, seedPm: await seedFor(input.noteId, input.access.ownerId) });
+    const docContext = view.markdown ?? '';
 
-    // Try the top results in order (some direct URLs may 404 / not be an image).
+    // 1) Focused queries (summarise a long selection + a couple of variants to try).
+    const queries = await deriveImageQueries(rawText, docContext);
+
+    // 2) Gather candidates across the queries (dedupe by URL; only allowed "free to use" licences).
+    const candidates: ImageResult[] = [];
+    for (const q of queries) {
+      let res: ImageResult[] = [];
+      try { res = await searchProviders(config.imageSearchProvider, q, allowed); } catch { /* try next query */ }
+      for (const r of rankImageResults(res, allowed)) { if (!candidates.some((c) => c.url === r.url)) candidates.push(r); }
+      if (candidates.length >= 12) break;
+    }
+    if (candidates.length === 0) return { ok: false, error: `no free-to-use image found for "${queries[0]}"`, action: 'find_image' };
+
+    // 3) Context-aware ranking: the model orders the candidates by fit to the request + the note.
+    const order = await rankCandidatesByContext(candidates, rawText.slice(0, 200), docContext);
+
+    // 4) Download in that order — a few tries — so a dead/blocked URL falls through to the next best.
     let pick: ImageResult | null = null; let payload: { bytes: Buffer; mime: string } | null = null; let lastErr = '';
-    for (const r of ranked.slice(0, 4)) {
-      try { payload = await downloadImage(r.url); pick = r; break; } catch (e) { lastErr = e instanceof Error ? e.message : 'error'; }
+    for (const idx of order.slice(0, 5)) {
+      const cand = candidates[idx]; if (!cand) continue;
+      try { payload = await downloadImage(cand.url); pick = cand; break; } catch (e) { lastErr = e instanceof Error ? e.message : 'error'; }
     }
     if (!pick || !payload) return { ok: false, error: `could not fetch a usable image: ${lastErr || 'no candidate worked'}`, action: 'find_image' };
 
     let artifactId: string | null = null;
     try {
       const art = await db.saveArtifact({
-        name: (pick.title || query).slice(0, 80), type: 'image', mimeType: payload.mime, data: payload.bytes, scope: 'user',
+        name: (pick.title || queries[0] || rawText).slice(0, 80), type: 'image', mimeType: payload.mime, data: payload.bytes, scope: 'user',
         userId: input.access.ownerId, ...(input.access.tenantId ? { tenantId: input.access.tenantId } : {}),
         tags: ['note', 'image', 'web'],
-        metadata: { source: 'note', noteId: input.noteId, kind: 'find_image', provider: pick.provider, license: pick.license, sourceUrl: pick.sourceUrl ?? '' },
+        metadata: { source: 'note', noteId: input.noteId, kind: 'find_image', provider: pick.provider, license: pick.license, sourceUrl: pick.sourceUrl ?? '', query: queries[0] ?? '', candidates: candidates.length },
       });
       artifactId = art.id;
     } catch { return { ok: false, error: 'could not store the sourced image', action: 'find_image' }; }
 
     const attribution = buildAttribution(pick);
+    const alt = (queries[0] ?? rawText).slice(0, 80);
     return stageInsert(
       input.noteId, input.access, 'find_image', 'image',
-      { src: `/api/artifacts/${artifactId}/data`, alt: query, caption: config.imageSearchRequireAttribution ? attribution : '', href: pick.sourceUrl ?? pick.licenseUrl ?? '', license: pick.license, author: 'ai' },
-      `Image: ${attribution}`, { artifactId }, `an image of ${query.slice(0, 50)}`,
+      { src: `/api/artifacts/${artifactId}/data`, alt, caption: config.imageSearchRequireAttribution ? attribution : '', href: pick.sourceUrl ?? pick.licenseUrl ?? '', license: pick.license, author: 'ai' },
+      `Image: ${attribution}`, { artifactId }, `an image of ${alt.slice(0, 50)}`,
     );
   }
 
