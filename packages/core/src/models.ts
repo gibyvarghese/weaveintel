@@ -239,10 +239,21 @@ export interface RerankerModel extends HasCapabilities {
 
 export interface ImageGenerationRequest {
   readonly prompt: string;
+  /** e.g. '1024x1024' | '1536x1024' | '1024x1536' | 'auto' (GPT Image); '1024x1792' etc. (DALL·E 3). */
   readonly size?: string;
+  /** GPT Image: 'low' | 'medium' | 'high' | 'auto'. DALL·E 3: 'standard' | 'hd'. */
   readonly quality?: string;
+  /** DALL·E 3 only: 'vivid' | 'natural'. (GPT Image ignores this.) */
   readonly style?: string;
   readonly n?: number;
+  /** GPT Image only: 'transparent' | 'opaque' | 'auto'. */
+  readonly background?: string;
+  /** GPT Image only: returned image format 'png' | 'jpeg' | 'webp' (default png). */
+  readonly outputFormat?: string;
+  /** GPT Image only: 0-100 compression level for 'jpeg'/'webp' output. */
+  readonly outputCompression?: number;
+  /** GPT Image only: content-moderation strictness 'low' | 'auto'. */
+  readonly moderation?: string;
 }
 
 export interface GeneratedImage {
@@ -254,6 +265,8 @@ export interface GeneratedImage {
 export interface ImageGenerationResponse {
   readonly images: readonly GeneratedImage[];
   readonly model: string;
+  /** Token usage (GPT Image models report this; DALL·E does not). */
+  readonly usage?: Readonly<Record<string, unknown>>;
 }
 
 export interface ImageModel extends HasCapabilities {

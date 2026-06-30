@@ -485,12 +485,13 @@ export function createModelImageGenerator(modelConfig: ChatEngineConfig): NoteIm
     if (!apiKey) return null;
     try {
       const mod = await import('@weaveintel/provider-openai') as unknown as {
-        weaveOpenAIImageModel: (id: string, opts: { apiKey?: string; baseUrl?: string }) => { generateImage: (ctx: unknown, req: { prompt: string; size?: string }) => Promise<{ images?: ReadonlyArray<{ image?: string }> }> };
+        weaveOpenAIImageModel: (id: string, opts: { apiKey?: string; baseUrl?: string }) => { generateImage: (ctx: unknown, req: { prompt: string; size?: string; quality?: string }) => Promise<{ images?: ReadonlyArray<{ base64?: string; url?: string }> }> };
       };
       const imgModel = mod.weaveOpenAIImageModel(model ?? 'gpt-image-1', { apiKey, ...(openaiCfg?.baseUrl ? { baseUrl: openaiCfg.baseUrl } : {}) });
       const ctx = weaveContext({ userId, tenantId: tenantId ?? undefined, runtime: modelConfig.runtime });
       const res = await imgModel.generateImage(ctx, { prompt, ...(size ? { size } : {}) });
-      return res.images?.[0]?.image ?? null;
+      // The provider returns base64 in `images[0].base64` (NOT `.image`). generateImageInner expects base64.
+      return res.images?.[0]?.base64 ?? null;
     } catch { return null; }
   };
 }
