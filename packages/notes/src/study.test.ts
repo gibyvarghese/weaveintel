@@ -2,7 +2,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   ratingToQuality, initialSchedule, sm2, isDue, dueCards, studyStats, validateFlashcards,
-  MIN_EASE, INITIAL_EASE, type CardSchedule,
+  ratingToGrade, fsrs, fsrsInterval, fsrsPreview, retrievability,
+  FSRS_DEFAULT_WEIGHTS, FSRS_DEFAULT_RETENTION,
+  MIN_EASE, INITIAL_EASE, type CardSchedule, type ReviewRating,
 } from './study.js';
 
 const T0 = 1_700_000_000_000; // a fixed "now" for deterministic dates
@@ -59,6 +61,138 @@ describe('study — SM-2 scheduler', () => {
     // q=5: EF + 0.1 ; q=3: EF + (0.1 - 2*(0.08+2*0.02)) = EF - 0.14
     expect(sm2(initialSchedule(T0), 'easy', T0).easeFactor).toBeCloseTo(2.6, 5);
     expect(sm2(initialSchedule(T0), 'hard', T0).easeFactor).toBeCloseTo(2.36, 5);
+  });
+});
+
+describe('study — FSRS-6 scheduler', () => {
+  const W = FSRS_DEFAULT_WEIGHTS;
+
+  it('maps the 4 buttons to FSRS grades 1–4', () => {
+    expect(ratingToGrade('again')).toBe(1);
+    expect(ratingToGrade('hard')).toBe(2);
+    expect(ratingToGrade('good')).toBe(3);
+    expect(ratingToGrade('easy')).toBe(4);
+  });
+
+  it('forgetting curve: recall is 1 at t=0 and equals the target when t=stability', () => {
+    const S = 12;
+    expect(retrievability(S, 0)).toBeCloseTo(1, 6);
+    // By the FACTOR definition, R(S, S) = 0.9 exactly (the curve anchor).
+    expect(retrievability(S, S)).toBeCloseTo(0.9, 6);
+    // Recall decays monotonically with elapsed time.
+    expect(retrievability(S, 30)).toBeLessThan(retrievability(S, 5));
+  });
+
+  it('next interval ≈ stability at 0.9 retention, and shrinks as target retention rises', () => {
+    const S = 20;
+    expect(fsrsInterval(S, 0.9)).toBe(Math.round(S)); // I == S at the anchor retention
+    expect(fsrsInterval(S, 0.97)).toBeLessThan(fsrsInterval(S, 0.9)); // want more recall → review sooner
+    expect(fsrsInterval(S, 0.8)).toBeGreaterThan(fsrsInterval(S, 0.9));
+    expect(fsrsInterval(S)).toBeGreaterThanOrEqual(1); // floored at 1 day
+  });
+
+  it('first review seeds stability + difficulty straight from the grade', () => {
+    const easy = fsrs(initialSchedule(T0), 'easy', T0);
+    const again = fsrs(initialSchedule(T0), 'again', T0);
+    // Initial stability = w[grade-1]: Easy (w[3]) ≫ Again (w[0]).
+    expect(easy.stability).toBeCloseTo(W[3]!, 6);
+    expect(again.stability).toBeCloseTo(Math.max(W[0]!, 0.1), 6);
+    // Easy seeds a much longer first interval than Again.
+    expect(easy.intervalDays).toBeGreaterThan(again.intervalDays);
+    // Difficulty within [1,10]; Again is harder than Easy.
+    expect(again.difficulty!).toBeGreaterThan(easy.difficulty!);
+    expect(easy.difficulty!).toBeGreaterThanOrEqual(1);
+    expect(again.difficulty!).toBeLessThanOrEqual(10);
+    expect(easy.lastReviewedAt).toBe(T0);
+    expect(easy.dueAt).toBe(T0 + easy.intervalDays * DAY);
+  });
+
+  it('a recall grows stability; the next interval lengthens each successful review', () => {
+    let s = fsrs(initialSchedule(T0), 'good', T0);
+    const intervals = [s.intervalDays];
+    const stabilities = [s.stability!];
+    for (let i = 0; i < 5; i++) {
+      s = fsrs(s, 'good', s.dueAt); // review exactly when due
+      intervals.push(s.intervalDays);
+      stabilities.push(s.stability!);
+    }
+    // Stability strictly increases on consecutive recalls.
+    for (let i = 1; i < stabilities.length; i++) expect(stabilities[i]).toBeGreaterThan(stabilities[i - 1]!);
+    // So do the intervals (monotonic, non-decreasing — and overall it stretches out).
+    expect(intervals[intervals.length - 1]!).toBeGreaterThan(intervals[0]!);
+  });
+
+  it('a lapse ("Again") NEVER increases stability and shortens the interval', () => {
+    // Build up a well-learned card.
+    let s = fsrs(initialSchedule(T0), 'good', T0);
+    for (let i = 0; i < 4; i++) s = fsrs(s, 'good', s.dueAt);
+    const before = s.stability!;
+    const lapsed = fsrs(s, 'again', s.dueAt);
+    expect(lapsed.stability!).toBeLessThanOrEqual(before); // capped: a forget can't raise stability
+    expect(lapsed.intervalDays).toBeLessThan(s.intervalDays); // and the next review comes sooner
+    expect(lapsed.repetitions).toBe(0); // streak resets
+  });
+
+  it('harder grades give shorter intervals than easier ones (Again ≤ Hard ≤ Good ≤ Easy)', () => {
+    let s = fsrs(initialSchedule(T0), 'good', T0);
+    for (let i = 0; i < 3; i++) s = fsrs(s, 'good', s.dueAt);
+    const p = fsrsPreview(s, s.dueAt);
+    expect(p.again).toBeLessThanOrEqual(p.hard);
+    expect(p.hard).toBeLessThanOrEqual(p.good);
+    expect(p.good).toBeLessThanOrEqual(p.easy);
+  });
+
+  it('respects the target-retention option end to end (higher retention → sooner due)', () => {
+    const seed = fsrs(initialSchedule(T0), 'good', T0);
+    const high = fsrs(seed, 'good', seed.dueAt, { targetRetention: 0.95 });
+    const low = fsrs(seed, 'good', seed.dueAt, { targetRetention: 0.85 });
+    expect(high.intervalDays).toBeLessThan(low.intervalDays);
+    // Out-of-range retention is clamped to the FSRS sane band (0.70–0.97), never throws.
+    expect(() => fsrs(seed, 'good', seed.dueAt, { targetRetention: 5 })).not.toThrow();
+  });
+
+  it('is deterministic — identical inputs produce identical output (no fuzz)', () => {
+    const s = fsrs(initialSchedule(T0), 'good', T0);
+    const a = fsrs(s, 'good', s.dueAt);
+    const b = fsrs(s, 'good', s.dueAt);
+    expect(a).toEqual(b);
+  });
+
+  it('STRESS: 2,000 random reviews of 50 cards stay finite + in-bounds, never NaN', () => {
+    const ratings: ReviewRating[] = ['again', 'hard', 'good', 'easy'];
+    // A simple deterministic PRNG so the stress run is reproducible.
+    let seed = 12345;
+    const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+    for (let card = 0; card < 50; card++) {
+      let s = initialSchedule(T0);
+      let now = T0;
+      for (let i = 0; i < 40; i++) {
+        const rating = ratings[Math.floor(rnd() * 4)]!;
+        s = fsrs(s, rating, now);
+        expect(Number.isFinite(s.stability!)).toBe(true);
+        expect(Number.isFinite(s.difficulty!)).toBe(true);
+        expect(Number.isFinite(s.intervalDays)).toBe(true);
+        expect(s.stability!).toBeGreaterThanOrEqual(0.001);
+        expect(s.stability!).toBeLessThanOrEqual(36_500);
+        expect(s.difficulty!).toBeGreaterThanOrEqual(1);
+        expect(s.difficulty!).toBeLessThanOrEqual(10);
+        expect(s.intervalDays).toBeGreaterThanOrEqual(1);
+        now = s.dueAt; // review when due
+      }
+    }
+  });
+
+  it('tolerates corrupt prior state (NaN/negative/missing stability) by reseeding', () => {
+    const corrupt: CardSchedule = { ...initialSchedule(T0), stability: -5, difficulty: NaN, lastReviewedAt: T0 - DAY };
+    const out = fsrs(corrupt, 'good', T0);
+    expect(Number.isFinite(out.stability!)).toBe(true);
+    expect(out.stability!).toBeGreaterThan(0);
+    expect(out.difficulty!).toBeGreaterThanOrEqual(1);
+  });
+
+  it('FSRS_DEFAULT_RETENTION is the published 0.90 anchor', () => {
+    expect(FSRS_DEFAULT_RETENTION).toBe(0.9);
+    expect(FSRS_DEFAULT_WEIGHTS).toHaveLength(21);
   });
 });
 

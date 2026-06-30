@@ -10056,9 +10056,9 @@ export class SQLiteAdapter implements DatabaseAdapter {
   async listDueFlashcards(ownerUserId: string, nowMs: number, limit: number): Promise<import('./db-types/adapter-agenda-notes.js').NoteFlashcardRow[]> {
     return this.d.prepare('SELECT * FROM note_flashcards WHERE owner_user_id = ? AND due_at <= ? ORDER BY due_at ASC LIMIT ?').all(ownerUserId, nowMs, Math.max(1, Math.min(500, limit))) as import('./db-types/adapter-agenda-notes.js').NoteFlashcardRow[];
   }
-  async updateNoteFlashcardSchedule(id: string, ownerUserId: string, sched: { ease_factor: number; interval_days: number; repetitions: number; due_at: number; last_reviewed_at: number }): Promise<void> {
-    this.d.prepare('UPDATE note_flashcards SET ease_factor = ?, interval_days = ?, repetitions = ?, due_at = ?, last_reviewed_at = ? WHERE id = ? AND owner_user_id = ?')
-      .run(sched.ease_factor, sched.interval_days, sched.repetitions, sched.due_at, sched.last_reviewed_at, id, ownerUserId);
+  async updateNoteFlashcardSchedule(id: string, ownerUserId: string, sched: { ease_factor: number; interval_days: number; repetitions: number; due_at: number; last_reviewed_at: number; stability?: number | null; difficulty?: number | null }): Promise<void> {
+    this.d.prepare('UPDATE note_flashcards SET ease_factor = ?, interval_days = ?, repetitions = ?, due_at = ?, last_reviewed_at = ?, stability = ?, difficulty = ? WHERE id = ? AND owner_user_id = ?')
+      .run(sched.ease_factor, sched.interval_days, sched.repetitions, sched.due_at, sched.last_reviewed_at, sched.stability ?? null, sched.difficulty ?? null, id, ownerUserId);
   }
   async countNoteFlashcards(noteId: string, ownerUserId: string): Promise<number> {
     return (this.d.prepare('SELECT COUNT(*) AS n FROM note_flashcards WHERE note_id = ? AND owner_user_id = ?').get(noteId, ownerUserId) as { n: number }).n;

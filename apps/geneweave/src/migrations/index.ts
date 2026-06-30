@@ -102,6 +102,7 @@ import { applyM119UserImageLanguage } from './m119-user-image-language.js';
 import { applyM120NoteAiRateLimit } from './m120-note-ai-rate-limit.js';
 import { applyM121VisualVerify } from './m121-visual-verify.js';
 import { applyM122Citations } from './m122-citations.js';
+import { applyM123Fsrs } from './m123-fsrs.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -212,6 +213,7 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm120-note-ai-rate-limit', description: 'weaveNotes Phase 0 hardening: per-USER AI rate limit. Adds weavenotes_settings.ai_rate_per_min_per_user (default 30) — a Builder-editable cap on how many note AI actions one person may run per minute. The server keeps a per-user token bucket (@weaveintel/resilience createKeyedRateLimiter) and returns HTTP 429 + Retry-After once a user exceeds it, across every /ai/* note endpoint. Stops a runaway script or prompt-injected agent loop from running up model costs. Idempotent ALTER', run: applyM120NoteAiRateLimit },
   { id: 'm121-visual-verify', description: 'weaveNotes Phase 1 (visual correctness): VERIFY a visual before showing it. Adds weavenotes_settings columns visual_verify_enabled/threshold/max_retries (the LLM-as-judge diagram quality-check + redraw loop) and image_verify_enabled/min_confidence (the vision "does this picture really depict X?" check on found images). Builder-editable. The diagram judge scores node/edge coverage of the request and redraws with the missing/extra deltas (max retries, early-stop); the image check has a vision model describe-then-verdict each candidate and tries the next if it does not depict the subject / is poor quality / unsafe. Idempotent ALTERs', run: applyM121VisualVerify },
   { id: 'm122-citations', description: 'weaveNotes Phase 2: Ask-your-workspace with VERIFIED character-level citations. Adds weavenotes_settings.citations_enabled (default 1) and citation_max_sources (default 6). The cited answer quotes each source VERBATIM and the server verifies every quote actually appears in its note (dropping invented ones — anti-hallucination); the UI highlights the exact line on click. Idempotent ALTERs', run: applyM122Citations },
+  { id: 'm123-fsrs', description: 'weaveNotes Phase 2: FSRS spaced repetition for flashcards (upgrade from SM-2). Adds note_flashcards.stability + difficulty (per-card memory state) and weavenotes_settings.fsrs_enabled (default 1) + fsrs_target_retention (default 0.9). FSRS models memory with Difficulty + Stability and predicts the forgetting curve far more accurately than SM-2 (it is what modern Anki uses); the Builder can toggle FSRS vs SM-2 and tune the target recall probability. Idempotent ALTERs', run: applyM123Fsrs },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

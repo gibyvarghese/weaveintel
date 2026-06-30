@@ -70,6 +70,10 @@ export interface WeaveNotesConfig {
   flashcardsEnabled: boolean;
   /** Phase 5: cap how many NEW cards a study session introduces per day (active-recall pacing). */
   dailyNewCardLimit: number;
+  /** Phase 2: schedule reviews with FSRS (the accurate memory-model scheduler) instead of classic SM-2. */
+  fsrsEnabled: boolean;
+  /** Phase 2: the recall probability FSRS aims for at review time (0.70–0.97; higher = more reviews). */
+  fsrsTargetRetention: number;
   /** Phase 7: let the mobile app work OFFLINE — edit notes with no signal and sync when back online. */
   mobileOfflineEnabled: boolean;
   /** Phase 7: let people DRAW freehand ink on a phone/tablet (synced to the web note untouched). */
@@ -144,6 +148,8 @@ export const DEFAULT_WEAVENOTES_CONFIG: WeaveNotesConfig = {
   citationMaxSources: 6,
   flashcardsEnabled: true,
   dailyNewCardLimit: 20,
+  fsrsEnabled: true,
+  fsrsTargetRetention: 0.9,
   mobileOfflineEnabled: true,
   mobileInkEnabled: true,
   mobileOfflineNoteLimit: 200,
@@ -204,6 +210,9 @@ export function validateWeaveNotesConfig(
   if (p.visualVerifyMaxRetries !== undefined && verifyRetries !== Math.trunc(Number(p.visualVerifyMaxRetries))) warnings.push(`Diagram verify retries clamped to ${verifyRetries} (0–5).`);
   const citeMax = clampInt(p.citationMaxSources ?? base.citationMaxSources, 1, 12, base.citationMaxSources);
   if (p.citationMaxSources !== undefined && citeMax !== Math.trunc(Number(p.citationMaxSources))) warnings.push(`Citation max sources clamped to ${citeMax} (1–12).`);
+  const targetRet = clamp01(p.fsrsTargetRetention ?? base.fsrsTargetRetention, base.fsrsTargetRetention);
+  const targetRetClamped = Math.max(0.7, Math.min(0.97, targetRet)); // FSRS sensible range (Anki's bounds)
+  if (p.fsrsTargetRetention !== undefined && targetRetClamped !== Number(p.fsrsTargetRetention)) warnings.push(`FSRS target retention clamped to ${targetRetClamped} (0.70–0.97).`);
 
   let tools = base.enabledAiTools;
   if (p.enabledAiTools !== undefined) {
@@ -263,6 +272,8 @@ export function validateWeaveNotesConfig(
       imageVerifyMinConfidence: imageMinConf,
       citationsEnabled: asBool(p.citationsEnabled ?? base.citationsEnabled, base.citationsEnabled),
       citationMaxSources: citeMax,
+      fsrsEnabled: asBool(p.fsrsEnabled ?? base.fsrsEnabled, base.fsrsEnabled),
+      fsrsTargetRetention: targetRetClamped,
       flashcardsEnabled: asBool(p.flashcardsEnabled ?? base.flashcardsEnabled, base.flashcardsEnabled),
       dailyNewCardLimit: clampInt(p.dailyNewCardLimit ?? base.dailyNewCardLimit, 1, 1000, base.dailyNewCardLimit),
       mobileOfflineEnabled: asBool(p.mobileOfflineEnabled ?? base.mobileOfflineEnabled, base.mobileOfflineEnabled),

@@ -52,6 +52,8 @@ function rowToConfig(row: WeaveNotesSettingsRow | null): WeaveNotesConfig {
     ...(typeof row.image_verify_min_confidence === 'number' ? { imageVerifyMinConfidence: row.image_verify_min_confidence } : {}),
     citationsEnabled: row.citations_enabled !== 0, // undefined (pre-m122) → enabled
     ...(typeof row.citation_max_sources === 'number' ? { citationMaxSources: row.citation_max_sources } : {}),
+    fsrsEnabled: row.fsrs_enabled !== 0, // undefined (pre-m123) → FSRS on
+    ...(typeof row.fsrs_target_retention === 'number' ? { fsrsTargetRetention: row.fsrs_target_retention } : {}),
     flashcardsEnabled: row.flashcards_enabled !== 0, // undefined (pre-m110) → enabled
     ...(typeof row.daily_new_card_limit === 'number' ? { dailyNewCardLimit: row.daily_new_card_limit } : {}),
     mobileOfflineEnabled: row.mobile_offline_enabled !== 0,  // undefined (pre-m112) → enabled
@@ -107,6 +109,8 @@ export function createNoteSettingsService(db: SettingsDb, opts: { now?: () => nu
       image_verify_min_confidence: config.imageVerifyMinConfidence,
       citations_enabled: config.citationsEnabled ? 1 : 0,
       citation_max_sources: config.citationMaxSources,
+      fsrs_enabled: config.fsrsEnabled ? 1 : 0,
+      fsrs_target_retention: config.fsrsTargetRetention,
       flashcards_enabled: config.flashcardsEnabled ? 1 : 0,
       daily_new_card_limit: config.dailyNewCardLimit,
       mobile_offline_enabled: config.mobileOfflineEnabled ? 1 : 0,

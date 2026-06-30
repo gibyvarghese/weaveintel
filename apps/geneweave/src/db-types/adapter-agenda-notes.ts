@@ -127,6 +127,9 @@ export interface NoteFlashcardRow {
   due_at: number;
   last_reviewed_at: number | null;
   created_at: number;
+  /** FSRS memory state (m123). NULL until the card's first FSRS review. */
+  stability?: number | null;
+  difficulty?: number | null;
 }
 
 export interface NoteDbRowRow {
@@ -226,7 +229,7 @@ export interface IAgendaNotesStore {
   getNoteFlashcard(id: string, ownerUserId: string): Promise<NoteFlashcardRow | null>;
   /** Cards due (due_at ≤ now) for a user, across all their notes, soonest-due first. */
   listDueFlashcards(ownerUserId: string, nowMs: number, limit: number): Promise<NoteFlashcardRow[]>;
-  /** Update a card's SM-2 schedule after a review (owner-scoped). */
-  updateNoteFlashcardSchedule(id: string, ownerUserId: string, sched: { ease_factor: number; interval_days: number; repetitions: number; due_at: number; last_reviewed_at: number }): Promise<void>;
+  /** Update a card's schedule after a review (owner-scoped). Includes FSRS stability/difficulty (m123). */
+  updateNoteFlashcardSchedule(id: string, ownerUserId: string, sched: { ease_factor: number; interval_days: number; repetitions: number; due_at: number; last_reviewed_at: number; stability?: number | null; difficulty?: number | null }): Promise<void>;
   countNoteFlashcards(noteId: string, ownerUserId: string): Promise<number>;
 }

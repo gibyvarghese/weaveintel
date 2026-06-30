@@ -15,7 +15,7 @@
  * cards from a note the user can't read.
  */
 import {
-  validateFlashcards, sm2, studyStats, initialSchedule,
+  validateFlashcards, sm2, fsrs, fsrsPreview, studyStats, initialSchedule,
   type Flashcard, type ReviewRating, type CardSchedule, type StudyStats,
 } from '@weaveintel/notes';
 import { newUUIDv7 } from '@weaveintel/core';
@@ -28,15 +28,21 @@ import type { NoteFlashcardRow } from './db-types/adapter-agenda-notes.js';
 
 type NoteStudyDb = DatabaseAdapter;
 
-export interface FlashcardView { id: string; noteId: string; front: string; back: string; dueAt: number; intervalDays: number; repetitions: number; easeFactor: number; lastReviewedAt: number | null }
-export interface StudyResult { ok: boolean; error?: string; created?: number; cards?: FlashcardView[]; stats?: StudyStats }
+export interface FlashcardView { id: string; noteId: string; front: string; back: string; dueAt: number; intervalDays: number; repetitions: number; easeFactor: number; lastReviewedAt: number | null; stability?: number | null; difficulty?: number | null; preview?: Record<ReviewRating, number> }
+export interface StudyResult { ok: boolean; error?: string; created?: number; cards?: FlashcardView[]; stats?: StudyStats; scheduler?: 'fsrs' | 'sm2' }
 
-/** Schedule fields out of a stored row (for SM-2). */
+/** Schedule fields out of a stored row (incl. FSRS stability/difficulty when present). */
 function rowSchedule(r: NoteFlashcardRow): CardSchedule {
-  return { easeFactor: r.ease_factor, intervalDays: r.interval_days, repetitions: r.repetitions, dueAt: r.due_at, lastReviewedAt: r.last_reviewed_at };
+  return { easeFactor: r.ease_factor, intervalDays: r.interval_days, repetitions: r.repetitions, dueAt: r.due_at, lastReviewedAt: r.last_reviewed_at, stability: r.stability ?? null, difficulty: r.difficulty ?? null };
 }
-function rowToView(r: NoteFlashcardRow): FlashcardView {
-  return { id: r.id, noteId: r.note_id, front: r.front, back: r.back, dueAt: r.due_at, intervalDays: r.interval_days, repetitions: r.repetitions, easeFactor: r.ease_factor, lastReviewedAt: r.last_reviewed_at };
+function rowToView(r: NoteFlashcardRow, preview?: Record<ReviewRating, number>): FlashcardView {
+  return { id: r.id, noteId: r.note_id, front: r.front, back: r.back, dueAt: r.due_at, intervalDays: r.interval_days, repetitions: r.repetitions, easeFactor: r.ease_factor, lastReviewedAt: r.last_reviewed_at, stability: r.stability ?? null, difficulty: r.difficulty ?? null, ...(preview ? { preview } : {}) };
+}
+
+/** Map rows to views, attaching each card's per-button FSRS interval preview when FSRS is on. */
+function rowsToViews(rows: NoteFlashcardRow[], cfg: { fsrsEnabled: boolean; fsrsTargetRetention: number }, at: number): FlashcardView[] {
+  if (!cfg.fsrsEnabled) return rows.map((r) => rowToView(r));
+  return rows.map((r) => rowToView(r, fsrsPreview(rowSchedule(r), at, { targetRetention: cfg.fsrsTargetRetention })));
 }
 
 /** Best-effort JSON-array extraction from a model reply (handles ```json fences + prose). */
@@ -86,30 +92,43 @@ export function createNoteStudyService(db: NoteStudyDb, generate: NoteAiGenerate
       }));
       for (const row of created) await db.createNoteFlashcard(row);
       void settings.recordActivity({ noteId, userId: cardOwner, tenantId: access.tenantId ?? null, action: 'updated', actor: 'ai', summary: `Made ${created.length} flashcard${created.length === 1 ? '' : 's'}` });
-      return { ok: true, created: created.length, cards: created.map(rowToView), stats: studyStats(created.map((r) => ({ schedule: rowSchedule(r) })), ts) };
+      return { ok: true, created: created.length, cards: created.map((r) => rowToView(r)), stats: studyStats(created.map((r) => ({ schedule: rowSchedule(r) })), ts) };
     },
 
     /** A note's deck FOR A USER + its study stats (due / fresh / learning / mature). */
     async listCards(noteId: string, userId: string): Promise<StudyResult> {
+      const cfg = await settings.getConfig();
       const rows = await db.listNoteFlashcards(noteId, userId);
-      return { ok: true, cards: rows.map(rowToView), stats: studyStats(rows.map((r) => ({ schedule: rowSchedule(r) })), now()) };
+      const at = now();
+      return { ok: true, scheduler: cfg.fsrsEnabled ? 'fsrs' : 'sm2', cards: rowsToViews(rows, cfg, at), stats: studyStats(rows.map((r) => ({ schedule: rowSchedule(r) })), at) };
     },
 
     /** The cross-note review QUEUE: the user's cards that are due now, soonest-due first. */
     async dueCards(userId: string, limit = 50): Promise<StudyResult> {
+      const cfg = await settings.getConfig();
       const rows = await db.listDueFlashcards(userId, now(), limit);
-      return { ok: true, cards: rows.map(rowToView) };
+      return { ok: true, scheduler: cfg.fsrsEnabled ? 'fsrs' : 'sm2', cards: rowsToViews(rows, cfg, now()) };
     },
 
-    /** Apply one SM-2 review to a card (owner-scoped) and re-schedule it. */
-    async reviewCard(input: { cardId: string; userId: string; rating: ReviewRating }): Promise<StudyResult & { card?: FlashcardView }> {
+    /**
+     * Apply one review to a card (owner-scoped) and re-schedule it. Uses FSRS (the accurate
+     * memory-model scheduler) when `fsrsEnabled`, else the classic SM-2 — picked from config so the
+     * Builder can switch schedulers per deployment. FSRS persists the card's stability/difficulty.
+     */
+    async reviewCard(input: { cardId: string; userId: string; rating: ReviewRating }): Promise<StudyResult & { card?: FlashcardView; preview?: Record<ReviewRating, number> }> {
       const row = await db.getNoteFlashcard(input.cardId, input.userId);
       if (!row) return { ok: false, error: 'card not found' };
-      const next = sm2(rowSchedule(row), input.rating, now());
+      const cfg = await settings.getConfig();
+      const schedule = rowSchedule(row);
+      const next = cfg.fsrsEnabled ? fsrs(schedule, input.rating, now(), { targetRetention: cfg.fsrsTargetRetention }) : sm2(schedule, input.rating, now());
       await db.updateNoteFlashcardSchedule(input.cardId, input.userId, {
         ease_factor: next.easeFactor, interval_days: next.intervalDays, repetitions: next.repetitions, due_at: next.dueAt, last_reviewed_at: next.lastReviewedAt ?? now(),
+        stability: next.stability ?? null, difficulty: next.difficulty ?? null,
       });
-      return { ok: true, card: rowToView({ ...row, ease_factor: next.easeFactor, interval_days: next.intervalDays, repetitions: next.repetitions, due_at: next.dueAt, last_reviewed_at: next.lastReviewedAt }) };
+      const updatedRow: NoteFlashcardRow = { ...row, ease_factor: next.easeFactor, interval_days: next.intervalDays, repetitions: next.repetitions, due_at: next.dueAt, last_reviewed_at: next.lastReviewedAt, stability: next.stability ?? null, difficulty: next.difficulty ?? null };
+      // What each button would schedule NEXT time (so the review UI can show real "+Nd" predictions).
+      const preview = cfg.fsrsEnabled ? fsrsPreview(rowSchedule(updatedRow), updatedRow.due_at, { targetRetention: cfg.fsrsTargetRetention }) : undefined;
+      return { ok: true, scheduler: cfg.fsrsEnabled ? 'fsrs' : 'sm2', card: rowToView(updatedRow), ...(preview ? { preview } : {}) };
     },
   };
 }

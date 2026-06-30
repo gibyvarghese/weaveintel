@@ -36,6 +36,10 @@ test('Phase 5 — make flashcards → deck + stats; SM-2 review reschedules; gat
   test.setTimeout(150_000);
   await login(page, OWNER);
   const origin = new URL(page.url()).origin; const hdr = { 'x-csrf-token': await csrf(page) };
+  // This test pins the classic SM-2 scheduler (FSRS is the default since Phase 2; FSRS has its own e2e).
+  await page.request.put(`${origin}/api/admin/weavenotes-settings`, { headers: hdr, data: { fsrs_enabled: false } });
+  const cfgCheck = await (await page.request.get(`${origin}/api/admin/weavenotes-settings`)).json() as { config?: { fsrs_enabled?: number } };
+  expect(cfgCheck.config?.fsrs_enabled).toBe(0); // the scheduler is now SM-2
   const note = await (await page.request.post(`${origin}/api/me/notes`, { headers: hdr, data: { title: 'Heart study', doc_json: STUDY_NOTE } })).json() as { id: string };
 
   // Generate flashcards from the note.

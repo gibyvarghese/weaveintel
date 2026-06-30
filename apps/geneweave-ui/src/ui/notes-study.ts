@@ -6,8 +6,10 @@
  * This is the "quiz yourself" screen. The assistant turns a note into question→answer cards, and
  * here you review the ones that are DUE today: you see the question, try to recall the answer,
  * reveal it, then tap how it went — Again / Hard / Good / Easy. Behind the scenes a spaced-
- * repetition scheduler (SM-2) decides when you'll see each card again — soon if you forgot, much
- * later if it was easy — which is the most effective way to actually remember things.
+ * repetition scheduler (FSRS, the accurate memory-model scheduler — or classic SM-2 when an admin
+ * turns FSRS off) decides when you'll see each card again — soon if you forgot, much later if it
+ * was easy — which is the most effective way to actually remember things. Each button shows the
+ * REAL predicted next-review date the scheduler computed for that card.
  *
  * It is a self-contained centre panel (no framework): it fetches the note's deck, walks the due
  * queue, and updates its own DOM as you grade — it never reloads the whole notes view mid-session.
@@ -15,7 +17,8 @@
 import { h } from './dom.js';
 import { api } from './api.js';
 
-interface CardView { id: string; front: string; back: string; intervalDays: number; repetitions: number }
+type Rating = 'again' | 'hard' | 'good' | 'easy';
+interface CardView { id: string; front: string; back: string; intervalDays: number; repetitions: number; preview?: Record<Rating, number> }
 interface DeckStats { total: number; due: number; fresh: number; learning: number; mature: number }
 
 /** Render the study screen for a note's deck. `onBack` returns to the editor. */
@@ -102,11 +105,17 @@ export function renderStudyView(noteId: string, noteTitle: string, onBack: () =>
       if (!revealed) {
         body.appendChild(h('button', { className: 'gw-btn-emerald gw-study-reveal', onClick: () => { revealed = true; paint(); } }, 'Show answer'));
       } else {
+        // Prefer the scheduler's REAL prediction (card.preview from FSRS); fall back to a heuristic.
+        const p = card.preview;
+        const again = p ? p.again : 0;
+        const hard = p ? p.hard : Math.max(1, Math.round(card.intervalDays * 1.2) || 1);
+        const good = p ? p.good : (card.repetitions === 0 ? 1 : card.repetitions === 1 ? 6 : Math.round(card.intervalDays * 2.5));
+        const easy = p ? p.easy : (card.repetitions === 0 ? 2 : Math.round(card.intervalDays * 3));
         body.appendChild(h('div', { className: 'gw-study-grades' },
-          h('button', { className: 'gw-grade gw-grade-again', onClick: () => void grade('again') }, h('span', null, 'Again'), h('small', null, 'today')),
-          h('button', { className: 'gw-grade gw-grade-hard', onClick: () => void grade('hard') }, h('span', null, 'Hard'), h('small', null, human(Math.max(1, Math.round(card.intervalDays * 1.2) || 1)))),
-          h('button', { className: 'gw-grade gw-grade-good', onClick: () => void grade('good') }, h('span', null, 'Good'), h('small', null, human(card.repetitions === 0 ? 1 : card.repetitions === 1 ? 6 : Math.round(card.intervalDays * 2.5)))),
-          h('button', { className: 'gw-grade gw-grade-easy', onClick: () => void grade('easy') }, h('span', null, 'Easy'), h('small', null, human(card.repetitions === 0 ? 2 : Math.round(card.intervalDays * 3)))),
+          h('button', { className: 'gw-grade gw-grade-again', onClick: () => void grade('again') }, h('span', null, 'Again'), h('small', null, human(again))),
+          h('button', { className: 'gw-grade gw-grade-hard', onClick: () => void grade('hard') }, h('span', null, 'Hard'), h('small', null, human(hard))),
+          h('button', { className: 'gw-grade gw-grade-good', onClick: () => void grade('good') }, h('span', null, 'Good'), h('small', null, human(good))),
+          h('button', { className: 'gw-grade gw-grade-easy', onClick: () => void grade('easy') }, h('span', null, 'Easy'), h('small', null, human(easy))),
         ));
       }
     }
