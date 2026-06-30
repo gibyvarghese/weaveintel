@@ -109,6 +109,10 @@ export {
   buildCitedAnswerPrompt,
   parseCitedAnswer,
   verifyCitations,
+  type ExpandedQueries,
+  MAX_QUERY_VARIANTS,
+  buildQueryExpansionPrompt,
+  parseExpandedQueries,
 } from './rag.js';
 
 // weaveNotes Phase 0 — foundation: the "colour encodes agency" contract.

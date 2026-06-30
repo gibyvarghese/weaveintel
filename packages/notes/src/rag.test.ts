@@ -4,7 +4,7 @@
  * rank fusion, numbered cited-context assembly, and citation-marker parsing.
  */
 import { describe, it, expect } from 'vitest';
-import { snippetAround, reciprocalRankFusion, buildCitedContext, parseCitedIds, type RagHit } from './rag.js';
+import { snippetAround, reciprocalRankFusion, buildCitedContext, parseCitedIds, buildQueryExpansionPrompt, parseExpandedQueries, MAX_QUERY_VARIANTS, type RagHit } from './rag.js';
 
 describe('snippetAround', () => {
   it('returns the whole text when shorter than the limit', () => {
@@ -82,5 +82,44 @@ describe('parseCitedIds', () => {
   });
   it('ignores out-of-range numbers', () => {
     expect(parseCitedIds('See [9].', sources)).toEqual([]);
+  });
+});
+
+describe('query expansion (multi-query + HyDE)', () => {
+  it('asks for N rephrasings + a hypothetical answer, returning strict JSON', () => {
+    const { system, user } = buildQueryExpansionPrompt('how did revenue change in Q3?', { n: 3 });
+    expect(system).toMatch(/queries/);
+    expect(system).toMatch(/hypothetical/i);
+    expect(system).toMatch(/JSON/);
+    expect(user).toContain('how did revenue change in Q3?');
+  });
+  it('clamps the requested count to the 2–4 band', () => {
+    expect(buildQueryExpansionPrompt('q', { n: 99 }).system).toMatch(/4 alternative/);
+    expect(buildQueryExpansionPrompt('q', { n: 1 }).system).toMatch(/2 alternative/);
+  });
+  it('parses variants, always puts the original first, dedupes, and caps', () => {
+    const reply = '{"queries":["Q3 revenue change","quarterly sales growth","revenue change in Q3?"],"hypothetical":"Revenue rose 12% in Q3."}';
+    const r = parseExpandedQueries(reply, 'how did revenue change in Q3?', { max: 4 });
+    expect(r.variants[0]).toBe('how did revenue change in Q3?');   // original first
+    expect(r.variants).toContain('Q3 revenue change');
+    // "revenue change in Q3?" duplicates the original case-insensitively-ish? it's distinct text → kept
+    expect(new Set(r.variants).size).toBe(r.variants.length);       // no dupes
+    expect(r.variants.length).toBeLessThanOrEqual(4);
+    expect(r.hypothetical).toBe('Revenue rose 12% in Q3.');
+  });
+  it('dedupes a variant identical to the original (case-insensitive)', () => {
+    const r = parseExpandedQueries('{"queries":["My Query","other"]}', 'my query');
+    expect(r.variants.filter((v) => v.toLowerCase() === 'my query').length).toBe(1);
+  });
+  it('is robust to junk / missing fields / surrounding prose', () => {
+    expect(parseExpandedQueries('not json at all', 'orig').variants).toEqual(['orig']);
+    expect(parseExpandedQueries('', 'orig').hypothetical).toBeNull();
+    const wrapped = parseExpandedQueries('Sure!\n{"queries":["a","b"]}\nthanks', 'orig');
+    expect(wrapped.variants).toEqual(['orig', 'a', 'b']);
+    expect(parseExpandedQueries('{"queries":[1,null,{},"  "]}', 'orig').variants).toEqual(['orig']); // non-strings/empties dropped
+  });
+  it('never returns more than MAX_QUERY_VARIANTS', () => {
+    const many = JSON.stringify({ queries: ['a', 'b', 'c', 'd', 'e', 'f', 'g'] });
+    expect(parseExpandedQueries(many, 'orig').variants.length).toBeLessThanOrEqual(MAX_QUERY_VARIANTS);
   });
 });

@@ -447,6 +447,9 @@ export interface WeaveNotesSettingsRow {
   /** weaveNotes Phase 2 citation dials (m122). Optional for old DBs. */
   citations_enabled?: number;
   citation_max_sources?: number;
+  /** weaveNotes Phase 2 query-expansion dials (m125). Optional for old DBs. */
+  query_expansion_enabled?: number;
+  query_expansion_variants?: number;
   /** weaveNotes Phase 2 FSRS spaced-repetition dials (m123). Optional for old DBs. */
   fsrs_enabled?: number;
   fsrs_target_retention?: number;

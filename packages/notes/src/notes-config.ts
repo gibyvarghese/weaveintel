@@ -66,6 +66,11 @@ export interface WeaveNotesConfig {
   citationsEnabled: boolean;
   /** Phase 2: how many sources the cited answer may draw on (token budget). */
   citationMaxSources: number;
+  /** Phase 2: expand a search query (rephrasings + a hypothetical answer / HyDE) so workspace search
+   *  finds more relevant notes/chats. Costs one extra small model call + a few embeddings per search. */
+  queryExpansionEnabled: boolean;
+  /** Phase 2: how many alternative phrasings to generate when query expansion is on (2–4). */
+  queryExpansionVariants: number;
   /** Phase 5: let the AI turn a note into flashcards + schedule reviews (SM-2 spaced repetition). */
   flashcardsEnabled: boolean;
   /** Phase 5: cap how many NEW cards a study session introduces per day (active-recall pacing). */
@@ -150,6 +155,8 @@ export const DEFAULT_WEAVENOTES_CONFIG: WeaveNotesConfig = {
   imageVerifyMinConfidence: 0.7,
   citationsEnabled: true,
   citationMaxSources: 6,
+  queryExpansionEnabled: true,
+  queryExpansionVariants: 3,
   flashcardsEnabled: true,
   dailyNewCardLimit: 20,
   fsrsEnabled: true,
@@ -215,6 +222,8 @@ export function validateWeaveNotesConfig(
   if (p.visualVerifyMaxRetries !== undefined && verifyRetries !== Math.trunc(Number(p.visualVerifyMaxRetries))) warnings.push(`Diagram verify retries clamped to ${verifyRetries} (0–5).`);
   const citeMax = clampInt(p.citationMaxSources ?? base.citationMaxSources, 1, 12, base.citationMaxSources);
   if (p.citationMaxSources !== undefined && citeMax !== Math.trunc(Number(p.citationMaxSources))) warnings.push(`Citation max sources clamped to ${citeMax} (1–12).`);
+  const qeVariants = clampInt(p.queryExpansionVariants ?? base.queryExpansionVariants, 2, 4, base.queryExpansionVariants);
+  if (p.queryExpansionVariants !== undefined && qeVariants !== Math.trunc(Number(p.queryExpansionVariants))) warnings.push(`Query expansion variants clamped to ${qeVariants} (2–4).`);
   const targetRet = clamp01(p.fsrsTargetRetention ?? base.fsrsTargetRetention, base.fsrsTargetRetention);
   const targetRetClamped = Math.max(0.7, Math.min(0.97, targetRet)); // FSRS sensible range (Anki's bounds)
   if (p.fsrsTargetRetention !== undefined && targetRetClamped !== Number(p.fsrsTargetRetention)) warnings.push(`FSRS target retention clamped to ${targetRetClamped} (0.70–0.97).`);
@@ -277,6 +286,8 @@ export function validateWeaveNotesConfig(
       imageVerifyMinConfidence: imageMinConf,
       citationsEnabled: asBool(p.citationsEnabled ?? base.citationsEnabled, base.citationsEnabled),
       citationMaxSources: citeMax,
+      queryExpansionEnabled: asBool(p.queryExpansionEnabled ?? base.queryExpansionEnabled, base.queryExpansionEnabled),
+      queryExpansionVariants: qeVariants,
       fsrsEnabled: asBool(p.fsrsEnabled ?? base.fsrsEnabled, base.fsrsEnabled),
       fsrsTargetRetention: targetRetClamped,
       translateEnabled: asBool(p.translateEnabled ?? base.translateEnabled, base.translateEnabled),

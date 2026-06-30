@@ -252,6 +252,63 @@ Return ONLY this JSON: {"answer":"… [1] … [2] …","citations":[{"source":1,
   return { system, user };
 }
 
+// ─── Query expansion (multi-query + HyDE) ──────────────────────────────────────
+//
+// A short question often misses relevant material because it shares few words with how the answer is
+// actually written. Two well-established fixes, fused together here:
+//   • MULTI-QUERY — rephrase the question several different ways (synonyms, broader/narrower, the
+//     keyword form) and retrieve for each, so a hit that matches ANY phrasing surfaces.
+//   • HyDE (Hypothetical Document Embeddings) — write a short, plausible ANSWER to the question and
+//     retrieve by THAT, since a hypothetical answer reads much more like the real source text than
+//     the question does.
+// We then fuse all the per-variant ranked lists with Reciprocal Rank Fusion (above). All pure: the
+// app makes the single LLM call and embeds each variant.
+
+export interface ExpandedQueries { variants: string[]; hypothetical: string | null }
+
+/** Cap on how many rephrasings we ask for / keep (keeps the extra embedding cost bounded). */
+export const MAX_QUERY_VARIANTS = 4;
+
+/**
+ * Build the prompt that turns one question into several search variants PLUS one hypothetical answer
+ * (HyDE). Asks for STRICT JSON so it parses deterministically.
+ */
+export function buildQueryExpansionPrompt(query: string, opts: { n?: number } = {}): { system: string; user: string } {
+  const n = Math.max(2, Math.min(opts.n ?? 3, MAX_QUERY_VARIANTS));
+  const system = `You expand a search query so a vector search over the user's own notes and chat history finds more of the relevant material.
+Given the QUESTION, produce:
+- "queries": ${n} alternative search phrasings of the SAME information need — vary the words (synonyms, a keyword-only form, a broader and a narrower version). Keep each short. Do NOT answer the question.
+- "hypothetical": one short, plausible 1–2 sentence passage that, if it existed in the user's notes, would directly answer the question (a fabricated example answer used only to improve retrieval — it does not need to be factually correct).
+Return ONLY this JSON: {"queries":["…","…"],"hypothetical":"…"}`;
+  const user = `QUESTION: ${query}`;
+  return { system, user };
+}
+
+/**
+ * Parse the expansion reply into deduped variants (always INCLUDING the original query first) and an
+ * optional hypothetical document. Tolerant of surrounding prose; never throws.
+ */
+export function parseExpandedQueries(reply: string, original: string, opts: { max?: number } = {}): ExpandedQueries {
+  const max = Math.max(1, Math.min(opts.max ?? MAX_QUERY_VARIANTS, MAX_QUERY_VARIANTS));
+  let obj: Record<string, unknown> = {};
+  try { const m = (reply ?? '').match(/\{[\s\S]*\}/); if (m) obj = JSON.parse(m[0]) as Record<string, unknown>; } catch { /* */ }
+  const rawList = Array.isArray(obj['queries']) ? obj['queries'] : [];
+  const seen = new Set<string>();
+  const variants: string[] = [];
+  const push = (s: unknown): void => {
+    if (typeof s !== 'string') return;
+    const t = s.trim().slice(0, 400);
+    if (!t) return;
+    const key = t.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key); variants.push(t);
+  };
+  push(original);                       // the original query always participates
+  for (const q of rawList) { if (variants.length >= max) break; push(q); }
+  const hyp = typeof obj['hypothetical'] === 'string' && obj['hypothetical'].trim() ? obj['hypothetical'].trim().slice(0, 1000) : null;
+  return { variants, hypothetical: hyp };
+}
+
 /** Parse the model's `{answer, citations:[{source, quote}]}` reply (tolerant of surrounding prose). */
 export function parseCitedAnswer(reply: string): { answer: string; citations: RawCitation[] } {
   let obj: Record<string, unknown> = {};

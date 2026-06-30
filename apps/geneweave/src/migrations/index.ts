@@ -104,6 +104,7 @@ import { applyM121VisualVerify } from './m121-visual-verify.js';
 import { applyM122Citations } from './m122-citations.js';
 import { applyM123Fsrs } from './m123-fsrs.js';
 import { applyM124Translate } from './m124-translate.js';
+import { applyM125QueryExpansion } from './m125-query-expansion.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -216,6 +217,7 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm122-citations', description: 'weaveNotes Phase 2: Ask-your-workspace with VERIFIED character-level citations. Adds weavenotes_settings.citations_enabled (default 1) and citation_max_sources (default 6). The cited answer quotes each source VERBATIM and the server verifies every quote actually appears in its note (dropping invented ones — anti-hallucination); the UI highlights the exact line on click. Idempotent ALTERs', run: applyM122Citations },
   { id: 'm123-fsrs', description: 'weaveNotes Phase 2: FSRS spaced repetition for flashcards (upgrade from SM-2). Adds note_flashcards.stability + difficulty (per-card memory state) and weavenotes_settings.fsrs_enabled (default 1) + fsrs_target_retention (default 0.9). FSRS models memory with Difficulty + Stability and predicts the forgetting curve far more accurately than SM-2 (it is what modern Anki uses); the Builder can toggle FSRS vs SM-2 and tune the target recall probability. Idempotent ALTERs', run: applyM123Fsrs },
   { id: 'm124-translate', description: 'weaveNotes Phase 2: first-class translate-a-note action. Adds weavenotes_settings.translate_enabled (default 1). The AI translates a note into another language preserving code/links/Markdown structure (protected spans masked so they can never break) and saves it as a NEW note, leaving the original intact. Idempotent ALTER', run: applyM124Translate },
+  { id: 'm125-query-expansion', description: 'weaveNotes Phase 2: query expansion (multi-query + HyDE) for Ask-your-workspace + workspace search. Adds weavenotes_settings.query_expansion_enabled (default 1) + query_expansion_variants (default 3). The search rephrases the question several ways and writes a hypothetical answer, embeds each, and fuses the results (RRF) so more relevant notes/chats surface. Idempotent ALTERs', run: applyM125QueryExpansion },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

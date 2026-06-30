@@ -22,9 +22,10 @@
  */
 import { cosineSimilarity } from '@weaveintel/cache';
 import { newUUIDv7, weaveContext } from '@weaveintel/core';
-import { buildCitedContext, reciprocalRankFusion, snippetAround, extractPlainText, buildCitedAnswerPrompt, parseCitedAnswer, verifyCitations, type RagHit, type CitedSource, type CitableSource, type Citation, type Note } from '@weaveintel/notes';
+import { buildCitedContext, reciprocalRankFusion, snippetAround, extractPlainText, buildCitedAnswerPrompt, parseCitedAnswer, verifyCitations, buildQueryExpansionPrompt, parseExpandedQueries, type RagHit, type CitedSource, type CitableSource, type Citation, type Note } from '@weaveintel/notes';
 import { createHash } from 'node:crypto';
 import { getActiveGuardrailEmbeddingModel } from './guardrail-judge.js';
+import { createNoteSettingsService } from './note-settings-sql.js';
 import { resolveRunAccess } from './shared-session-sql.js';
 import type { NoteAiGenerate } from './note-ai-sql.js';
 import type { DatabaseAdapter } from './db-types.js';
@@ -53,6 +54,7 @@ export interface WorkspaceAskResult {
 
 export function createNoteWorkspaceService(db: WorkspaceDb, opts: { now?: () => number; aiGenerate?: NoteAiGenerate } = {}) {
   const now = opts.now ?? (() => Date.now());
+  const settings = createNoteSettingsService(db);
 
   /** Embed text with the active embedding model (or null if none configured / empty). */
   async function embed(text: string, userId: string, tenantId?: string | null): Promise<number[] | null> {
@@ -113,52 +115,71 @@ export function createNoteWorkspaceService(db: WorkspaceDb, opts: { now?: () => 
    * Notes come from Phase 5 `note_embeddings`; runs from `run_embeddings`. Each corpus is
    * cosine-ranked, then the two lists are fused (RRF) into one ranking.
    */
+  /**
+   * Work out the query variants to retrieve with. With QUERY EXPANSION on (config) and a model
+   * available, ask the model to rephrase the question several ways AND write a hypothetical answer
+   * (HyDE); we embed each so a hit matching ANY phrasing — or reading like the answer — surfaces.
+   * Falls back to just the original query (no extra LLM call) when expansion is off or unavailable.
+   */
+  async function queryVariants(query: string, userId: string, tenantId?: string | null): Promise<string[]> {
+    const cfg = await settings.getConfig();
+    if (!cfg.queryExpansionEnabled || !opts.aiGenerate) return [query];
+    try {
+      const { system, user } = buildQueryExpansionPrompt(query, { n: cfg.queryExpansionVariants });
+      const reply = await opts.aiGenerate({ system, user, userId, tenantId: tenantId ?? null, temperature: 0.3, maxTokens: 400 });
+      const { variants, hypothetical } = parseExpandedQueries(reply, query, { max: cfg.queryExpansionVariants });
+      // The hypothetical answer (HyDE) is embedded as one more retrieval probe.
+      return hypothetical ? [...variants, hypothetical] : variants;
+    } catch { return [query]; }
+  }
+
   /** Retrieve the top fused hits (notes + runs) as RagHits carrying FULL text (for citation spans). */
-  async function retrieve(input: { userId: string; tenantId?: string | null; query: string; limit?: number; scope?: 'all' | 'notes' | 'runs' }): Promise<RagHit[]> {
+  async function retrieve(input: { userId: string; tenantId?: string | null; query: string; limit?: number; scope?: 'all' | 'notes' | 'runs'; expand?: boolean }): Promise<RagHit[]> {
     const scope = input.scope ?? 'all';
     const limit = Math.max(1, Math.min(input.limit ?? 6, 12));
-    const qvec = await embed(input.query, input.userId, input.tenantId);
-    if (!qvec) return [];
 
-    // Rank notes (cosine over note_embeddings).
-    const noteRanked: Array<{ id: string; title: string; score: number }> = [];
+    // Build the query variants (expansion), then embed each into a retrieval probe vector.
+    const queries = input.expand === false ? [input.query] : await queryVariants(input.query, input.userId, input.tenantId);
+    const qvecs = (await Promise.all(queries.map((q) => embed(q, input.userId, input.tenantId)))).filter((v): v is number[] => Array.isArray(v) && v.length > 0);
+    if (qvecs.length === 0) return [];
+
+    // SECURITY: scope embeddings to the caller's tenant (null-safe) so workspace RAG can never
+    // surface another tenant's notes, even if a user id were ever shared/migrated across tenants.
+    // Parse each corpus's stored vectors ONCE, then rank against every query probe.
+    const noteVecs: Array<{ id: string; title: string; vec: number[] }> = [];
     if (scope !== 'runs') {
-      // SECURITY: scope embeddings to the caller's tenant (null-safe) so workspace RAG can never
-      // surface another tenant's notes, even if a user id were ever shared/migrated across tenants.
       for (const row of await db.listUserNoteEmbeddings(input.userId, input.tenantId ?? null)) {
-        try {
-          const v = JSON.parse(row.embedding_json) as number[];
-          if (v.length !== qvec.length) continue;
-          noteRanked.push({ id: row.note_id, title: row.title ?? '(untitled note)', score: cosineSimilarity(qvec, v) });
-        } catch { /* skip */ }
+        try { const v = JSON.parse(row.embedding_json) as number[]; noteVecs.push({ id: row.note_id, title: row.title ?? '(untitled note)', vec: v }); } catch { /* skip */ }
       }
-      noteRanked.sort((a, b) => b.score - a.score);
     }
-
-    // Rank runs (cosine over run_embeddings; content is stored for snippets).
-    const runRanked: Array<{ id: string; title: string; score: number; content: string }> = [];
+    const runVecs: Array<{ id: string; title: string; content: string; vec: number[] }> = [];
     if (scope !== 'notes') {
       for (const row of await db.listUserRunEmbeddings(input.userId, input.tenantId ?? null)) {
-        try {
-          const v = JSON.parse(row.embedding_json) as number[];
-          if (v.length !== qvec.length) continue;
-          runRanked.push({ id: row.run_id, title: row.title ?? 'Chat run', score: cosineSimilarity(qvec, v), content: row.content ?? '' });
-        } catch { /* skip */ }
+        try { const v = JSON.parse(row.embedding_json) as number[]; runVecs.push({ id: row.run_id, title: row.title ?? 'Chat run', content: row.content ?? '', vec: v }); } catch { /* skip */ }
       }
-      runRanked.sort((a, b) => b.score - a.score);
     }
 
-    // Keep only meaningfully-similar hits, then fuse the two ranked lists (RRF).
-    const notesTop = noteRanked.filter((r) => r.score > 0.1).slice(0, limit);
-    const runsTop = runRanked.filter((r) => r.score > 0.1).slice(0, limit);
-    const fused = reciprocalRankFusion([
-      notesTop.map((r) => ({ id: `note:${r.id}` })),
-      runsTop.map((r) => ({ id: `run:${r.id}` })),
-    ]).slice(0, limit);
+    // Per query probe, produce a ranked id-list for notes and for runs (kept separate by prefix),
+    // tracking each item's BEST cosine across probes for the materialized score. RRF then fuses all
+    // 2×(#probes) lists so an item ranked highly under several phrasings rises.
+    const lists: Array<Array<{ id: string }>> = [];
+    const bestNote = new Map<string, { title: string; score: number }>();
+    const bestRun = new Map<string, { title: string; content: string; score: number }>();
+    for (const qvec of qvecs) {
+      const nr = noteVecs.filter((r) => r.vec.length === qvec.length).map((r) => ({ id: r.id, title: r.title, score: cosineSimilarity(qvec, r.vec) }))
+        .filter((r) => r.score > 0.1).sort((a, b) => b.score - a.score).slice(0, limit);
+      const rr = runVecs.filter((r) => r.vec.length === qvec.length).map((r) => ({ id: r.id, title: r.title, content: r.content, score: cosineSimilarity(qvec, r.vec) }))
+        .filter((r) => r.score > 0.1).sort((a, b) => b.score - a.score).slice(0, limit);
+      if (nr.length) lists.push(nr.map((r) => ({ id: `note:${r.id}` })));
+      if (rr.length) lists.push(rr.map((r) => ({ id: `run:${r.id}` })));
+      for (const r of nr) { const cur = bestNote.get(r.id); if (!cur || r.score > cur.score) bestNote.set(r.id, { title: r.title, score: r.score }); }
+      for (const r of rr) { const cur = bestRun.get(r.id); if (!cur || r.score > cur.score) bestRun.set(r.id, { title: r.title, content: r.content, score: r.score }); }
+    }
+    const fused = reciprocalRankFusion(lists).slice(0, limit);
 
     // Materialize each fused hit into a RagHit (fetch note text on demand; runs carry content).
-    const noteById = new Map(notesTop.map((r) => [r.id, r]));
-    const runById = new Map(runsTop.map((r) => [r.id, r]));
+    const noteById = bestNote;
+    const runById = bestRun;
     const hits: RagHit[] = [];
     for (const f of fused) {
       const [kind, id] = [f.id.slice(0, f.id.indexOf(':')), f.id.slice(f.id.indexOf(':') + 1)];

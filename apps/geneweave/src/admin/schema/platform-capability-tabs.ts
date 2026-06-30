@@ -557,6 +557,8 @@ export const PLATFORM_CAPABILITY_ADMIN_TABS: Record<string, AdminTabDef> = {
       { key: 'image_verify_min_confidence', label: 'Accept a found image at this 0–1 vision confidence (and good quality + safe)', type: 'number', save: 'float', default: 0.7 },
       { key: 'citations_enabled', label: 'Ask-your-workspace answers cite the EXACT line from each note (verified, click-to-highlight)', type: 'checkbox', save: 'bool', default: true },
       { key: 'citation_max_sources', label: 'How many notes a cited answer may draw on', type: 'number', save: 'int', default: 6 },
+      { key: 'query_expansion_enabled', label: 'Smarter workspace search — rephrase the question + try a hypothetical answer (HyDE) to find more relevant notes', type: 'checkbox', save: 'bool', default: true },
+      { key: 'query_expansion_variants', label: 'How many alternative phrasings to try when smarter search is on (2–4)', type: 'number', save: 'int', default: 3 },
       { key: 'flashcards_enabled', label: 'AI can make flashcards + schedule reviews (spaced repetition)', type: 'checkbox', save: 'bool', default: true },
       { key: 'daily_new_card_limit', label: 'New flashcards introduced per study session', type: 'number', save: 'int', default: 20 },
       { key: 'fsrs_enabled', label: 'Schedule reviews with FSRS (the accurate memory-model scheduler used by modern Anki) instead of classic SM-2', type: 'checkbox', save: 'bool', default: true },

@@ -52,6 +52,8 @@ function rowToConfig(row: WeaveNotesSettingsRow | null): WeaveNotesConfig {
     ...(typeof row.image_verify_min_confidence === 'number' ? { imageVerifyMinConfidence: row.image_verify_min_confidence } : {}),
     citationsEnabled: row.citations_enabled !== 0, // undefined (pre-m122) → enabled
     ...(typeof row.citation_max_sources === 'number' ? { citationMaxSources: row.citation_max_sources } : {}),
+    queryExpansionEnabled: row.query_expansion_enabled !== 0, // undefined (pre-m125) → on
+    ...(typeof row.query_expansion_variants === 'number' ? { queryExpansionVariants: row.query_expansion_variants } : {}),
     fsrsEnabled: row.fsrs_enabled !== 0, // undefined (pre-m123) → FSRS on
     ...(typeof row.fsrs_target_retention === 'number' ? { fsrsTargetRetention: row.fsrs_target_retention } : {}),
     translateEnabled: row.translate_enabled !== 0, // undefined (pre-m124) → enabled
@@ -110,6 +112,8 @@ export function createNoteSettingsService(db: SettingsDb, opts: { now?: () => nu
       image_verify_min_confidence: config.imageVerifyMinConfidence,
       citations_enabled: config.citationsEnabled ? 1 : 0,
       citation_max_sources: config.citationMaxSources,
+      query_expansion_enabled: config.queryExpansionEnabled ? 1 : 0,
+      query_expansion_variants: config.queryExpansionVariants,
       fsrs_enabled: config.fsrsEnabled ? 1 : 0,
       fsrs_target_retention: config.fsrsTargetRetention,
       translate_enabled: config.translateEnabled ? 1 : 0,
