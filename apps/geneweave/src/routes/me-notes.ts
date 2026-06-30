@@ -67,6 +67,7 @@ import { createNoteAiService, type NoteAiGenerate, type AiAction } from '../note
 import { createNoteColorizeService } from '../note-colorize-sql.js';
 import { createNoteCreativeService } from '../note-creative-sql.js';
 import { createNoteStudyService } from '../note-study-sql.js';
+import { createNoteTranslateService } from '../note-translate-sql.js';
 import { isColorScheme } from '@weaveintel/notes';
 import { sanitizeAwarenessState } from '@weaveintel/coedit';
 import { withAiPresence } from '../note-ai-presence.js';
@@ -134,6 +135,8 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
   const noteCreative = opts.aiGenerate ? createNoteCreativeService(db, opts.aiGenerate, { ...(opts.imageGenerate ? { generateImage: opts.imageGenerate } : {}), ...(opts.verifyVision ? { verifyVision: opts.verifyVision } : {}) }) : null;
   // weaveNotes Phase 5: the AI study service (flashcards + SM-2 spaced repetition).
   const noteStudy = opts.aiGenerate ? createNoteStudyService(db, opts.aiGenerate) : null;
+  // weaveNotes Phase 2: the AI translate service (note → faithful translated copy).
+  const noteTranslate = opts.aiGenerate ? createNoteTranslateService(db, opts.aiGenerate) : null;
   // weaveNotes Phase 4: the publish service (note → shareable artifact, sensitivity-gated).
   const publish = createNotePublishService(db, { jwtSecret: opts.jwtSecret ?? process.env['JWT_SECRET'] ?? 'insecure-dev-secret', ...(opts.publicBaseUrl ? { publicBaseUrl: opts.publicBaseUrl } : {}) });
   // weaveNotes Phase 5: the knowledge-graph service (wiki-links/backlinks, entity/relation
@@ -889,6 +892,24 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     const rating = ['again', 'hard', 'good', 'easy'].includes(String(body['rating'])) ? body['rating'] as 'again' | 'hard' | 'good' | 'easy' : 'good';
     const r = await noteStudy.reviewCard({ cardId: params['cid']!, userId: auth.userId, rating });
     res.writeHead(r.ok ? 200 : 404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(r));
+  }, { auth: true });
+
+  // ── weaveNotes Phase 2: translate a note into another language (saved as a NEW note) ──
+  //   POST /api/me/notes/:id/translate   { targetLanguage, formality?, glossary? }   (collaborator+)
+  aiPost('/api/me/notes/:id/translate', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    if (!noteTranslate) { res.writeHead(501); res.end(JSON.stringify({ error: 'AI features are not configured' })); return; }
+    const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    if (!roleAtLeast(access.role, 'collaborator')) { res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden: viewers cannot translate' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    const targetLanguage = typeof body['targetLanguage'] === 'string' ? body['targetLanguage'] : '';
+    const formality = ['default', 'formal', 'informal'].includes(String(body['formality'])) ? body['formality'] as 'default' | 'formal' | 'informal' : undefined;
+    const glossary = Array.isArray(body['glossary']) ? (body['glossary'] as unknown[]).filter((t): t is string => typeof t === 'string') : undefined;
+    const r = await noteTranslate.translateNote({ noteId: params['id']!, access, userId: auth.userId, targetLanguage, ...(formality ? { formality } : {}), ...(glossary ? { glossary } : {}) });
+    res.writeHead(r.ok ? 201 : 400, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(r));
   }, { auth: true });
 

@@ -74,6 +74,8 @@ export interface WeaveNotesConfig {
   fsrsEnabled: boolean;
   /** Phase 2: the recall probability FSRS aims for at review time (0.70–0.97; higher = more reviews). */
   fsrsTargetRetention: number;
+  /** Phase 2: the AI can translate a note into another language (saved as a new note). */
+  translateEnabled: boolean;
   /** Phase 7: let the mobile app work OFFLINE — edit notes with no signal and sync when back online. */
   mobileOfflineEnabled: boolean;
   /** Phase 7: let people DRAW freehand ink on a phone/tablet (synced to the web note untouched). */
@@ -121,6 +123,8 @@ export const WEAVENOTES_AI_TOOLS = [
   'recent_notes',
   // Phase 10 — export: the AI can export/download a note in a chosen format.
   'export_note',
+  // Phase 2 — translate a note into another language (saved as a new note).
+  'translate_note',
 ] as const;
 
 export const DEFAULT_WEAVENOTES_CONFIG: WeaveNotesConfig = {
@@ -150,6 +154,7 @@ export const DEFAULT_WEAVENOTES_CONFIG: WeaveNotesConfig = {
   dailyNewCardLimit: 20,
   fsrsEnabled: true,
   fsrsTargetRetention: 0.9,
+  translateEnabled: true,
   mobileOfflineEnabled: true,
   mobileInkEnabled: true,
   mobileOfflineNoteLimit: 200,
@@ -274,6 +279,7 @@ export function validateWeaveNotesConfig(
       citationMaxSources: citeMax,
       fsrsEnabled: asBool(p.fsrsEnabled ?? base.fsrsEnabled, base.fsrsEnabled),
       fsrsTargetRetention: targetRetClamped,
+      translateEnabled: asBool(p.translateEnabled ?? base.translateEnabled, base.translateEnabled),
       flashcardsEnabled: asBool(p.flashcardsEnabled ?? base.flashcardsEnabled, base.flashcardsEnabled),
       dailyNewCardLimit: clampInt(p.dailyNewCardLimit ?? base.dailyNewCardLimit, 1, 1000, base.dailyNewCardLimit),
       mobileOfflineEnabled: asBool(p.mobileOfflineEnabled ?? base.mobileOfflineEnabled, base.mobileOfflineEnabled),

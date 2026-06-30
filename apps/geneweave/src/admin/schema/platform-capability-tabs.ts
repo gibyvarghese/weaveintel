@@ -561,6 +561,7 @@ export const PLATFORM_CAPABILITY_ADMIN_TABS: Record<string, AdminTabDef> = {
       { key: 'daily_new_card_limit', label: 'New flashcards introduced per study session', type: 'number', save: 'int', default: 20 },
       { key: 'fsrs_enabled', label: 'Schedule reviews with FSRS (the accurate memory-model scheduler used by modern Anki) instead of classic SM-2', type: 'checkbox', save: 'bool', default: true },
       { key: 'fsrs_target_retention', label: 'Recall chance to aim for at review time (0.70–0.97; higher = review more often, remember more)', type: 'number', save: 'float', default: 0.9 },
+      { key: 'translate_enabled', label: 'AI can translate a note into another language (saved as a new note; code, links and layout preserved)', type: 'checkbox', save: 'bool', default: true },
       { key: 'mobile_offline_enabled', label: 'Mobile app can edit notes offline + sync later', type: 'checkbox', save: 'bool', default: true },
       { key: 'mobile_ink_enabled', label: 'Mobile app can draw freehand ink on notes', type: 'checkbox', save: 'bool', default: true },
       { key: 'mobile_offline_note_limit', label: 'Notes cached on a phone for offline use', type: 'number', save: 'int', default: 200 },

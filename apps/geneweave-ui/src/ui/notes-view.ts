@@ -29,6 +29,7 @@ import { wireLiveCursors, peerColor, type LiveCursors, type Participant } from '
 import { wireNoteConnections, type NoteConnectionsPanel } from './notes-graph.js';
 import { renderDatabasesView } from './notes-database-view.js';
 import { renderStudyView } from './notes-study.js';
+import { renderTranslateCard } from './notes-translate.js';
 import { renderCapturePanel } from './notes-capture.js';
 import { saveNotesSnapshot, cacheNote, offlineNotes, offlineNote, setLastNoteId, getLastNoteId } from './notes-offline.js';
 import { openQuickCaptureModal } from './notes-quick-capture.js';
@@ -393,6 +394,11 @@ function buildInsertMenu(render: () => void): OverflowItem[] {
       } },
     { label: '🗃 Databases', title: 'Tables with AI auto-fill', onClick: () => { state.currentDatabaseId = null; state.notesView = 'databases'; render(); } },
     { label: '📇 Study (flashcards)', title: 'Make + review flashcards from this note (spaced repetition)', onClick: () => { teardownCoedit(); state.notesView = 'study'; render(); } },
+    { label: '🌍 Translate', title: 'Translate this note into another language (saved as a new note)', onClick: () => {
+        const id = state.currentNoteId as string | null;
+        if (!id) { alert('Open a note first, then translate it.'); return; }
+        openCenterModal('Translate note', renderTranslateCard(id, (newId) => { void openNote(newId); }));
+      } },
     { label: '📥 Archived notes', title: 'View + restore archived notes', onClick: async () => { await loadArchivedNotes(); state.notesView = 'archive'; render(); } },
   ];
 }

@@ -1032,6 +1032,7 @@ export interface ToolRegistryOptions {
   noteFindImage?: (args: { userId: string; noteId: string; query: string }) => Promise<{ ok: boolean; error?: string; suggestionId?: string; artifactId?: string | null }>;
   // weaveNotes Phase 5 — turn a note into flashcards (active recall + SM-2 spaced repetition).
   noteMakeFlashcards?: (args: { userId: string; noteId: string; count?: number }) => Promise<{ ok: boolean; error?: string; created?: number }>;
+  noteTranslate?: (args: { userId: string; noteId: string; targetLanguage: string; formality?: 'default' | 'formal' | 'informal'; glossary?: string[] }) => Promise<{ ok: boolean; error?: string; noteId?: string; language?: { code: string; name: string; rtl: boolean }; warnings?: string[] }>;
 }
 
 export function filterToolNamesByPersona(toolNames: string[], persona: string | null | undefined): string[] {
@@ -1859,6 +1860,30 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
         tags: ['notes', 'study', 'output'],
       }),
     } : {}),
+    // weaveNotes Phase 2: translate a note into another language — available when noteTranslate is set.
+    ...(opts?.noteTranslate && opts.currentUserId ? {
+      translate_note: weaveTool({
+        name: 'translate_note',
+        description: 'Translate one of the user\'s notes into another language and save it as a NEW note (the original is left untouched). Use this when the user asks to "translate this note", "put my note in Spanish/French/Japanese/…", or "what does this note say in German?". You need the note id and the target language (a name like "Spanish" or an ISO code like "es"). Code, links and formatting are preserved. Optionally pass formality ("formal"/"informal") or a glossary of terms to keep verbatim.',
+        parameters: {
+          type: 'object',
+          properties: {
+            noteId: { type: 'string', description: 'The id of the note to translate.' },
+            targetLanguage: { type: 'string', description: 'Target language — a name ("Spanish", "Brazilian Portuguese") or ISO 639-1 code ("es", "ja").' },
+            formality: { type: 'string', enum: ['default', 'formal', 'informal'], description: 'Optional register, for languages that distinguish it (e.g. German Sie/du).' },
+            glossary: { type: 'array', items: { type: 'string' }, description: 'Optional terms (brand/product names) to keep exactly as written.' },
+          },
+          required: ['noteId', 'targetLanguage'],
+        },
+        execute: async (args: { noteId: string; targetLanguage: string; formality?: 'default' | 'formal' | 'informal'; glossary?: string[] }) => {
+          if (!opts.noteTranslate || !opts.currentUserId) return { content: 'Translation is unavailable in this context.', isError: true };
+          const r = await opts.noteTranslate({ userId: opts.currentUserId, noteId: args.noteId, targetLanguage: args.targetLanguage, ...(args.formality ? { formality: args.formality } : {}), ...(Array.isArray(args.glossary) ? { glossary: args.glossary } : {}) });
+          if (!r.ok) return { content: `translate_note failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, noteId: r.noteId, language: r.language?.name, warnings: r.warnings ?? [] });
+        },
+        tags: ['notes', 'translate', 'output'],
+      }),
+    } : {}),
     // weaveNotes Phase 8: workspace RAG search — available when workspaceSearch callback is set.
     ...(opts?.workspaceSearch && opts.currentUserId ? {
       workspace_search: weaveTool({
@@ -2214,7 +2239,7 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
     // the selection card. Each is built only when its callback is wired + gated by per-call config.
     // (generate_image is intentionally NOT here — it costs money and stays opt-in.)
     'create_diagram', 'draw_ink', 'recolor_ink', 'create_illustration', 'create_visual', 'find_image',
-    'make_flashcards', 'apply_highlight', 'apply_text_color', 'colorize_semantic',
+    'make_flashcards', 'translate_note', 'apply_highlight', 'apply_text_color', 'colorize_semantic',
   ] as const) {
     const t = scopedTools[noteTool];
     if (t && !registeredFromSelection.has(noteTool) && canUseTool(actorPersona, noteTool)) registry.register(t);

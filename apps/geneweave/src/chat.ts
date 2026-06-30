@@ -58,6 +58,7 @@ import { createNoteAiService, createModelTextGenerator, agentCreateNote, agentNe
 import { createColorizeTools } from './note-colorize-sql.js';
 import { createCreativeTools, createModelImageGenerator, createModelVisionVerifier } from './note-creative-sql.js';
 import { createStudyTool } from './note-study-sql.js';
+import { createTranslateTool } from './note-translate-sql.js';
 import { withAiPresence } from './note-ai-presence.js';
 import { createNotePublishService } from './note-publish-sql.js';
 import { createNoteGraphService } from './note-graph-sql.js';
@@ -468,6 +469,9 @@ export class ChatEngine {
       // weaveNotes Phase 5: wire the make_flashcards tool — turn a note into a spaced-repetition deck.
       noteMakeFlashcards: (a: { userId: string; noteId: string; count?: number }) =>
         createStudyTool(db, createModelTextGenerator(config)).makeFlashcards(a),
+      // weaveNotes Phase 2: wire the translate_note tool — translate a note into another language (new note).
+      noteTranslate: (a: { userId: string; noteId: string; targetLanguage: string; formality?: 'default' | 'formal' | 'informal'; glossary?: string[] }) =>
+        createTranslateTool(db, createModelTextGenerator(config)).translateNote(a),
     };
   }
 

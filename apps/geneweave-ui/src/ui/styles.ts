@@ -1714,6 +1714,14 @@ input{font-family:inherit;outline:none}
 .gw-study-empty-icon{font-size:42px}
 .gw-study-empty-msg{font-size:15px;color:var(--ink,#14201B)}
 .gw-study-make{padding:10px 22px}
+/* weaveNotes Phase 2 — translate card */
+.gw-translate{display:flex;flex-direction:column;gap:12px;padding:18px 20px;min-width:340px}
+.gw-translate-row{display:flex;flex-direction:column;gap:5px}
+.gw-translate-label{font-size:13px;font-weight:600;color:var(--ink,#14201B)}
+.gw-translate-lang,.gw-translate-tone{padding:9px 11px;border:1px solid var(--bg4);border-radius:9px;background:var(--bg1);font-size:14px;color:var(--ink,#14201B)}
+.gw-translate-hint{font-size:12.5px;color:var(--muted,#5C6B63);margin:2px 0 0;line-height:1.5}
+.gw-translate-error{font-size:13px;color:#b42318;margin:0}
+.gw-translate-go{align-self:flex-start;padding:10px 22px;margin-top:4px}
 /* Slash menu */
 .notes-slash-menu{background:var(--bg1);border:1px solid var(--bg4);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:4px;min-width:200px;z-index:300}
 .notes-slash-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;cursor:pointer;font-size:13px;color:var(--fg1)}

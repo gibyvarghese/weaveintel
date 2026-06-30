@@ -491,6 +491,7 @@ export function registerAdminRoutingRoutes(
     if (body['daily_new_card_limit'] !== undefined) partial['dailyNewCardLimit'] = body['daily_new_card_limit'];
     if (body['fsrs_enabled'] !== undefined) partial['fsrsEnabled'] = body['fsrs_enabled'];
     if (body['fsrs_target_retention'] !== undefined) partial['fsrsTargetRetention'] = body['fsrs_target_retention'];
+    if (body['translate_enabled'] !== undefined) partial['translateEnabled'] = body['translate_enabled'];
     if (body['mobile_offline_enabled'] !== undefined) partial['mobileOfflineEnabled'] = body['mobile_offline_enabled'];
     if (body['mobile_ink_enabled'] !== undefined) partial['mobileInkEnabled'] = body['mobile_ink_enabled'];
     if (body['mobile_offline_note_limit'] !== undefined) partial['mobileOfflineNoteLimit'] = body['mobile_offline_note_limit'];
