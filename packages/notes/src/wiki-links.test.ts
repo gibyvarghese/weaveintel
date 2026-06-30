@@ -5,7 +5,7 @@
  * short titles, substrings, or already-linked titles), and ordering.
  */
 import { describe, it, expect } from 'vitest';
-import { parseWikiLinks, findUnlinkedMentions, titleKey } from './wiki-links.js';
+import { parseWikiLinks, findUnlinkedMentions, titleKey, buildLinkSuggestions, linkifyFirstMention } from './wiki-links.js';
 
 describe('parseWikiLinks', () => {
   it('parses [[Title]] and [[Title|alias]]', () => {
@@ -58,5 +58,41 @@ describe('findUnlinkedMentions', () => {
     const found = findUnlinkedMentions(text, candidates);
     expect(found.map((m) => m.id)).toEqual(['n2', 'n1']); // n2 mentioned twice
     expect(found[0]!.count).toBe(2);
+  });
+});
+
+describe('buildLinkSuggestions (proactive)', () => {
+  it('merges verbatim mentions (ranked first) + related notes, deduped + linked-removed', () => {
+    const mentions = [{ id: 'a', title: 'Project Polaris', count: 2 }];
+    const related = [{ noteId: 'a', title: 'Project Polaris', score: 0.9 }, { noteId: 'b', title: 'Heat Shield', score: 0.7 }, { noteId: 'c', title: 'Old Note', score: 0.6 }];
+    const s = buildLinkSuggestions(mentions, related, { linkedTitleKeys: new Set([titleKey('Old Note')]), max: 5 });
+    expect(s[0]).toMatchObject({ targetId: 'a', kind: 'mention' });   // verbatim mention wins + ranks first
+    expect(s.find((x) => x.targetId === 'a')!.reason).toMatch(/2/);
+    expect(s.map((x) => x.targetId)).toContain('b');                  // related kept
+    expect(s.map((x) => x.targetId)).not.toContain('c');              // already linked → removed
+    expect(s.filter((x) => x.targetId === 'a').length).toBe(1);       // deduped (mention beat the relation)
+  });
+  it('is empty for no candidates', () => { expect(buildLinkSuggestions([], [])).toEqual([]); });
+});
+
+describe('linkifyFirstMention', () => {
+  it('wraps the first whole-phrase occurrence in [[ ]]', () => {
+    expect(linkifyFirstMention('See Project Polaris for details.', 'Project Polaris')).toEqual({ text: 'See [[Project Polaris]] for details.', changed: true });
+  });
+  it('preserves the typed casing as a display alias', () => {
+    expect(linkifyFirstMention('see project polaris now', 'Project Polaris').text).toBe('see [[Project Polaris|project polaris]] now');
+  });
+  it('only links the FIRST occurrence', () => {
+    const r = linkifyFirstMention('Polaris and Polaris again', 'Polaris');
+    expect(r.text).toBe('[[Polaris]] and Polaris again');
+  });
+  it('skips an occurrence already inside [[ ]] and links the next plain one', () => {
+    const r = linkifyFirstMention('[[Polaris]] then Polaris', 'Polaris');
+    expect(r.text).toBe('[[Polaris]] then [[Polaris]]');
+  });
+  it('no change when the title is absent or only-bracketed', () => {
+    expect(linkifyFirstMention('nothing here', 'Polaris').changed).toBe(false);
+    expect(linkifyFirstMention('[[Polaris]]', 'Polaris').changed).toBe(false);
+    expect(linkifyFirstMention('Polarisation', 'Polaris').changed).toBe(false); // word-boundary, not a substring
   });
 });

@@ -65,9 +65,12 @@ export {
   type WikiLink,
   type UnlinkedMention,
   type FindUnlinkedOptions,
+  type LinkSuggestion,
   parseWikiLinks,
   findUnlinkedMentions,
   titleKey,
+  buildLinkSuggestions,
+  linkifyFirstMention,
 } from './wiki-links.js';
 
 // weaveNotes Phase 6 — typed database properties, validation + rollups.

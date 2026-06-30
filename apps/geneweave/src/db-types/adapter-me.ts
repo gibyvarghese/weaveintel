@@ -467,6 +467,8 @@ export interface WeaveNotesSettingsRow {
   /** weaveNotes Phase 3 MCP vault dials (m130). Optional for old DBs. */
   mcp_notes_enabled?: number;
   mcp_notes_allow_writes?: number;
+  /** weaveNotes Phase 3: proactive link suggestions as you write (m131). Optional for old DBs. */
+  proactive_linking_enabled?: number;
   local_model_for_sensitive: number;
   /** weaveNotes Phase 3: show live collaborator cursors (0/1). */
   live_cursors_enabled: number;

@@ -1006,6 +1006,20 @@ input{font-family:inherit;outline:none}
 .notes-capture-status{font-size:11px;color:var(--fg3);min-height:14px;margin-top:2px}
 /* weaveNotes Phase 8 — workspace panels (history / comments / synced) + Ask box */
 .notes-ws-panel{border:1px solid var(--bg4);border-radius:8px;background:var(--bg2);padding:8px;margin:6px 12px}
+/* weaveNotes Phase 3 — proactive linking */
+.notes-proactive-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:6px 12px;padding:7px 10px;border:1px solid #DCEFE5;border-radius:10px;background:#F4FBF7}
+.notes-proactive-label{font-size:12px;font-weight:600;color:#0B7A57;white-space:nowrap}
+.notes-proactive-chips{display:flex;gap:6px;flex-wrap:wrap}
+.notes-proactive-chip{font-size:12px;padding:3px 9px;border-radius:999px;border:1px solid #9FD8BE;background:#fff;color:#0B7A57;cursor:pointer;font-weight:600}
+.notes-proactive-chip:hover{background:#E8F5EE}
+.notes-proactive-chip:disabled{opacity:.6;cursor:default}
+.notes-proactive-dismiss{margin-left:auto;border:none;background:transparent;color:#9aa7a1;cursor:pointer;font-size:13px;line-height:1}
+.notes-suggest-list{display:flex;flex-direction:column;gap:6px}
+.notes-suggest-row{display:flex;align-items:center;gap:6px}
+.notes-conn-reason{font-size:11px;color:#9aa7a1}
+.notes-suggest-link-btn{margin-left:auto;font-size:11px;padding:2px 8px;border-radius:7px;border:1px solid #9FD8BE;background:#fff;color:#0B7A57;cursor:pointer;font-weight:600}
+.notes-suggest-link-btn:hover{background:#E8F5EE}
+.notes-suggest-link-btn:disabled{opacity:.6;cursor:default}
 .notes-ws-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
 .notes-ws-title{font-size:12px;font-weight:600;color:var(--fg1)}
 .notes-ws-action{padding:3px 10px;border:none;border-radius:6px;background:var(--accent);color:#fff;font-size:11px;cursor:pointer;white-space:nowrap}

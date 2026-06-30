@@ -33,15 +33,42 @@ interface Unlinked { noteId: string; title: string; count: number }
 interface Related { noteId: string; title: string; score: number }
 interface GraphNode { id: string; label: string; kind: 'note' | 'entity'; type?: string }
 interface GraphEdge { source: string; target: string; label: string }
+// weaveNotes Phase 3 — proactive linking.
+interface LinkSuggestion { targetId: string; targetTitle: string; kind: 'mention' | 'related'; reason: string; weight: number }
 
-export function wireNoteConnections(opts: { noteId: string; panelEl: HTMLElement; onOpenNote: (id: string) => void }): NoteConnectionsPanel {
-  const { noteId, panelEl, onOpenNote } = opts;
+export function wireNoteConnections(opts: { noteId: string; panelEl: HTMLElement; onOpenNote: (id: string) => void; onApplied?: () => void }): NoteConnectionsPanel {
+  const { noteId, panelEl, onOpenNote, onApplied } = opts;
 
   function section(title: string, body: HTMLElement): HTMLElement {
     return h('div', { className: 'notes-conn-section' }, h('div', { className: 'notes-conn-title' }, title), body);
   }
   function noteChip(id: string, label: string, extra?: string): HTMLElement {
     return h('button', { className: 'notes-conn-chip', onClick: () => onOpenNote(id) }, label + (extra ? ` ${extra}` : ''));
+  }
+
+  // weaveNotes Phase 3 — turn a suggestion into a real [[wiki-link]] in the note (server-side,
+  // lossless), then reload the editor so the link + its new backlink appear.
+  async function applyLink(title: string, btn: HTMLButtonElement): Promise<void> {
+    btn.disabled = true; btn.textContent = 'Linking…';
+    try {
+      const res = await api.post(`/api/me/notes/${noteId}/link-suggestions/apply`, { targetTitle: title });
+      const data = await res.json().catch(() => ({})) as { ok?: boolean; linked?: boolean; error?: string };
+      if (res.ok && data.ok && data.linked) { onApplied?.(); await refresh(); return; }
+      btn.textContent = data.linked === false ? 'No plain mention' : 'Couldn’t link';
+    } catch { btn.textContent = 'Error'; }
+  }
+  // A proactive suggestion row: the target title + a short reason, an "open" affordance, and (for a
+  // verbatim mention) a one-click "🔗 Link" button.
+  function suggestionRow(s: LinkSuggestion): HTMLElement {
+    const open = h('button', { className: 'notes-conn-chip', title: 'Open this note', onClick: () => onOpenNote(s.targetId) }, s.targetTitle) as HTMLElement;
+    const reason = h('span', { className: 'notes-conn-reason' }, s.reason);
+    const row = h('div', { className: 'notes-suggest-row' }, open, reason) as HTMLElement;
+    if (s.kind === 'mention') {
+      const link = h('button', { className: 'notes-suggest-link-btn', title: `Link the first mention of “${s.targetTitle}”` }, '🔗 Link') as HTMLButtonElement;
+      link.addEventListener('click', () => void applyLink(s.targetTitle, link));
+      row.appendChild(link);
+    }
+    return row;
   }
 
   async function get<T>(path: string, fallback: T): Promise<T> {
@@ -92,10 +119,11 @@ export function wireNoteConnections(opts: { noteId: string; panelEl: HTMLElement
   async function refresh(): Promise<void> {
     panelEl.innerHTML = '';
     panelEl.appendChild(h('div', { className: 'notes-conn-loading' }, 'Loading connections…'));
-    const [backlinks, unlinkedRes, relatedRes, graph] = await Promise.all([
+    const [backlinks, unlinkedRes, relatedRes, suggestRes, graph] = await Promise.all([
       get<{ backlinks: Backlink[] }>('backlinks', { backlinks: [] }),
       get<{ unlinked: Unlinked[] }>('unlinked', { unlinked: [] }),
       get<{ related: Related[] }>('related', { related: [] }),
+      get<{ suggestions: LinkSuggestion[]; disabled?: boolean }>('link-suggestions', { suggestions: [] }),
       get<{ nodes: GraphNode[]; edges: GraphEdge[] }>('graph', { nodes: [], edges: [] }),
     ]);
     panelEl.innerHTML = '';
@@ -104,6 +132,14 @@ export function wireNoteConnections(opts: { noteId: string; panelEl: HTMLElement
       h('span', { className: 'notes-conn-heading' }, '🔗 Connections'),
       h('button', { className: 'notes-conn-index-btn', title: 'Re-index this note (links + entities + related)', onClick: () => void index() }, '↻ Index'),
     ));
+
+    // weaveNotes Phase 3 — proactive link suggestions, first (what to do next), with one-click apply.
+    if (!suggestRes.disabled) {
+      panelEl.appendChild(section(`💡 Suggested links (${suggestRes.suggestions.length})`,
+        suggestRes.suggestions.length
+          ? h('div', { className: 'notes-suggest-list' }, ...suggestRes.suggestions.map((s) => suggestionRow(s)))
+          : h('div', { className: 'notes-conn-empty' }, 'Nothing to link right now.')));
+    }
 
     panelEl.appendChild(section(`Backlinks (${backlinks.backlinks.length})`,
       backlinks.backlinks.length

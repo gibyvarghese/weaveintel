@@ -572,6 +572,7 @@ export const PLATFORM_CAPABILITY_ADMIN_TABS: Record<string, AdminTabDef> = {
       { key: 'scheduled_agent_max_per_user', label: 'How many scheduled agents each user may create', type: 'number', save: 'int', default: 10 },
       { key: 'mcp_notes_enabled', label: 'Expose notes over MCP — let external apps (Claude/ChatGPT) connect to a user’s notes with a personal token', type: 'checkbox', save: 'bool', default: true },
       { key: 'mcp_notes_allow_writes', label: 'Allow MCP clients to create/append notes (off → the MCP connection is read-only)', type: 'checkbox', save: 'bool', default: true },
+      { key: 'proactive_linking_enabled', label: 'Suggest links as you write — surface notes you mentioned (or that are related) for one-click [[linking]]', type: 'checkbox', save: 'bool', default: true },
       { key: 'mobile_offline_enabled', label: 'Mobile app can edit notes offline + sync later', type: 'checkbox', save: 'bool', default: true },
       { key: 'mobile_ink_enabled', label: 'Mobile app can draw freehand ink on notes', type: 'checkbox', save: 'bool', default: true },
       { key: 'mobile_offline_note_limit', label: 'Notes cached on a phone for offline use', type: 'number', save: 'int', default: 200 },

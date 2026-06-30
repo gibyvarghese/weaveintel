@@ -110,6 +110,7 @@ import { applyM127TenantGovernance } from './m127-tenant-governance.js';
 import { applyM128ImageProvenance } from './m128-image-provenance.js';
 import { applyM129ScheduledAgents } from './m129-scheduled-agents.js';
 import { applyM130McpNotes } from './m130-mcp-notes.js';
+import { applyM131ProactiveLinking } from './m131-proactive-linking.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -228,6 +229,7 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm128-image-provenance', description: 'weaveNotes Phase 2: image licence/provenance Content Credentials. Adds weavenotes_settings.image_provenance_enabled (default 1). Embeds where an image came from (web licence/author/source, or AI generator + prompt) into SVG bytes + stores a manifest with raster assets. Idempotent ALTER', run: applyM128ImageProvenance },
   { id: 'm129-scheduled-agents', description: 'weaveNotes Phase 3: scheduled/triggered workspace agents. Adds scheduled_note_agents (per-user recurring AI note tasks: recipe, cron schedule, scope, token/step budget, HITL approval) + scheduled_note_agent_runs (per-run audit log) + global Builder dials (scheduled_agents_enabled, max token budget, max per user) + the manage_scheduled_agent tool granted to the weaveNotes Editor. Runs are budget-bounded, additive (never overwrite), and fully audited. Idempotent', run: applyM129ScheduledAgents },
   { id: 'm130-mcp-notes', description: 'weaveNotes Phase 3: MCP server for the note vault. Adds user_mcp_tokens (per-user bearer tokens, hashed, read|readwrite scope, revocable) so an external agent (Claude/ChatGPT/Cursor) can search/read/create/append the user’s notes over the Model Context Protocol — every call owner-scoped from the validated token, never a tool argument. Plus weavenotes_settings.mcp_notes_enabled + mcp_notes_allow_writes Builder dials. Idempotent', run: applyM130McpNotes },
+  { id: 'm131-proactive-linking', description: 'weaveNotes Phase 3: proactive linking. Adds weavenotes_settings.proactive_linking_enabled (default ON) — the editor suggests connections as you write (notes you mentioned by name, plus semantically-related notes) and turns each into a one-click [[wiki-link]] (lossless; the backlink appears automatically). Idempotent', run: applyM131ProactiveLinking },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

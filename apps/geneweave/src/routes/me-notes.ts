@@ -1351,6 +1351,37 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     res.end(JSON.stringify(await noteGraph.graph(params['id']!, access)));
   }, { auth: true });
 
+  // weaveNotes Phase 3: PROACTIVE link suggestions — notes this one already refers to (by name or by
+  // meaning) that aren't linked yet. Surfaced live as you write; gated by the Builder dial.
+  router.get('/api/me/notes/:id/link-suggestions', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const cfg = await noteSettings.getConfig();
+    if (!cfg.proactiveLinkingEnabled) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ suggestions: [], disabled: true })); return; }
+    const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    const max = safePageInt(new URL(req.url ?? '/', 'http://x').searchParams.get('max'), 8, 1, 20);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ suggestions: await noteGraph.linkSuggestions(params['id']!, access, { max }) }));
+  }, { auth: true });
+
+  // weaveNotes Phase 3: accept a link suggestion — wrap the FIRST plain mention of `targetTitle` in a
+  // [[wiki-link]] (lossless), re-index so the backlink appears. Body: { targetTitle }.
+  router.post('/api/me/notes/:id/link-suggestions/apply', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const cfg = await noteSettings.getConfig();
+    if (!cfg.proactiveLinkingEnabled) { res.writeHead(403); res.end(JSON.stringify({ error: 'Proactive linking is disabled' })); return; }
+    const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    let body: { targetTitle?: unknown } = {};
+    try { body = JSON.parse(await readBody(req)) as { targetTitle?: unknown }; } catch { /* empty */ }
+    const targetTitle = typeof body.targetTitle === 'string' ? body.targetTitle : '';
+    const result = await noteGraph.applyLink(params['id']!, access, targetTitle);
+    if (!result.ok) { res.writeHead(400); res.end(JSON.stringify({ error: result.error ?? 'Could not apply' })); return; }
+    if (result.linked) void noteSettings.recordActivity({ noteId: params['id']!, userId: auth.userId, tenantId: access.tenantId ?? null, action: 'updated', actor: 'ai', summary: `Linked “${targetTitle.trim()}”` });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
+  }, { auth: true });
+
   // ── WC8: Save-time extraction pipeline ────────────────────────────────────
   // Called by the client after saving a note. Extracts to-do checkboxes and
   // creates linked tasks. Also syncs @mention links from doc_json.

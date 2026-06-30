@@ -429,6 +429,15 @@ export class ChatEngine {
       // weaveNotes Phase 5: wire the `find_related_notes` tool (semantic note search).
       notesSearch: (a: { userId: string; tenantId?: string | null; query: string; limit?: number }) =>
         createNoteGraphService(db).searchNotes({ userId: a.userId, tenantId: a.tenantId ?? null }, a.query, a.limit ?? 5),
+      // weaveNotes Phase 3: wire the `suggest_links` tool (proactive linking) — gated by the Builder dial.
+      notesLinkSuggest: async (a: { userId: string; tenantId?: string | null; noteId: string; apply?: string; max?: number }) => {
+        const cfg = await createNoteSettingsService(db).getConfig();
+        if (!cfg.proactiveLinkingEnabled) return { applied: { ok: false, error: 'Proactive linking is disabled' }, suggestions: [] };
+        const graph = createNoteGraphService(db);
+        const access = { noteId: a.noteId, ownerId: a.userId, tenantId: a.tenantId ?? null, role: 'owner' as const };
+        if (a.apply) return { applied: await graph.applyLink(a.noteId, access, a.apply) };
+        return { suggestions: await graph.linkSuggestions(a.noteId, access, { max: a.max ?? 8 }) };
+      },
       // weaveNotes Phase 6: wire the `autofill_database` tool (AI fills a table column w/ citations).
       dbAutofill: (a: { userId: string; tenantId?: string | null; databaseId: string; propertyKey: string; useWeb?: boolean }) =>
         createNoteDbService(db, { generate: createModelTextGenerator(config) }).agentAutofill(a),

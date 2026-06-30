@@ -184,6 +184,7 @@ const TOOL_POLICIES: Record<ChatMode, string[]> = {
     'note_edit', // weaveNotes Phase 3: the agent can co-author the user's notes
     'note_publish', // weaveNotes Phase 4: the agent can publish a note as an artifact
     'find_related_notes', // weaveNotes Phase 5: semantic note search/knowledge-graph nav
+    'suggest_links', // weaveNotes Phase 3: proactive linking — list/apply [[wiki-link]] suggestions
     'autofill_database', // weaveNotes Phase 6: AI table column auto-fill
     'capture_web_page', // weaveNotes Phase 7: clip a web page into a structured note
     'workspace_search', // weaveNotes Phase 8: cited RAG over the user notes + runs
@@ -204,6 +205,7 @@ const TOOL_POLICIES: Record<ChatMode, string[]> = {
     'note_edit', // weaveNotes Phase 3: co-author notes
     'note_publish', // weaveNotes Phase 4: publish a note as an artifact
     'find_related_notes', // weaveNotes Phase 5: semantic note search
+    'suggest_links', // weaveNotes Phase 3: proactive linking — list/apply [[wiki-link]] suggestions
     'autofill_database', // weaveNotes Phase 6: AI table column auto-fill
     'capture_web_page', // weaveNotes Phase 7: clip a web page into a structured note
     'workspace_search', // weaveNotes Phase 8: cited RAG over the user notes + runs
@@ -219,6 +221,7 @@ const TOOL_POLICIES: Record<ChatMode, string[]> = {
     'note_edit', // weaveNotes Phase 3: co-author notes
     'note_publish', // weaveNotes Phase 4: publish a note as an artifact
     'find_related_notes', // weaveNotes Phase 5: semantic note search
+    'suggest_links', // weaveNotes Phase 3: proactive linking — list/apply [[wiki-link]] suggestions
     'autofill_database', // weaveNotes Phase 6: AI table column auto-fill
     'capture_web_page', // weaveNotes Phase 7: clip a web page into a structured note
     'workspace_search', // weaveNotes Phase 8: cited RAG over the user notes + runs

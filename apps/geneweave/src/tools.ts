@@ -993,6 +993,13 @@ export interface ToolRegistryOptions {
    */
   notesSearch?: (args: { userId: string; tenantId?: string | null; query: string; limit?: number }) => Promise<Array<{ noteId: string; title: string; score: number }>>;
   /**
+   * weaveNotes Phase 3: proactive linking. When set, the `suggest_links` tool is available so the
+   * agent can list a note's unlinked connections (notes mentioned by name or semantically related)
+   * and optionally turn one into a `[[wiki-link]]` (lossless; the backlink appears automatically).
+   * Owner-scoped.
+   */
+  notesLinkSuggest?: (args: { userId: string; tenantId?: string | null; noteId: string; apply?: string; max?: number }) => Promise<{ suggestions?: Array<{ targetId: string; targetTitle: string; kind: string; reason: string }>; applied?: { ok: boolean; linked?: boolean; error?: string } }>;
+  /**
    * weaveNotes Phase 6: database column auto-fill. When set, the `autofill_database` tool is
    * available so the agent can fill a column of one of the user's note databases from each
    * row's context (the page + workspace + optionally the web), with citations. Owner-scoped.
@@ -1978,6 +1985,34 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
         tags: ['notes', 'memory'],
       }),
     } : {}),
+    // weaveNotes Phase 3: proactive linking — available when notesLinkSuggest callback is set.
+    ...(opts?.notesLinkSuggest && opts.currentUserId ? {
+      suggest_links: weaveTool({
+        name: 'suggest_links',
+        description: 'Find the connections a note already implies but hasn\'t linked yet: other notes it mentions BY NAME (high-confidence) plus notes that are semantically related. Call with just a `noteId` to LIST the suggestions; call with `noteId` + `apply` (a suggested note title) to turn the first plain mention of that title into a [[wiki-link]] — lossless, and the backlink appears on the other note automatically. Use this to tidy up a note\'s links or when the user asks to "link this up" / "connect related notes".',
+        parameters: {
+          type: 'object',
+          properties: {
+            noteId: { type: 'string', description: 'The note to find link suggestions for (or apply a link to).' },
+            apply: { type: 'string', description: 'Optional: a suggested note title to link. When set, the first plain mention of it becomes a [[wiki-link]].' },
+            max: { type: 'number', description: 'Max suggestions to list (default 8, max 20).' },
+          },
+          required: ['noteId'],
+        },
+        execute: async (args: { noteId: string; apply?: string; max?: number }) => {
+          if (!opts.notesLinkSuggest || !opts.currentUserId) return { content: 'Link suggestions are unavailable in this context.', isError: true };
+          const max = Math.max(1, Math.min(20, Number(args.max ?? 8)));
+          const r = await opts.notesLinkSuggest({ userId: opts.currentUserId, tenantId: opts.currentTenantId ?? null, noteId: args.noteId, ...(args.apply ? { apply: args.apply } : {}), max });
+          if (args.apply) {
+            if (r.applied?.ok && r.applied.linked) return JSON.stringify({ applied: true, linkedTo: args.apply });
+            if (r.applied?.ok && !r.applied.linked) return JSON.stringify({ applied: false, reason: 'No plain (unlinked) mention of that title was found in the note.' });
+            return { content: r.applied?.error ?? 'Could not apply the link.', isError: true };
+          }
+          return JSON.stringify({ noteId: args.noteId, count: r.suggestions?.length ?? 0, suggestions: r.suggestions ?? [] });
+        },
+        tags: ['notes', 'memory'],
+      }),
+    } : {}),
     // weaveNotes Phase 3.1: create-note tool — available when createNote callback is set.
     ...(opts?.createNote && opts.currentUserId ? {
       create_note: weaveTool({
@@ -2262,7 +2297,7 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
   // fall back to emit_artifact). Skip any already registered from the selection above.
   for (const noteTool of [
     'create_note', 'new_from_template', 'recent_notes', 'export_note', 'note_edit', 'note_publish', 'restructure_note',
-    'find_related_notes', 'autofill_database', 'capture_web_page', 'workspace_search', 'read_note_activity',
+    'find_related_notes', 'suggest_links', 'autofill_database', 'capture_web_page', 'workspace_search', 'read_note_activity',
     // weaveNotes Phase 2/4/5: the CREATIVE + study tools — so the assistant can draw a diagram, sketch
     // ink, colour-code, or make flashcards from a plain chat ("draw a diagram of this"), not only via
     // the selection card. Each is built only when its callback is wired + gated by per-call config.

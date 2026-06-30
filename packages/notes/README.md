@@ -39,6 +39,7 @@ shared contract pins every adapter to identical behaviour.
 | `extractTaskItems(docJson)` | Pure helper: the text of every unchecked to-do in a ProseMirror doc (→ tasks). |
 | `extractPlainText(docJson)` | Pure helper: all text in a ProseMirror doc (search/preview). |
 | `parseWikiLinks` / `findUnlinkedMentions` / `titleKey` | Phase 5 knowledge-graph helpers: `[[wiki-link]]` parsing + unlinked-mention detection. |
+| `buildLinkSuggestions` / `linkifyFirstMention` | Phase 3 PROACTIVE LINKING: merge unlinked **mentions** (verbatim, high-confidence) + semantically **related** notes into one ranked, deduped suggestion list (already-linked targets removed); and losslessly wrap the FIRST plain occurrence of a title in a `[[wiki-link]]` (preserving the typed casing as a display alias, skipping anything already bracketed). Pure + zero-dep; the app surfaces these as the live "💡 Suggested links" bar + one-click apply. |
 | `PropertyDef` / `parseSchema` / `coerceValue` / `validateRow` / `computeRollup` / `VIEW_TYPES` | Phase 6 typed-database model (columns, validation, rollups, view types). |
 | `parseEmail` / `buildCaptureNote` / `dailyNoteTitle` | Phase 7 capture helpers: parse an email (fields or raw RFC822 → text), assemble a provenance-stamped capture note, and the daily-jots inbox title. |
 | `snippetAround` / `reciprocalRankFusion` / `buildCitedContext` / `parseCitedIds` | Phase 8 workspace-RAG helpers: query-centred excerpts, rank-fusion of multiple corpora, numbered "[n]" cited context for the LLM, and citation-marker parsing. |

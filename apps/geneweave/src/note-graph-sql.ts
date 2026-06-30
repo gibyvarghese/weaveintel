@@ -21,7 +21,7 @@
  * owner-scoped + tenant-isolated.
  */
 import { BlockDoc, pmToBlocks, blocksToMarkdown } from '@weaveintel/coedit';
-import { parseWikiLinks, findUnlinkedMentions, titleKey, extractPlainText, type Note } from '@weaveintel/notes';
+import { parseWikiLinks, findUnlinkedMentions, titleKey, extractPlainText, buildLinkSuggestions, linkifyFirstMention, type Note, type LinkSuggestion } from '@weaveintel/notes';
 import { extractKnowledgeGraph } from '@weaveintel/extraction';
 import { cosineSimilarity } from '@weaveintel/cache';
 import { newUUIDv7, weaveContext } from '@weaveintel/core';
@@ -202,6 +202,58 @@ export function createNoteGraphService(db: NoteGraphDb, opts: { generate?: NoteA
       }
       scored.sort((a, b) => b.score - a.score);
       return scored.filter((s) => s.score > 0.1).slice(0, topK);
+    },
+
+    /**
+     * Phase 3 — PROACTIVE link suggestions for a note: the unlinked mentions it already contains
+     * (verbatim, one-click) PLUS its semantically-related notes, merged + ranked + already-linked
+     * targets removed. Surfaced live as the user writes.
+     */
+    async linkSuggestions(noteId: string, access: NoteAccess, opts: { max?: number } = {}): Promise<LinkSuggestion[]> {
+      const note = await db.getNote(noteId, access.ownerId) as Note | null;
+      if (!note) return [];
+      const { text, markdown } = noteText(note, access.ownerId);
+      const all = await db.listNotes(access.ownerId) as Note[];
+      const candidates = all.filter((n) => n.id !== noteId && !n.is_template).map((n) => ({ id: n.id, title: n.title }));
+      const linkedTitleKeys = new Set(parseWikiLinks(markdown).map((w) => titleKey(w.target)));
+      const mentions = findUnlinkedMentions(text, candidates, { excludeIds: new Set([noteId]), linkedTitleKeys });
+      let related: RelatedNote[] = [];
+      try { related = await this.relatedNotes(noteId, access, 6); } catch { /* best-effort */ }
+      return buildLinkSuggestions(mentions, related.filter((r) => !linkedTitleKeys.has(titleKey(r.title))), { linkedTitleKeys, max: opts.max ?? 8 });
+    },
+
+    /**
+     * Phase 3 — accept a link suggestion: surgically wrap the FIRST unlinked mention of `targetTitle`
+     * inside the note's content with a `[[wiki-link]]` (lossless — only the matched text node changes),
+     * re-index so the backlink appears, and record the activity. Owner-scoped.
+     */
+    async applyLink(noteId: string, access: NoteAccess, targetTitle: string): Promise<{ ok: boolean; error?: string; linked?: boolean }> {
+      const title = (targetTitle ?? '').trim();
+      if (!title) return { ok: false, error: 'targetTitle required' };
+      const note = await db.getNote(noteId, access.ownerId) as (Note & { doc_json?: string }) | null;
+      if (!note) return { ok: false, error: 'note not found' };
+      let doc: { type?: string; content?: unknown[] };
+      try { doc = JSON.parse(note.doc_json ?? '') as { type?: string; content?: unknown[] }; } catch { return { ok: false, error: 'could not read the note' }; }
+
+      // Walk the ProseMirror tree; linkify the FIRST text node that contains a plain (unbracketed)
+      // whole-phrase occurrence of the title. Only that node's text changes → lossless.
+      let changed = false;
+      const visit = (node: unknown): void => {
+        if (changed || !node || typeof node !== 'object') return;
+        const n = node as { type?: string; text?: string; content?: unknown[] };
+        if (typeof n.text === 'string' && n.text) {
+          const r = linkifyFirstMention(n.text, title);
+          if (r.changed) { n.text = r.text; changed = true; return; }
+        }
+        if (Array.isArray(n.content)) for (const c of n.content) visit(c);
+      };
+      visit(doc);
+      if (!changed) return { ok: true, linked: false }; // the mention wasn't found as plain text
+
+      await db.updateNote(noteId, access.ownerId, { doc_json: JSON.stringify(doc) } as never);
+      try { await this.indexNote({ noteId, access }); } catch { /* backlinks refresh best-effort */ }
+      try { await db.recordNoteActivity?.({ id: newUUIDv7(), note_id: noteId, user_id: access.ownerId, tenant_id: access.tenantId ?? null, action: 'updated', actor: 'ai', summary: `Linked “${title}”`, detail_json: JSON.stringify({ via: 'proactive_link', target: title }), created_at: new Date(now()).toISOString() }); } catch { /* */ }
+      return { ok: true, linked: true };
     },
 
     /**

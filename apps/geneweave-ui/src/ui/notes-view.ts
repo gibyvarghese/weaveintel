@@ -27,6 +27,7 @@ import { wireNoteAi, type NoteAiPanel } from './notes-ai.js';
 import { wireSelectionCard, type SelectionCard } from './notes-ai-card.js';
 import { wireLiveCursors, peerColor, type LiveCursors, type Participant } from './notes-cursors.js';
 import { wireNoteConnections, type NoteConnectionsPanel } from './notes-graph.js';
+import { wireProactiveLinks, type ProactiveLinksBar } from './notes-proactive-links.js';
 import { renderDatabasesView } from './notes-database-view.js';
 import { renderStudyView } from './notes-study.js';
 import { renderTranslateCard } from './notes-translate.js';
@@ -52,6 +53,8 @@ let _activeCard: SelectionCard | null = null;
 let _activeCursors: LiveCursors | null = null;
 /** The knowledge-graph connections panel for the currently-open note (Phase 5). */
 let _activeConn: NoteConnectionsPanel | null = null;
+/** The live proactive-linking bar for the currently-open note (Phase 3). */
+let _activeProactive: ProactiveLinksBar | null = null;
 /** Phase 8 panels: version history, comments, synced blocks. */
 let _activeHistory: SimplePanel | null = null;
 let _activeComments: SimplePanel | null = null;
@@ -62,6 +65,7 @@ function teardownCoedit(): void {
   if (_activeCard) { _activeCard.destroy(); _activeCard = null; }
   if (_activeCursors) { _activeCursors.destroy(); _activeCursors = null; }
   if (_activeConn) { _activeConn.close(); _activeConn = null; }
+  if (_activeProactive) { _activeProactive.destroy(); _activeProactive = null; }
   if (_activeHistory) { _activeHistory.close(); _activeHistory = null; }
   if (_activeComments) { _activeComments.close(); _activeComments = null; }
   if (_activeSynced) { _activeSynced.close(); _activeSynced = null; }
@@ -442,6 +446,10 @@ function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLEle
   // mentions, related notes, mini graph). Lives in the right rail's "Links" tab.
   const connPanel = h('div', { className: 'notes-connections-panel' }) as HTMLElement;
 
+  // weaveNotes Phase 3 — the live proactive-linking bar (sits above the note body, hidden until
+  // there's an unlinked mention to connect; one-click turns it into a [[wiki-link]]).
+  const proactiveBar = h('div', { className: 'notes-proactive-bar', style: 'display:none' }) as HTMLElement;
+
   // weaveNotes Phase 8 — version History, Comments, and Synced-blocks panels. Inline panels
   // shown above the editor, toggled from the centre top-bar overflow (⋯) menu.
   const historyPanel = h('div', { className: 'notes-ws-panel' }) as HTMLElement; historyPanel.style.display = 'none';
@@ -606,7 +614,7 @@ function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLEle
     metaText: 'Edited just now',
     isLive: true,
     iconEl, titleInput, editorContainer, presenceBadge, presenceAvatarsEl,
-    inlinePanels: [historyPanel, commentsPanel, syncedPanel],
+    inlinePanels: [proactiveBar, historyPanel, commentsPanel, syncedPanel],
     afterEditorPanels: [aiPanel], // the inline AI-edit diff cards live in the note body
     extractResult,
     onSetTheme: (t) => {
@@ -656,7 +664,10 @@ function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLEle
     // Phase 2: the floating AI selection card — select text → card → ask/colour → suggestion.
     _activeCard = wireSelectionCard({ container: editorContainer, noteId: note.id, onSuggestion: () => { _railTab = 'assistant'; void _activeAi?.refresh(); } });
     // Phase 5: wire the knowledge-graph connections panel (hidden until the button opens it).
-    _activeConn = wireNoteConnections({ noteId: note.id, panelEl: connPanel, onOpenNote: (id) => { void loadNote(id).then(render); } });
+    _activeConn = wireNoteConnections({ noteId: note.id, panelEl: connPanel, onOpenNote: (id) => { void loadNote(id).then(render); }, onApplied: () => { void loadNote(note.id).then(render); } });
+    // Phase 3: wire the LIVE proactive-linking bar (debounced; shows as you pause typing).
+    _activeProactive = wireProactiveLinks({ noteId: note.id, barEl: proactiveBar, onApplied: () => { void loadNote(note.id).then(render); } });
+    void _activeProactive.refresh();
     // Phase 8: wire the version-history, comments, and synced-blocks panels (hidden until opened).
     _activeHistory = wireNoteHistory({ noteId: note.id, panelEl: historyPanel, onRestored: () => { void loadNote(note.id).then(render); } });
     _activeComments = wireNoteComments({ noteId: note.id, panelEl: commentsPanel });
@@ -670,7 +681,7 @@ function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLEle
       onSelectionChange: () => _activeCursors?.onLocalSelectionChange(),
       // Mark an edit as pending the instant it happens (the save is debounced) so a remote-echo
       // reload can't clobber an unsaved edit that didn't focus the editor (a diagram/ink button).
-      onLocalEdit: () => { lastLocalEditTs = Date.now(); },
+      onLocalEdit: () => { lastLocalEditTs = Date.now(); _activeProactive?.noteEdited(); },
       // Serialize saves: two debounced saves >1.5s apart can otherwise overlap, and since each
       // sends the WHOLE document, a slower earlier (stale) snapshot landing after a newer one would
       // revert it (e.g. a node-add right after a recolour). Chaining guarantees in-order, last-wins.

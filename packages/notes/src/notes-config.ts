@@ -100,6 +100,8 @@ export interface WeaveNotesConfig {
   mcpNotesEnabled: boolean;
   /** Phase 3: allow MCP clients to WRITE (create/append) notes; off → the MCP server is read-only. */
   mcpNotesAllowWrites: boolean;
+  /** Phase 3: proactively suggest links as you write — turn unlinked mentions + related notes into one-click `[[links]]`. */
+  proactiveLinkingEnabled: boolean;
   /** Phase 7: let the mobile app work OFFLINE — edit notes with no signal and sync when back online. */
   mobileOfflineEnabled: boolean;
   /** Phase 7: let people DRAW freehand ink on a phone/tablet (synced to the web note untouched). */
@@ -191,6 +193,7 @@ export const DEFAULT_WEAVENOTES_CONFIG: WeaveNotesConfig = {
   scheduledAgentMaxPerUser: 10,
   mcpNotesEnabled: true,
   mcpNotesAllowWrites: true,
+  proactiveLinkingEnabled: true,
   mobileOfflineEnabled: true,
   mobileInkEnabled: true,
   mobileOfflineNoteLimit: 200,
@@ -328,6 +331,7 @@ export function validateWeaveNotesConfig(
       scheduledAgentMaxPerUser: clampInt(p.scheduledAgentMaxPerUser ?? base.scheduledAgentMaxPerUser, 0, 100, base.scheduledAgentMaxPerUser),
       mcpNotesEnabled: asBool(p.mcpNotesEnabled ?? base.mcpNotesEnabled, base.mcpNotesEnabled),
       mcpNotesAllowWrites: asBool(p.mcpNotesAllowWrites ?? base.mcpNotesAllowWrites, base.mcpNotesAllowWrites),
+      proactiveLinkingEnabled: asBool(p.proactiveLinkingEnabled ?? base.proactiveLinkingEnabled, base.proactiveLinkingEnabled),
       flashcardsEnabled: asBool(p.flashcardsEnabled ?? base.flashcardsEnabled, base.flashcardsEnabled),
       dailyNewCardLimit: clampInt(p.dailyNewCardLimit ?? base.dailyNewCardLimit, 1, 1000, base.dailyNewCardLimit),
       mobileOfflineEnabled: asBool(p.mobileOfflineEnabled ?? base.mobileOfflineEnabled, base.mobileOfflineEnabled),

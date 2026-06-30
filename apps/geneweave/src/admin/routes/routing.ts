@@ -502,6 +502,7 @@ export function registerAdminRoutingRoutes(
     if (body['scheduled_agent_max_per_user'] !== undefined) partial['scheduledAgentMaxPerUser'] = body['scheduled_agent_max_per_user'];
     if (body['mcp_notes_enabled'] !== undefined) partial['mcpNotesEnabled'] = body['mcp_notes_enabled'];
     if (body['mcp_notes_allow_writes'] !== undefined) partial['mcpNotesAllowWrites'] = body['mcp_notes_allow_writes'];
+    if (body['proactive_linking_enabled'] !== undefined) partial['proactiveLinkingEnabled'] = body['proactive_linking_enabled'];
     if (body['mobile_offline_enabled'] !== undefined) partial['mobileOfflineEnabled'] = body['mobile_offline_enabled'];
     if (body['mobile_ink_enabled'] !== undefined) partial['mobileInkEnabled'] = body['mobile_ink_enabled'];
     if (body['mobile_offline_note_limit'] !== undefined) partial['mobileOfflineNoteLimit'] = body['mobile_offline_note_limit'];
