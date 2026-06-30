@@ -104,6 +104,13 @@ export interface DatabaseAdapter extends
   createScheduledNoteAgentRun(row: import('./scheduled-agents.js').ScheduledNoteAgentRunRow): Promise<void>;
   updateScheduledNoteAgentRun(id: string, fields: Partial<import('./scheduled-agents.js').ScheduledNoteAgentRunRow>): Promise<void>;
   listScheduledNoteAgentRuns(agentId: string, userId: string, limit?: number): Promise<import('./scheduled-agents.js').ScheduledNoteAgentRunRow[]>;
+
+  // ── Per-user MCP tokens (m130 / Phase 3) ─────────────────────────────────
+  createUserMcpToken(row: import('./mcp-notes.js').UserMcpTokenRow): Promise<void>;
+  listUserMcpTokens(userId: string): Promise<import('./mcp-notes.js').UserMcpTokenRow[]>;
+  getUserMcpTokenByHash(tokenHash: string): Promise<import('./mcp-notes.js').UserMcpTokenRow | null>;
+  revokeUserMcpToken(id: string, userId: string): Promise<void>;
+  touchUserMcpToken(id: string): Promise<void>;
 }
 
 export interface DatabaseConfig {

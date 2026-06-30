@@ -1757,6 +1757,29 @@ input{font-family:inherit;outline:none}
 .gw-sched-lbl{font-size:11.5px;font-weight:600;color:var(--muted,#5C6B63);margin-bottom:-4px}
 .gw-sched-create{align-self:flex-start;padding:9px 20px;margin-top:4px}
 .gw-sched-error{font-size:13px;color:#b42318;margin:0}
+/* weaveNotes Phase 3 — MCP connect panel */
+.gw-mcp{display:flex;flex-direction:column;gap:12px;padding:18px 20px;min-width:480px;max-width:580px}
+.gw-mcp-intro{font-size:12.5px;color:var(--muted,#5C6B63);margin:0;line-height:1.5}
+.gw-mcp-endpoint{display:flex;align-items:center;gap:10px;font-size:12.5px}
+.gw-mcp-endpoint code{background:var(--bg3,#eef2f0);border-radius:6px;padding:3px 8px;font-size:12px;word-break:break-all}
+.gw-mcp-lbl{font-weight:600;color:var(--muted,#5C6B63)}
+.gw-mcp-secret{border:1px solid #0a7d4e;background:#e7f6ee;border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:6px}
+.gw-mcp-secret-title{font-size:12.5px;font-weight:700;color:#0a5d3a}
+.gw-mcp-token{display:block;background:#fff;border:1px solid var(--bg4);border-radius:7px;padding:8px 10px;font-size:12.5px;word-break:break-all;user-select:all}
+.gw-mcp-secret-hint{font-size:11.5px;color:var(--muted,#5C6B63)}
+.gw-mcp-list{display:flex;flex-direction:column;gap:4px}
+.gw-mcp-row{display:grid;grid-template-columns:1fr auto auto auto;align-items:center;gap:10px;padding:7px 4px;border-bottom:1px solid var(--bg3,#eef2f0)}
+.gw-mcp-name{font-size:13.5px;font-weight:600;color:var(--ink,#14201B)}
+.gw-mcp-scope{font-size:11px;color:#0a7d4e;background:#e7f6ee;border-radius:20px;padding:2px 9px}
+.gw-mcp-pfx{font-size:11.5px;color:var(--muted,#5C6B63);font-family:monospace}
+.gw-mcp-revoke{background:none;border:none;color:var(--muted,#5C6B63);font-size:12px;cursor:pointer}
+.gw-mcp-revoke:hover{color:#b42318}
+.gw-mcp-form{display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--bg3,#eef2f0);padding-top:12px;margin-top:4px}
+.gw-mcp-form-title{font-size:13px;font-weight:700;color:var(--ink,#14201B)}
+.gw-mcp-input{padding:8px 11px;border:1px solid var(--bg4);border-radius:9px;background:var(--bg1);font-size:13.5px;color:var(--ink,#14201B)}
+.gw-mcp-create{align-self:flex-start;padding:9px 20px;margin-top:4px}
+.gw-mcp-error{font-size:13px;color:#b42318;margin:0}
+.gw-mcp-foot{font-size:11.5px;color:var(--muted,#5C6B63);margin:6px 0 0;line-height:1.5}
 /* Slash menu */
 .notes-slash-menu{background:var(--bg1);border:1px solid var(--bg4);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:4px;min-width:200px;z-index:300}
 .notes-slash-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;cursor:pointer;font-size:13px;color:var(--fg1)}

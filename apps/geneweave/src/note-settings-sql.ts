@@ -63,6 +63,8 @@ function rowToConfig(row: WeaveNotesSettingsRow | null): WeaveNotesConfig {
     scheduledAgentsEnabled: row.scheduled_agents_enabled !== 0, // undefined (pre-m129) → on
     ...(typeof row.scheduled_agent_max_token_budget === 'number' ? { scheduledAgentMaxTokenBudget: row.scheduled_agent_max_token_budget } : {}),
     ...(typeof row.scheduled_agent_max_per_user === 'number' ? { scheduledAgentMaxPerUser: row.scheduled_agent_max_per_user } : {}),
+    mcpNotesEnabled: row.mcp_notes_enabled !== 0, // undefined (pre-m130) → on
+    mcpNotesAllowWrites: row.mcp_notes_allow_writes !== 0,
     flashcardsEnabled: row.flashcards_enabled !== 0, // undefined (pre-m110) → enabled
     ...(typeof row.daily_new_card_limit === 'number' ? { dailyNewCardLimit: row.daily_new_card_limit } : {}),
     mobileOfflineEnabled: row.mobile_offline_enabled !== 0,  // undefined (pre-m112) → enabled
@@ -129,6 +131,8 @@ export function createNoteSettingsService(db: SettingsDb, opts: { now?: () => nu
       scheduled_agents_enabled: config.scheduledAgentsEnabled ? 1 : 0,
       scheduled_agent_max_token_budget: config.scheduledAgentMaxTokenBudget,
       scheduled_agent_max_per_user: config.scheduledAgentMaxPerUser,
+      mcp_notes_enabled: config.mcpNotesEnabled ? 1 : 0,
+      mcp_notes_allow_writes: config.mcpNotesAllowWrites ? 1 : 0,
       flashcards_enabled: config.flashcardsEnabled ? 1 : 0,
       daily_new_card_limit: config.dailyNewCardLimit,
       mobile_offline_enabled: config.mobileOfflineEnabled ? 1 : 0,

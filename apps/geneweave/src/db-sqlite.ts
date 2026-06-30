@@ -10728,6 +10728,26 @@ export class SQLiteAdapter implements DatabaseAdapter {
     return this.d.prepare(`SELECT * FROM scheduled_note_agent_runs WHERE agent_id = ? AND user_id = ? ORDER BY started_at DESC LIMIT ?`).all(agentId, userId, Math.max(1, Math.min(100, limit))) as import('./db-types/scheduled-agents.js').ScheduledNoteAgentRunRow[];
   }
 
+  // ─── Per-user MCP tokens (m130) ──────────────────────────────────────────────
+  async createUserMcpToken(row: import('./db-types/mcp-notes.js').UserMcpTokenRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO user_mcp_tokens (id, user_id, tenant_id, name, token_hash, token_prefix, scope, enabled, created_at, last_used_at, expires_at)
+       VALUES (@id, @user_id, @tenant_id, @name, @token_hash, @token_prefix, @scope, @enabled, @created_at, @last_used_at, @expires_at)`,
+    ).run(row);
+  }
+  async listUserMcpTokens(userId: string): Promise<import('./db-types/mcp-notes.js').UserMcpTokenRow[]> {
+    return this.d.prepare(`SELECT * FROM user_mcp_tokens WHERE user_id = ? ORDER BY created_at DESC`).all(userId) as import('./db-types/mcp-notes.js').UserMcpTokenRow[];
+  }
+  async getUserMcpTokenByHash(tokenHash: string): Promise<import('./db-types/mcp-notes.js').UserMcpTokenRow | null> {
+    return (this.d.prepare(`SELECT * FROM user_mcp_tokens WHERE token_hash = ?`).get(tokenHash) as import('./db-types/mcp-notes.js').UserMcpTokenRow) ?? null;
+  }
+  async revokeUserMcpToken(id: string, userId: string): Promise<void> {
+    this.d.prepare(`UPDATE user_mcp_tokens SET enabled = 0 WHERE id = ? AND user_id = ?`).run(id, userId);
+  }
+  async touchUserMcpToken(id: string): Promise<void> {
+    try { this.d.prepare(`UPDATE user_mcp_tokens SET last_used_at = datetime('now') WHERE id = ?`).run(id); } catch { /* best-effort */ }
+  }
+
   // ─── Live artifact configs (m80 / Phase 6) ────────────────────────────────────
 
   async getLiveArtifactConfig(artifactId: string): Promise<import('./db-types/artifacts.js').LiveArtifactConfigRow | null> {

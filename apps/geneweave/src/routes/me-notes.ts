@@ -70,6 +70,7 @@ import { createNoteStudyService } from '../note-study-sql.js';
 import { createNoteTranslateService } from '../note-translate-sql.js';
 import { createTenantGovernanceService } from '../tenant-governance-sql.js';
 import { createNoteScheduledAgentService } from '../note-scheduled-agent-sql.js';
+import { createMcpNotesServer } from '../mcp-notes-sql.js';
 import { isColorScheme, parseProvenanceFromSvg } from '@weaveintel/notes';
 import { sanitizeAwarenessState } from '@weaveintel/coedit';
 import { withAiPresence } from '../note-ai-presence.js';
@@ -143,6 +144,8 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
   const governance = createTenantGovernanceService(db as unknown as Parameters<typeof createTenantGovernanceService>[0]);
   // weaveNotes Phase 3: scheduled/triggered workspace agents (recurring AI note tasks).
   const scheduledAgents = opts.aiGenerate ? createNoteScheduledAgentService(db, opts.aiGenerate) : null;
+  // weaveNotes Phase 3: the MCP note-vault server (expose notes to external agents via MCP).
+  const mcpNotes = createMcpNotesServer(db, opts.aiGenerate ? { generate: opts.aiGenerate } : {});
   // weaveNotes Phase 4: the publish service (note → shareable artifact, sensitivity-gated).
   const publish = createNotePublishService(db, { jwtSecret: opts.jwtSecret ?? process.env['JWT_SECRET'] ?? 'insecure-dev-secret', ...(opts.publicBaseUrl ? { publicBaseUrl: opts.publicBaseUrl } : {}) });
   // weaveNotes Phase 5: the knowledge-graph service (wiki-links/backlinks, entity/relation
@@ -975,6 +978,41 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     const r = await scheduledAgents!.runNow({ agentId: params['id']!, userId: auth.userId, tenantId: auth.tenantId ?? null, trigger: 'manual' });
     res.writeHead(r.ok ? 200 : (r.code ?? 400), { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(r));
+  }, { auth: true });
+
+  // ── weaveNotes Phase 3: MCP note-vault server + per-user tokens ──────────────
+  //   POST /api/mcp/notes              the MCP endpoint (its OWN bearer-token auth; no cookie/CSRF)
+  //   GET/POST /api/me/mcp-tokens      list / mint a personal MCP token (the secret is shown ONCE)
+  //   DELETE /api/me/mcp-tokens/:id    revoke a token
+  router.post('/api/mcp/notes', async (req, res) => {
+    const bearer = (req.headers['authorization'] as string | undefined) ?? '';
+    const raw = await readBody(req).catch(() => '');
+    const out = await mcpNotes.handleRequest(bearer, raw);
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (out.status === 401) headers['WWW-Authenticate'] = 'Bearer realm="weaveNotes MCP"';
+    res.writeHead(out.status, headers);
+    res.end(out.body === null ? '' : JSON.stringify(out.body));
+  }, { auth: false, csrf: false });
+  router.get('/api/me/mcp-tokens', async (_req, res, _params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, tokens: await mcpNotes.listTokens(auth.userId), endpoint: '/api/mcp/notes' }));
+  }, { auth: true });
+  router.post('/api/me/mcp-tokens', async (req, res, _params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const cfg = await (await import('../note-settings-sql.js')).createNoteSettingsService(db).getConfig();
+    if (!cfg.mcpNotesEnabled) { res.writeHead(403); res.end(JSON.stringify({ error: 'The notes MCP server is disabled.' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* */ }
+    const created = await mcpNotes.createToken({ userId: auth.userId, tenantId: auth.tenantId ?? null, name: typeof body['name'] === 'string' ? body['name'] : undefined, scope: body['scope'] === 'read' ? 'read' : 'readwrite' });
+    res.writeHead(201, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, ...created, endpoint: '/api/mcp/notes' })); // `token` plaintext is returned ONCE
+  }, { auth: true });
+  router.del('/api/me/mcp-tokens/:id', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    await mcpNotes.revokeToken(params['id']!, auth.userId);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true }));
   }, { auth: true });
 
   router.post('/api/me/flashcards/:cid/review', async (req, res, params, auth) => {

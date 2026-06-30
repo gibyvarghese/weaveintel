@@ -96,6 +96,10 @@ export interface WeaveNotesConfig {
   scheduledAgentMaxTokenBudget: number;
   /** Phase 3: how many scheduled agents a single user may define. */
   scheduledAgentMaxPerUser: number;
+  /** Phase 3: expose the note vault over MCP so external agents (Claude/ChatGPT) can search/read it. */
+  mcpNotesEnabled: boolean;
+  /** Phase 3: allow MCP clients to WRITE (create/append) notes; off → the MCP server is read-only. */
+  mcpNotesAllowWrites: boolean;
   /** Phase 7: let the mobile app work OFFLINE — edit notes with no signal and sync when back online. */
   mobileOfflineEnabled: boolean;
   /** Phase 7: let people DRAW freehand ink on a phone/tablet (synced to the web note untouched). */
@@ -185,6 +189,8 @@ export const DEFAULT_WEAVENOTES_CONFIG: WeaveNotesConfig = {
   scheduledAgentsEnabled: true,
   scheduledAgentMaxTokenBudget: 20000,
   scheduledAgentMaxPerUser: 10,
+  mcpNotesEnabled: true,
+  mcpNotesAllowWrites: true,
   mobileOfflineEnabled: true,
   mobileInkEnabled: true,
   mobileOfflineNoteLimit: 200,
@@ -320,6 +326,8 @@ export function validateWeaveNotesConfig(
       scheduledAgentsEnabled: asBool(p.scheduledAgentsEnabled ?? base.scheduledAgentsEnabled, base.scheduledAgentsEnabled),
       scheduledAgentMaxTokenBudget: clampInt(p.scheduledAgentMaxTokenBudget ?? base.scheduledAgentMaxTokenBudget, 500, 500_000, base.scheduledAgentMaxTokenBudget),
       scheduledAgentMaxPerUser: clampInt(p.scheduledAgentMaxPerUser ?? base.scheduledAgentMaxPerUser, 0, 100, base.scheduledAgentMaxPerUser),
+      mcpNotesEnabled: asBool(p.mcpNotesEnabled ?? base.mcpNotesEnabled, base.mcpNotesEnabled),
+      mcpNotesAllowWrites: asBool(p.mcpNotesAllowWrites ?? base.mcpNotesAllowWrites, base.mcpNotesAllowWrites),
       flashcardsEnabled: asBool(p.flashcardsEnabled ?? base.flashcardsEnabled, base.flashcardsEnabled),
       dailyNewCardLimit: clampInt(p.dailyNewCardLimit ?? base.dailyNewCardLimit, 1, 1000, base.dailyNewCardLimit),
       mobileOfflineEnabled: asBool(p.mobileOfflineEnabled ?? base.mobileOfflineEnabled, base.mobileOfflineEnabled),

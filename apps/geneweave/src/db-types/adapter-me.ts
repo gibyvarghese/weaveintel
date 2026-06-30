@@ -464,6 +464,9 @@ export interface WeaveNotesSettingsRow {
   scheduled_agents_enabled?: number;
   scheduled_agent_max_token_budget?: number;
   scheduled_agent_max_per_user?: number;
+  /** weaveNotes Phase 3 MCP vault dials (m130). Optional for old DBs. */
+  mcp_notes_enabled?: number;
+  mcp_notes_allow_writes?: number;
   local_model_for_sensitive: number;
   /** weaveNotes Phase 3: show live collaborator cursors (0/1). */
   live_cursors_enabled: number;
