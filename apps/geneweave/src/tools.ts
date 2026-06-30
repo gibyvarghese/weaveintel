@@ -1033,6 +1033,7 @@ export interface ToolRegistryOptions {
   // weaveNotes Phase 5 — turn a note into flashcards (active recall + SM-2 spaced repetition).
   noteMakeFlashcards?: (args: { userId: string; noteId: string; count?: number }) => Promise<{ ok: boolean; error?: string; created?: number }>;
   noteTranslate?: (args: { userId: string; noteId: string; targetLanguage: string; formality?: 'default' | 'formal' | 'informal'; glossary?: string[] }) => Promise<{ ok: boolean; error?: string; noteId?: string; language?: { code: string; name: string; rtl: boolean }; warnings?: string[] }>;
+  noteScheduledAgent?: (args: { userId: string; op: 'create' | 'list' | 'run'; agentId?: string; name?: string; recipe?: string; cron?: string; timezone?: string; scope?: string; taskPrompt?: string }) => Promise<{ ok: boolean; error?: string; agents?: unknown[]; agent?: unknown; run?: unknown }>;
 }
 
 export function filterToolNamesByPersona(toolNames: string[], persona: string | null | undefined): string[] {
@@ -1884,6 +1885,34 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
         tags: ['notes', 'translate', 'output'],
       }),
     } : {}),
+    // weaveNotes Phase 3: set up / run a scheduled workspace agent — available when noteScheduledAgent is set.
+    ...(opts?.noteScheduledAgent && opts.currentUserId ? {
+      manage_scheduled_agent: weaveTool({
+        name: 'manage_scheduled_agent',
+        description: 'Set up, list, or run a SCHEDULED workspace agent — a recurring AI task over the user\'s OWN notes (e.g. "every weekday at 8am, digest the notes I touched yesterday"). Use op="create" to make one (give a name, a recipe, and a cron schedule), op="list" to show the user\'s agents, or op="run" to run one now by agentId. Recipes: daily_digest, link_suggester, action_items, stale_flagger, custom (with taskPrompt). Each run is budget-bounded and produces a NEW note (never overwrites). Use when the user asks to "schedule", "automate", "every day/week summarise my notes", or "run my scheduled agent".',
+        parameters: {
+          type: 'object',
+          properties: {
+            op: { type: 'string', enum: ['create', 'list', 'run'], description: 'create a new agent, list existing ones, or run one now.' },
+            agentId: { type: 'string', description: 'The agent id (for op="run").' },
+            name: { type: 'string', description: 'A label for a new agent (op="create").' },
+            recipe: { type: 'string', enum: ['daily_digest', 'link_suggester', 'action_items', 'stale_flagger', 'custom'], description: 'The task recipe (op="create").' },
+            cron: { type: 'string', description: 'A 5-field cron schedule, e.g. "0 8 * * MON-FRI" (op="create").' },
+            timezone: { type: 'string', description: 'IANA timezone for the schedule, e.g. "America/New_York" (op="create").' },
+            scope: { type: 'string', enum: ['recent', 'all', 'tag'], description: 'Which notes to consider (op="create").' },
+            taskPrompt: { type: 'string', description: 'Extra instruction (required for recipe="custom").' },
+          },
+          required: ['op'],
+        },
+        execute: async (args: { op: 'create' | 'list' | 'run'; agentId?: string; name?: string; recipe?: string; cron?: string; timezone?: string; scope?: string; taskPrompt?: string }) => {
+          if (!opts.noteScheduledAgent || !opts.currentUserId) return { content: 'Scheduled agents are unavailable in this context.', isError: true };
+          const r = await opts.noteScheduledAgent({ userId: opts.currentUserId, ...args });
+          if (!r.ok) return { content: `manage_scheduled_agent failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, ...(r.agents ? { agents: r.agents } : {}), ...(r.agent ? { agent: r.agent } : {}), ...(r.run ? { run: r.run } : {}) });
+        },
+        tags: ['notes', 'agent', 'schedule', 'output'],
+      }),
+    } : {}),
     // weaveNotes Phase 8: workspace RAG search — available when workspaceSearch callback is set.
     ...(opts?.workspaceSearch && opts.currentUserId ? {
       workspace_search: weaveTool({
@@ -2239,7 +2268,7 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
     // the selection card. Each is built only when its callback is wired + gated by per-call config.
     // (generate_image is intentionally NOT here — it costs money and stays opt-in.)
     'create_diagram', 'draw_ink', 'recolor_ink', 'create_illustration', 'create_visual', 'find_image',
-    'make_flashcards', 'translate_note', 'apply_highlight', 'apply_text_color', 'colorize_semantic',
+    'make_flashcards', 'translate_note', 'manage_scheduled_agent', 'apply_highlight', 'apply_text_color', 'colorize_semantic',
   ] as const) {
     const t = scopedTools[noteTool];
     if (t && !registeredFromSelection.has(noteTool) && canUseTool(actorPersona, noteTool)) registry.register(t);

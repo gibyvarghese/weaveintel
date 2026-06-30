@@ -312,6 +312,24 @@ export {
   validateFlashcards,
 } from './study.js';
 
+// SCHEDULED WORKSPACE AGENTS (Phase 3): recurring multi-step note tasks, budget-bounded + HITL.
+export type { ScheduleRecipe, ScheduleTriggerType, ScheduleScope, ScheduledAgentConfig, RecipeInfo, RunBudget } from './scheduled-agent.js';
+export {
+  SCHEDULE_RECIPES,
+  RECIPE_CATALOG,
+  recipeInfo,
+  DEFAULT_SCHEDULED_AGENT,
+  validateScheduledAgent,
+  newRunBudget,
+  chargeBudget,
+  budgetExhausted,
+  budgetRemaining,
+  isValidCron,
+  isValidTimezone,
+  cronMatches,
+  cronNextRun,
+} from './scheduled-agent.js';
+
 // IMAGE PROVENANCE (Phase 2): licence + AI-lineage credentials embedded with image assets.
 export type { ImageSourceKind, ImageProvenance } from './provenance.js';
 export {

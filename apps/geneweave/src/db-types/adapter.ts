@@ -92,6 +92,18 @@ export interface DatabaseAdapter extends
   updateLiveArtifactConfig?(artifactId: string, patch: import('./artifacts.js').LiveArtifactConfigUpdate): Promise<import('./artifacts.js').LiveArtifactConfigRow>;
   deleteLiveArtifactConfig?(artifactId: string): Promise<void>;
   touchLiveArtifactRefresh?(artifactId: string): Promise<void>;
+
+  // ── Scheduled note agents (m129 / Phase 3) ───────────────────────────────
+  createScheduledNoteAgent(row: import('./scheduled-agents.js').ScheduledNoteAgentRow): Promise<void>;
+  listScheduledNoteAgents(userId: string): Promise<import('./scheduled-agents.js').ScheduledNoteAgentRow[]>;
+  getScheduledNoteAgent(id: string, userId: string): Promise<import('./scheduled-agents.js').ScheduledNoteAgentRow | null>;
+  countScheduledNoteAgents(userId: string): Promise<number>;
+  updateScheduledNoteAgent(id: string, userId: string, fields: Partial<import('./scheduled-agents.js').ScheduledNoteAgentRow>): Promise<void>;
+  deleteScheduledNoteAgent(id: string, userId: string): Promise<void>;
+  listDueScheduledNoteAgents(nowMs: number, limit?: number): Promise<import('./scheduled-agents.js').ScheduledNoteAgentRow[]>;
+  createScheduledNoteAgentRun(row: import('./scheduled-agents.js').ScheduledNoteAgentRunRow): Promise<void>;
+  updateScheduledNoteAgentRun(id: string, fields: Partial<import('./scheduled-agents.js').ScheduledNoteAgentRunRow>): Promise<void>;
+  listScheduledNoteAgentRuns(agentId: string, userId: string, limit?: number): Promise<import('./scheduled-agents.js').ScheduledNoteAgentRunRow[]>;
 }
 
 export interface DatabaseConfig {

@@ -69,6 +69,7 @@ import { createNoteCreativeService } from '../note-creative-sql.js';
 import { createNoteStudyService } from '../note-study-sql.js';
 import { createNoteTranslateService } from '../note-translate-sql.js';
 import { createTenantGovernanceService } from '../tenant-governance-sql.js';
+import { createNoteScheduledAgentService } from '../note-scheduled-agent-sql.js';
 import { isColorScheme, parseProvenanceFromSvg } from '@weaveintel/notes';
 import { sanitizeAwarenessState } from '@weaveintel/coedit';
 import { withAiPresence } from '../note-ai-presence.js';
@@ -140,6 +141,8 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
   const noteTranslate = opts.aiGenerate ? createNoteTranslateService(db, opts.aiGenerate) : null;
   // weaveNotes Phase 2: per-tenant enterprise governance (read-only surface for the user).
   const governance = createTenantGovernanceService(db as unknown as Parameters<typeof createTenantGovernanceService>[0]);
+  // weaveNotes Phase 3: scheduled/triggered workspace agents (recurring AI note tasks).
+  const scheduledAgents = opts.aiGenerate ? createNoteScheduledAgentService(db, opts.aiGenerate) : null;
   // weaveNotes Phase 4: the publish service (note → shareable artifact, sensitivity-gated).
   const publish = createNotePublishService(db, { jwtSecret: opts.jwtSecret ?? process.env['JWT_SECRET'] ?? 'insecure-dev-secret', ...(opts.publicBaseUrl ? { publicBaseUrl: opts.publicBaseUrl } : {}) });
   // weaveNotes Phase 5: the knowledge-graph service (wiki-links/backlinks, entity/relation
@@ -912,6 +915,65 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
     const r = await governance.getEffective(auth.tenantId ?? '');
     res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(r));
+  }, { auth: true });
+
+  // ── weaveNotes Phase 3: scheduled workspace agents (recurring AI note tasks) ──
+  //   GET  /api/me/scheduled-agents            list the user's scheduled agents
+  //   POST /api/me/scheduled-agents            create one
+  //   GET/PUT/DELETE /api/me/scheduled-agents/:id   read / update / delete one
+  //   POST /api/me/scheduled-agents/:id/run    run it now (AI op, rate-limited)
+  //   GET  /api/me/scheduled-agents/:id/runs   the run log (audit)
+  const schedReady = (res: { writeHead: (n: number) => void; end: (s: string) => void }): boolean => { if (!scheduledAgents) { res.writeHead(501); res.end(JSON.stringify({ error: 'AI features are not configured' })); return false; } return true; };
+  router.get('/api/me/scheduled-agents', async (_req, res, _params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    if (!schedReady(res)) return;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, agents: await scheduledAgents!.list(auth.userId) }));
+  }, { auth: true });
+  router.post('/api/me/scheduled-agents', async (req, res, _params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    if (!schedReady(res)) return;
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* */ }
+    const r = await scheduledAgents!.create({ userId: auth.userId, tenantId: auth.tenantId ?? null, partial: body });
+    res.writeHead(r.ok ? 201 : (r.code ?? 400), { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(r));
+  }, { auth: true });
+  router.get('/api/me/scheduled-agents/:id', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    if (!schedReady(res)) return;
+    const agent = await scheduledAgents!.get(params['id']!, auth.userId);
+    res.writeHead(agent ? 200 : 404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(agent ? { ok: true, agent } : { error: 'Not found' }));
+  }, { auth: true });
+  router.put('/api/me/scheduled-agents/:id', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    if (!schedReady(res)) return;
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* */ }
+    const r = await scheduledAgents!.update(params['id']!, auth.userId, body);
+    res.writeHead(r.ok ? 200 : (r.code ?? 400), { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(r));
+  }, { auth: true });
+  router.del('/api/me/scheduled-agents/:id', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    if (!schedReady(res)) return;
+    const r = await scheduledAgents!.remove(params['id']!, auth.userId);
+    res.writeHead(r.ok ? 200 : (r.code ?? 404), { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(r));
+  }, { auth: true });
+  router.get('/api/me/scheduled-agents/:id/runs', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    if (!schedReady(res)) return;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, runs: await scheduledAgents!.listRuns(params['id']!, auth.userId) }));
+  }, { auth: true });
+  aiPost('/api/me/scheduled-agents/:id/run', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    if (!schedReady(res)) return;
+    const r = await scheduledAgents!.runNow({ agentId: params['id']!, userId: auth.userId, tenantId: auth.tenantId ?? null, trigger: 'manual' });
+    res.writeHead(r.ok ? 200 : (r.code ?? 400), { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(r));
   }, { auth: true });
 

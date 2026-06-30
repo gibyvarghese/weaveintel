@@ -497,6 +497,9 @@ export function registerAdminRoutingRoutes(
     if (body['db_autofill_web_search'] !== undefined) partial['dbAutofillWebSearch'] = body['db_autofill_web_search'];
     if (body['db_autofill_redact_pii'] !== undefined) partial['dbAutofillRedactPii'] = body['db_autofill_redact_pii'];
     if (body['image_provenance_enabled'] !== undefined) partial['imageProvenanceEnabled'] = body['image_provenance_enabled'];
+    if (body['scheduled_agents_enabled'] !== undefined) partial['scheduledAgentsEnabled'] = body['scheduled_agents_enabled'];
+    if (body['scheduled_agent_max_token_budget'] !== undefined) partial['scheduledAgentMaxTokenBudget'] = body['scheduled_agent_max_token_budget'];
+    if (body['scheduled_agent_max_per_user'] !== undefined) partial['scheduledAgentMaxPerUser'] = body['scheduled_agent_max_per_user'];
     if (body['mobile_offline_enabled'] !== undefined) partial['mobileOfflineEnabled'] = body['mobile_offline_enabled'];
     if (body['mobile_ink_enabled'] !== undefined) partial['mobileInkEnabled'] = body['mobile_ink_enabled'];
     if (body['mobile_offline_note_limit'] !== undefined) partial['mobileOfflineNoteLimit'] = body['mobile_offline_note_limit'];

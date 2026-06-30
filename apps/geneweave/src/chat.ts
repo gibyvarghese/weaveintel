@@ -59,6 +59,7 @@ import { createColorizeTools } from './note-colorize-sql.js';
 import { createCreativeTools, createModelImageGenerator, createModelVisionVerifier } from './note-creative-sql.js';
 import { createStudyTool } from './note-study-sql.js';
 import { createTranslateTool } from './note-translate-sql.js';
+import { createScheduledAgentTool } from './note-scheduled-agent-sql.js';
 import { withAiPresence } from './note-ai-presence.js';
 import { createNotePublishService } from './note-publish-sql.js';
 import { createNoteGraphService } from './note-graph-sql.js';
@@ -472,6 +473,9 @@ export class ChatEngine {
       // weaveNotes Phase 2: wire the translate_note tool — translate a note into another language (new note).
       noteTranslate: (a: { userId: string; noteId: string; targetLanguage: string; formality?: 'default' | 'formal' | 'informal'; glossary?: string[] }) =>
         createTranslateTool(db, createModelTextGenerator(config)).translateNote(a),
+      // weaveNotes Phase 3: wire the manage_scheduled_agent tool — set up / run a recurring note task.
+      noteScheduledAgent: (a: { userId: string; op: 'create' | 'list' | 'run'; agentId?: string; name?: string; recipe?: string; cron?: string; timezone?: string; scope?: string; taskPrompt?: string }) =>
+        createScheduledAgentTool(db, createModelTextGenerator(config)).manageScheduledAgent(a),
     };
   }
 

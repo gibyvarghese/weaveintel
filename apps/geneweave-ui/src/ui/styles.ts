@@ -1736,6 +1736,27 @@ input{font-family:inherit;outline:none}
 .gw-gov-detail{font-size:12px;color:var(--muted,#5C6B63);text-align:right}
 .gw-gov-foot{font-size:11.5px;color:var(--muted,#5C6B63);margin:6px 0 0}
 .gw-gov-loading,.gw-gov-empty{padding:24px;color:var(--muted,#5C6B63);font-size:13px}
+/* weaveNotes Phase 3 — scheduled agents panel */
+.gw-sched{display:flex;flex-direction:column;gap:12px;padding:18px 20px;min-width:480px;max-width:560px}
+.gw-sched-intro{font-size:12.5px;color:var(--muted,#5C6B63);margin:0;line-height:1.5}
+.gw-sched-empty{font-size:13px;color:var(--muted,#5C6B63);padding:8px 0}
+.gw-sched-card{border:1px solid var(--bg4);border-radius:11px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;background:var(--bg1)}
+.gw-sched-card-head{display:flex;align-items:center;gap:8px}
+.gw-sched-tag{font-size:11px;font-weight:600;color:#0a7d4e;background:#e7f6ee;border-radius:20px;padding:2px 9px}
+.gw-sched-meta{font-size:12px;color:var(--muted,#5C6B63)}
+.gw-sched-actions{display:flex;align-items:center;gap:10px;margin-top:2px}
+.gw-sched-run{padding:6px 14px;font-size:13px}
+.gw-sched-link{background:none;border:none;color:var(--muted,#5C6B63);font-size:12.5px;cursor:pointer;padding:4px 2px}
+.gw-sched-link:hover{color:var(--ink,#14201B)}
+.gw-sched-del:hover{color:#b42318}
+.gw-sched-runs{display:flex;flex-direction:column;gap:2px;margin-top:2px}
+.gw-sched-runs .gw-sched-run{padding:2px 0;font-size:11.5px;color:var(--muted,#5C6B63)}
+.gw-sched-form{display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--bg3,#eef2f0);padding-top:12px;margin-top:4px}
+.gw-sched-form-title{font-size:13px;font-weight:700;color:var(--ink,#14201B)}
+.gw-sched-input{padding:8px 11px;border:1px solid var(--bg4);border-radius:9px;background:var(--bg1);font-size:13.5px;color:var(--ink,#14201B)}
+.gw-sched-lbl{font-size:11.5px;font-weight:600;color:var(--muted,#5C6B63);margin-bottom:-4px}
+.gw-sched-create{align-self:flex-start;padding:9px 20px;margin-top:4px}
+.gw-sched-error{font-size:13px;color:#b42318;margin:0}
 /* Slash menu */
 .notes-slash-menu{background:var(--bg1);border:1px solid var(--bg4);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:4px;min-width:200px;z-index:300}
 .notes-slash-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;cursor:pointer;font-size:13px;color:var(--fg1)}

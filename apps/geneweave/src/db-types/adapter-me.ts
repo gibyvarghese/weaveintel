@@ -460,6 +460,10 @@ export interface WeaveNotesSettingsRow {
   db_autofill_redact_pii?: number;
   /** weaveNotes Phase 2 image provenance dial (m128). Optional for old DBs. */
   image_provenance_enabled?: number;
+  /** weaveNotes Phase 3 scheduled-agent dials (m129). Optional for old DBs. */
+  scheduled_agents_enabled?: number;
+  scheduled_agent_max_token_budget?: number;
+  scheduled_agent_max_per_user?: number;
   local_model_for_sensitive: number;
   /** weaveNotes Phase 3: show live collaborator cursors (0/1). */
   live_cursors_enabled: number;

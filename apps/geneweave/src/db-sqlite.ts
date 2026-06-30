@@ -10680,6 +10680,54 @@ export class SQLiteAdapter implements DatabaseAdapter {
     try { const r = this.d.prepare(`DELETE FROM note_activity WHERE tenant_id = ? AND created_at < ?`).run(tenantId, cutoffIso); return r.changes ?? 0; } catch { return 0; }
   }
 
+  // ─── Scheduled note agents (m129) ────────────────────────────────────────────
+  async createScheduledNoteAgent(row: import('./db-types/scheduled-agents.js').ScheduledNoteAgentRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO scheduled_note_agents (id, user_id, tenant_id, name, recipe, task_prompt, trigger_type, cron, timezone, scope, scope_tag, lookback_days, max_notes, token_budget, max_steps, require_approval, enabled, last_run_id, last_run_at, next_run_at, created_at, updated_at)
+       VALUES (@id, @user_id, @tenant_id, @name, @recipe, @task_prompt, @trigger_type, @cron, @timezone, @scope, @scope_tag, @lookback_days, @max_notes, @token_budget, @max_steps, @require_approval, @enabled, @last_run_id, @last_run_at, @next_run_at, @created_at, @updated_at)`,
+    ).run(row);
+  }
+  async listScheduledNoteAgents(userId: string): Promise<import('./db-types/scheduled-agents.js').ScheduledNoteAgentRow[]> {
+    return this.d.prepare(`SELECT * FROM scheduled_note_agents WHERE user_id = ? ORDER BY created_at DESC`).all(userId) as import('./db-types/scheduled-agents.js').ScheduledNoteAgentRow[];
+  }
+  async getScheduledNoteAgent(id: string, userId: string): Promise<import('./db-types/scheduled-agents.js').ScheduledNoteAgentRow | null> {
+    return (this.d.prepare(`SELECT * FROM scheduled_note_agents WHERE id = ? AND user_id = ?`).get(id, userId) as import('./db-types/scheduled-agents.js').ScheduledNoteAgentRow) ?? null;
+  }
+  async countScheduledNoteAgents(userId: string): Promise<number> {
+    return (this.d.prepare(`SELECT COUNT(*) AS n FROM scheduled_note_agents WHERE user_id = ?`).get(userId) as { n: number }).n;
+  }
+  async updateScheduledNoteAgent(id: string, userId: string, fields: Partial<import('./db-types/scheduled-agents.js').ScheduledNoteAgentRow>): Promise<void> {
+    const cols = ['name', 'recipe', 'task_prompt', 'trigger_type', 'cron', 'timezone', 'scope', 'scope_tag', 'lookback_days', 'max_notes', 'token_budget', 'max_steps', 'require_approval', 'enabled', 'last_run_id', 'last_run_at', 'next_run_at'] as const;
+    const sets: string[] = []; const vals: unknown[] = [];
+    for (const c of cols) { const v = (fields as Record<string, unknown>)[c]; if (v !== undefined) { sets.push(`${c} = ?`); vals.push(v); } }
+    if (!sets.length) return;
+    sets.push(`updated_at = datetime('now')`); vals.push(id, userId);
+    this.d.prepare(`UPDATE scheduled_note_agents SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`).run(...vals);
+  }
+  async deleteScheduledNoteAgent(id: string, userId: string): Promise<void> {
+    this.d.prepare(`DELETE FROM scheduled_note_agents WHERE id = ? AND user_id = ?`).run(id, userId);
+  }
+  async listDueScheduledNoteAgents(nowMs: number, limit = 50): Promise<import('./db-types/scheduled-agents.js').ScheduledNoteAgentRow[]> {
+    return this.d.prepare(`SELECT * FROM scheduled_note_agents WHERE enabled = 1 AND trigger_type = 'schedule' AND next_run_at IS NOT NULL AND next_run_at <= ? ORDER BY next_run_at ASC LIMIT ?`).all(nowMs, Math.max(1, Math.min(200, limit))) as import('./db-types/scheduled-agents.js').ScheduledNoteAgentRow[];
+  }
+  async createScheduledNoteAgentRun(row: import('./db-types/scheduled-agents.js').ScheduledNoteAgentRunRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO scheduled_note_agent_runs (id, agent_id, user_id, tenant_id, trigger, status, started_at, finished_at, steps, tokens_used, notes_scanned, suggestions_created, output_note_id, summary, error, detail_json)
+       VALUES (@id, @agent_id, @user_id, @tenant_id, @trigger, @status, @started_at, @finished_at, @steps, @tokens_used, @notes_scanned, @suggestions_created, @output_note_id, @summary, @error, @detail_json)`,
+    ).run(row);
+  }
+  async updateScheduledNoteAgentRun(id: string, fields: Partial<import('./db-types/scheduled-agents.js').ScheduledNoteAgentRunRow>): Promise<void> {
+    const cols = ['status', 'finished_at', 'steps', 'tokens_used', 'notes_scanned', 'suggestions_created', 'output_note_id', 'summary', 'error', 'detail_json'] as const;
+    const sets: string[] = []; const vals: unknown[] = [];
+    for (const c of cols) { const v = (fields as Record<string, unknown>)[c]; if (v !== undefined) { sets.push(`${c} = ?`); vals.push(v); } }
+    if (!sets.length) return;
+    vals.push(id);
+    this.d.prepare(`UPDATE scheduled_note_agent_runs SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+  async listScheduledNoteAgentRuns(agentId: string, userId: string, limit = 20): Promise<import('./db-types/scheduled-agents.js').ScheduledNoteAgentRunRow[]> {
+    return this.d.prepare(`SELECT * FROM scheduled_note_agent_runs WHERE agent_id = ? AND user_id = ? ORDER BY started_at DESC LIMIT ?`).all(agentId, userId, Math.max(1, Math.min(100, limit))) as import('./db-types/scheduled-agents.js').ScheduledNoteAgentRunRow[];
+  }
+
   // ─── Live artifact configs (m80 / Phase 6) ────────────────────────────────────
 
   async getLiveArtifactConfig(artifactId: string): Promise<import('./db-types/artifacts.js').LiveArtifactConfigRow | null> {

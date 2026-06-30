@@ -90,6 +90,12 @@ export interface WeaveNotesConfig {
   /** Phase 2: embed licence + provenance "Content Credentials" with every AI/web image (where it came
    *  from, or the AI generator + prompt) — embedded in SVG bytes, stored with raster assets. */
   imageProvenanceEnabled: boolean;
+  /** Phase 3: allow users to set up SCHEDULED workspace agents (recurring AI note tasks). */
+  scheduledAgentsEnabled: boolean;
+  /** Phase 3: hard upper bound on a scheduled agent run's token budget (anti-runaway, platform cap). */
+  scheduledAgentMaxTokenBudget: number;
+  /** Phase 3: how many scheduled agents a single user may define. */
+  scheduledAgentMaxPerUser: number;
   /** Phase 7: let the mobile app work OFFLINE — edit notes with no signal and sync when back online. */
   mobileOfflineEnabled: boolean;
   /** Phase 7: let people DRAW freehand ink on a phone/tablet (synced to the web note untouched). */
@@ -139,6 +145,8 @@ export const WEAVENOTES_AI_TOOLS = [
   'export_note',
   // Phase 2 — translate a note into another language (saved as a new note).
   'translate_note',
+  // Phase 3 — set up / run a scheduled workspace agent (recurring AI note task).
+  'manage_scheduled_agent',
 ] as const;
 
 export const DEFAULT_WEAVENOTES_CONFIG: WeaveNotesConfig = {
@@ -174,6 +182,9 @@ export const DEFAULT_WEAVENOTES_CONFIG: WeaveNotesConfig = {
   dbAutofillWebSearch: true,
   dbAutofillRedactPii: true,
   imageProvenanceEnabled: true,
+  scheduledAgentsEnabled: true,
+  scheduledAgentMaxTokenBudget: 20000,
+  scheduledAgentMaxPerUser: 10,
   mobileOfflineEnabled: true,
   mobileInkEnabled: true,
   mobileOfflineNoteLimit: 200,
@@ -306,6 +317,9 @@ export function validateWeaveNotesConfig(
       dbAutofillWebSearch: asBool(p.dbAutofillWebSearch ?? base.dbAutofillWebSearch, base.dbAutofillWebSearch),
       dbAutofillRedactPii: asBool(p.dbAutofillRedactPii ?? base.dbAutofillRedactPii, base.dbAutofillRedactPii),
       imageProvenanceEnabled: asBool(p.imageProvenanceEnabled ?? base.imageProvenanceEnabled, base.imageProvenanceEnabled),
+      scheduledAgentsEnabled: asBool(p.scheduledAgentsEnabled ?? base.scheduledAgentsEnabled, base.scheduledAgentsEnabled),
+      scheduledAgentMaxTokenBudget: clampInt(p.scheduledAgentMaxTokenBudget ?? base.scheduledAgentMaxTokenBudget, 500, 500_000, base.scheduledAgentMaxTokenBudget),
+      scheduledAgentMaxPerUser: clampInt(p.scheduledAgentMaxPerUser ?? base.scheduledAgentMaxPerUser, 0, 100, base.scheduledAgentMaxPerUser),
       flashcardsEnabled: asBool(p.flashcardsEnabled ?? base.flashcardsEnabled, base.flashcardsEnabled),
       dailyNewCardLimit: clampInt(p.dailyNewCardLimit ?? base.dailyNewCardLimit, 1, 1000, base.dailyNewCardLimit),
       mobileOfflineEnabled: asBool(p.mobileOfflineEnabled ?? base.mobileOfflineEnabled, base.mobileOfflineEnabled),
