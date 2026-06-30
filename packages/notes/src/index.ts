@@ -312,6 +312,17 @@ export {
   validateFlashcards,
 } from './study.js';
 
+// GOVERNANCE model (Phase 2): per-tenant enterprise posture (residency/BYOK/no-training/SSO/retention).
+export type { ResidencyRegion, SsoProtocol, TenantGovernance, PostureItem, PostureContext } from './governance.js';
+export {
+  RESIDENCY_REGIONS,
+  SSO_PROTOCOLS,
+  DEFAULT_TENANT_GOVERNANCE,
+  validateTenantGovernance,
+  governancePosture,
+  governanceScore,
+} from './governance.js';
+
 // TRANSLATE model (Phase 2): faithful, structure-preserving, injection-defended note translation.
 export type { TargetLanguage, Formality, TranslateOptions, ProtectResult, TranslateVerification } from './translate.js';
 export {

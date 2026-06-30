@@ -68,6 +68,7 @@ import { createNoteColorizeService } from '../note-colorize-sql.js';
 import { createNoteCreativeService } from '../note-creative-sql.js';
 import { createNoteStudyService } from '../note-study-sql.js';
 import { createNoteTranslateService } from '../note-translate-sql.js';
+import { createTenantGovernanceService } from '../tenant-governance-sql.js';
 import { isColorScheme } from '@weaveintel/notes';
 import { sanitizeAwarenessState } from '@weaveintel/coedit';
 import { withAiPresence } from '../note-ai-presence.js';
@@ -137,6 +138,8 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
   const noteStudy = opts.aiGenerate ? createNoteStudyService(db, opts.aiGenerate) : null;
   // weaveNotes Phase 2: the AI translate service (note → faithful translated copy).
   const noteTranslate = opts.aiGenerate ? createNoteTranslateService(db, opts.aiGenerate) : null;
+  // weaveNotes Phase 2: per-tenant enterprise governance (read-only surface for the user).
+  const governance = createTenantGovernanceService(db as unknown as Parameters<typeof createTenantGovernanceService>[0]);
   // weaveNotes Phase 4: the publish service (note → shareable artifact, sensitivity-gated).
   const publish = createNotePublishService(db, { jwtSecret: opts.jwtSecret ?? process.env['JWT_SECRET'] ?? 'insecure-dev-secret', ...(opts.publicBaseUrl ? { publicBaseUrl: opts.publicBaseUrl } : {}) });
   // weaveNotes Phase 5: the knowledge-graph service (wiki-links/backlinks, entity/relation
@@ -880,6 +883,15 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     if (!noteStudy) { res.writeHead(501); res.end(JSON.stringify({ error: 'AI features are not configured' })); return; }
     const limit = safePageInt(new URL(req.url ?? '/', 'http://x').searchParams.get('limit'), 50, 1, 200);
     const r = await noteStudy.dueCards(auth.userId, limit);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(r));
+  }, { auth: true });
+
+  // weaveNotes Phase 2: a user can SEE their workspace's enterprise governance posture (read-only;
+  // editing is admin-only via /api/admin/tenant-governance). Surfaces residency/no-training/BYOK/etc.
+  router.get('/api/me/governance', async (_req, res, _params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const r = await governance.getEffective(auth.tenantId ?? '');
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(r));
   }, { auth: true });

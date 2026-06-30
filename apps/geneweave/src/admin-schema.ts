@@ -91,6 +91,7 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
     { key: 'working-memory', label: 'Working Memory' },
     { key: 'memory-extraction-events', label: 'Extraction Events' },
     { key: 'compliance-rules', label: 'Compliance' },
+    { key: 'tenant-governance', label: 'Tenant Governance' },
     { key: 'tenant-encryption-policies', label: 'Tenant Encryption' },
   ]},
   { label: 'A2A Protocol', icon: '\uD83E\uDD16\uD83E\uDD1D', tabs: [

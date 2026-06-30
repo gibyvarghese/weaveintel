@@ -1722,6 +1722,20 @@ input{font-family:inherit;outline:none}
 .gw-translate-hint{font-size:12.5px;color:var(--muted,#5C6B63);margin:2px 0 0;line-height:1.5}
 .gw-translate-error{font-size:13px;color:#b42318;margin:0}
 .gw-translate-go{align-self:flex-start;padding:10px 22px;margin-top:4px}
+/* weaveNotes Phase 2 — workspace governance card */
+.gw-gov{display:flex;flex-direction:column;gap:10px;padding:18px 20px;min-width:440px;max-width:560px}
+.gw-gov-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.gw-gov-title{font-size:15px;font-weight:700;color:var(--ink,#14201B)}
+.gw-gov-score{font-size:12.5px;color:var(--muted,#5C6B63)}
+.gw-gov-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+.gw-gov-item{display:grid;grid-template-columns:20px 1fr auto;align-items:center;gap:8px;padding:6px 4px;border-bottom:1px solid var(--bg3,#eef2f0)}
+.gw-gov-badge{font-weight:700;text-align:center}
+.gw-gov-on .gw-gov-badge{color:#0a7d4e}
+.gw-gov-off .gw-gov-badge{color:#9aa6a0}
+.gw-gov-label{font-size:13.5px;color:var(--ink,#14201B)}
+.gw-gov-detail{font-size:12px;color:var(--muted,#5C6B63);text-align:right}
+.gw-gov-foot{font-size:11.5px;color:var(--muted,#5C6B63);margin:6px 0 0}
+.gw-gov-loading,.gw-gov-empty{padding:24px;color:var(--muted,#5C6B63);font-size:13px}
 /* Slash menu */
 .notes-slash-menu{background:var(--bg1);border:1px solid var(--bg4);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:4px;min-width:200px;z-index:300}
 .notes-slash-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;cursor:pointer;font-size:13px;color:var(--fg1)}

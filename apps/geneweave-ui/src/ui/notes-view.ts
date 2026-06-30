@@ -30,6 +30,7 @@ import { wireNoteConnections, type NoteConnectionsPanel } from './notes-graph.js
 import { renderDatabasesView } from './notes-database-view.js';
 import { renderStudyView } from './notes-study.js';
 import { renderTranslateCard } from './notes-translate.js';
+import { renderGovernanceCard } from './notes-governance.js';
 import { renderCapturePanel } from './notes-capture.js';
 import { saveNotesSnapshot, cacheNote, offlineNotes, offlineNote, setLastNoteId, getLastNoteId } from './notes-offline.js';
 import { openQuickCaptureModal } from './notes-quick-capture.js';
@@ -400,6 +401,7 @@ function buildInsertMenu(render: () => void): OverflowItem[] {
         openCenterModal('Translate note', renderTranslateCard(id, (newId) => { void openNote(newId); }));
       } },
     { label: '📥 Archived notes', title: 'View + restore archived notes', onClick: async () => { await loadArchivedNotes(); state.notesView = 'archive'; render(); } },
+    { label: '🛡️ Workspace governance', title: 'See your workspace’s enterprise trust posture (read-only)', onClick: () => { openCenterModal('Workspace governance', renderGovernanceCard()); } },
   ];
 }
 

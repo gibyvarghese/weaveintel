@@ -10632,6 +10632,54 @@ export class SQLiteAdapter implements DatabaseAdapter {
     try { this.d.prepare(`DELETE FROM tenant_artifact_settings WHERE tenant_id = ?`).run(tenantId); } catch { /* ignore */ }
   }
 
+  // ─── Tenant enterprise governance (m127) ─────────────────────────────────────
+
+  async getTenantGovernance(tenantId: string): Promise<import('./db-types/governance.js').TenantGovernanceRow | null> {
+    try { return (this.d.prepare(`SELECT * FROM tenant_governance WHERE tenant_id = ?`).get(tenantId) as import('./db-types/governance.js').TenantGovernanceRow) ?? null; } catch { return null; }
+  }
+
+  async listTenantGovernance(): Promise<import('./db-types/governance.js').TenantGovernanceRow[]> {
+    try { return this.d.prepare(`SELECT * FROM tenant_governance ORDER BY tenant_id ASC`).all() as import('./db-types/governance.js').TenantGovernanceRow[]; } catch { return []; }
+  }
+
+  async upsertTenantGovernance(
+    tenantId: string,
+    fields: Partial<Omit<import('./db-types/governance.js').TenantGovernanceRow, 'id' | 'tenant_id' | 'created_at' | 'updated_at'>>,
+  ): Promise<import('./db-types/governance.js').TenantGovernanceRow> {
+    const now = new Date().toISOString();
+    const existing = await this.getTenantGovernance(tenantId);
+    const cols = ['data_residency', 'allow_model_training', 'allow_analytics', 'sso_required', 'sso_protocol', 'scim_enabled', 'activity_retention_days', 'audit_retention_days', 'legal_hold'] as const;
+    if (existing) {
+      const sets: string[] = []; const vals: unknown[] = [];
+      for (const c of cols) { const v = (fields as Record<string, unknown>)[c]; if (v !== undefined) { sets.push(`${c} = ?`); vals.push(v); } }
+      if (sets.length > 0) { sets.push('updated_at = ?'); vals.push(now, tenantId); this.d.prepare(`UPDATE tenant_governance SET ${sets.join(', ')} WHERE tenant_id = ?`).run(...vals); }
+    } else {
+      const { newUUIDv7 } = await import('@weaveintel/core');
+      this.d.prepare(`
+        INSERT INTO tenant_governance
+          (id, tenant_id, data_residency, allow_model_training, allow_analytics, sso_required, sso_protocol, scim_enabled, activity_retention_days, audit_retention_days, legal_hold, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        newUUIDv7(), tenantId,
+        fields.data_residency ?? 'unrestricted',
+        fields.allow_model_training ?? 1, fields.allow_analytics ?? 1,
+        fields.sso_required ?? 0, fields.sso_protocol ?? 'none', fields.scim_enabled ?? 0,
+        fields.activity_retention_days ?? 0, fields.audit_retention_days ?? 365, fields.legal_hold ?? 0,
+        now,
+      );
+    }
+    return (await this.getTenantGovernance(tenantId))!;
+  }
+
+  async deleteTenantGovernance(tenantId: string): Promise<void> {
+    try { this.d.prepare(`DELETE FROM tenant_governance WHERE tenant_id = ?`).run(tenantId); } catch { /* ignore */ }
+  }
+
+  /** Per-tenant note_activity prune older than cutoff (for per-tenant retention enforcement). */
+  async pruneNoteActivityForTenant(tenantId: string, cutoffIso: string): Promise<number> {
+    try { const r = this.d.prepare(`DELETE FROM note_activity WHERE tenant_id = ? AND created_at < ?`).run(tenantId, cutoffIso); return r.changes ?? 0; } catch { return 0; }
+  }
+
   // ─── Live artifact configs (m80 / Phase 6) ────────────────────────────────────
 
   async getLiveArtifactConfig(artifactId: string): Promise<import('./db-types/artifacts.js').LiveArtifactConfigRow | null> {

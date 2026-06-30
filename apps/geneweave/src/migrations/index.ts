@@ -106,6 +106,7 @@ import { applyM123Fsrs } from './m123-fsrs.js';
 import { applyM124Translate } from './m124-translate.js';
 import { applyM125QueryExpansion } from './m125-query-expansion.js';
 import { applyM126DbAutofill } from './m126-db-autofill.js';
+import { applyM127TenantGovernance } from './m127-tenant-governance.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -220,6 +221,7 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm124-translate', description: 'weaveNotes Phase 2: first-class translate-a-note action. Adds weavenotes_settings.translate_enabled (default 1). The AI translates a note into another language preserving code/links/Markdown structure (protected spans masked so they can never break) and saves it as a NEW note, leaving the original intact. Idempotent ALTER', run: applyM124Translate },
   { id: 'm125-query-expansion', description: 'weaveNotes Phase 2: query expansion (multi-query + HyDE) for Ask-your-workspace + workspace search. Adds weavenotes_settings.query_expansion_enabled (default 1) + query_expansion_variants (default 3). The search rephrases the question several ways and writes a hypothetical answer, embeds each, and fuses the results (RRF) so more relevant notes/chats surface. Idempotent ALTERs', run: applyM125QueryExpansion },
   { id: 'm126-db-autofill', description: 'weaveNotes Phase 2: relation-aware + PII-safe database auto-fill. Adds weavenotes_settings.db_autofill_web_search (default 1) + db_autofill_redact_pii (default 1). Auto-fill now feeds a row’s RELATED rows in as context, and scrubs personal data out of any outbound web-search query. Idempotent ALTERs', run: applyM126DbAutofill },
+  { id: 'm127-tenant-governance', description: 'weaveNotes Phase 2: per-tenant enterprise governance record (tenant_governance). One row per tenant: data residency, no-training, analytics, enforced SSO + protocol, SCIM, activity/audit retention, legal hold. Projected (with the existing BYOK/encryption tables) into the compliance checklist shown in the Builder + a per-user posture endpoint. Idempotent', run: applyM127TenantGovernance },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

@@ -723,6 +723,26 @@ export const PLATFORM_CAPABILITY_ADMIN_TABS: Record<string, AdminTabDef> = {
     ],
   },
 
+  'tenant-governance': {
+    singular: 'Tenant Governance', apiPath: 'admin/tenant-governance', listKey: 'tenants',
+    cols: ['tenant_id', 'data_residency', 'controls', 'legal_hold'],
+    fields: [
+      { key: 'tenant_id', label: 'Tenant ID', readonly: false },
+      { key: 'data_residency', label: 'Data residency (region the data must stay in)', options: ['unrestricted', 'us', 'eu', 'uk', 'apac', 'canada', 'australia'], default: 'unrestricted' },
+      { key: 'allow_model_training', label: 'Allow using this tenant’s data for model training (off = no-training)', type: 'checkbox', save: 'bool', default: true },
+      { key: 'allow_analytics', label: 'Allow product analytics for this tenant', type: 'checkbox', save: 'bool', default: true },
+      { key: 'sso_required', label: 'Enforce single sign-on (SSO) for this tenant', type: 'checkbox', save: 'bool', default: false },
+      { key: 'sso_protocol', label: 'SSO protocol', options: ['none', 'saml', 'oidc'], default: 'none' },
+      { key: 'scim_enabled', label: 'SCIM user provisioning enabled', type: 'checkbox', save: 'bool', default: false },
+      { key: 'activity_retention_days', label: 'Activity-log retention (days; 0 = keep forever)', type: 'number', save: 'int', default: 0 },
+      { key: 'audit_retention_days', label: 'Audit retention (days; 0 = keep forever)', type: 'number', save: 'int', default: 365 },
+      { key: 'legal_hold', label: 'Legal hold (suspend all auto-deletion)', type: 'checkbox', save: 'bool', default: false },
+      { key: 'byok_active', label: 'BYOK active (read-only; from encryption config)', type: 'checkbox', save: 'bool', readonly: true },
+      { key: 'encryption_at_rest', label: 'Encryption at rest (read-only; from encryption policy)', type: 'checkbox', save: 'bool', readonly: true },
+      { key: 'controls', label: 'Enterprise controls on', readonly: true },
+    ],
+  },
+
   'tenant-configs': {
     singular: 'Tenant Config', apiPath: 'admin/tenant-configs', listKey: 'tenant-configs',
     cols: ['name', 'tenant_id', 'scope', 'enabled'],
