@@ -555,6 +555,8 @@ export const PLATFORM_CAPABILITY_ADMIN_TABS: Record<string, AdminTabDef> = {
       { key: 'visual_verify_max_retries', label: 'Redraw a too-low diagram at most this many times', type: 'number', save: 'int', default: 2 },
       { key: 'image_verify_enabled', label: 'A vision model confirms a FOUND image really depicts the subject before inserting', type: 'checkbox', save: 'bool', default: true },
       { key: 'image_verify_min_confidence', label: 'Accept a found image at this 0–1 vision confidence (and good quality + safe)', type: 'number', save: 'float', default: 0.7 },
+      { key: 'citations_enabled', label: 'Ask-your-workspace answers cite the EXACT line from each note (verified, click-to-highlight)', type: 'checkbox', save: 'bool', default: true },
+      { key: 'citation_max_sources', label: 'How many notes a cited answer may draw on', type: 'number', save: 'int', default: 6 },
       { key: 'flashcards_enabled', label: 'AI can make flashcards + schedule reviews (spaced repetition)', type: 'checkbox', save: 'bool', default: true },
       { key: 'daily_new_card_limit', label: 'New flashcards introduced per study session', type: 'number', save: 'int', default: 20 },
       { key: 'mobile_offline_enabled', label: 'Mobile app can edit notes offline + sync later', type: 'checkbox', save: 'bool', default: true },

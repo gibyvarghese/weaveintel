@@ -199,7 +199,67 @@ export function wireNoteSynced(opts: { noteId: string; panelEl: HTMLElement }): 
 
 interface CitedSource { n: number; id: string; kind: string; title: string; snippet: string }
 
-export function renderWorkspaceAsk(onOpenNote: (id: string) => void): HTMLElement {
+interface AskCitation { n: number; sourceId: string; sourceKind: string; sourceTitle: string; quote: string; charStart: number; charEnd: number }
+interface AskResponse { answer: string; citations: AskCitation[]; sources: CitedSource[] }
+
+/**
+ * Find a verified quote in the open note editor and HIGHLIGHT it (CSS Custom Highlight API — no DOM
+ * mutation), then scroll it into view. The quote is anchored by its TEXT (not a char offset) so it
+ * survives edits. Best-effort: if the text isn't found (rare), the note still opened.
+ */
+export function highlightQuoteInEditor(quote: string): void {
+  const q = (quote ?? '').trim();
+  if (q.length < 3) return;
+  const root = (document.querySelector('.notes-editor-mount [contenteditable]') ?? document.querySelector('.notes-editor-mount')) as HTMLElement | null;
+  if (!root) return;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = []; const starts: number[] = []; let full = '';
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) { starts.push(full.length); nodes.push(n as Text); full += (n as Text).data; }
+  let idx = full.toLowerCase().indexOf(q.toLowerCase());
+  if (idx < 0) { const probe = q.replace(/\s+/g, ' ').toLowerCase().slice(0, 48); idx = full.replace(/\s+/g, ' ').toLowerCase().indexOf(probe); }
+  if (idx < 0) return;
+  const end = idx + q.length;
+  const locate = (target: number): { node: Text; offset: number } | null => {
+    for (let i = 0; i < nodes.length; i++) { const s = starts[i]!; const len = nodes[i]!.data.length; if (target <= s + len) return { node: nodes[i]!, offset: Math.max(0, target - s) }; }
+    const last = nodes[nodes.length - 1]; return last ? { node: last, offset: last.data.length } : null;
+  };
+  const s = locate(idx); const e = locate(end);
+  if (!s || !e) return;
+  try {
+    const range = document.createRange();
+    range.setStart(s.node, Math.min(s.offset, s.node.data.length));
+    range.setEnd(e.node, Math.min(e.offset, e.node.data.length));
+    const w = window as unknown as { CSS?: { highlights?: Map<string, unknown> }; Highlight?: new (r: Range) => unknown };
+    if (w.CSS?.highlights && typeof w.Highlight === 'function') {
+      w.CSS.highlights.set('gw-cite', new w.Highlight(range));
+      setTimeout(() => { try { w.CSS!.highlights!.delete('gw-cite'); } catch { /* */ } }, 6500);
+    }
+    (s.node.parentElement ?? root).scrollIntoView({ behavior: 'smooth', block: 'center' });
+  } catch { /* range can fail across odd boundaries — the note is still open */ }
+}
+
+/** Render the answer prose, turning each inline [n] marker into a clickable chip that jumps to source n. */
+function renderAnswerWithChips(answer: string, citations: AskCitation[], onOpenNote: (id: string, quote?: string) => void): HTMLElement {
+  const byN = new Map(citations.map((c) => [c.n, c]));
+  const el = h('div', { className: 'notes-ws-ask-answer' }) as HTMLElement;
+  let last = 0;
+  for (const m of answer.matchAll(/\[(\d+)\]/g)) {
+    const i = m.index ?? 0;
+    if (i > last) el.appendChild(document.createTextNode(answer.slice(last, i)));
+    const n = Number(m[1]);
+    const c = byN.get(n);
+    el.appendChild(h('button', {
+      className: `notes-ws-cite-chip${c ? '' : ' unmatched'}`,
+      title: c ? `Open “${c.sourceTitle}” and highlight the quote` : 'No verified source',
+      ...(c ? { onClick: () => onOpenNote(c.sourceId, c.quote) } : {}),
+    }, String(n)) as HTMLElement);
+    last = i + m[0].length;
+  }
+  if (last < answer.length) el.appendChild(document.createTextNode(answer.slice(last)));
+  return el;
+}
+
+export function renderWorkspaceAsk(onOpenNote: (id: string, quote?: string) => void): HTMLElement {
   const results = h('div', { className: 'notes-ws-ask-results' }) as HTMLElement;
   const input = h('input', { className: 'notes-ws-ask-input', type: 'text', placeholder: '✦ Ask your workspace — "what did we learn about…"' }) as HTMLInputElement;
   let busy = false;
@@ -208,25 +268,29 @@ export function renderWorkspaceAsk(onOpenNote: (id: string) => void): HTMLElemen
     const query = input.value.trim();
     if (!query || busy) return;
     busy = true;
-    results.replaceChildren(h('div', { className: 'notes-ws-loading' }, 'Searching your notes + chats…'));
+    results.replaceChildren(h('div', { className: 'notes-ws-loading' }, 'Reading your notes + chats…'));
     try {
-      const res = await api.post('/api/me/workspace/search', { query });
-      const data = await res.json().catch(() => ({ sources: [] })) as { sources: CitedSource[] };
-      if (data.sources.length === 0) {
+      const res = await api.post('/api/me/workspace/ask', { query });
+      const data = await res.json().catch(() => ({ answer: '', citations: [], sources: [] })) as AskResponse;
+      if (!data.answer) {
         results.replaceChildren(h('div', { className: 'notes-ws-empty' }, 'No matches. Try the ↻ Reindex button, or add more notes.'));
       } else {
+        const cites = data.citations ?? [];
         results.replaceChildren(
-          h('div', { className: 'notes-ws-ask-label' }, `${data.sources.length} source${data.sources.length === 1 ? '' : 's'} found — click to open:`),
-          ...data.sources.map((s) => h('div', {
-            className: 'notes-ws-ask-hit',
-            ...(s.kind === 'note' ? { onClick: () => onOpenNote(s.id) } : {}),
+          renderAnswerWithChips(data.answer, cites, onOpenNote),
+          h('div', { className: 'notes-ws-cite-label' }, cites.length ? 'Verified sources — click to see the exact line:' : 'No verifiable source quotes for this answer.'),
+          ...cites.map((c) => h('div', {
+            className: 'notes-ws-citation',
+            title: 'Open the source note and highlight this exact line',
+            onClick: () => onOpenNote(c.sourceId, c.quote),
           },
-            h('div', { className: 'notes-ws-ask-hit-head' }, h('span', { className: 'notes-ws-ask-n' }, `[${s.n}]`), h('span', { className: 'notes-ws-ask-kind' }, s.kind), h('span', { className: 'notes-ws-ask-title' }, s.title)),
-            h('div', { className: 'notes-ws-ask-snippet' }, s.snippet),
+            h('span', { className: 'notes-ws-ask-n' }, `[${c.n}]`),
+            h('span', { className: 'notes-ws-cite-quote' }, `“${c.quote}”`),
+            h('span', { className: 'notes-ws-cite-src' }, `— ${c.sourceTitle}`),
           )),
         );
       }
-    } catch { results.replaceChildren(h('div', { className: 'notes-ws-empty' }, 'Search failed.')); }
+    } catch { results.replaceChildren(h('div', { className: 'notes-ws-empty' }, 'Ask failed.')); }
     finally { busy = false; }
   }
 

@@ -102,6 +102,13 @@ export {
   reciprocalRankFusion,
   buildCitedContext,
   parseCitedIds,
+  type CitableSource,
+  type RawCitation,
+  type Citation,
+  locateQuote,
+  buildCitedAnswerPrompt,
+  parseCitedAnswer,
+  verifyCitations,
 } from './rag.js';
 
 // weaveNotes Phase 0 — foundation: the "colour encodes agency" contract.

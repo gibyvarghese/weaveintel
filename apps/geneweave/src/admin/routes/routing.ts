@@ -485,6 +485,8 @@ export function registerAdminRoutingRoutes(
     if (body['visual_verify_max_retries'] !== undefined) partial['visualVerifyMaxRetries'] = body['visual_verify_max_retries'];
     if (body['image_verify_enabled'] !== undefined) partial['imageVerifyEnabled'] = body['image_verify_enabled'];
     if (body['image_verify_min_confidence'] !== undefined) partial['imageVerifyMinConfidence'] = body['image_verify_min_confidence'];
+    if (body['citations_enabled'] !== undefined) partial['citationsEnabled'] = body['citations_enabled'];
+    if (body['citation_max_sources'] !== undefined) partial['citationMaxSources'] = body['citation_max_sources'];
     if (body['flashcards_enabled'] !== undefined) partial['flashcardsEnabled'] = body['flashcards_enabled'];
     if (body['daily_new_card_limit'] !== undefined) partial['dailyNewCardLimit'] = body['daily_new_card_limit'];
     if (body['mobile_offline_enabled'] !== undefined) partial['mobileOfflineEnabled'] = body['mobile_offline_enabled'];

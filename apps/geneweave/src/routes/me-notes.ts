@@ -148,7 +148,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
   const noteSettings = createNoteSettingsService(db);
   // weaveNotes Phase 8: workspace RAG (cited search over notes+runs), version history,
   // block comments, and synced blocks (transclusion).
-  const noteWorkspace = createNoteWorkspaceService(db);
+  const noteWorkspace = createNoteWorkspaceService(db, opts.aiGenerate ? { aiGenerate: opts.aiGenerate } : {});
   const noteVersions = createNoteVersionService(db);
   const noteComments = createNoteCommentService(db);
   const noteSynced = createNoteSyncedService(db);
@@ -1430,6 +1430,31 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     const result = await noteWorkspace.workspaceSearch({
       userId: auth.userId, tenantId: auth.tenantId ?? null, query: body['query'], scope,
       ...(typeof body['limit'] === 'number' ? { limit: body['limit'] } : {}),
+    });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
+  }, { auth: true });
+
+  //   POST /api/me/workspace/ask  { query, scope?, limit? }  → a cited ANSWER with VERIFIED
+  //   character-level citations (each quote provably exists in its source; hallucinated ones dropped).
+  //   Rate-limited like every AI action (aiPost). The UI highlights each cited quote in its source note.
+  aiPost('/api/me/workspace/ask', async (req, res, _params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    if (!opts.aiGenerate) { res.writeHead(501); res.end(JSON.stringify({ error: 'AI is not configured on this server' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty */ }
+    if (typeof body['query'] !== 'string' || !body['query'].trim()) { res.writeHead(400); res.end(JSON.stringify({ error: 'query required' })); return; }
+    const scope = (['all', 'notes', 'runs'].includes(String(body['scope'])) ? body['scope'] : 'all') as 'all' | 'notes' | 'runs';
+    const cfg = await noteSettings.getConfig();
+    if (!cfg.citationsEnabled) {
+      // Citations turned off by the admin → fall back to a plain cited-source search (no AI answer).
+      const s = await noteWorkspace.workspaceSearch({ userId: auth.userId, tenantId: auth.tenantId ?? null, query: body['query'], scope });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ query: s.query, answer: '', citations: [], sources: s.sources })); return;
+    }
+    const result = await noteWorkspace.askWorkspace({
+      userId: auth.userId, tenantId: auth.tenantId ?? null, query: body['query'], scope,
+      limit: typeof body['limit'] === 'number' ? body['limit'] : cfg.citationMaxSources,
     });
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(result));

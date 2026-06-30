@@ -61,6 +61,11 @@ export interface WeaveNotesConfig {
   imageVerifyEnabled: boolean;
   /** Accept an image when the vision check's 0–1 confidence is ≥ this (and it is good quality + safe). */
   imageVerifyMinConfidence: number;
+  /** Phase 2: "Ask your workspace" answers with VERIFIED character-level citations (each quote is checked
+   *  to exist in its source; invented ones are dropped). Off → Ask returns matching sources only. */
+  citationsEnabled: boolean;
+  /** Phase 2: how many sources the cited answer may draw on (token budget). */
+  citationMaxSources: number;
   /** Phase 5: let the AI turn a note into flashcards + schedule reviews (SM-2 spaced repetition). */
   flashcardsEnabled: boolean;
   /** Phase 5: cap how many NEW cards a study session introduces per day (active-recall pacing). */
@@ -135,6 +140,8 @@ export const DEFAULT_WEAVENOTES_CONFIG: WeaveNotesConfig = {
   visualVerifyMaxRetries: 2,
   imageVerifyEnabled: true,
   imageVerifyMinConfidence: 0.7,
+  citationsEnabled: true,
+  citationMaxSources: 6,
   flashcardsEnabled: true,
   dailyNewCardLimit: 20,
   mobileOfflineEnabled: true,
@@ -195,6 +202,8 @@ export function validateWeaveNotesConfig(
   if (p.imageVerifyMinConfidence !== undefined && imageMinConf !== Number(p.imageVerifyMinConfidence)) warnings.push(`Image verify confidence clamped to ${imageMinConf} (0–1).`);
   const verifyRetries = clampInt(p.visualVerifyMaxRetries ?? base.visualVerifyMaxRetries, 0, 5, base.visualVerifyMaxRetries);
   if (p.visualVerifyMaxRetries !== undefined && verifyRetries !== Math.trunc(Number(p.visualVerifyMaxRetries))) warnings.push(`Diagram verify retries clamped to ${verifyRetries} (0–5).`);
+  const citeMax = clampInt(p.citationMaxSources ?? base.citationMaxSources, 1, 12, base.citationMaxSources);
+  if (p.citationMaxSources !== undefined && citeMax !== Math.trunc(Number(p.citationMaxSources))) warnings.push(`Citation max sources clamped to ${citeMax} (1–12).`);
 
   let tools = base.enabledAiTools;
   if (p.enabledAiTools !== undefined) {
@@ -252,6 +261,8 @@ export function validateWeaveNotesConfig(
       visualVerifyMaxRetries: verifyRetries,
       imageVerifyEnabled: asBool(p.imageVerifyEnabled ?? base.imageVerifyEnabled, base.imageVerifyEnabled),
       imageVerifyMinConfidence: imageMinConf,
+      citationsEnabled: asBool(p.citationsEnabled ?? base.citationsEnabled, base.citationsEnabled),
+      citationMaxSources: citeMax,
       flashcardsEnabled: asBool(p.flashcardsEnabled ?? base.flashcardsEnabled, base.flashcardsEnabled),
       dailyNewCardLimit: clampInt(p.dailyNewCardLimit ?? base.dailyNewCardLimit, 1, 1000, base.dailyNewCardLimit),
       mobileOfflineEnabled: asBool(p.mobileOfflineEnabled ?? base.mobileOfflineEnabled, base.mobileOfflineEnabled),

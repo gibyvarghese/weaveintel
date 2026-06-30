@@ -444,6 +444,9 @@ export interface WeaveNotesSettingsRow {
   visual_verify_max_retries?: number;
   image_verify_enabled?: number;
   image_verify_min_confidence?: number;
+  /** weaveNotes Phase 2 citation dials (m122). Optional for old DBs. */
+  citations_enabled?: number;
+  citation_max_sources?: number;
   local_model_for_sensitive: number;
   /** weaveNotes Phase 3: show live collaborator cursors (0/1). */
   live_cursors_enabled: number;

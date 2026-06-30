@@ -1050,6 +1050,18 @@ input{font-family:inherit;outline:none}
 .notes-ws-ask-kind{font-size:9px;text-transform:uppercase;background:var(--bg4);color:var(--fg2);border-radius:4px;padding:0 4px}
 .notes-ws-ask-title{font-size:12px;font-weight:600;color:var(--fg1)}
 .notes-ws-ask-snippet{font-size:11px;color:var(--fg2);line-height:1.4}
+/* Phase 2: cited "Ask your workspace" answer + verified citations */
+.notes-ws-ask-answer{font-size:14px;line-height:1.7;color:var(--fg1);margin:4px 0 12px;white-space:pre-wrap}
+.notes-ws-cite-chip{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;margin:0 1px;padding:0 4px;font-size:10px;font-weight:700;color:#0B7A57;background:#E8F5EE;border:1px solid #BfE6D4;border-radius:999px;cursor:pointer;vertical-align:super;line-height:1}
+.notes-ws-cite-chip:hover{background:#0B7A57;color:#fff}
+.notes-ws-cite-chip.unmatched{color:var(--fg2);background:var(--bg4);border-color:var(--bg4);cursor:default}
+.notes-ws-cite-label{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--fg2);margin:4px 0 6px}
+.notes-ws-citation{display:flex;align-items:baseline;gap:6px;border:1px solid var(--bg4);border-left:3px solid #0B7A57;border-radius:6px;padding:6px 8px;margin-bottom:5px;cursor:pointer}
+.notes-ws-citation:hover{border-color:#0B7A57;background:#F4FBF7}
+.notes-ws-cite-quote{font-size:12px;color:var(--fg1);font-style:italic;flex:1}
+.notes-ws-cite-src{font-size:11px;color:var(--fg2);white-space:nowrap}
+/* The cited line, highlighted in the source note when a citation is clicked (CSS Custom Highlight API) */
+::highlight(gw-cite){background:#FCEBA4;color:inherit;border-radius:2px}
 
 /* ════════════════ geneWeave Notes — 3-column design shell (design handoff) ════════════════ */
 .gw-notes{height:100%}

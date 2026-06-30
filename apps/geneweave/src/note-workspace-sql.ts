@@ -22,10 +22,11 @@
  */
 import { cosineSimilarity } from '@weaveintel/cache';
 import { newUUIDv7, weaveContext } from '@weaveintel/core';
-import { buildCitedContext, reciprocalRankFusion, snippetAround, extractPlainText, type RagHit, type CitedSource, type Note } from '@weaveintel/notes';
+import { buildCitedContext, reciprocalRankFusion, snippetAround, extractPlainText, buildCitedAnswerPrompt, parseCitedAnswer, verifyCitations, type RagHit, type CitedSource, type CitableSource, type Citation, type Note } from '@weaveintel/notes';
 import { createHash } from 'node:crypto';
 import { getActiveGuardrailEmbeddingModel } from './guardrail-judge.js';
 import { resolveRunAccess } from './shared-session-sql.js';
+import type { NoteAiGenerate } from './note-ai-sql.js';
 import type { DatabaseAdapter } from './db-types.js';
 
 type WorkspaceDb = DatabaseAdapter;
@@ -40,7 +41,17 @@ export interface WorkspaceSearchResult {
   sources: CitedSource[];
 }
 
-export function createNoteWorkspaceService(db: WorkspaceDb, opts: { now?: () => number } = {}) {
+/** A cited "ask your workspace" answer: prose with [n] markers + VERIFIED character-level citations. */
+export interface WorkspaceAskResult {
+  query: string;
+  answer: string;
+  /** Each citation's quote provably exists in its source (hallucinated ones are dropped). */
+  citations: Citation[];
+  /** The numbered sources behind the answer (for the [n] list + snippets). */
+  sources: CitedSource[];
+}
+
+export function createNoteWorkspaceService(db: WorkspaceDb, opts: { now?: () => number; aiGenerate?: NoteAiGenerate } = {}) {
   const now = opts.now ?? (() => Date.now());
 
   /** Embed text with the active embedding model (or null if none configured / empty). */
@@ -102,11 +113,12 @@ export function createNoteWorkspaceService(db: WorkspaceDb, opts: { now?: () => 
    * Notes come from Phase 5 `note_embeddings`; runs from `run_embeddings`. Each corpus is
    * cosine-ranked, then the two lists are fused (RRF) into one ranking.
    */
-  async function workspaceSearch(input: { userId: string; tenantId?: string | null; query: string; limit?: number; scope?: 'all' | 'notes' | 'runs' }): Promise<WorkspaceSearchResult> {
+  /** Retrieve the top fused hits (notes + runs) as RagHits carrying FULL text (for citation spans). */
+  async function retrieve(input: { userId: string; tenantId?: string | null; query: string; limit?: number; scope?: 'all' | 'notes' | 'runs' }): Promise<RagHit[]> {
     const scope = input.scope ?? 'all';
     const limit = Math.max(1, Math.min(input.limit ?? 6, 12));
     const qvec = await embed(input.query, input.userId, input.tenantId);
-    if (!qvec) return { query: input.query, context: '', sources: [] };
+    if (!qvec) return [];
 
     // Rank notes (cosine over note_embeddings).
     const noteRanked: Array<{ id: string; title: string; score: number }> = [];
@@ -164,8 +176,37 @@ export function createNoteWorkspaceService(db: WorkspaceDb, opts: { now?: () => 
       }
     }
 
+    return hits;
+  }
+
+  /** The numbered cited-context block + sources (the model answers FROM this and cites with "[n]"). */
+  async function workspaceSearch(input: { userId: string; tenantId?: string | null; query: string; limit?: number; scope?: 'all' | 'notes' | 'runs' }): Promise<WorkspaceSearchResult> {
+    const limit = Math.max(1, Math.min(input.limit ?? 6, 12));
+    const hits = await retrieve(input);
     const { context, sources } = buildCitedContext(hits, input.query, { maxSources: limit });
     return { query: input.query, context, sources };
+  }
+
+  /**
+   * Phase 2 — "Ask your workspace" with VERIFIED character-level citations. Retrieves the top sources,
+   * asks the model to answer FROM them and quote VERBATIM per claim, then VERIFIES every quote actually
+   * appears in its source (dropping invented ones — the anti-hallucination control). The UI highlights
+   * each verified quote in the source note on click. Returns an empty answer if no model / no sources.
+   */
+  async function askWorkspace(input: { userId: string; tenantId?: string | null; query: string; limit?: number; scope?: 'all' | 'notes' | 'runs' }): Promise<WorkspaceAskResult> {
+    if (!opts.aiGenerate) return { query: input.query, answer: '', citations: [], sources: [] };
+    const limit = Math.max(1, Math.min(input.limit ?? 6, 8));
+    const hits = await retrieve(input);
+    const { sources } = buildCitedContext(hits, input.query, { maxSources: limit });
+    if (hits.length === 0) return { query: input.query, answer: 'I could not find anything about that in your notes or past chats.', citations: [], sources: [] };
+
+    // Build the citable sources (numbered, with FULL text the model may quote + we verify against).
+    const citables: CitableSource[] = hits.slice(0, limit).map((h, i) => ({ n: i + 1, id: h.id, kind: h.kind, title: h.title || '(untitled)', content: h.content }));
+    const { system, user } = buildCitedAnswerPrompt(input.query, citables);
+    const reply = await opts.aiGenerate({ system, user, userId: input.userId, tenantId: input.tenantId ?? null, temperature: 0.2, maxTokens: 1200 });
+    const parsed = parseCitedAnswer(reply);
+    const citations = verifyCitations(parsed.citations, citables); // hallucinated quotes dropped here
+    return { query: input.query, answer: parsed.answer, citations, sources };
   }
 
   /**
@@ -177,7 +218,7 @@ export function createNoteWorkspaceService(db: WorkspaceDb, opts: { now?: () => 
     return { ok: true, query: r.query, context: r.context, sources: r.sources.map((s) => ({ n: s.n, id: s.id, kind: s.kind, title: s.title })) };
   }
 
-  return { indexRun, reindexRuns, workspaceSearch, agentWorkspaceSearch, _snippetAround: snippetAround };
+  return { indexRun, reindexRuns, workspaceSearch, askWorkspace, agentWorkspaceSearch, _snippetAround: snippetAround };
 }
 
 export type NoteWorkspaceService = ReturnType<typeof createNoteWorkspaceService>;

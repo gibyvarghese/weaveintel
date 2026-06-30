@@ -101,6 +101,7 @@ import { applyM118NoteImageSearch } from './m118-note-image-search.js';
 import { applyM119UserImageLanguage } from './m119-user-image-language.js';
 import { applyM120NoteAiRateLimit } from './m120-note-ai-rate-limit.js';
 import { applyM121VisualVerify } from './m121-visual-verify.js';
+import { applyM122Citations } from './m122-citations.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -210,6 +211,7 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm118-note-image-search', description: 'weaveNotes: source a real FREE-TO-USE image from the web (find_image). Adds image-search settings to weavenotes_settings (enabled/provider/allowed-licences/require-attribution, Builder-editable), seeds the find_image routing row in note_action_modes (default direct), registers the find_image tool in tool_catalog + grants it to the weaveNotes Editor worker + enables it. The provider search + image download run through the HARDENED SSRF-guarded fetch; only public images under allowed licences are used, inserted as a track-changes suggestion with a licence + attribution caption. Idempotent (safeExec ALTERs + INSERT OR IGNORE + JSON merges)', run: applyM118NoteImageSearch },
   { id: 'm120-note-ai-rate-limit', description: 'weaveNotes Phase 0 hardening: per-USER AI rate limit. Adds weavenotes_settings.ai_rate_per_min_per_user (default 30) — a Builder-editable cap on how many note AI actions one person may run per minute. The server keeps a per-user token bucket (@weaveintel/resilience createKeyedRateLimiter) and returns HTTP 429 + Retry-After once a user exceeds it, across every /ai/* note endpoint. Stops a runaway script or prompt-injected agent loop from running up model costs. Idempotent ALTER', run: applyM120NoteAiRateLimit },
   { id: 'm121-visual-verify', description: 'weaveNotes Phase 1 (visual correctness): VERIFY a visual before showing it. Adds weavenotes_settings columns visual_verify_enabled/threshold/max_retries (the LLM-as-judge diagram quality-check + redraw loop) and image_verify_enabled/min_confidence (the vision "does this picture really depict X?" check on found images). Builder-editable. The diagram judge scores node/edge coverage of the request and redraws with the missing/extra deltas (max retries, early-stop); the image check has a vision model describe-then-verdict each candidate and tries the next if it does not depict the subject / is poor quality / unsafe. Idempotent ALTERs', run: applyM121VisualVerify },
+  { id: 'm122-citations', description: 'weaveNotes Phase 2: Ask-your-workspace with VERIFIED character-level citations. Adds weavenotes_settings.citations_enabled (default 1) and citation_max_sources (default 6). The cited answer quotes each source VERBATIM and the server verifies every quote actually appears in its note (dropping invented ones — anti-hallucination); the UI highlights the exact line on click. Idempotent ALTERs', run: applyM122Citations },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

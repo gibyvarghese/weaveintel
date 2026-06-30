@@ -32,7 +32,7 @@ import { renderStudyView } from './notes-study.js';
 import { renderCapturePanel } from './notes-capture.js';
 import { saveNotesSnapshot, cacheNote, offlineNotes, offlineNote, setLastNoteId, getLastNoteId } from './notes-offline.js';
 import { openQuickCaptureModal } from './notes-quick-capture.js';
-import { wireNoteHistory, wireNoteComments, wireNoteSynced, renderWorkspaceAsk, type SimplePanel } from './notes-workspace-ui.js';
+import { wireNoteHistory, wireNoteComments, wireNoteSynced, renderWorkspaceAsk, highlightQuoteInEditor, type SimplePanel } from './notes-workspace-ui.js';
 import { renderEditorCanvas, type OverflowItem } from './notes-editor-canvas.js';
 import { renderRightRail } from './notes-right-rail.js';
 import { renderLeftRail } from './notes-left-rail.js';
@@ -382,7 +382,14 @@ function buildInsertMenu(render: () => void): OverflowItem[] {
         if (data?.noteId) { await loadNotesList(); await openNote(data.noteId); } else { alert('Could not clip that page.'); }
       } },
     { label: '✦ Ask your workspace', title: 'Search your notes + chats with citations', onClick: () => {
-        openCenterModal('Ask your workspace', renderWorkspaceAsk((id) => { void openNote(id); document.querySelector('.gw-modal-overlay')?.remove(); }));
+        openCenterModal('Ask your workspace', renderWorkspaceAsk((id, quote) => {
+          void (async () => {
+            await openNote(id);
+            document.querySelector('.gw-modal-overlay')?.remove();
+            // After the editor renders, highlight the exact cited line in the source note.
+            if (quote) setTimeout(() => highlightQuoteInEditor(quote), 450);
+          })();
+        }));
       } },
     { label: '🗃 Databases', title: 'Tables with AI auto-fill', onClick: () => { state.currentDatabaseId = null; state.notesView = 'databases'; render(); } },
     { label: '📇 Study (flashcards)', title: 'Make + review flashcards from this note (spaced repetition)', onClick: () => { teardownCoedit(); state.notesView = 'study'; render(); } },
