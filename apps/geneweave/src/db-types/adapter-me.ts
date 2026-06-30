@@ -455,6 +455,9 @@ export interface WeaveNotesSettingsRow {
   fsrs_target_retention?: number;
   /** weaveNotes Phase 2 translate-a-note dial (m124). Optional for old DBs. */
   translate_enabled?: number;
+  /** weaveNotes Phase 2 database auto-fill dials (m126). Optional for old DBs. */
+  db_autofill_web_search?: number;
+  db_autofill_redact_pii?: number;
   local_model_for_sensitive: number;
   /** weaveNotes Phase 3: show live collaborator cursors (0/1). */
   live_cursors_enabled: number;

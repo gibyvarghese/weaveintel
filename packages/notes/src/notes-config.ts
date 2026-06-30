@@ -81,6 +81,12 @@ export interface WeaveNotesConfig {
   fsrsTargetRetention: number;
   /** Phase 2: the AI can translate a note into another language (saved as a new note). */
   translateEnabled: boolean;
+  /** Phase 2: allow database AUTO-FILL to consult the WEB for a value (governance gate; off → only the
+   *  row's own + related-row data is used). */
+  dbAutofillWebSearch: boolean;
+  /** Phase 2: scrub personal data (emails, phones, card/SSN-like numbers) OUT of the outbound web-search
+   *  query during auto-fill, so a row's PII never leaves to the search engine. */
+  dbAutofillRedactPii: boolean;
   /** Phase 7: let the mobile app work OFFLINE — edit notes with no signal and sync when back online. */
   mobileOfflineEnabled: boolean;
   /** Phase 7: let people DRAW freehand ink on a phone/tablet (synced to the web note untouched). */
@@ -162,6 +168,8 @@ export const DEFAULT_WEAVENOTES_CONFIG: WeaveNotesConfig = {
   fsrsEnabled: true,
   fsrsTargetRetention: 0.9,
   translateEnabled: true,
+  dbAutofillWebSearch: true,
+  dbAutofillRedactPii: true,
   mobileOfflineEnabled: true,
   mobileInkEnabled: true,
   mobileOfflineNoteLimit: 200,
@@ -291,6 +299,8 @@ export function validateWeaveNotesConfig(
       fsrsEnabled: asBool(p.fsrsEnabled ?? base.fsrsEnabled, base.fsrsEnabled),
       fsrsTargetRetention: targetRetClamped,
       translateEnabled: asBool(p.translateEnabled ?? base.translateEnabled, base.translateEnabled),
+      dbAutofillWebSearch: asBool(p.dbAutofillWebSearch ?? base.dbAutofillWebSearch, base.dbAutofillWebSearch),
+      dbAutofillRedactPii: asBool(p.dbAutofillRedactPii ?? base.dbAutofillRedactPii, base.dbAutofillRedactPii),
       flashcardsEnabled: asBool(p.flashcardsEnabled ?? base.flashcardsEnabled, base.flashcardsEnabled),
       dailyNewCardLimit: clampInt(p.dailyNewCardLimit ?? base.dailyNewCardLimit, 1, 1000, base.dailyNewCardLimit),
       mobileOfflineEnabled: asBool(p.mobileOfflineEnabled ?? base.mobileOfflineEnabled, base.mobileOfflineEnabled),

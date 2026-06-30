@@ -20,7 +20,9 @@
 import { parseSchema, coerceValue, computeRollup, isViewType, type PropertyDef, type DatabaseViewType } from '@weaveintel/notes';
 import { autofillProperty, type AutofillRow } from '@weaveintel/extraction';
 import { createSearchRouter, type SearchProviderConfig } from '@weaveintel/tools-search';
+import { redactText } from '@weaveintel/artifacts';
 import { newUUIDv7 } from '@weaveintel/core';
+import { createNoteSettingsService } from './note-settings-sql.js';
 import type { NoteAiGenerate } from './note-ai-sql.js';
 import type { DatabaseAdapter } from './db-types.js';
 import type { NoteDbRowRow } from './db-types/adapter-agenda-notes.js';
@@ -28,6 +30,20 @@ import type { NoteDbRowRow } from './db-types/adapter-agenda-notes.js';
 type NoteDbServiceDb = DatabaseAdapter;
 
 const CITATIONS_KEY = '_citations';
+const MAX_RELATED_PER_PROP = 5; // bound the related-row context fed into auto-fill
+
+/**
+ * Make an outbound web-search query PII-safe: scrub personal data (emails, phones, card/SSN-like
+ * numbers) via the shared DLP redactor, drop the resulting `[REDACTED-…]` placeholders (they add no
+ * search value), and report whether enough real signal remains to be worth searching. So a row's
+ * personal data never leaves to the external search engine.
+ */
+export function piiSafeWebQuery(raw: string): { query: string; hadPii: boolean; usable: boolean } {
+  const { text, redactions } = redactText(raw ?? '', 'pii');
+  const cleaned = text.replace(/\[REDACTED-[A-Z-]+\]/g, ' ').replace(/\s+/g, ' ').trim();
+  const usable = cleaned.replace(/[^A-Za-z0-9]/g, '').length >= 3;
+  return { query: cleaned, hadPii: redactions > 0, usable };
+}
 
 export interface ViewRow { id: string; fields: Record<string, unknown>; rollups: Record<string, unknown>; citations: Record<string, Array<{ label: string; url?: string }>> }
 export interface DatabaseView { id: string; name: string; viewType: DatabaseViewType; schema: PropertyDef[]; rows: ViewRow[] }
@@ -54,6 +70,7 @@ function searchRouter() {
 }
 
 export function createNoteDbService(db: NoteDbServiceDb, opts: { generate?: NoteAiGenerate } = {}) {
+  const settings = createNoteSettingsService(db);
   /** A render-ready view: schema + rows with computed rollups + citations. */
   async function view(databaseId: string, userId: string): Promise<DatabaseView | null> {
     const dbRow = await db.getNoteDatabase(databaseId, userId);
@@ -113,6 +130,22 @@ export function createNoteDbService(db: NoteDbServiceDb, opts: { generate?: Note
     if (input.rowIds?.length) { const want = new Set(input.rowIds); rows = rows.filter((r) => want.has(r.id)); }
     if (rows.length === 0) return { ok: true, filled: [] };
 
+    const cfg = await settings.getConfig();
+    const allowWeb = input.useWeb && cfg.dbAutofillWebSearch; // per-call request AND governance gate
+
+    // RELATION-AWARE: pre-load every related database's rows once, so a row's linked rows can be fed
+    // in as context (e.g. fill a "Region" column from the related Company's HQ).
+    const relationProps = schema.filter((p) => p.type === 'relation' && p.relationDatabaseId);
+    const relatedCache = new Map<string, Map<string, Record<string, unknown>>>();
+    for (const rp of relationProps) {
+      const rid = rp.relationDatabaseId!;
+      if (relatedCache.has(rid)) continue;
+      const byId = new Map<string, Record<string, unknown>>();
+      for (const rr of await db.listNoteDbRows(rid)) byId.set(rr.id, readRow(rr).fields);
+      relatedCache.set(rid, byId);
+    }
+    const relatedTitle = (fields: Record<string, unknown>): string => String(fields['name'] ?? fields['title'] ?? Object.values(fields)[0] ?? 'related');
+
     // Build per-row context + a map from cited source id → {label,url} for that row.
     const titleProp = schema.find((p) => p.type === 'text');
     const afRows: AutofillRow[] = [];
@@ -120,12 +153,33 @@ export function createNoteDbService(db: NoteDbServiceDb, opts: { generate?: Note
     for (const r of rows) {
       const { fields } = readRow(r);
       const title = String((titleProp && fields[titleProp.key]) || fields['name'] || fields['title'] || '');
-      const fieldLines = schema.filter((p) => p.type !== 'rollup' && p.key !== input.propertyKey).map((p) => `${p.name}: ${JSON.stringify(fields[p.key] ?? null)}`).join('\n');
+      const fieldLines = schema.filter((p) => p.type !== 'rollup' && p.type !== 'relation' && p.key !== input.propertyKey).map((p) => `${p.name}: ${JSON.stringify(fields[p.key] ?? null)}`).join('\n');
       const sources = new Map<string, { label: string; url?: string }>([['row', { label: 'this row' }]]);
       let context = `[row] Known fields for this row:\n${fieldLines}`;
-      if (input.useWeb && (title || fieldLines)) {
-        const web = await webSources(`${title} ${prop.name}`.trim(), 3);
-        for (const w of web) { sources.set(w.id, { label: w.label, url: w.url }); context += `\n\n[${w.id}] ${w.text}`; }
+
+      // Add the row's RELATED rows (linked records) as cited context.
+      let relIdx = 0;
+      for (const rp of relationProps) {
+        const linkedIds = (Array.isArray(fields[rp.key]) ? fields[rp.key] : []) as string[];
+        const byId = relatedCache.get(rp.relationDatabaseId!);
+        if (!byId || linkedIds.length === 0) continue;
+        for (const lid of linkedIds.slice(0, MAX_RELATED_PER_PROP)) {
+          const rf = byId.get(lid); if (!rf) continue;
+          const sid = `rel:${++relIdx}`;
+          const summary = Object.entries(rf).filter(([k]) => k !== CITATIONS_KEY).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join('; ').slice(0, 600);
+          sources.set(sid, { label: `${rp.name} → ${relatedTitle(rf)}` });
+          context += `\n\n[${sid}] Related (${rp.name}) "${relatedTitle(rf)}":\n${summary}`;
+        }
+      }
+
+      if (allowWeb && (title || fieldLines)) {
+        // PII-SAFE: scrub personal data out of the outbound query before it leaves to the search engine.
+        const rawQuery = `${title} ${prop.name}`.trim();
+        const safe = cfg.dbAutofillRedactPii ? piiSafeWebQuery(rawQuery) : { query: rawQuery, usable: true };
+        if (safe.usable) {
+          const web = await webSources(safe.query, 3);
+          for (const w of web) { sources.set(w.id, { label: w.label, url: w.url }); context += `\n\n[${w.id}] ${w.text}`; }
+        }
       }
       sourceMaps.set(r.id, sources);
       afRows.push({ rowId: r.id, title, context, sourceIds: [...sources.keys()] });

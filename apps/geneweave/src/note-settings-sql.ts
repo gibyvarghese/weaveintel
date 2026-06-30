@@ -57,6 +57,8 @@ function rowToConfig(row: WeaveNotesSettingsRow | null): WeaveNotesConfig {
     fsrsEnabled: row.fsrs_enabled !== 0, // undefined (pre-m123) → FSRS on
     ...(typeof row.fsrs_target_retention === 'number' ? { fsrsTargetRetention: row.fsrs_target_retention } : {}),
     translateEnabled: row.translate_enabled !== 0, // undefined (pre-m124) → enabled
+    dbAutofillWebSearch: row.db_autofill_web_search !== 0, // undefined (pre-m126) → on
+    dbAutofillRedactPii: row.db_autofill_redact_pii !== 0,
     flashcardsEnabled: row.flashcards_enabled !== 0, // undefined (pre-m110) → enabled
     ...(typeof row.daily_new_card_limit === 'number' ? { dailyNewCardLimit: row.daily_new_card_limit } : {}),
     mobileOfflineEnabled: row.mobile_offline_enabled !== 0,  // undefined (pre-m112) → enabled
@@ -117,6 +119,8 @@ export function createNoteSettingsService(db: SettingsDb, opts: { now?: () => nu
       fsrs_enabled: config.fsrsEnabled ? 1 : 0,
       fsrs_target_retention: config.fsrsTargetRetention,
       translate_enabled: config.translateEnabled ? 1 : 0,
+      db_autofill_web_search: config.dbAutofillWebSearch ? 1 : 0,
+      db_autofill_redact_pii: config.dbAutofillRedactPii ? 1 : 0,
       flashcards_enabled: config.flashcardsEnabled ? 1 : 0,
       daily_new_card_limit: config.dailyNewCardLimit,
       mobile_offline_enabled: config.mobileOfflineEnabled ? 1 : 0,
