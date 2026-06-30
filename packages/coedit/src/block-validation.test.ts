@@ -72,4 +72,31 @@ describe('validateClientBlockOps — negative / security', () => {
     expect(validateClientBlockOps([{ t: 'ins', id: { counter: 0, siteId: SITE }, originId: null, kind: 'char', char: 'x' }], { expectedSiteId: NS }).ok).toBe(false);
     expect(validateClientBlockOps([{ t: 'frobnicate' }], { expectedSiteId: NS }).ok).toBe(false);
   });
+
+  // [SEC][P2] link-mark URL validated at INPUT (the relay), not only on render.
+  const linkOp = (value: string) => [{ t: 'mark', opId: { counter: 1, siteId: SITE }, startId: { counter: 2, siteId: SITE }, endId: { counter: 3, siteId: SITE }, markType: 'link', markValue: value, remove: false }];
+  it('rejects a link mark with a dangerous URL scheme at input', () => {
+    expect(validateClientBlockOps(linkOp('javascript:alert(1)'), { expectedSiteId: NS }).ok).toBe(false);
+    expect(validateClientBlockOps(linkOp('  javascript:alert(1)'), { expectedSiteId: NS }).ok).toBe(false);  // leading space
+    expect(validateClientBlockOps(linkOp('java\tscript:alert(1)'), { expectedSiteId: NS }).ok).toBe(false);  // tab inside scheme
+    expect(validateClientBlockOps(linkOp('data:text/html,<script>'), { expectedSiteId: NS }).ok).toBe(false);
+    expect(validateClientBlockOps(linkOp('vbscript:msgbox'), { expectedSiteId: NS }).ok).toBe(false);
+    expect(validateClientBlockOps(linkOp('file:///etc/passwd'), { expectedSiteId: NS }).ok).toBe(false);
+  });
+  it('accepts safe link URLs (http(s), relative, anchor, mailto, empty)', () => {
+    for (const u of ['https://example.com/x', 'http://a.b', '/relative/path', '#anchor', 'mailto:x@y.com', 'tel:+15551234567', '']) {
+      expect(validateClientBlockOps(linkOp(u), { expectedSiteId: NS }).ok).toBe(true);
+    }
+  });
+});
+
+import { isSafeLinkUrl } from './block-validation.js';
+describe('isSafeLinkUrl', () => {
+  it('flags dangerous schemes and allows safe ones', () => {
+    expect(isSafeLinkUrl('javascript:alert(1)')).toBe(false);
+    expect(isSafeLinkUrl('JaVaScRiPt:alert(1)')).toBe(false);
+    expect(isSafeLinkUrl('https://ok.com')).toBe(true);
+    expect(isSafeLinkUrl('')).toBe(true);
+    expect(isSafeLinkUrl(123 as unknown as string)).toBe(false);
+  });
 });

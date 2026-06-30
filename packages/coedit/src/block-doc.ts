@@ -221,6 +221,10 @@ export class BlockDoc {
     return this.#markOp(blockId, from, to, markType, undefined, true);
   }
   #markOp(blockId: RgaId | null, from: number, to: number, markType: MarkType, markValue: string | undefined, remove: boolean): BlockOp | null {
+    // The range is INCLUSIVE [startId, endId]: startId is the char at `from` (1-based +1), endId the
+    // char at `to-1`. A collapsed/inverted selection (from >= to) covers no characters → no-op, which
+    // also avoids the degenerate anchor `#charIdAtBlockIndex(blockId, 0)` returning the block id itself.
+    if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || from >= to) return null;
     const startId = this.#charIdAtBlockIndex(blockId, from + 1);
     const endId = this.#charIdAtBlockIndex(blockId, to);
     if (!startId || !endId) return null;

@@ -24,7 +24,7 @@ import type { DatabaseAdapter } from './db-types.js';
 
 type NoteCaptureDb = DatabaseAdapter;
 
-export interface CaptureResult { ok: boolean; error?: string; code?: number; noteId?: string; title?: string }
+export interface CaptureResult { ok: boolean; error?: string; code?: number; noteId?: string; title?: string; deduped?: boolean }
 
 /** SSRF guard: only public http(s) hosts (no localhost / private / link-local / cloud-metadata). */
 export function isSafePublicUrl(raw: string): boolean {
@@ -92,6 +92,15 @@ export function createNoteCaptureService(db: NoteCaptureDb, opts: { now?: () => 
     const hostname = (() => { try { return new URL(input.url).hostname; } catch { return input.url; } })();
     const title = read.title?.trim() || hostname;
     const note = buildCaptureNote({ source: 'web', title, body, sourceLabel: hostname, sourceUrl: input.url, capturedAt: todayIso(now) });
+    // DEDUP: if this exact URL was already clipped (same title + the URL present in the note body),
+    // return that note instead of creating a duplicate on every re-clip.
+    try {
+      const sameTitle = (await db.listNotes(input.userId, { search: title, limit: 10 })).filter((n) => n.title === note.title);
+      for (const cand of sameTitle) {
+        const full = await db.getNote(cand.id, input.userId) as { doc_json?: string } | null;
+        if (full?.doc_json && full.doc_json.includes(input.url)) return { ok: true, noteId: cand.id, title: note.title, deduped: true };
+      }
+    } catch { /* dedup is best-effort; fall through to create */ }
     const created = await agentCreateNote(db, { userId: input.userId, ...(input.tenantId != null ? { tenantId: input.tenantId } : {}), title: note.title, markdown: note.markdown });
     return created.ok ? { ok: true, noteId: created.noteId!, title: note.title } : { ok: false, code: 500, error: created.error };
   }

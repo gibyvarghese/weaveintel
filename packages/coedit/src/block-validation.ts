@@ -34,6 +34,22 @@ const BLOCK_TYPES = new Set<BlockType>([
 /** The inline mark types the relay accepts (StarterKit + Phase 1 colour marks). */
 const MARK_TYPES = new Set<MarkType>(['bold', 'italic', 'code', 'strike', 'underline', 'link', 'highlight', 'textColor']);
 
+/** Schemes that can execute or smuggle content via a link href — rejected at input. */
+const UNSAFE_URL_SCHEME = /^(?:javascript|data|vbscript|file):/i;
+/**
+ * Is a link mark's URL safe to STORE + broadcast? Accepts relative/anchor/mailto/tel and http(s);
+ * rejects executable/smuggling schemes (javascript:, data:, vbscript:, file:) — including ones hidden
+ * behind leading whitespace or control characters. Empty is allowed (clears the link).
+ */
+export function isSafeLinkUrl(url: string): boolean {
+  if (typeof url !== 'string') return false;
+  // Strip leading whitespace + control chars used to evade scheme detection (e.g. a tab inside the scheme).
+  // eslint-disable-next-line no-control-regex
+  const cleaned = url.replace(/[\u0000-\u0020]+/g, '');
+  if (!cleaned) return true;
+  return !UNSAFE_URL_SCHEME.test(cleaned);
+}
+
 export interface BlockOpValidationOptions {
   /** The site NAMESPACE this connection may author as (e.g. `u:<userId>`) — anti-forgery. */
   expectedSiteId: string;
@@ -119,6 +135,9 @@ export function validateClientBlockOps(raw: unknown, opts: BlockOpValidationOpti
       if (!isRgaId(op['startId']) || !isRgaId(op['endId'])) return { ok: false, error: 'invalid mark range' };
       if (!MARK_TYPES.has(op['markType'] as MarkType)) return { ok: false, error: `unknown mark type: ${String(op['markType'])}` };
       if (op['markValue'] !== undefined && (typeof op['markValue'] !== 'string' || op['markValue'].length > maxValueLen)) return { ok: false, error: 'invalid mark value' };
+      // SECURITY: reject dangerous link URLs at INPUT (the relay), not only on render — so a malicious
+      // link op (javascript:/data:/vbscript:/file:) can never be stored or broadcast to collaborators.
+      if (op['markType'] === 'link' && typeof op['markValue'] === 'string' && !isSafeLinkUrl(op['markValue'])) return { ok: false, error: 'unsafe link URL' };
       if (typeof op['remove'] !== 'boolean') return { ok: false, error: 'mark.remove must be a boolean' };
     } else {
       return { ok: false, error: `unknown op type: ${String(t)}` };

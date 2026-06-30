@@ -23,6 +23,23 @@ describe('svg — sanitizeSvg (SECURITY: strips every active vector)', () => {
     const s = sanitizeSvg('<svg><script>alert(1)</script><rect/></svg>')!;
     expect(s).not.toContain('<script'); expect(s).toContain('<rect');
   });
+  // [SEC][P2] NESTED / split / obfuscated <script> must not survive the regex pass (fail-closed allowlist).
+  it('neutralises nested + split + cased + spaced <script> payloads (no executable script leaks)', () => {
+    const payloads = [
+      '<svg><scr<script>ipt>alert(1)</script></svg>',                 // nested: removing inner reveals outer
+      '<svg><script><script>alert(1)</script></script><rect/></svg>', // doubled
+      '<svg><ScRiPt>alert(1)</ScRiPt><rect/></svg>',                  // mixed case
+      '<svg><script >alert(1)</script ><rect/></svg>',                // space before >
+      '<svg><script\ttype="text/javascript">alert(1)</script><rect/></svg>', // tab in tag
+      '<svg><script/xlink:href="data:,alert(1)"/></svg>',            // self-closing variant
+    ];
+    for (const p of payloads) {
+      const out = sanitizeSvg(p) ?? '';
+      // No executable <script ...> tag survives in any form (case-insensitive).
+      expect(out).not.toMatch(/<\s*script/i);
+      expect(out).not.toMatch(/<\/\s*script/i);
+    }
+  });
   it('removes onload / onclick + other event handlers', () => {
     const s = sanitizeSvg('<svg onload="alert(1)"><rect onclick="x()" onmouseover=\'y()\'/></svg>')!;
     expect(s).not.toMatch(/onload|onclick|onmouseover/i);

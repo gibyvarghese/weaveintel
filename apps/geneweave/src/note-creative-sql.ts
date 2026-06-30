@@ -41,6 +41,16 @@ import type { NoteAiGenerate } from './note-ai-sql.js';
 
 type NoteCreativeDb = DatabaseAdapter;
 
+// [PERF][P2] Process-local cache for find_image query derivation (skips an LLM call on a re-clip of
+// the same selection). Size-capped + TTL'd so it can't grow unbounded or serve stale results.
+const IMAGE_QUERY_TTL_MS = 10 * 60 * 1000;
+const IMAGE_QUERY_CACHE_MAX = 300;
+const imageQueryCache = new Map<string, { queries: string[]; at: number }>();
+function cacheImageQueries(key: string, queries: string[]): void {
+  if (imageQueryCache.size >= IMAGE_QUERY_CACHE_MAX) { const oldest = imageQueryCache.keys().next().value; if (oldest !== undefined) imageQueryCache.delete(oldest); }
+  imageQueryCache.set(key, { queries, at: Date.now() });
+}
+
 /** Generate a raster image from a prompt; returns base64 PNG (no data-uri prefix) or null. */
 export type NoteImageGenerate = (opts: { prompt: string; model?: string; size?: string; userId?: string; tenantId?: string | null }) => Promise<string | null>;
 /** Phase 1: a MULTIMODAL model call — sends an image (base64) + a text prompt to a vision model and
@@ -286,6 +296,11 @@ export function createNoteCreativeService(db: NoteCreativeDb, generate: NoteAiGe
     const text = rawText.trim().slice(0, 4000);
     const fallback = text.split(/\s+/).slice(0, 8).join(' ').slice(0, 80) || text.slice(0, 80);
     const lang = languageName(language);
+    // [PERF] Cache the query-derivation LLM call by (text+context+language) — a repeated find_image on
+    // the same selection skips this round-trip entirely (TTL + size-capped, process-local).
+    const ck = `${language} ${text.slice(0, 240)} ${docContext.slice(0, 240)}`;
+    const cached = imageQueryCache.get(ck);
+    if (cached && cached.at > Date.now() - IMAGE_QUERY_TTL_MS) return cached.queries;
     try {
       const reply = await generate({
         system: `You turn a request for a picture (which may be a long passage the user selected) into SHORT web image-search queries IN ${lang}. Output ONLY a JSON array of 1-3 strings, BEST first, each 2-6 plain ${lang} words, concrete and visual — no punctuation, no quotes, no commentary.`,
@@ -294,7 +309,7 @@ export function createNoteCreativeService(db: NoteCreativeDb, generate: NoteAiGe
       });
       const arr = extractJson(reply, 'array');
       const queries = Array.isArray(arr) ? [...new Set(arr.map((s) => String(s).trim().replace(/^["']|["']$/g, '')).filter((s) => s.length > 1).slice(0, 3))] : [];
-      if (queries.length) return queries;
+      if (queries.length) { cacheImageQueries(ck, queries); return queries; }
     } catch { /* fall through to the heuristic */ }
     return [fallback];
   }
