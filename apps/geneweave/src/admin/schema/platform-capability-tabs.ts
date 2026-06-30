@@ -566,6 +566,7 @@ export const PLATFORM_CAPABILITY_ADMIN_TABS: Record<string, AdminTabDef> = {
       { key: 'translate_enabled', label: 'AI can translate a note into another language (saved as a new note; code, links and layout preserved)', type: 'checkbox', save: 'bool', default: true },
       { key: 'db_autofill_web_search', label: 'Database auto-fill may search the WEB for a value (off → uses only the row + its related rows)', type: 'checkbox', save: 'bool', default: true },
       { key: 'db_autofill_redact_pii', label: 'Scrub personal data (emails, phone numbers, card/SSN-like numbers) out of database auto-fill web searches', type: 'checkbox', save: 'bool', default: true },
+      { key: 'image_provenance_enabled', label: 'Embed licence + provenance “Content Credentials” with AI/web images (source + licence, or AI generator + prompt)', type: 'checkbox', save: 'bool', default: true },
       { key: 'mobile_offline_enabled', label: 'Mobile app can edit notes offline + sync later', type: 'checkbox', save: 'bool', default: true },
       { key: 'mobile_ink_enabled', label: 'Mobile app can draw freehand ink on notes', type: 'checkbox', save: 'bool', default: true },
       { key: 'mobile_offline_note_limit', label: 'Notes cached on a phone for offline use', type: 'number', save: 'int', default: 200 },

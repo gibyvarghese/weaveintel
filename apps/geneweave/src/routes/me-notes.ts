@@ -69,7 +69,7 @@ import { createNoteCreativeService } from '../note-creative-sql.js';
 import { createNoteStudyService } from '../note-study-sql.js';
 import { createNoteTranslateService } from '../note-translate-sql.js';
 import { createTenantGovernanceService } from '../tenant-governance-sql.js';
-import { isColorScheme } from '@weaveintel/notes';
+import { isColorScheme, parseProvenanceFromSvg } from '@weaveintel/notes';
 import { sanitizeAwarenessState } from '@weaveintel/coedit';
 import { withAiPresence } from '../note-ai-presence.js';
 import { createNotePublishService, type PublishFormat } from '../note-publish-sql.js';
@@ -885,6 +885,25 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     const r = await noteStudy.dueCards(auth.userId, limit);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(r));
+  }, { auth: true });
+
+  // weaveNotes Phase 2: read an image artifact's CONTENT CREDENTIALS (licence + provenance manifest)
+  // so a download/share can carry where the image came from. Owner-scoped.
+  router.get('/api/me/artifacts/:id/credentials', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    if (!db.getArtifact) { res.writeHead(501); res.end(JSON.stringify({ error: 'Artifacts unavailable' })); return; }
+    const art = await db.getArtifact(params['id']!);
+    if (!art || (art.user_id && art.user_id !== auth.userId)) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    let meta: Record<string, unknown> = {};
+    try { meta = art.metadata ? JSON.parse(art.metadata) as Record<string, unknown> : {}; } catch { /* */ }
+    // Raster images carry the manifest in metadata; SVG illustrations carry it EMBEDDED in their bytes.
+    let provenance: unknown = meta['provenance'] ?? null;
+    if (!provenance) {
+      const svgText = art.data_text ?? (art.data_blob ? art.data_blob.toString('utf8') : '');
+      if (svgText.includes('gw-provenance')) provenance = parseProvenanceFromSvg(svgText);
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ id: art.id, provenance: provenance ?? null }));
   }, { auth: true });
 
   // weaveNotes Phase 2: a user can SEE their workspace's enterprise governance posture (read-only;

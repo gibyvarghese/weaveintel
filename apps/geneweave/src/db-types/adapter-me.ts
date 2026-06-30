@@ -458,6 +458,8 @@ export interface WeaveNotesSettingsRow {
   /** weaveNotes Phase 2 database auto-fill dials (m126). Optional for old DBs. */
   db_autofill_web_search?: number;
   db_autofill_redact_pii?: number;
+  /** weaveNotes Phase 2 image provenance dial (m128). Optional for old DBs. */
+  image_provenance_enabled?: number;
   local_model_for_sensitive: number;
   /** weaveNotes Phase 3: show live collaborator cursors (0/1). */
   live_cursors_enabled: number;

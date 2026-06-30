@@ -312,6 +312,16 @@ export {
   validateFlashcards,
 } from './study.js';
 
+// IMAGE PROVENANCE (Phase 2): licence + AI-lineage credentials embedded with image assets.
+export type { ImageSourceKind, ImageProvenance } from './provenance.js';
+export {
+  buildImageProvenance,
+  provenanceCreditLine,
+  provenanceToXmp,
+  embedXmpInSvg,
+  parseProvenanceFromSvg,
+} from './provenance.js';
+
 // GOVERNANCE model (Phase 2): per-tenant enterprise posture (residency/BYOK/no-training/SSO/retention).
 export type { ResidencyRegion, SsoProtocol, TenantGovernance, PostureItem, PostureContext } from './governance.js';
 export {

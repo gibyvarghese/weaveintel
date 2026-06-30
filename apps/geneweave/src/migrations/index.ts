@@ -107,6 +107,7 @@ import { applyM124Translate } from './m124-translate.js';
 import { applyM125QueryExpansion } from './m125-query-expansion.js';
 import { applyM126DbAutofill } from './m126-db-autofill.js';
 import { applyM127TenantGovernance } from './m127-tenant-governance.js';
+import { applyM128ImageProvenance } from './m128-image-provenance.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -222,6 +223,7 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm125-query-expansion', description: 'weaveNotes Phase 2: query expansion (multi-query + HyDE) for Ask-your-workspace + workspace search. Adds weavenotes_settings.query_expansion_enabled (default 1) + query_expansion_variants (default 3). The search rephrases the question several ways and writes a hypothetical answer, embeds each, and fuses the results (RRF) so more relevant notes/chats surface. Idempotent ALTERs', run: applyM125QueryExpansion },
   { id: 'm126-db-autofill', description: 'weaveNotes Phase 2: relation-aware + PII-safe database auto-fill. Adds weavenotes_settings.db_autofill_web_search (default 1) + db_autofill_redact_pii (default 1). Auto-fill now feeds a row’s RELATED rows in as context, and scrubs personal data out of any outbound web-search query. Idempotent ALTERs', run: applyM126DbAutofill },
   { id: 'm127-tenant-governance', description: 'weaveNotes Phase 2: per-tenant enterprise governance record (tenant_governance). One row per tenant: data residency, no-training, analytics, enforced SSO + protocol, SCIM, activity/audit retention, legal hold. Projected (with the existing BYOK/encryption tables) into the compliance checklist shown in the Builder + a per-user posture endpoint. Idempotent', run: applyM127TenantGovernance },
+  { id: 'm128-image-provenance', description: 'weaveNotes Phase 2: image licence/provenance Content Credentials. Adds weavenotes_settings.image_provenance_enabled (default 1). Embeds where an image came from (web licence/author/source, or AI generator + prompt) into SVG bytes + stores a manifest with raster assets. Idempotent ALTER', run: applyM128ImageProvenance },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

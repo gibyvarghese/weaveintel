@@ -20,6 +20,7 @@ import {
   inkFromPrimitives, strokesToSvg, validateStrokes, recolorStrokes, type InkStroke,
   sanitizeSvg, svgToDataUri, type WeaveNotesConfig,
   type ImageResult, type LicenseId, DEFAULT_ALLOWED_LICENSES, LICENSE_LABELS, rankImageResults, buildAttribution,
+  buildImageProvenance, embedXmpInSvg, type ImageProvenance,
   normalizeLanguage, languageName, applyLanguagePreference,
   buildOpenverseUrl, buildWikimediaUrl, buildUnsplashUrl, buildPexelsUrl, buildPixabayUrl,
   parseOpenverse, parseWikimedia, parseUnsplash, parsePexels, parsePixabay,
@@ -195,9 +196,15 @@ export function createNoteCreativeService(db: NoteCreativeDb, generate: NoteAiGe
     const fence = makeFence(); // Phase 0-D: spotlight the untrusted request
     const sys = `${spotlightPreamble(fence)}\n\nYou are an SVG illustrator. Draw the requested subject as a single, clean, self-contained <svg> illustration — use <path> with curves, <circle>, <ellipse>, <polygon>, <rect>, <line>, <text>, and <linearGradient>/<radialGradient> for shading. Use a sensible viewBox (e.g. "0 0 320 320"), tasteful colours, and clear labels where helpful. Output ONLY the <svg>…</svg> markup — no markdown, no prose, no <script>.`;
     const reply = await generate({ system: sys, user: `Request (untrusted data): ${fenceUntrusted(input.instruction, fence)}`, userId: input.access.ownerId, tenantId: input.access.tenantId, temperature: 0.4, maxTokens: 3000 });
-    const svg = sanitizeSvg(reply.replace(/^```(?:svg|xml|html)?/i, '').replace(/```$/, '').trim());
+    let svg = sanitizeSvg(reply.replace(/^```(?:svg|xml|html)?/i, '').replace(/```$/, '').trim());
     if (!svg) return { ok: false, error: 'the model did not produce a usable SVG', action: 'create_illustration' };
     const alt = input.instruction.slice(0, 80);
+    // Phase 2 — EMBED provenance (Content Credentials) into the SVG's bytes, so an exported
+    // illustration is self-describing ("AI-illustration", the prompt, the generator).
+    const config = await cfg();
+    if (config.imageProvenanceEnabled) {
+      svg = embedXmpInSvg(svg, buildImageProvenance({ kind: 'ai-illustration', title: alt, generator: 'geneWeave AI', model: 'svg-illustrator', prompt: input.instruction.slice(0, 400) }));
+    }
     return stageInsert(input.noteId, input.access, 'create_illustration', 'image', { src: svgToDataUri(svg), alt, author: 'ai' }, `Illustration: ${alt}`, { svg }, `an illustration of ${alt}`);
   }
 
@@ -213,7 +220,11 @@ export function createNoteCreativeService(db: NoteCreativeDb, generate: NoteAiGe
     try {
       // Decode the model's base64 to raw BYTES so the artifact is stored as a binary blob (served as
       // a real image), not as base64 text labelled image/png (which renders broken).
-      const art = await db.saveArtifact({ name: input.instruction.slice(0, 80) || 'image', type: 'image', mimeType: 'image/png', data: Buffer.from(b64, 'base64'), scope: 'user', userId: input.access.ownerId, ...(input.access.tenantId ? { tenantId: input.access.tenantId } : {}), tags: ['note', 'creative', 'image'], metadata: { source: 'note', noteId: input.noteId, kind: 'image', model: config.imageModel } });
+      // Phase 2 — store the AI-generation provenance (Content Credentials) WITH the asset.
+      const provenance: ImageProvenance | undefined = config.imageProvenanceEnabled
+        ? buildImageProvenance({ kind: 'ai-generated', title: input.instruction.slice(0, 80), generator: 'geneWeave AI', model: config.imageModel, prompt: input.instruction.slice(0, 400) })
+        : undefined;
+      const art = await db.saveArtifact({ name: input.instruction.slice(0, 80) || 'image', type: 'image', mimeType: 'image/png', data: Buffer.from(b64, 'base64'), scope: 'user', userId: input.access.ownerId, ...(input.access.tenantId ? { tenantId: input.access.tenantId } : {}), tags: ['note', 'creative', 'image'], metadata: { source: 'note', noteId: input.noteId, kind: 'image', model: config.imageModel, ...(provenance ? { provenance } : {}) } });
       artifactId = art.id;
     } catch { return { ok: false, error: 'could not store the generated image', action: 'generate_image' }; }
     const alt = input.instruction.slice(0, 80);
@@ -376,18 +387,22 @@ export function createNoteCreativeService(db: NoteCreativeDb, generate: NoteAiGe
       return { ok: false, error: why, action: 'find_image' };
     }
 
+    const attribution = buildAttribution(pick);
+    // Phase 2 — a full licence/provenance manifest (Content Credentials) stored WITH the asset.
+    const provenance: ImageProvenance | undefined = config.imageProvenanceEnabled
+      ? buildImageProvenance({ kind: 'web', title: pick.title || (queries[0] ?? rawText).slice(0, 80), license: LICENSE_LABELS[pick.license] ?? pick.license, licenseUrl: pick.licenseUrl, author: pick.creator, sourceUrl: pick.sourceUrl, provider: pick.provider, attribution, ...(verdict ? { verified: true, verifyConfidence: verdict.confidence } : {}) })
+      : undefined;
     let artifactId: string | null = null;
     try {
       const art = await db.saveArtifact({
         name: (pick.title || queries[0] || rawText).slice(0, 80), type: 'image', mimeType: payload.mime, data: payload.bytes, scope: 'user',
         userId: input.access.ownerId, ...(input.access.tenantId ? { tenantId: input.access.tenantId } : {}),
         tags: ['note', 'image', 'web'],
-        metadata: { source: 'note', noteId: input.noteId, kind: 'find_image', provider: pick.provider, license: pick.license, sourceUrl: pick.sourceUrl ?? '', query: queries[0] ?? '', candidates: candidates.length },
+        metadata: { source: 'note', noteId: input.noteId, kind: 'find_image', provider: pick.provider, license: pick.license, sourceUrl: pick.sourceUrl ?? '', query: queries[0] ?? '', candidates: candidates.length, ...(provenance ? { provenance } : {}) },
       });
       artifactId = art.id;
     } catch { return { ok: false, error: 'could not store the sourced image', action: 'find_image' }; }
 
-    const attribution = buildAttribution(pick);
     const alt = (queries[0] ?? rawText).slice(0, 80);
     const verifyNote = verdict ? ` · verified ${Math.round(verdict.confidence * 100)}%` : '';
     return stageInsert(

@@ -87,6 +87,9 @@ export interface WeaveNotesConfig {
   /** Phase 2: scrub personal data (emails, phones, card/SSN-like numbers) OUT of the outbound web-search
    *  query during auto-fill, so a row's PII never leaves to the search engine. */
   dbAutofillRedactPii: boolean;
+  /** Phase 2: embed licence + provenance "Content Credentials" with every AI/web image (where it came
+   *  from, or the AI generator + prompt) — embedded in SVG bytes, stored with raster assets. */
+  imageProvenanceEnabled: boolean;
   /** Phase 7: let the mobile app work OFFLINE — edit notes with no signal and sync when back online. */
   mobileOfflineEnabled: boolean;
   /** Phase 7: let people DRAW freehand ink on a phone/tablet (synced to the web note untouched). */
@@ -170,6 +173,7 @@ export const DEFAULT_WEAVENOTES_CONFIG: WeaveNotesConfig = {
   translateEnabled: true,
   dbAutofillWebSearch: true,
   dbAutofillRedactPii: true,
+  imageProvenanceEnabled: true,
   mobileOfflineEnabled: true,
   mobileInkEnabled: true,
   mobileOfflineNoteLimit: 200,
@@ -301,6 +305,7 @@ export function validateWeaveNotesConfig(
       translateEnabled: asBool(p.translateEnabled ?? base.translateEnabled, base.translateEnabled),
       dbAutofillWebSearch: asBool(p.dbAutofillWebSearch ?? base.dbAutofillWebSearch, base.dbAutofillWebSearch),
       dbAutofillRedactPii: asBool(p.dbAutofillRedactPii ?? base.dbAutofillRedactPii, base.dbAutofillRedactPii),
+      imageProvenanceEnabled: asBool(p.imageProvenanceEnabled ?? base.imageProvenanceEnabled, base.imageProvenanceEnabled),
       flashcardsEnabled: asBool(p.flashcardsEnabled ?? base.flashcardsEnabled, base.flashcardsEnabled),
       dailyNewCardLimit: clampInt(p.dailyNewCardLimit ?? base.dailyNewCardLimit, 1, 1000, base.dailyNewCardLimit),
       mobileOfflineEnabled: asBool(p.mobileOfflineEnabled ?? base.mobileOfflineEnabled, base.mobileOfflineEnabled),

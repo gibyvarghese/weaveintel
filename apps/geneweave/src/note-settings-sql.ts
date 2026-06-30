@@ -59,6 +59,7 @@ function rowToConfig(row: WeaveNotesSettingsRow | null): WeaveNotesConfig {
     translateEnabled: row.translate_enabled !== 0, // undefined (pre-m124) → enabled
     dbAutofillWebSearch: row.db_autofill_web_search !== 0, // undefined (pre-m126) → on
     dbAutofillRedactPii: row.db_autofill_redact_pii !== 0,
+    imageProvenanceEnabled: row.image_provenance_enabled !== 0, // undefined (pre-m128) → on
     flashcardsEnabled: row.flashcards_enabled !== 0, // undefined (pre-m110) → enabled
     ...(typeof row.daily_new_card_limit === 'number' ? { dailyNewCardLimit: row.daily_new_card_limit } : {}),
     mobileOfflineEnabled: row.mobile_offline_enabled !== 0,  // undefined (pre-m112) → enabled
@@ -121,6 +122,7 @@ export function createNoteSettingsService(db: SettingsDb, opts: { now?: () => nu
       translate_enabled: config.translateEnabled ? 1 : 0,
       db_autofill_web_search: config.dbAutofillWebSearch ? 1 : 0,
       db_autofill_redact_pii: config.dbAutofillRedactPii ? 1 : 0,
+      image_provenance_enabled: config.imageProvenanceEnabled ? 1 : 0,
       flashcards_enabled: config.flashcardsEnabled ? 1 : 0,
       daily_new_card_limit: config.dailyNewCardLimit,
       mobile_offline_enabled: config.mobileOfflineEnabled ? 1 : 0,
