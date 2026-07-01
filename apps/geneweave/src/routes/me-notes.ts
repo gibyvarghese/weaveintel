@@ -48,6 +48,7 @@ import {
   blocksToDoc,
   normalizeLanguage,
   LANGUAGE_NAMES,
+  extractPlainText,
   type NoteBlock,
 } from '@weaveintel/notes';
 
@@ -79,6 +80,7 @@ import { createNoteGraphService } from '../note-graph-sql.js';
 import { createNoteDbService } from '../note-db-sql.js';
 import { createNoteCaptureService } from '../note-capture-sql.js';
 import { createNoteMeetingService, type MeetingTranscribe } from '../note-meeting-sql.js';
+import { createNoteMemoryService } from '../note-memory-sql.js';
 import { createNoteSettingsService } from '../note-settings-sql.js';
 import { createNoteWorkspaceService } from '../note-workspace-sql.js';
 import { createNoteVersionService } from '../note-version-sql.js';
@@ -163,6 +165,14 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
   const noteMeeting = createNoteMeetingService(db, {
     ...(opts.transcribe ? { transcribe: opts.transcribe } : {}),
     ...(opts.aiGenerate ? { generate: opts.aiGenerate } : {}),
+  });
+  // weaveNotes Phase 5: background memory / "second brain" (distil durable memories; temporal recall).
+  const noteMemory = createNoteMemoryService(db, {
+    ...(opts.aiGenerate ? { generate: opts.aiGenerate } : {}),
+    config: async () => {
+      const c = await noteSettings.getConfig();
+      return { enabled: c.backgroundMemoryEnabled, importanceThreshold: c.memoryImportanceThreshold, maxPerNote: c.memoryMaxPerNote, recallCount: c.memoryRecallCount, decayHalfLifeDays: c.memoryDecayHalfLifeDays };
+    },
   });
   // weaveNotes Phase 0: settings + activity (record what happens to a note so the AI knows).
   const noteSettings = createNoteSettingsService(db);
@@ -1673,6 +1683,67 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     const result = await noteMeeting.getMeeting(params['id']!, auth.userId);
     if (!result.ok) { res.writeHead(404); res.end(JSON.stringify({ error: 'No meeting for this note' })); return; }
     res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
+  }, { auth: true });
+
+  // ── weaveNotes Phase 5: background memory ("second brain") ───────────────────
+  //   GET  /api/me/notes/:id/recall            memories relevant to THIS note (proactive surfacing)
+  //   POST /api/me/notes/:id/remember          extract durable memories from this note NOW (manual)
+  //   POST /api/me/memory/recall  { query }    temporally-aware recall by query
+  //   GET  /api/me/memory                      list the user's note-derived memories (manage UI)
+  //   DELETE /api/me/memory/:id                forget a memory
+  router.get('/api/me/notes/:id/recall', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const cfg = await noteSettings.getConfig();
+    if (!cfg.backgroundMemoryEnabled) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ memories: [], disabled: true })); return; }
+    const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    const note = await db.getNote(params['id']!, auth.userId) as { title?: string; doc_json?: string } | null;
+    let query = note?.title ?? '';
+    try { query = `${note?.title ?? ''} ${extractPlainText(JSON.parse(note?.doc_json ?? '{}')).slice(0, 400)}`.trim(); } catch { /* title-only */ }
+    const limit = safePageInt(new URL(req.url ?? '/', 'http://x').searchParams.get('limit'), cfg.memoryRecallCount, 1, 20);
+    // Exclude memories that came from THIS note (surface OTHER things you know that relate).
+    const memories = (await noteMemory.recall({ userId: auth.userId, tenantId: auth.tenantId ?? null, query, limit: limit + 4 })).filter((m) => m.noteId !== params['id']).slice(0, limit);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ memories }));
+  }, { auth: true });
+
+  router.post('/api/me/notes/:id/remember', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const cfg = await noteSettings.getConfig();
+    if (!cfg.backgroundMemoryEnabled) { res.writeHead(403); res.end(JSON.stringify({ error: 'Background memory is disabled' })); return; }
+    const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    const result = await noteMemory.extractFromNote({ noteId: params['id']!, access, force: true });
+    res.writeHead(result.ok ? 200 : (result.error === 'AI is not configured on this server' ? 501 : 400), { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
+  }, { auth: true });
+
+  router.post('/api/me/memory/recall', async (req, res, _params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const cfg = await noteSettings.getConfig();
+    if (!cfg.backgroundMemoryEnabled) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ memories: [], disabled: true })); return; }
+    let body: { query?: unknown; limit?: unknown } = {};
+    try { body = JSON.parse(await readBody(req)) as typeof body; } catch { /* empty */ }
+    const query = typeof body.query === 'string' ? body.query : '';
+    if (!query.trim()) { res.writeHead(400); res.end(JSON.stringify({ error: 'query required' })); return; }
+    const memories = await noteMemory.recall({ userId: auth.userId, tenantId: auth.tenantId ?? null, query, ...(typeof body.limit === 'number' ? { limit: body.limit } : {}) });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ memories }));
+  }, { auth: true });
+
+  router.get('/api/me/memory', async (req, res, _params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const limit = safePageInt(new URL(req.url ?? '/', 'http://x').searchParams.get('limit'), 100, 1, 500);
+    const memories = await noteMemory.list({ userId: auth.userId, tenantId: auth.tenantId ?? null, limit });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ memories }));
+  }, { auth: true });
+
+  router.del('/api/me/memory/:id', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const result = await noteMemory.forget({ userId: auth.userId, id: params['id']! });
+    res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(result));
   }, { auth: true });
 

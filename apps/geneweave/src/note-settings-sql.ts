@@ -73,6 +73,11 @@ function rowToConfig(row: WeaveNotesSettingsRow | null): WeaveNotesConfig {
     ...(typeof row.transcription_language === 'string' ? { transcriptionLanguage: row.transcription_language } : {}),
     ...(typeof row.transcription_model === 'string' && row.transcription_model ? { transcriptionModel: row.transcription_model } : {}),
     ...(typeof row.max_recording_seconds === 'number' ? { maxRecordingSeconds: row.max_recording_seconds } : {}),
+    backgroundMemoryEnabled: row.background_memory_enabled !== 0, // undefined (pre-m134) → on
+    ...(typeof row.memory_importance_threshold === 'number' ? { memoryImportanceThreshold: row.memory_importance_threshold } : {}),
+    ...(typeof row.memory_max_per_note === 'number' ? { memoryMaxPerNote: row.memory_max_per_note } : {}),
+    ...(typeof row.memory_recall_count === 'number' ? { memoryRecallCount: row.memory_recall_count } : {}),
+    ...(typeof row.memory_decay_half_life_days === 'number' ? { memoryDecayHalfLifeDays: row.memory_decay_half_life_days } : {}),
     flashcardsEnabled: row.flashcards_enabled !== 0, // undefined (pre-m110) → enabled
     ...(typeof row.daily_new_card_limit === 'number' ? { dailyNewCardLimit: row.daily_new_card_limit } : {}),
     mobileOfflineEnabled: row.mobile_offline_enabled !== 0,  // undefined (pre-m112) → enabled
@@ -149,6 +154,11 @@ export function createNoteSettingsService(db: SettingsDb, opts: { now?: () => nu
       transcription_language: config.transcriptionLanguage,
       transcription_model: config.transcriptionModel,
       max_recording_seconds: config.maxRecordingSeconds,
+      background_memory_enabled: config.backgroundMemoryEnabled ? 1 : 0,
+      memory_importance_threshold: config.memoryImportanceThreshold,
+      memory_max_per_note: config.memoryMaxPerNote,
+      memory_recall_count: config.memoryRecallCount,
+      memory_decay_half_life_days: config.memoryDecayHalfLifeDays,
       flashcards_enabled: config.flashcardsEnabled ? 1 : 0,
       daily_new_card_limit: config.dailyNewCardLimit,
       mobile_offline_enabled: config.mobileOfflineEnabled ? 1 : 0,

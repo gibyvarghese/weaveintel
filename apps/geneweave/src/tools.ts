@@ -1006,6 +1006,12 @@ export interface ToolRegistryOptions {
    */
   notesSummarizeMeeting?: (args: { userId: string; tenantId?: string | null; transcript: string; title?: string }) => Promise<{ ok: boolean; error?: string; noteId?: string; title?: string; summary?: string; actionItems?: number }>;
   /**
+   * weaveNotes Phase 5: background memory / "second brain". When set, the `recall_second_brain` tool
+   * recalls durable memories the app has learned about the user from their notes over time — ranked so
+   * recent, important and relevant ones surface first (superseded facts excluded). Owner-scoped.
+   */
+  notesRecallMemory?: (args: { userId: string; tenantId?: string | null; query: string; limit?: number }) => Promise<{ ok: boolean; count: number; memories: Array<{ content: string; kind?: string; when?: string }> }>;
+  /**
    * weaveNotes Phase 6: database column auto-fill. When set, the `autofill_database` tool is
    * available so the agent can fill a column of one of the user's note databases from each
    * row's context (the page + workspace + optionally the web), with citations. Owner-scoped.
@@ -2041,6 +2047,28 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
         tags: ['notes', 'meeting', 'output'],
       }),
     } : {}),
+    // weaveNotes Phase 5: second-brain recall — available when notesRecallMemory callback is set.
+    ...(opts?.notesRecallMemory && opts.currentUserId ? {
+      recall_second_brain: weaveTool({
+        name: 'recall_second_brain',
+        description: 'Recall what you already know about the user from their notes over time — durable facts, preferences, decisions, people and commitments — ranked so the most recent, important and relevant surface first (superseded facts are excluded). Use this to ground an answer in what the user has told you before, e.g. "what do I know about the Polaris project?", "what are their preferences?", "what did they decide about the launch?". Returns short memory statements, each with when it was learned.',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: 'The topic, person, or question to recall memories about.' },
+            limit: { type: 'number', description: 'Max memories to return (default 5, max 20).' },
+          },
+          required: ['query'],
+        },
+        execute: async (args: { query: string; limit?: number }) => {
+          if (!opts.notesRecallMemory || !opts.currentUserId) return { content: 'Memory recall is unavailable in this context.', isError: true };
+          const limit = Math.max(1, Math.min(20, Number(args.limit ?? 5)));
+          const r = await opts.notesRecallMemory({ userId: opts.currentUserId, tenantId: opts.currentTenantId ?? null, query: args.query, limit });
+          return JSON.stringify({ query: args.query, count: r.count, memories: r.memories });
+        },
+        tags: ['notes', 'memory', 'personalization'],
+      }),
+    } : {}),
     // weaveNotes Phase 3.1: create-note tool — available when createNote callback is set.
     ...(opts?.createNote && opts.currentUserId ? {
       create_note: weaveTool({
@@ -2325,7 +2353,7 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
   // fall back to emit_artifact). Skip any already registered from the selection above.
   for (const noteTool of [
     'create_note', 'new_from_template', 'recent_notes', 'export_note', 'note_edit', 'note_publish', 'restructure_note',
-    'find_related_notes', 'suggest_links', 'autofill_database', 'capture_web_page', 'summarize_meeting', 'workspace_search', 'read_note_activity',
+    'find_related_notes', 'suggest_links', 'autofill_database', 'capture_web_page', 'summarize_meeting', 'recall_second_brain', 'workspace_search', 'read_note_activity',
     // weaveNotes Phase 2/4/5: the CREATIVE + study tools — so the assistant can draw a diagram, sketch
     // ink, colour-code, or make flashcards from a plain chat ("draw a diagram of this"), not only via
     // the selection card. Each is built only when its callback is wired + gated by per-call config.

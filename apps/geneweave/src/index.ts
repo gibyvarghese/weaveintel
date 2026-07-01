@@ -48,6 +48,7 @@ import { startToolHealthJob } from './tool-health-job.js';
 import { startArtifactRetentionJob } from './artifact-retention-job.js';
 import { startNoteActivityRetentionJob } from './note-activity-retention-job.js';
 import { startNoteScheduledAgentJob } from './note-scheduled-agent-job.js';
+import { startNoteMemoryJob } from './note-memory-job.js';
 import { createModelTextGenerator } from './note-ai-sql.js';
 import {
   createTriggerDispatcher,
@@ -646,6 +647,9 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
 
   // weaveNotes Phase 3: fire schedule-triggered workspace agents whose next run is due (polls 1/min).
   startNoteScheduledAgentJob(db, createModelTextGenerator({ providers: activeProviders, defaultProvider: config.defaultProvider, defaultModel: config.defaultModel, runtime }));
+
+  // weaveNotes Phase 5: background memory ("second brain") — distil durable memories from changed notes.
+  startNoteMemoryJob(db, createModelTextGenerator({ providers: activeProviders, defaultProvider: config.defaultProvider, defaultModel: config.defaultModel, runtime }));
 
   // 5-EN. Phase 1 (Tenant Encryption): bootstrap the per-tenant key
   // manager wired to SQLite-backed EncryptionStore + audit emitter.

@@ -116,6 +116,16 @@ export interface WeaveNotesConfig {
   transcriptionModel: string;
   /** Phase 4: hard cap on a single recording's length, in seconds (anti-abuse / cost). */
   maxRecordingSeconds: number;
+  /** Phase 5: build a "second brain" — a background job distils durable memories from notes over time. */
+  backgroundMemoryEnabled: boolean;
+  /** Phase 5: only remember memories at/above this importance (0–1); lower = remember more. */
+  memoryImportanceThreshold: number;
+  /** Phase 5: max durable memories to keep from a single note. */
+  memoryMaxPerNote: number;
+  /** Phase 5: how many memories to surface on a proactive recall. */
+  memoryRecallCount: number;
+  /** Phase 5: recency half-life (days) for temporal recall — older memories fade unless re-seen. */
+  memoryDecayHalfLifeDays: number;
   /** Phase 7: let the mobile app work OFFLINE — edit notes with no signal and sync when back online. */
   mobileOfflineEnabled: boolean;
   /** Phase 7: let people DRAW freehand ink on a phone/tablet (synced to the web note untouched). */
@@ -215,6 +225,11 @@ export const DEFAULT_WEAVENOTES_CONFIG: WeaveNotesConfig = {
   transcriptionLanguage: '',
   transcriptionModel: 'whisper-1',
   maxRecordingSeconds: 3600,
+  backgroundMemoryEnabled: true,
+  memoryImportanceThreshold: 0.3,
+  memoryMaxPerNote: 8,
+  memoryRecallCount: 5,
+  memoryDecayHalfLifeDays: 30,
   mobileOfflineEnabled: true,
   mobileInkEnabled: true,
   mobileOfflineNoteLimit: 200,
@@ -360,6 +375,11 @@ export function validateWeaveNotesConfig(
       transcriptionLanguage: typeof p.transcriptionLanguage === 'string' ? p.transcriptionLanguage.trim().slice(0, 8) : base.transcriptionLanguage,
       transcriptionModel: typeof p.transcriptionModel === 'string' && p.transcriptionModel.trim() ? p.transcriptionModel.trim().slice(0, 64) : base.transcriptionModel,
       maxRecordingSeconds: clampInt(p.maxRecordingSeconds ?? base.maxRecordingSeconds, 30, 21600, base.maxRecordingSeconds),
+      backgroundMemoryEnabled: asBool(p.backgroundMemoryEnabled ?? base.backgroundMemoryEnabled, base.backgroundMemoryEnabled),
+      memoryImportanceThreshold: (() => { const v = Number(p.memoryImportanceThreshold ?? base.memoryImportanceThreshold); return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : base.memoryImportanceThreshold; })(),
+      memoryMaxPerNote: clampInt(p.memoryMaxPerNote ?? base.memoryMaxPerNote, 1, 30, base.memoryMaxPerNote),
+      memoryRecallCount: clampInt(p.memoryRecallCount ?? base.memoryRecallCount, 1, 20, base.memoryRecallCount),
+      memoryDecayHalfLifeDays: clampInt(p.memoryDecayHalfLifeDays ?? base.memoryDecayHalfLifeDays, 1, 3650, base.memoryDecayHalfLifeDays),
       flashcardsEnabled: asBool(p.flashcardsEnabled ?? base.flashcardsEnabled, base.flashcardsEnabled),
       dailyNewCardLimit: clampInt(p.dailyNewCardLimit ?? base.dailyNewCardLimit, 1, 1000, base.dailyNewCardLimit),
       mobileOfflineEnabled: asBool(p.mobileOfflineEnabled ?? base.mobileOfflineEnabled, base.mobileOfflineEnabled),

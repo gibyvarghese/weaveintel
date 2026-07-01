@@ -82,6 +82,18 @@ export {
   chunk,
 } from './entities.js';
 
+// weaveNotes Phase 5 — background memory ("second brain"): distil durable memories from notes.
+export {
+  type NoteMemoryKind,
+  type NoteMemory,
+  buildMemoryExtractionPrompt,
+  parseMemoryExtraction,
+  memoryKey,
+  dedupeAgainstExisting,
+  formatRecall,
+  relativeWhen,
+} from './note-memory.js';
+
 // weaveNotes Phase 4 — meeting / voice capture: transcript → structured note + anchored citations.
 export {
   type TranscriptSegment,

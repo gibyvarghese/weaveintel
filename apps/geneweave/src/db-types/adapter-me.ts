@@ -336,6 +336,25 @@ export interface NoteSuggestionRow {
 
 // ── weaveNotes Phase 5 — notes knowledge graph (m102) ─────────────────────────
 
+/** weaveNotes Phase 5 (m134) — background-memory extraction state per note (content version + memory ids). */
+export interface NoteMemoryStateRow {
+  note_id: string;
+  user_id: string;
+  tenant_id: string | null;
+  content_hash: string;
+  memory_ids_json: string;
+  memory_count: number;
+  last_extracted_at: string;
+}
+
+/** weaveNotes Phase 5 — a note that needs (re)processing for background memory. */
+export interface NoteNeedingMemoryRow {
+  id: string;
+  owner_user_id: string;
+  tenant_id: string | null;
+  updated_at: string;
+}
+
 /** weaveNotes Phase 4 (m133) — one captured meeting/recording: transcript + structured note. */
 export interface NoteMeetingRow {
   id: string;
@@ -502,6 +521,12 @@ export interface WeaveNotesSettingsRow {
   transcription_language?: string;
   transcription_model?: string;
   max_recording_seconds?: number;
+  /** weaveNotes Phase 5: background memory / second brain (m134). Optional for old DBs. */
+  background_memory_enabled?: number;
+  memory_importance_threshold?: number;
+  memory_max_per_note?: number;
+  memory_recall_count?: number;
+  memory_decay_half_life_days?: number;
   local_model_for_sensitive: number;
   /** weaveNotes Phase 3: show live collaborator cursors (0/1). */
   live_cursors_enabled: number;
@@ -738,6 +763,10 @@ export interface IMeStore {
   listNoteEntities(noteId: string): Promise<NoteEntityRow[]>;
   // weaveNotes Phase 3 (m132) — all of a user's entities (for cross-note graph / shared-entity retrieval). tenant_id null-safe.
   listUserNoteEntities(userId: string, tenantId?: string | null): Promise<NoteEntityRow[]>;
+  // weaveNotes Phase 5 (m134) — background-memory extraction state.
+  getNoteMemoryState(noteId: string, userId: string): Promise<NoteMemoryStateRow | null>;
+  upsertNoteMemoryState(row: NoteMemoryStateRow): Promise<void>;
+  listNotesNeedingMemoryExtraction(limit: number): Promise<NoteNeedingMemoryRow[]>;
   // weaveNotes Phase 4 (m133) — captured meetings (transcript + structured note). Owner-scoped.
   createNoteMeeting(row: NoteMeetingRow): Promise<void>;
   getNoteMeetingByNote(noteId: string, userId: string): Promise<NoteMeetingRow | null>;

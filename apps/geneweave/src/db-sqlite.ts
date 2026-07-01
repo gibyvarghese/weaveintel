@@ -9288,6 +9288,29 @@ export class SQLiteAdapter implements DatabaseAdapter {
       ? this.d.prepare('SELECT * FROM note_entities WHERE user_id = ?').all(userId)
       : this.d.prepare('SELECT * FROM note_entities WHERE user_id = ? AND tenant_id IS ?').all(userId, tenantId ?? null)) as import('./db-types/adapter-me.js').NoteEntityRow[];
   }
+  // weaveNotes Phase 5 (m134) — background-memory extraction state.
+  async getNoteMemoryState(noteId: string, userId: string): Promise<import('./db-types/adapter-me.js').NoteMemoryStateRow | null> {
+    return (this.d.prepare('SELECT * FROM note_memory_state WHERE note_id = ? AND user_id = ?').get(noteId, userId) ?? null) as import('./db-types/adapter-me.js').NoteMemoryStateRow | null;
+  }
+  async upsertNoteMemoryState(row: import('./db-types/adapter-me.js').NoteMemoryStateRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO note_memory_state (note_id, user_id, tenant_id, content_hash, memory_ids_json, memory_count, last_extracted_at)
+       VALUES (@note_id,@user_id,@tenant_id,@content_hash,@memory_ids_json,@memory_count,@last_extracted_at)
+       ON CONFLICT(note_id) DO UPDATE SET content_hash=excluded.content_hash, memory_ids_json=excluded.memory_ids_json, memory_count=excluded.memory_count, last_extracted_at=excluded.last_extracted_at`,
+    ).run(row);
+  }
+  async listNotesNeedingMemoryExtraction(limit: number): Promise<import('./db-types/adapter-me.js').NoteNeedingMemoryRow[]> {
+    return this.d.prepare(
+      `SELECT n.id AS id, n.owner_user_id AS owner_user_id, n.tenant_id AS tenant_id, n.updated_at AS updated_at
+         FROM notes n
+         LEFT JOIN note_memory_state s ON s.note_id = n.id
+        WHERE (n.is_template = 0 OR n.is_template IS NULL)
+          AND (n.archived_at IS NULL)
+          AND (s.note_id IS NULL OR datetime(n.updated_at) > datetime(s.last_extracted_at))
+        ORDER BY n.updated_at DESC
+        LIMIT ?`,
+    ).all(Math.max(1, Math.min(200, limit))) as import('./db-types/adapter-me.js').NoteNeedingMemoryRow[];
+  }
   // weaveNotes Phase 4 (m133) — captured meetings.
   async createNoteMeeting(row: import('./db-types/adapter-me.js').NoteMeetingRow): Promise<void> {
     this.d.prepare(

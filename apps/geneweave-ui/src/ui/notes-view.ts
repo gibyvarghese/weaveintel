@@ -34,6 +34,7 @@ import { renderTranslateCard } from './notes-translate.js';
 import { renderGovernanceCard } from './notes-governance.js';
 import { renderScheduledAgentsPanel } from './notes-scheduled-agents.js';
 import { renderMeetingRecorder, wireMeetingTranscript } from './notes-meeting.js';
+import { renderMemoryPanel, wireMemoryStrip, type MemoryStrip } from './notes-memory.js';
 import { renderMcpPanel } from './notes-mcp.js';
 import { renderCapturePanel } from './notes-capture.js';
 import { saveNotesSnapshot, cacheNote, offlineNotes, offlineNote, setLastNoteId, getLastNoteId } from './notes-offline.js';
@@ -58,6 +59,8 @@ let _activeConn: NoteConnectionsPanel | null = null;
 let _activeProactive: ProactiveLinksBar | null = null;
 /** Clickable transcript-citation wiring for a meeting note (Phase 4). */
 let _activeMeeting: { destroy: () => void } | null = null;
+/** Proactive "from your memory" strip for the currently-open note (Phase 5). */
+let _activeMemory: MemoryStrip | null = null;
 /** Phase 8 panels: version history, comments, synced blocks. */
 let _activeHistory: SimplePanel | null = null;
 let _activeComments: SimplePanel | null = null;
@@ -70,6 +73,7 @@ function teardownCoedit(): void {
   if (_activeConn) { _activeConn.close(); _activeConn = null; }
   if (_activeProactive) { _activeProactive.destroy(); _activeProactive = null; }
   if (_activeMeeting) { _activeMeeting.destroy(); _activeMeeting = null; }
+  if (_activeMemory) { _activeMemory.destroy(); _activeMemory = null; }
   if (_activeHistory) { _activeHistory.close(); _activeHistory = null; }
   if (_activeComments) { _activeComments.close(); _activeComments = null; }
   if (_activeSynced) { _activeSynced.close(); _activeSynced = null; }
@@ -390,6 +394,9 @@ function buildInsertMenu(render: () => void): OverflowItem[] {
     { label: '🎙 Record meeting', title: 'Record → transcribe → a structured note with clickable transcript citations', onClick: () => {
         openCenterModal('Record a meeting', renderMeetingRecorder((id) => { void loadNotesList().then(() => openNote(id)); }));
       } },
+    { label: '🧠 Your memory', title: 'See + search everything the app remembers about you from your notes (your "second brain")', onClick: () => {
+        openCenterModal('Your memory', renderMemoryPanel((id) => { void openNote(id); }));
+      } },
     { label: '🌐 Capture a web page', title: 'Clip a public page into a note', onClick: async () => {
         const url = prompt('Paste a public web page URL to clip into a note:'); if (!url) return;
         const res = await api.post('/api/me/notes/capture/web', { url }).catch(() => null);
@@ -456,6 +463,9 @@ function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLEle
   // weaveNotes Phase 3 — the live proactive-linking bar (sits above the note body, hidden until
   // there's an unlinked mention to connect; one-click turns it into a [[wiki-link]]).
   const proactiveBar = h('div', { className: 'notes-proactive-bar', style: 'display:none' }) as HTMLElement;
+  // weaveNotes Phase 5 — the proactive "from your memory" strip (durable things you told the app
+  // before that relate to what you're writing now). Hidden until there's something to recall.
+  const memoryStrip = h('div', { className: 'notes-memory-strip', style: 'display:none' }) as HTMLElement;
 
   // weaveNotes Phase 8 — version History, Comments, and Synced-blocks panels. Inline panels
   // shown above the editor, toggled from the centre top-bar overflow (⋯) menu.
@@ -621,7 +631,7 @@ function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLEle
     metaText: 'Edited just now',
     isLive: true,
     iconEl, titleInput, editorContainer, presenceBadge, presenceAvatarsEl,
-    inlinePanels: [proactiveBar, historyPanel, commentsPanel, syncedPanel],
+    inlinePanels: [memoryStrip, proactiveBar, historyPanel, commentsPanel, syncedPanel],
     afterEditorPanels: [aiPanel], // the inline AI-edit diff cards live in the note body
     extractResult,
     onSetTheme: (t) => {
@@ -677,6 +687,8 @@ function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLEle
     void _activeProactive.refresh();
     // Phase 4: for a MEETING note, make the ⟦m:ss⟧ citation markers click-to-jump the transcript.
     _activeMeeting = wireMeetingTranscript({ noteId: note.id, editorContainer });
+    // Phase 5: proactively surface durable memories relevant to this note (the "second brain").
+    _activeMemory = wireMemoryStrip({ noteId: note.id, barEl: memoryStrip });
     // Phase 8: wire the version-history, comments, and synced-blocks panels (hidden until opened).
     _activeHistory = wireNoteHistory({ noteId: note.id, panelEl: historyPanel, onRestored: () => { void loadNote(note.id).then(render); } });
     _activeComments = wireNoteComments({ noteId: note.id, panelEl: commentsPanel });

@@ -1039,6 +1039,25 @@ input{font-family:inherit;outline:none}
 .notes-meeting-paste-wrap{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--bg4);padding-top:10px}
 .notes-meeting-paste{width:100%;box-sizing:border-box;font-size:13px;padding:8px;border-radius:8px;border:1px solid var(--bg4);background:var(--bg1);color:var(--fg1);resize:vertical}
 .notes-meeting-flash{background:#FEF6D8 !important;border-radius:6px;transition:background .4s ease}
+/* weaveNotes Phase 5 — background memory ("second brain") */
+.notes-memory-strip{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:6px 12px;padding:7px 10px;border:1px solid #D8D0EC;border-radius:10px;background:#F6F3FC}
+.notes-memory-strip-label{font-size:12px;font-weight:600;color:#6A4CA6;white-space:nowrap}
+.notes-memory-strip-items{display:flex;gap:6px;flex-wrap:wrap}
+.notes-memory-chip{font-size:12px;padding:3px 9px;border-radius:999px;border:1px solid #C9BCE6;background:#fff;color:#5A3E96}
+.notes-memory-strip-dismiss{margin-left:auto;border:none;background:transparent;color:#9aa7a1;cursor:pointer;font-size:13px;line-height:1}
+.notes-memory-panel{display:flex;flex-direction:column;gap:10px;min-width:460px;max-width:600px}
+.notes-memory-intro{font-size:13px;line-height:1.5;color:var(--fg2);margin:0}
+.notes-memory-search{width:100%;box-sizing:border-box;font-size:13px;padding:8px 12px;border-radius:8px;border:1px solid var(--bg4);background:var(--bg1);color:var(--fg1)}
+.notes-memory-status{font-size:12px;color:var(--fg2);min-height:15px}
+.notes-memory-list{display:flex;flex-direction:column;gap:6px;max-height:420px;overflow-y:auto}
+.notes-memory-row{display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border:1px solid var(--bg4);border-radius:8px;background:var(--bg2)}
+.notes-memory-row-main{flex:1;display:flex;flex-direction:column;gap:2px}
+.notes-memory-row-text{font-size:13px;color:var(--fg1);line-height:1.4}
+.notes-memory-row-meta{font-size:11px;color:#9aa7a1}
+.notes-memory-open{border:none;background:transparent;color:#6A4CA6;cursor:pointer;font-size:13px;align-self:flex-start}
+.notes-memory-forget{border:none;background:transparent;color:#C0392B;cursor:pointer;font-size:13px}
+.notes-memory-forget:disabled{opacity:.4;cursor:default}
+.notes-memory-empty{font-size:13px;color:var(--fg2);padding:12px;text-align:center}
 .notes-ws-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
 .notes-ws-title{font-size:12px;font-weight:600;color:var(--fg1)}
 .notes-ws-action{padding:3px 10px;border:none;border-radius:6px;background:var(--accent);color:#fff;font-size:11px;cursor:pointer;white-space:nowrap}

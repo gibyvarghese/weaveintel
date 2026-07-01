@@ -66,6 +66,7 @@ import { createNoteGraphService } from './note-graph-sql.js';
 import { createNoteDbService } from './note-db-sql.js';
 import { createNoteCaptureService } from './note-capture-sql.js';
 import { createNoteMeetingService } from './note-meeting-sql.js';
+import { createNoteMemoryService } from './note-memory-sql.js';
 import { createNoteWorkspaceService } from './note-workspace-sql.js';
 import { createNoteSettingsService } from './note-settings-sql.js';
 import {
@@ -430,6 +431,15 @@ export class ChatEngine {
       // weaveNotes Phase 5: wire the `find_related_notes` tool (semantic note search).
       notesSearch: (a: { userId: string; tenantId?: string | null; query: string; limit?: number }) =>
         createNoteGraphService(db).searchNotes({ userId: a.userId, tenantId: a.tenantId ?? null }, a.query, a.limit ?? 5),
+      // weaveNotes Phase 5: wire the `recall_second_brain` tool — temporally-aware memory recall.
+      notesRecallMemory: async (a: { userId: string; tenantId?: string | null; query: string; limit?: number }) => {
+        const cfg = await createNoteSettingsService(db).getConfig();
+        if (!cfg.backgroundMemoryEnabled) return { ok: true, count: 0, memories: [] };
+        return createNoteMemoryService(db, {
+          generate: createModelTextGenerator(config),
+          config: async () => ({ enabled: cfg.backgroundMemoryEnabled, importanceThreshold: cfg.memoryImportanceThreshold, maxPerNote: cfg.memoryMaxPerNote, recallCount: cfg.memoryRecallCount, decayHalfLifeDays: cfg.memoryDecayHalfLifeDays }),
+        }).agentRecall(a);
+      },
       // weaveNotes Phase 4: wire the `summarize_meeting` tool — pasted transcript → structured note.
       notesSummarizeMeeting: async (a: { userId: string; tenantId?: string | null; transcript: string; title?: string }) => {
         const cfg = await createNoteSettingsService(db).getConfig();

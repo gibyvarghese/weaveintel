@@ -510,6 +510,11 @@ export function registerAdminRoutingRoutes(
     if (body['transcription_language'] !== undefined) partial['transcriptionLanguage'] = body['transcription_language'];
     if (body['transcription_model'] !== undefined) partial['transcriptionModel'] = body['transcription_model'];
     if (body['max_recording_seconds'] !== undefined) partial['maxRecordingSeconds'] = body['max_recording_seconds'];
+    if (body['background_memory_enabled'] !== undefined) partial['backgroundMemoryEnabled'] = body['background_memory_enabled'];
+    if (body['memory_importance_threshold'] !== undefined) partial['memoryImportanceThreshold'] = body['memory_importance_threshold'];
+    if (body['memory_max_per_note'] !== undefined) partial['memoryMaxPerNote'] = body['memory_max_per_note'];
+    if (body['memory_recall_count'] !== undefined) partial['memoryRecallCount'] = body['memory_recall_count'];
+    if (body['memory_decay_half_life_days'] !== undefined) partial['memoryDecayHalfLifeDays'] = body['memory_decay_half_life_days'];
     if (body['mobile_offline_enabled'] !== undefined) partial['mobileOfflineEnabled'] = body['mobile_offline_enabled'];
     if (body['mobile_ink_enabled'] !== undefined) partial['mobileInkEnabled'] = body['mobile_ink_enabled'];
     if (body['mobile_offline_note_limit'] !== undefined) partial['mobileOfflineNoteLimit'] = body['mobile_offline_note_limit'];
