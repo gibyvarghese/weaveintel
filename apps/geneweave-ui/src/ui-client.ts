@@ -1750,9 +1750,20 @@ function renderApp() {
     selectChat,
     deleteChat,
   }));
-  
+
+  // Responsive adaptive shell: on tablet/mobile the workspace nav is an off-canvas drawer. A backdrop
+  // (CSS-hidden on desktop) closes it on tap; a hamburger in the header opens it. 44px hit targets.
+  const backdrop = h('div', { className: 'nav-backdrop', 'aria-hidden': 'true', onClick: () => wrap.classList.remove('nav-open') }) as HTMLElement;
+  wrap.appendChild(backdrop);
+  const hamburger = h('button', {
+    className: 'gw-hamburger', type: 'button', 'aria-label': 'Open navigation menu', 'aria-expanded': 'false',
+    onClick: () => { const open = wrap.classList.toggle('nav-open'); (hamburger as HTMLElement).setAttribute('aria-expanded', String(open)); },
+    innerHTML: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>',
+  }) as HTMLElement;
+
   const main = h('div', {className:'main'});
   main.appendChild(h('div', { className: 'main-header' },
+    hamburger,
     renderWorkspaceTopCard({
       render,
       createChat,
@@ -1968,6 +1979,10 @@ async function applyTenantAppearance(): Promise<void> {
 }
 
 export function initialize() {
+  // Responsive shell: Escape closes the mobile nav / rail drawers (keyboard accessibility).
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { document.querySelector('.app')?.classList.remove('nav-open', 'rail-open'); }
+  });
   document.addEventListener('click', () => {
     if (state.showSettings || state.showProfile || state.showNotifications) {
       state.showSettings = false;

@@ -1,8 +1,17 @@
 // CSS styles for geneWeave UI
 // This is embedded in the HTML as a <style> tag
+//
+// geneWeave design tokens are generated from @geneweave/tokens (the single source of truth shared with
+// the native app) into TOKENS_CSS at BUILD time (scripts/gen-tokens-css.mjs) — a plain string, so this
+// browser-served module never bare-imports the workspace package. TOKENS_CSS defines `--gw-*` (colours/
+// space/radii/fonts/type + breakpoints) for light, dark, and the Creative variant, plus legacy
+// `--bg`/`--accent`/… aliases → `--gw-*`, so the stylesheet + the per-tenant appearance override read
+// from ONE place. It's placed right after the font @import; the app's own `:root` (identical values)
+// still wins by cascade — zero visual change until each rule migrates to `var(--gw-*)`.
+import { TOKENS_CSS } from './tokens.generated.js';
 
-export const STYLES = `
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Caveat:wght@500;600;700&family=Kalam:wght@400;700&family=Patrick+Hand&family=Gochi+Hand&display=swap');
+export const STYLES = `@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Caveat:wght@500;600;700&family=Kalam:wght@400;700&family=Patrick+Hand&family=Gochi+Hand&display=swap');
+${TOKENS_CSS}
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 /* geneWeave design system — "color encodes agency": neutrals = you, emerald/mint = the AI.
    Token names are kept stable (--bg/--fg/--accent…) and remapped to the design palette so the
@@ -2051,7 +2060,27 @@ input{font-family:inherit;outline:none}
 @media(max-width:900px){.prompt-wizard-grid{grid-template-columns:1fr}}
 @media(max-width:1200px){.admin-content-grid.editing{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:1200px){.admin-editor-panel{position:static}}
-@media(max-width:640px){.workspace-nav{display:none}.app{flex-direction:column}}
-@media(max-width:900px){.notes-layout{grid-template-columns:1fr}.notes-sidebar{display:none}}
 @media(max-width:900px){.cal-week-view .cal-week-header,.cal-week-grid .cal-week-row{grid-template-columns:40px repeat(7,1fr)}}
+
+/* ── geneWeave responsive adaptive shell (web · tablet · mobile) ───────────────────────
+   Rails are persistent side panels on desktop and become off-canvas DRAWERS below tablet
+   (slide over, close on backdrop-tap / Esc), so the whole app stays navigable on a phone.
+   Breakpoints come from @geneweave/tokens: tablet 900, desktop 1200. */
+.gw-hamburger{display:none;align-items:center;justify-content:center;width:40px;height:40px;border-radius:10px;border:1px solid var(--bg4);background:var(--bg2);color:var(--fg);cursor:pointer;flex:none}
+.nav-backdrop{display:none;position:fixed;inset:0;background:rgba(20,32,27,.32);z-index:150;opacity:0;pointer-events:none;transition:opacity .2s ease}
+@media(max-width:899.98px){
+  .app{position:relative;flex-direction:row}
+  .app > .workspace-nav{position:fixed;top:0;left:0;bottom:0;height:100vh;max-height:100vh;z-index:200;width:min(86vw,320px);transform:translateX(-100%);transition:transform .22s ease;box-shadow:var(--shadow-pop)}
+  .app.nav-open > .workspace-nav{transform:translateX(0)}
+  .app .nav-backdrop{display:block}
+  .app.nav-open .nav-backdrop{opacity:1;pointer-events:auto}
+  .app .gw-hamburger{display:inline-flex}
+  .main{width:100%;min-width:0}
+  .notes-layout{grid-template-columns:1fr}
+  /* Notes notebook rail → slide-over drawer, reachable via its toggle instead of vanishing. */
+  .app-fullbleed .notes-sidebar{position:fixed;top:0;left:0;bottom:0;z-index:200;width:min(86vw,320px);transform:translateX(-100%);transition:transform .22s ease;box-shadow:var(--shadow-pop);background:var(--bg2);display:flex}
+  .app-fullbleed.rail-open .notes-sidebar{transform:translateX(0)}
+  .app-fullbleed .gw-left-rail{display:flex}
+}
+@media(prefers-reduced-motion:reduce){.app > .workspace-nav,.nav-backdrop,.app-fullbleed .notes-sidebar{transition:none}}
 `;
