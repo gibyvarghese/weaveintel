@@ -1017,6 +1017,11 @@ export interface ToolRegistryOptions {
    */
   setWorkspaceAppearance?: (args: { userId: string; tenantId?: string | null; colorScheme?: string; variant?: string; accent?: string; cornerStyle?: string; density?: string }) => Promise<{ ok: boolean; error?: string; applied?: Record<string, string>; degraded?: boolean }>;
   /**
+   * geneWeave UI rebuild: update the SIGNED-IN user's own account (profile + preferences + notifications).
+   * Always scoped to the current user; never touches another person's account.
+   */
+  updateAccountProfile?: (args: { userId: string; profile?: Record<string, unknown>; notification?: { event: string; in_app?: boolean; email?: boolean; push?: boolean } }) => Promise<{ ok: boolean; error?: string; applied?: Record<string, string | null>; notification?: string }>;
+  /**
    * weaveNotes Phase 6: database column auto-fill. When set, the `autofill_database` tool is
    * available so the agent can fill a column of one of the user's note databases from each
    * row's context (the page + workspace + optionally the web), with citations. Owner-scoped.
@@ -2076,6 +2081,44 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
         tags: ['appearance', 'branding', 'admin'],
       }),
     } : {}),
+    // geneWeave UI rebuild: update the signed-in user's own account — when updateAccountProfile is set.
+    ...(opts?.updateAccountProfile && opts.currentUserId ? {
+      update_account_profile: weaveTool({
+        name: 'update_account_profile',
+        description: 'Update the signed-in person’s OWN account. Two things you can change: (1) their profile & formatting preferences — display name, pronouns, role/title, working hours, a short "about" blurb, their status line (e.g. "Focusing · back at 2:00"), interface language, timezone, date format, start of week, or the Pro/Creative editor look; (2) which notifications reach them and where. Use for requests like "set my status to focusing", "call me they/them", "start my week on Sunday", or "turn off email for comments". Only ever changes the current user’s own account.',
+        parameters: {
+          type: 'object',
+          properties: {
+            profile: {
+              type: 'object',
+              description: 'Profile & preference fields to change. Any subset of: display_name, pronouns, role_title, working_hours, about, status_text, status_emoji, language, timezone, date_format, week_start (monday/sunday/saturday), ui_variant (pro/creative).',
+              properties: {
+                display_name: { type: 'string' }, pronouns: { type: 'string' }, role_title: { type: 'string' },
+                working_hours: { type: 'string' }, about: { type: 'string' }, status_text: { type: 'string' }, status_emoji: { type: 'string' },
+                language: { type: 'string' }, timezone: { type: 'string' }, date_format: { type: 'string' },
+                week_start: { type: 'string', enum: ['monday', 'sunday', 'saturday'] }, ui_variant: { type: 'string', enum: ['pro', 'creative'] },
+              },
+            },
+            notification: {
+              type: 'object',
+              description: 'Turn a notification channel on/off for one event.',
+              properties: {
+                event: { type: 'string', enum: ['mentions', 'shares', 'comments', 'assistant_finished', 'weekly_digest'] },
+                in_app: { type: 'boolean' }, email: { type: 'boolean' }, push: { type: 'boolean' },
+              },
+              required: ['event'],
+            },
+          },
+        },
+        execute: async (args: { profile?: Record<string, unknown>; notification?: { event: string; in_app?: boolean; email?: boolean; push?: boolean } }) => {
+          if (!opts.updateAccountProfile || !opts.currentUserId) return { content: 'Account changes are unavailable in this context.', isError: true };
+          const r = await opts.updateAccountProfile({ userId: opts.currentUserId, ...args });
+          if (!r.ok) return { content: r.error ?? 'Could not update your account.', isError: true };
+          return JSON.stringify({ ok: true, applied: r.applied, notification: r.notification });
+        },
+        tags: ['account', 'profile', 'preferences'],
+      }),
+    } : {}),
     // weaveNotes Phase 5: second-brain recall — available when notesRecallMemory callback is set.
     ...(opts?.notesRecallMemory && opts.currentUserId ? {
       recall_second_brain: weaveTool({
@@ -2382,7 +2425,7 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
   // fall back to emit_artifact). Skip any already registered from the selection above.
   for (const noteTool of [
     'create_note', 'new_from_template', 'recent_notes', 'export_note', 'note_edit', 'note_publish', 'restructure_note',
-    'find_related_notes', 'suggest_links', 'autofill_database', 'capture_web_page', 'summarize_meeting', 'recall_second_brain', 'set_workspace_appearance', 'workspace_search', 'read_note_activity',
+    'find_related_notes', 'suggest_links', 'autofill_database', 'capture_web_page', 'summarize_meeting', 'recall_second_brain', 'set_workspace_appearance', 'update_account_profile', 'workspace_search', 'read_note_activity',
     // weaveNotes Phase 2/4/5: the CREATIVE + study tools — so the assistant can draw a diagram, sketch
     // ink, colour-code, or make flashcards from a plain chat ("draw a diagram of this"), not only via
     // the selection card. Each is built only when its callback is wired + gated by per-call config.

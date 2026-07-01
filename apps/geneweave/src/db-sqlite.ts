@@ -710,6 +710,31 @@ export class SQLiteAdapter implements DatabaseAdapter {
     ).run(userId, defaultMode, theme, showFlag);
   }
 
+  // m136 — Account settings surface. `patch` is a whitelist-validated set of columns from the service layer.
+  async updateUserAccountPrefs(userId: string, patch: Record<string, string | null>): Promise<void> {
+    const cols = Object.keys(patch);
+    if (cols.length === 0) return;
+    // Ensure a row exists first (a fresh user may have no preferences row yet).
+    this.d.prepare(`INSERT OR IGNORE INTO user_preferences (user_id, default_mode, theme, show_process_card) VALUES (?, 'direct', 'light', 1)`).run(userId);
+    const setClause = cols.map((c) => `${c}=@${c}`).join(', ');
+    this.d.prepare(`UPDATE user_preferences SET ${setClause}, updated_at=datetime('now') WHERE user_id=@user_id`).run({ ...patch, user_id: userId });
+  }
+
+  async getUserNotificationPrefs(userId: string): Promise<import('./db-types/core.js').UserNotificationPrefRow[]> {
+    return this.d.prepare('SELECT * FROM user_notification_prefs WHERE user_id = ? ORDER BY event_key').all(userId) as import('./db-types/core.js').UserNotificationPrefRow[];
+  }
+
+  async setUserNotificationPref(userId: string, eventKey: string, channels: { in_app?: boolean; email?: boolean; push?: boolean }): Promise<void> {
+    const existing = this.d.prepare('SELECT * FROM user_notification_prefs WHERE user_id = ? AND event_key = ?').get(userId, eventKey) as import('./db-types/core.js').UserNotificationPrefRow | undefined;
+    const inApp = channels.in_app === undefined ? (existing?.in_app ?? 1) : (channels.in_app ? 1 : 0);
+    const email = channels.email === undefined ? (existing?.email ?? 0) : (channels.email ? 1 : 0);
+    const push = channels.push === undefined ? (existing?.push ?? 0) : (channels.push ? 1 : 0);
+    this.d.prepare(
+      `INSERT INTO user_notification_prefs (user_id, event_key, in_app, email, push) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(user_id, event_key) DO UPDATE SET in_app=excluded.in_app, email=excluded.email, push=excluded.push, updated_at=datetime('now')`,
+    ).run(userId, eventKey, inApp, email, push);
+  }
+
   // ── Chat Settings ──────────────────────────────────────────
 
   async getChatSettings(chatId: string): Promise<ChatSettingsRow | null> {

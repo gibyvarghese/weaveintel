@@ -188,6 +188,7 @@ const TOOL_POLICIES: Record<ChatMode, string[]> = {
     'summarize_meeting', // weaveNotes Phase 4: transcript → structured meeting note
     'recall_second_brain', // weaveNotes Phase 5: temporally-aware recall from the note-derived memory
     'set_workspace_appearance', // geneWeave UI rebuild: white-label workspace branding (admin-gated)
+    'update_account_profile', // geneWeave UI rebuild: the user's own account (profile/prefs/notifications)
     'autofill_database', // weaveNotes Phase 6: AI table column auto-fill
     'capture_web_page', // weaveNotes Phase 7: clip a web page into a structured note
     'workspace_search', // weaveNotes Phase 8: cited RAG over the user notes + runs
@@ -212,6 +213,7 @@ const TOOL_POLICIES: Record<ChatMode, string[]> = {
     'summarize_meeting', // weaveNotes Phase 4: transcript → structured meeting note
     'recall_second_brain', // weaveNotes Phase 5: temporally-aware recall from the note-derived memory
     'set_workspace_appearance', // geneWeave UI rebuild: white-label workspace branding (admin-gated)
+    'update_account_profile', // geneWeave UI rebuild: the user's own account (profile/prefs/notifications)
     'autofill_database', // weaveNotes Phase 6: AI table column auto-fill
     'capture_web_page', // weaveNotes Phase 7: clip a web page into a structured note
     'workspace_search', // weaveNotes Phase 8: cited RAG over the user notes + runs
@@ -231,6 +233,7 @@ const TOOL_POLICIES: Record<ChatMode, string[]> = {
     'summarize_meeting', // weaveNotes Phase 4: transcript → structured meeting note
     'recall_second_brain', // weaveNotes Phase 5: temporally-aware recall from the note-derived memory
     'set_workspace_appearance', // geneWeave UI rebuild: white-label workspace branding (admin-gated)
+    'update_account_profile', // geneWeave UI rebuild: the user's own account (profile/prefs/notifications)
     'autofill_database', // weaveNotes Phase 6: AI table column auto-fill
     'capture_web_page', // weaveNotes Phase 7: clip a web page into a structured note
     'workspace_search', // weaveNotes Phase 8: cited RAG over the user notes + runs

@@ -69,6 +69,7 @@ import {
   registerMeConversationsRoutes,
   registerMeMemoryRoutes,
   registerMeAgendaRoutes,
+  registerMeAccountRoutes,
   registerMeNotesRoutes,
   registerMeComplianceRoutes,
   registerVoiceRoutes,
@@ -284,6 +285,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   // M5-3: pass consent manager so isGranted() is called on every memory write path.
   registerMeMemoryRoutes(router, db, { consentManager: config.runtime ? createDurableConsentManager({ runtime: config.runtime, namespace: 'consent' }) : undefined });
   registerMeAgendaRoutes(router, db);
+  registerMeAccountRoutes(router, db);
   // weaveNotes Phase 3: give the notes routes an LLM generator (built from the chat
   // engine's resolved providers + default model) so the AI co-author actions work.
   // weaveNotes Phase 4: pass the share-token secret + public base url so a note can be

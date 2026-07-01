@@ -68,6 +68,7 @@ import { createNoteCaptureService } from './note-capture-sql.js';
 import { createNoteMeetingService } from './note-meeting-sql.js';
 import { createNoteMemoryService } from './note-memory-sql.js';
 import { createTenantAppearanceService } from './tenant-appearance-sql.js';
+import { createAccountService } from './account-sql.js';
 import { createNoteWorkspaceService } from './note-workspace-sql.js';
 import { createNoteSettingsService } from './note-settings-sql.js';
 import {
@@ -439,6 +440,10 @@ export class ChatEngine {
         if (!['tenant_admin', 'platform_admin'].includes(persona)) return { ok: false, error: 'Only a workspace admin can change the workspace appearance.' };
         return createTenantAppearanceService(db).agentSetAppearance({ tenantId: a.tenantId ?? '', ...(a.colorScheme ? { colorScheme: a.colorScheme } : {}), ...(a.variant ? { variant: a.variant } : {}), ...(a.accent ? { accent: a.accent } : {}), ...(a.cornerStyle ? { cornerStyle: a.cornerStyle } : {}), ...(a.density ? { density: a.density } : {}) });
       },
+      // geneWeave UI rebuild: wire the `update_account_profile` tool. Always scoped to the signed-in user
+      // (userId comes from the session) — the assistant can never change another person's account.
+      updateAccountProfile: (a: { userId: string; profile?: Record<string, unknown>; notification?: { event: string; in_app?: boolean; email?: boolean; push?: boolean } }) =>
+        createAccountService(db).agentUpdateAccount(a),
       // weaveNotes Phase 5: wire the `recall_second_brain` tool — temporally-aware memory recall.
       notesRecallMemory: async (a: { userId: string; tenantId?: string | null; query: string; limit?: number }) => {
         const cfg = await createNoteSettingsService(db).getConfig();

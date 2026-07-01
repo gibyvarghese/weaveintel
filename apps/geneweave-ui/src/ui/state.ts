@@ -143,6 +143,15 @@ export const state: any = {
   noteDatabases: [] as any[],
   currentDatabaseId: null as string | null,  // weaveNotes Phase 6: the open database
 
+  // Account settings surface (geneWeave UI rebuild — "GeneWeave Account.dc.html")
+  accountSection: 'profile' as string,
+  account: null as any,          // the loaded AccountView (profile + preferences + notifications)
+  accountDraft: null as any,     // working copy for dirty-tracked Profile/Preferences edits
+  accountLoaded: false,
+  accountLoading: false,
+  accountPeople: null as any,    // { people[], canManage }
+  accountSaving: false,
+
   // Admin
   adminTab: 'prompts',
   adminData: {} as Record<string, any[]>,

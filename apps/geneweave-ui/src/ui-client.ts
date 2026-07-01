@@ -114,6 +114,7 @@ import { renderCalendarView } from './ui/calendar-view.js';
 import { renderNotesView, loadNotesList } from './ui/notes-view.js';
 import { renderDesignSystemView } from './ui/design-system-view.js';
 import { renderBuilderView } from './ui/builder-view.js';
+import { renderAccountView } from './ui/account-view.js';
 import { loadActionFeed } from './ui/action-feed.js';
 import { loadCalendarItems, loadCalendarCategories } from './ui/agenda-api.js';
 import {
@@ -1739,6 +1740,13 @@ function renderApp() {
   if (state.view === 'builder') {
     wrap.classList.add('app-fullbleed');
     wrap.appendChild(renderBuilderView(render, { loadAdmin }));
+    return wrap;
+  }
+  // Account — the full-bleed settings surface (its own 256px nav + sticky Save bar), recreated from
+  // "GeneWeave Account.dc.html". `preferences` is kept as an alias so old entry points still land here.
+  if (state.view === 'account' || state.view === 'preferences') {
+    wrap.classList.add('app-fullbleed');
+    wrap.appendChild(renderAccountView(render));
     return wrap;
   }
   wrap.appendChild(renderWorkspaceNav({
