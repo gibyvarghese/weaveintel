@@ -102,6 +102,10 @@ export interface WeaveNotesConfig {
   mcpNotesAllowWrites: boolean;
   /** Phase 3: proactively suggest links as you write — turn unlinked mentions + related notes into one-click `[[links]]`. */
   proactiveLinkingEnabled: boolean;
+  /** Phase 3: fold spelling variants of an entity ("OpenAI"/"OpenAI, Inc.") into one canonical graph node (disambiguation). */
+  entityResolutionEnabled: boolean;
+  /** Phase 3: how many notes to embed in one model call during a workspace re-index (batched; anti-N+1). */
+  embeddingBatchSize: number;
   /** Phase 7: let the mobile app work OFFLINE — edit notes with no signal and sync when back online. */
   mobileOfflineEnabled: boolean;
   /** Phase 7: let people DRAW freehand ink on a phone/tablet (synced to the web note untouched). */
@@ -194,6 +198,8 @@ export const DEFAULT_WEAVENOTES_CONFIG: WeaveNotesConfig = {
   mcpNotesEnabled: true,
   mcpNotesAllowWrites: true,
   proactiveLinkingEnabled: true,
+  entityResolutionEnabled: true,
+  embeddingBatchSize: 16,
   mobileOfflineEnabled: true,
   mobileInkEnabled: true,
   mobileOfflineNoteLimit: 200,
@@ -332,6 +338,8 @@ export function validateWeaveNotesConfig(
       mcpNotesEnabled: asBool(p.mcpNotesEnabled ?? base.mcpNotesEnabled, base.mcpNotesEnabled),
       mcpNotesAllowWrites: asBool(p.mcpNotesAllowWrites ?? base.mcpNotesAllowWrites, base.mcpNotesAllowWrites),
       proactiveLinkingEnabled: asBool(p.proactiveLinkingEnabled ?? base.proactiveLinkingEnabled, base.proactiveLinkingEnabled),
+      entityResolutionEnabled: asBool(p.entityResolutionEnabled ?? base.entityResolutionEnabled, base.entityResolutionEnabled),
+      embeddingBatchSize: clampInt(p.embeddingBatchSize ?? base.embeddingBatchSize, 1, 64, base.embeddingBatchSize),
       flashcardsEnabled: asBool(p.flashcardsEnabled ?? base.flashcardsEnabled, base.flashcardsEnabled),
       dailyNewCardLimit: clampInt(p.dailyNewCardLimit ?? base.dailyNewCardLimit, 1, 1000, base.dailyNewCardLimit),
       mobileOfflineEnabled: asBool(p.mobileOfflineEnabled ?? base.mobileOfflineEnabled, base.mobileOfflineEnabled),

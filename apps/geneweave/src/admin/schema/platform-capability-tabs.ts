@@ -573,6 +573,8 @@ export const PLATFORM_CAPABILITY_ADMIN_TABS: Record<string, AdminTabDef> = {
       { key: 'mcp_notes_enabled', label: 'Expose notes over MCP — let external apps (Claude/ChatGPT) connect to a user’s notes with a personal token', type: 'checkbox', save: 'bool', default: true },
       { key: 'mcp_notes_allow_writes', label: 'Allow MCP clients to create/append notes (off → the MCP connection is read-only)', type: 'checkbox', save: 'bool', default: true },
       { key: 'proactive_linking_enabled', label: 'Suggest links as you write — surface notes you mentioned (or that are related) for one-click [[linking]]', type: 'checkbox', save: 'bool', default: true },
+      { key: 'entity_resolution_enabled', label: 'Entity disambiguation — fold spelling variants ("OpenAI"/"OpenAI, Inc.") into one knowledge-graph node', type: 'checkbox', save: 'bool', default: true },
+      { key: 'embedding_batch_size', label: 'Notes embedded per model call during a workspace re-index (batched; 1–64)', type: 'number', save: 'int', default: 16 },
       { key: 'mobile_offline_enabled', label: 'Mobile app can edit notes offline + sync later', type: 'checkbox', save: 'bool', default: true },
       { key: 'mobile_ink_enabled', label: 'Mobile app can draw freehand ink on notes', type: 'checkbox', save: 'bool', default: true },
       { key: 'mobile_offline_note_limit', label: 'Notes cached on a phone for offline use', type: 'number', save: 'int', default: 200 },

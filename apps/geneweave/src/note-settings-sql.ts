@@ -66,6 +66,8 @@ function rowToConfig(row: WeaveNotesSettingsRow | null): WeaveNotesConfig {
     mcpNotesEnabled: row.mcp_notes_enabled !== 0, // undefined (pre-m130) → on
     mcpNotesAllowWrites: row.mcp_notes_allow_writes !== 0,
     proactiveLinkingEnabled: row.proactive_linking_enabled !== 0, // undefined (pre-m131) → on
+    entityResolutionEnabled: row.entity_resolution_enabled !== 0, // undefined (pre-m132) → on
+    ...(typeof row.embedding_batch_size === 'number' ? { embeddingBatchSize: row.embedding_batch_size } : {}),
     flashcardsEnabled: row.flashcards_enabled !== 0, // undefined (pre-m110) → enabled
     ...(typeof row.daily_new_card_limit === 'number' ? { dailyNewCardLimit: row.daily_new_card_limit } : {}),
     mobileOfflineEnabled: row.mobile_offline_enabled !== 0,  // undefined (pre-m112) → enabled
@@ -135,6 +137,8 @@ export function createNoteSettingsService(db: SettingsDb, opts: { now?: () => nu
       mcp_notes_enabled: config.mcpNotesEnabled ? 1 : 0,
       mcp_notes_allow_writes: config.mcpNotesAllowWrites ? 1 : 0,
       proactive_linking_enabled: config.proactiveLinkingEnabled ? 1 : 0,
+      entity_resolution_enabled: config.entityResolutionEnabled ? 1 : 0,
+      embedding_batch_size: config.embeddingBatchSize,
       flashcards_enabled: config.flashcardsEnabled ? 1 : 0,
       daily_new_card_limit: config.dailyNewCardLimit,
       mobile_offline_enabled: config.mobileOfflineEnabled ? 1 : 0,

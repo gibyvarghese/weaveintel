@@ -73,6 +73,15 @@ export {
   linkifyFirstMention,
 } from './wiki-links.js';
 
+// weaveNotes Phase 3 — GraphRAG quality: entity resolution/disambiguation + batching.
+export {
+  type EntityMention,
+  type CanonicalEntity,
+  canonicalizeEntityName,
+  resolveEntities,
+  chunk,
+} from './entities.js';
+
 // weaveNotes Phase 6 — typed database properties, validation + rollups.
 export {
   type PropertyType,

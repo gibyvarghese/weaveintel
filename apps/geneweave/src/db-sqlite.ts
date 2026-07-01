@@ -9277,11 +9277,16 @@ export class SQLiteAdapter implements DatabaseAdapter {
   // weaveNotes Phase 5 — notes knowledge graph.
   async replaceNoteEntities(noteId: string, rows: import('./db-types/adapter-me.js').NoteEntityRow[]): Promise<void> {
     const del = this.d.prepare('DELETE FROM note_entities WHERE note_id = ?');
-    const ins = this.d.prepare('INSERT INTO note_entities (id, note_id, user_id, tenant_id, name, name_key, type, created_at) VALUES (@id,@note_id,@user_id,@tenant_id,@name,@name_key,@type,@created_at)');
-    this.d.transaction(() => { del.run(noteId); for (const r of rows) ins.run(r); })();
+    const ins = this.d.prepare('INSERT INTO note_entities (id, note_id, user_id, tenant_id, name, name_key, type, created_at, canonical_key, canonical_name) VALUES (@id,@note_id,@user_id,@tenant_id,@name,@name_key,@type,@created_at,@canonical_key,@canonical_name)');
+    this.d.transaction(() => { del.run(noteId); for (const r of rows) ins.run({ canonical_key: null, canonical_name: null, ...r }); })();
   }
   async listNoteEntities(noteId: string): Promise<import('./db-types/adapter-me.js').NoteEntityRow[]> {
     return this.d.prepare('SELECT * FROM note_entities WHERE note_id = ? ORDER BY created_at ASC').all(noteId) as import('./db-types/adapter-me.js').NoteEntityRow[];
+  }
+  async listUserNoteEntities(userId: string, tenantId?: string | null): Promise<import('./db-types/adapter-me.js').NoteEntityRow[]> {
+    return (tenantId === undefined
+      ? this.d.prepare('SELECT * FROM note_entities WHERE user_id = ?').all(userId)
+      : this.d.prepare('SELECT * FROM note_entities WHERE user_id = ? AND tenant_id IS ?').all(userId, tenantId ?? null)) as import('./db-types/adapter-me.js').NoteEntityRow[];
   }
   async replaceNoteRelations(noteId: string, rows: import('./db-types/adapter-me.js').NoteRelationRow[]): Promise<void> {
     const del = this.d.prepare('DELETE FROM note_relations WHERE note_id = ?');

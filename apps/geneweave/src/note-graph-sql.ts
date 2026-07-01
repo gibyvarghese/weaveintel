@@ -21,7 +21,7 @@
  * owner-scoped + tenant-isolated.
  */
 import { BlockDoc, pmToBlocks, blocksToMarkdown } from '@weaveintel/coedit';
-import { parseWikiLinks, findUnlinkedMentions, titleKey, extractPlainText, buildLinkSuggestions, linkifyFirstMention, type Note, type LinkSuggestion } from '@weaveintel/notes';
+import { parseWikiLinks, findUnlinkedMentions, titleKey, extractPlainText, buildLinkSuggestions, linkifyFirstMention, canonicalizeEntityName, resolveEntities, chunk, type Note, type LinkSuggestion } from '@weaveintel/notes';
 import { extractKnowledgeGraph } from '@weaveintel/extraction';
 import { cosineSimilarity } from '@weaveintel/cache';
 import { newUUIDv7, weaveContext } from '@weaveintel/core';
@@ -76,6 +76,25 @@ export function createNoteGraphService(db: NoteGraphDb, opts: { generate?: NoteA
     } catch { return null; }
   }
 
+  /**
+   * Phase 3 — embed MANY texts in ONE model call (fixes the N+1 embedding cost). Returns a vector per
+   * input, aligned by index; any that fail come back as null. Empty/whitespace inputs → null (no call).
+   */
+  async function embedMany(texts: string[], access: NoteAccess): Promise<Array<number[] | null>> {
+    const model = getActiveGuardrailEmbeddingModel();
+    if (!model) return texts.map(() => null);
+    const idx: number[] = []; const inputs: string[] = [];
+    texts.forEach((t, i) => { if (t && t.trim()) { idx.push(i); inputs.push(t.slice(0, 4000)); } });
+    const out: Array<number[] | null> = texts.map(() => null);
+    if (!inputs.length) return out;
+    try {
+      const ctx = weaveContext({ userId: access.ownerId, tenantId: access.tenantId ?? undefined });
+      const res = await model.embed(ctx, { input: inputs });
+      idx.forEach((originalIndex, j) => { const v = res.embeddings[j]; if (Array.isArray(v)) out[originalIndex] = [...v]; });
+    } catch { /* whole batch failed → all null (caller can fall back) */ }
+    return out;
+  }
+
   return {
     /**
      * (Re)index a note into the knowledge graph: resolve its `[[wiki-links]]` to note
@@ -106,7 +125,14 @@ export function createNoteGraphService(db: NoteGraphDb, opts: { generate?: NoteA
       if (opts.generate && input.extractGraph !== false) {
         const g = await extractKnowledgeGraph(text, (o) => opts.generate!({ ...o, userId: input.access.ownerId, tenantId: input.access.tenantId }));
         const ts = now();
-        const entRows: NoteEntityRow[] = g.entities.map((e) => ({ id: newUUIDv7(), note_id: input.noteId, user_id: input.access.ownerId, tenant_id: input.access.tenantId, name: e.name, name_key: e.name.toLowerCase(), type: e.type, created_at: ts }));
+        // Phase 3 — resolve spelling variants WITHIN this note so each stored entity carries a stable
+        // canonical key + best display name (the graph then groups + connects notes by canonical key).
+        const resolved = resolveEntities(g.entities.map((e) => ({ name: e.name, type: e.type })));
+        const canonNameByKey = new Map(resolved.map((r) => [r.key, r.name]));
+        const entRows: NoteEntityRow[] = g.entities.map((e) => {
+          const canonical_key = canonicalizeEntityName(e.name);
+          return { id: newUUIDv7(), note_id: input.noteId, user_id: input.access.ownerId, tenant_id: input.access.tenantId, name: e.name, name_key: e.name.toLowerCase(), type: e.type, created_at: ts, canonical_key, canonical_name: canonNameByKey.get(canonical_key) ?? e.name };
+        });
         const relRows: NoteRelationRow[] = g.relations.map((r) => ({ id: newUUIDv7(), note_id: input.noteId, user_id: input.access.ownerId, tenant_id: input.access.tenantId, subject: r.subject, predicate: r.predicate, object: r.object, created_at: ts }));
         await db.replaceNoteEntities(input.noteId, entRows);
         await db.replaceNoteRelations(input.noteId, relRows);
@@ -257,6 +283,71 @@ export function createNoteGraphService(db: NoteGraphDb, opts: { generate?: NoteA
     },
 
     /**
+     * Phase 3 — GraphRAG BATCHED re-index of the whole workspace: (re)embed every note whose content
+     * changed since last time, in ONE model call per batch (not one per note), and optionally refresh
+     * the entity graph (canonical keys) for each note. Owner-scoped; safe to run repeatedly.
+     */
+    async reindexWorkspace(access: NoteAccess, params: { batchSize?: number; extractGraph?: boolean } = {}): Promise<{ notes: number; embedded: number; batches: number; entities: number }> {
+      const all = await db.listNotes(access.ownerId) as Note[];
+      const notes = all.filter((n) => !n.is_template);
+      const toEmbed: Array<{ id: string; title: string; text: string; hash: string }> = [];
+      for (const listed of notes) {
+        // listNotes() omits doc_json for performance — fetch the full note so noteText() has content.
+        const n = await db.getNote(listed.id, access.ownerId) as Note | null;
+        if (!n) continue;
+        const { text } = noteText(n, access.ownerId);
+        if (!text.trim()) continue;
+        const hash = hashOf(`${n.title}\n${text}`);
+        const prior = await db.getNoteEmbedding(n.id, access.tenantId ?? null);
+        if (!prior || prior.content_hash !== hash) toEmbed.push({ id: n.id, title: n.title, text, hash });
+      }
+      let embedded = 0, batches = 0;
+      const size = Math.max(1, Math.min(64, params.batchSize ?? 16));
+      for (const group of chunk(toEmbed, size)) {
+        batches++;
+        const vecs = await embedMany(group.map((g) => `${g.title}\n${g.text}`), access);
+        for (let i = 0; i < group.length; i++) {
+          const vec = vecs[i]; const g = group[i]!;
+          if (!vec) continue;
+          await db.upsertNoteEmbedding({ note_id: g.id, user_id: access.ownerId, tenant_id: access.tenantId ?? null, dim: vec.length, embedding_json: JSON.stringify(vec), content_hash: g.hash, title: g.title, updated_at: now() });
+          embedded++;
+        }
+      }
+      let entities = 0;
+      if (params.extractGraph && opts.generate) {
+        for (const n of notes) { try { entities += (await this.indexNote({ noteId: n.id, access })).entities; } catch { /* best-effort per note */ } }
+      }
+      return { notes: notes.length, embedded, batches, entities };
+    },
+
+    /**
+     * Phase 3 — GraphRAG retrieval: notes that share a CANONICAL entity with this one (connected
+     * through the same person/org/concept even if worded differently), ranked by how many they share.
+     */
+    async relatedByEntities(noteId: string, access: NoteAccess, topK = 5): Promise<Array<{ noteId: string; title: string; shared: number; via: string[] }>> {
+      const mine = await db.listNoteEntities(noteId);
+      const myKeys = new Map<string, string>();
+      for (const e of mine) { const ck = (e.canonical_key && e.canonical_key.trim()) || e.name_key; if (ck) myKeys.set(ck, (e.canonical_name && e.canonical_name.trim()) || e.name); }
+      if (!myKeys.size) return [];
+      const all = await db.listUserNoteEntities(access.ownerId, access.tenantId ?? null);
+      const byNote = new Map<string, Set<string>>();
+      for (const e of all) {
+        const ck = (e.canonical_key && e.canonical_key.trim()) || e.name_key;
+        if (e.note_id === noteId || !myKeys.has(ck)) continue;
+        const set = byNote.get(e.note_id) ?? new Set<string>();
+        set.add(ck); byNote.set(e.note_id, set);
+      }
+      const out: Array<{ noteId: string; title: string; shared: number; via: string[] }> = [];
+      for (const [nid, keys] of byNote) {
+        const n = await db.getNote(nid, access.ownerId) as Note | null;
+        if (!n) continue;
+        out.push({ noteId: nid, title: n.title, shared: keys.size, via: [...keys].map((k) => myKeys.get(k)!).slice(0, 5) });
+      }
+      out.sort((a, b) => b.shared - a.shared || a.title.localeCompare(b.title));
+      return out.slice(0, topK);
+    },
+
+    /**
      * The local knowledge graph around a note: nodes = this note + linked notes +
      * extracted entities; edges = links_to / mentions / typed relations. For the UI.
      */
@@ -284,12 +375,39 @@ export function createNoteGraphService(db: NoteGraphDb, opts: { generate?: NoteA
         nodes.set(sid, { id: sid, label: s.title, kind: 'note' });
         edges.push({ source: sid, target: noteNodeId, label: 'links to' });
       }
-      // Entities mentioned by this note + their typed relations.
+      // Entities mentioned by this note + their typed relations. Phase 3: group by the CANONICAL key
+      // (so "OpenAI"/"OpenAI, Inc." are one node) and CONNECT other notes that mention the same entity.
       const entities = await db.listNoteEntities(noteId);
+      const myCanon = new Map<string, string>(); // canonical key → display label
       for (const e of entities) {
-        const eid = `entity:${e.name_key}`;
-        nodes.set(eid, { id: eid, label: e.name, kind: 'entity', type: e.type });
+        const ck = (e.canonical_key && e.canonical_key.trim()) || e.name_key;
+        const label = (e.canonical_name && e.canonical_name.trim()) || e.name;
+        const eid = `entity:${ck}`;
+        if (!nodes.has(eid)) nodes.set(eid, { id: eid, label, kind: 'entity', type: e.type });
         edges.push({ source: noteNodeId, target: eid, label: 'mentions' });
+        myCanon.set(ck, label);
+      }
+      // Cross-note connectivity (the GraphRAG payoff): for each entity this note mentions, surface a few
+      // OTHER notes that mention the SAME canonical entity, as note→entity edges. Tenant-scoped.
+      if (myCanon.size) {
+        const all = await db.listUserNoteEntities(access.ownerId, access.tenantId ?? null);
+        const perEntity = new Map<string, Set<string>>();
+        for (const e of all) {
+          const ck = (e.canonical_key && e.canonical_key.trim()) || e.name_key;
+          if (e.note_id === noteId || !myCanon.has(ck)) continue;
+          const set = perEntity.get(ck) ?? new Set<string>();
+          if (set.size < 4) set.add(e.note_id); // cap fan-out per entity so the graph stays readable
+          perEntity.set(ck, set);
+        }
+        for (const [ck, noteIds] of perEntity) {
+          for (const otherId of noteIds) {
+            const other = await db.getNote(otherId, access.ownerId) as Note | null;
+            if (!other) continue;
+            const oid = `note:${other.id}`;
+            if (!nodes.has(oid)) nodes.set(oid, { id: oid, label: other.title, kind: 'note' });
+            edges.push({ source: oid, target: `entity:${ck}`, label: 'mentions' });
+          }
+        }
       }
       for (const r of await db.listNoteRelations(noteId)) {
         const sid = `entity:${r.subject.toLowerCase()}`, oid = `entity:${r.object.toLowerCase()}`;

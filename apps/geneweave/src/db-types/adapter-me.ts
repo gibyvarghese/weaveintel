@@ -345,6 +345,10 @@ export interface NoteEntityRow {
   name_key: string;
   type: string;
   created_at: number;
+  /** weaveNotes Phase 3 (m132): disambiguation key that folds spelling variants into one entity. */
+  canonical_key?: string | null;
+  /** weaveNotes Phase 3 (m132): the best display name for the canonical entity. */
+  canonical_name?: string | null;
 }
 export interface NoteRelationRow {
   id: string;
@@ -469,6 +473,9 @@ export interface WeaveNotesSettingsRow {
   mcp_notes_allow_writes?: number;
   /** weaveNotes Phase 3: proactive link suggestions as you write (m131). Optional for old DBs. */
   proactive_linking_enabled?: number;
+  /** weaveNotes Phase 3: entity disambiguation + batched embeddings (m132). Optional for old DBs. */
+  entity_resolution_enabled?: number;
+  embedding_batch_size?: number;
   local_model_for_sensitive: number;
   /** weaveNotes Phase 3: show live collaborator cursors (0/1). */
   live_cursors_enabled: number;
@@ -703,6 +710,8 @@ export interface IMeStore {
   // weaveNotes Phase 5 — notes knowledge graph (entities / relations / embeddings)
   replaceNoteEntities(noteId: string, rows: NoteEntityRow[]): Promise<void>;
   listNoteEntities(noteId: string): Promise<NoteEntityRow[]>;
+  // weaveNotes Phase 3 (m132) — all of a user's entities (for cross-note graph / shared-entity retrieval). tenant_id null-safe.
+  listUserNoteEntities(userId: string, tenantId?: string | null): Promise<NoteEntityRow[]>;
   replaceNoteRelations(noteId: string, rows: NoteRelationRow[]): Promise<void>;
   listNoteRelations(noteId: string): Promise<NoteRelationRow[]>;
   upsertNoteEmbedding(row: NoteEmbeddingRow): Promise<void>;

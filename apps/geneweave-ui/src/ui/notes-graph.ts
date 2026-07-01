@@ -33,6 +33,8 @@ interface Unlinked { noteId: string; title: string; count: number }
 interface Related { noteId: string; title: string; score: number }
 interface GraphNode { id: string; label: string; kind: 'note' | 'entity'; type?: string }
 interface GraphEdge { source: string; target: string; label: string }
+// weaveNotes Phase 3 (GraphRAG) — a note connected to this one through a shared canonical entity.
+interface EntityRelated { noteId: string; title: string; shared: number; via: string[] }
 // weaveNotes Phase 3 — proactive linking.
 interface LinkSuggestion { targetId: string; targetTitle: string; kind: 'mention' | 'related'; reason: string; weight: number }
 
@@ -119,11 +121,12 @@ export function wireNoteConnections(opts: { noteId: string; panelEl: HTMLElement
   async function refresh(): Promise<void> {
     panelEl.innerHTML = '';
     panelEl.appendChild(h('div', { className: 'notes-conn-loading' }, 'Loading connections…'));
-    const [backlinks, unlinkedRes, relatedRes, suggestRes, graph] = await Promise.all([
+    const [backlinks, unlinkedRes, relatedRes, suggestRes, entityRes, graph] = await Promise.all([
       get<{ backlinks: Backlink[] }>('backlinks', { backlinks: [] }),
       get<{ unlinked: Unlinked[] }>('unlinked', { unlinked: [] }),
       get<{ related: Related[] }>('related', { related: [] }),
       get<{ suggestions: LinkSuggestion[]; disabled?: boolean }>('link-suggestions', { suggestions: [] }),
+      get<{ related: EntityRelated[] }>('entity-related', { related: [] }),
       get<{ nodes: GraphNode[]; edges: GraphEdge[] }>('graph', { nodes: [], edges: [] }),
     ]);
     panelEl.innerHTML = '';
@@ -131,6 +134,7 @@ export function wireNoteConnections(opts: { noteId: string; panelEl: HTMLElement
     panelEl.appendChild(h('div', { className: 'notes-conn-header' },
       h('span', { className: 'notes-conn-heading' }, '🔗 Connections'),
       h('button', { className: 'notes-conn-index-btn', title: 'Re-index this note (links + entities + related)', onClick: () => void index() }, '↻ Index'),
+      h('button', { className: 'notes-conn-index-btn', title: 'Rebuild the whole knowledge graph (batched embeddings + entity resolution across all your notes)', onClick: () => void rebuild() }, '🕸 Rebuild'),
     ));
 
     // weaveNotes Phase 3 — proactive link suggestions, first (what to do next), with one-click apply.
@@ -156,6 +160,12 @@ export function wireNoteConnections(opts: { noteId: string; panelEl: HTMLElement
         ? h('div', { className: 'notes-conn-list' }, ...relatedRes.related.map((r) => noteChip(r.noteId, r.title, `· ${(r.score * 100).toFixed(0)}%`)))
         : h('div', { className: 'notes-conn-empty' }, 'No related notes yet — try Index.')));
 
+    // Phase 3 (GraphRAG) — notes connected THROUGH a shared entity (same person/org/concept).
+    panelEl.appendChild(section(`Connected through (${entityRes.related.length})`,
+      entityRes.related.length
+        ? h('div', { className: 'notes-conn-list' }, ...entityRes.related.map((r) => noteChip(r.noteId, r.title, `· via ${r.via.slice(0, 2).join(', ')}${r.shared > 2 ? ' …' : ''}`)))
+        : h('div', { className: 'notes-conn-empty' }, 'No shared entities yet — try Rebuild.')));
+
     panelEl.appendChild(section('Knowledge graph', renderGraph(graph)));
   }
 
@@ -163,6 +173,15 @@ export function wireNoteConnections(opts: { noteId: string; panelEl: HTMLElement
     panelEl.innerHTML = '';
     panelEl.appendChild(h('div', { className: 'notes-conn-loading' }, 'Indexing — resolving links, extracting entities, embedding…'));
     try { await api.post(`/api/me/notes/${noteId}/index`, {}); } catch { /* show whatever we can */ }
+    await refresh();
+  }
+
+  // Phase 3 (GraphRAG) — rebuild the WHOLE knowledge graph: batched embeddings + entity resolution
+  // across every note, so notes connect through the same people/orgs/concepts even when worded apart.
+  async function rebuild(): Promise<void> {
+    panelEl.innerHTML = '';
+    panelEl.appendChild(h('div', { className: 'notes-conn-loading' }, 'Rebuilding the knowledge graph — batched embeddings + entity resolution across your notes…'));
+    try { await api.post('/api/me/notes/reindex', { extractGraph: true }); } catch { /* show whatever we can */ }
     await refresh();
   }
 

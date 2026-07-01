@@ -1351,6 +1351,30 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     res.end(JSON.stringify(await noteGraph.graph(params['id']!, access)));
   }, { auth: true });
 
+  // weaveNotes Phase 3 (GraphRAG) — notes CONNECTED to this one through a shared canonical entity
+  // (the same person/org/concept, even if worded differently). Owner-scoped.
+  router.get('/api/me/notes/:id/entity-related', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    const topK = safePageInt(new URL(req.url ?? '/', 'http://x').searchParams.get('limit'), 5, 1, 20);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ related: await noteGraph.relatedByEntities(params['id']!, access, topK) }));
+  }, { auth: true });
+
+  // weaveNotes Phase 3 (GraphRAG) — BATCHED workspace re-index: (re)embed changed notes in one call
+  // per batch (anti-N+1) and optionally refresh the entity graph. Body: { extractGraph?: boolean }.
+  router.post('/api/me/notes/reindex', async (req, res, _params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const cfg = await noteSettings.getConfig();
+    let body: { extractGraph?: unknown } = {};
+    try { body = JSON.parse(await readBody(req)) as { extractGraph?: unknown }; } catch { /* empty */ }
+    const access = { noteId: '', ownerId: auth.userId, tenantId: auth.tenantId ?? null, role: 'owner' as const };
+    const result = await noteGraph.reindexWorkspace(access, { batchSize: cfg.embeddingBatchSize, extractGraph: body.extractGraph === true });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
+  }, { auth: true });
+
   // weaveNotes Phase 3: PROACTIVE link suggestions — notes this one already refers to (by name or by
   // meaning) that aren't linked yet. Surfaced live as you write; gated by the Builder dial.
   router.get('/api/me/notes/:id/link-suggestions', async (req, res, params, auth) => {
