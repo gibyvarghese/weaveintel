@@ -90,11 +90,11 @@ describe('account service — profile & preferences', () => {
     // A payload laced with C0 control chars (NUL, BEL, ESC) plus a newline, padded past the cap.
     const payload = `Head${String.fromCharCode(0)}${String.fromCharCode(7)}\n${String.fromCharCode(27)}line` + 'A'.repeat(500);
     const r = await svc.updateProfile('u1', { role_title: payload });
-    const stored = r.applied['role_title'];
+    const stored = String(r.applied['role_title'] ?? '');
     expect(/[\u0000-\u001F\u007F-\u009F]/.test(stored)).toBe(false); // no control chars survive
     expect(stored.length).toBeLessThanOrEqual(120); // role_title cap
     const about = await svc.updateProfile('u1', { about: 'B'.repeat(5000) });
-    expect((about.applied['about']).length).toBeLessThanOrEqual(600);
+    expect(String(about.applied['about'] ?? '').length).toBeLessThanOrEqual(600);
   });
 });
 
