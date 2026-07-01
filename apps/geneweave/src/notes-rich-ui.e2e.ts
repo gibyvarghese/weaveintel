@@ -104,6 +104,29 @@ test('Notes toolbar — the 1/2/3 column layout control applies to the editor bo
   expect(cc).toBe('2');
 });
 
+test('Notes assistant — floats as a pop-up panel that collapses to a bubble and back', async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const { H } = await login(page, 'notes-asst@weaveintel.dev');
+  await page.request.post('/api/me/notes', { headers: H, data: { title: 'Asst note', doc_json: JSON.stringify({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'hi' }] }] }) } });
+  await goNotes(page);
+  await page.locator('.gw-tree-row', { hasText: 'Asst note' }).first().click();
+  await page.waitForTimeout(500);
+
+  // No persistent right column — the shell is 2-col and the assistant is a floating panel.
+  await expect(page.locator('.gw-shell-2col')).toHaveCount(1);
+  await expect(page.locator('.gw-assistant-panel')).toBeVisible();
+
+  // Minimize → collapses to the floating bubble.
+  await page.locator('.gw-assistant-min').click();
+  await expect(page.locator('.gw-assistant-panel')).toHaveCount(0);
+  await expect(page.locator('.gw-assistant-bubble')).toBeVisible();
+
+  // Clicking the bubble reopens the panel.
+  await page.locator('.gw-assistant-bubble').click();
+  await expect(page.locator('.gw-assistant-panel')).toBeVisible();
+});
+
 test('Notes rail — sub-notes render as an expandable notebook folder tree', async ({ page }) => {
   test.setTimeout(60_000);
   await page.setViewportSize({ width: 1440, height: 900 });

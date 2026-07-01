@@ -1127,6 +1127,21 @@ input{font-family:inherit;outline:none}
 /* ════════════════ geneWeave Notes — 3-column design shell (design handoff) ════════════════ */
 .gw-notes{height:100%}
 .gw-shell{display:grid;grid-template-columns:248px minmax(0,1fr) 300px;height:100%;overflow:hidden;background:var(--canvas)}
+/* 2-column shell: notebooks rail + canvas; the assistant floats over the canvas (bottom-right) */
+.gw-shell-2col{grid-template-columns:248px minmax(0,1fr);position:relative}
+/* floating assistant dock */
+.gw-assistant-dock{position:absolute;right:26px;bottom:26px;z-index:45}
+.gw-assistant-bubble{width:60px;height:60px;border-radius:50%;background:var(--surface);border:1px solid var(--mint-deep);box-shadow:0 10px 30px rgba(20,32,27,.18);cursor:pointer;display:flex;align-items:center;justify-content:center;position:relative;animation:gw-bubble-pulse 3.4s ease-in-out infinite}
+.gw-assistant-bubble-mark{display:inline-flex}
+.gw-assistant-bubble-dot{position:absolute;top:6px;right:6px;width:11px;height:11px;border-radius:50%;background:var(--accent);border:2px solid var(--surface)}
+@keyframes gw-bubble-pulse{0%,100%{box-shadow:0 10px 30px rgba(20,32,27,.18)}50%{box-shadow:0 10px 30px rgba(20,32,27,.18),0 0 0 8px rgba(14,154,110,.08)}}
+.gw-assistant-panel{width:352px;height:580px;max-height:calc(100vh - 52px);background:var(--surface);border:1px solid var(--hairline);border-radius:20px;box-shadow:0 18px 50px rgba(20,32,27,.22);display:flex;flex-direction:column;overflow:hidden;position:relative}
+.gw-assistant-panel .gw-rail{border-left:none;border-radius:20px;height:100%;background:transparent}
+.gw-assistant-min{position:absolute;top:12px;right:12px;z-index:5;width:30px;height:30px;border-radius:8px;border:none;background:transparent;color:var(--fg3);cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+.gw-assistant-min:hover{background:var(--bg3);color:var(--fg2)}
+@media(prefers-reduced-motion:reduce){.gw-assistant-bubble{animation:none}}
+/* on phones the panel fills most of the screen */
+@media(max-width:899.98px){.gw-assistant-dock{right:16px;bottom:16px}.gw-assistant-panel{width:calc(100vw - 32px);max-width:352px;height:min(70vh,560px)}}
 .gw-scroll::-webkit-scrollbar{width:10px}
 .gw-scroll::-webkit-scrollbar-thumb{background:var(--bg4);border-radius:999px;border:3px solid transparent;background-clip:padding-box}
 /* — full-bleed: Notes takes the whole viewport (its rail is the primary nav) — */
@@ -1405,7 +1420,9 @@ input{font-family:inherit;outline:none}
 /* AI-authored blocks (Phase 3 AI block, suggestions) — mint frame + byline, per the design */
 .gw-canvas .notes-ai-block,.gw-canvas .notes-suggestion{border:1.5px solid var(--mint-border);border-radius:16px;background:var(--mint-wash);overflow:hidden}
 .gw-canvas .notes-ai-block-byline,.gw-canvas .notes-suggestion-byline{display:flex;align-items:center;gap:7px;padding:10px 16px;border-bottom:1px solid var(--mint-deep);font-size:12px;font-weight:600;color:var(--accent2)}
-@media(max-width:1100px){.gw-shell{grid-template-columns:248px minmax(0,1fr)}.gw-rail{display:none}}
+/* legacy 3-column shell only: drop the right column on narrow screens. The 2-col shell floats the assistant,
+   so its .gw-rail (inside the panel) must NOT be hidden here. */
+@media(max-width:1100px){.gw-shell:not(.gw-shell-2col){grid-template-columns:248px minmax(0,1fr)}.gw-shell:not(.gw-shell-2col) .gw-rail{display:none}}
 /* Mobile/tablet: the notebooks rail becomes a slide-over DRAWER (opened by the topbar toggle) instead of
    stacking above the canvas, so the editor stays the full-width hero. Backdrop tap closes it. */
 .gw-rail-toggle{display:none;width:32px;height:32px;flex:none;border-radius:9px;border:1px solid var(--hairline);background:var(--surface);color:var(--fg2);cursor:pointer;align-items:center;justify-content:center}

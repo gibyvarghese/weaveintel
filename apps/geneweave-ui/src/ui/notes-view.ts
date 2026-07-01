@@ -444,6 +444,9 @@ function buildInsertMenu(render: () => void): OverflowItem[] {
 
 /** The right-rail Assistant tab (module-local so it survives editor re-renders). */
 let _railTab: 'assistant' | 'outline' | 'links' = 'assistant';
+// The Assistant is a FLOATING dock (design): a pulsing bubble bottom-right when collapsed, expanding to a
+// pop-up panel. Starts open the first time a note is viewed this session, then remembers the user's choice.
+let _assistantOpen = true;
 
 function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLElement; rail: HTMLElement } {
   const isFav = note.favorite === 1;
@@ -848,19 +851,44 @@ export function renderNotesView(render: () => void): HTMLElement {
     },
   });
 
+  // The Assistant is a FLOATING dock (design), not a persistent column: a pulsing bubble bottom-right that
+  // expands to a rounded pop-up panel holding the rail (Assistant / Outline / Links + composer).
+  const assistant = renderFloatingAssistant(rightRail, render);
+
   // weaveNotes Phase 8 (desktop): an offline banner when the list/note came from the local cache.
   const offline = (state as { notesOffline?: boolean }).notesOffline === true;
   return h('div', { className: 'gw-notes notes-full-view' },
     offline ? h('div', { className: 'gw-notes-offline', title: 'Showing your locally cached notes' },
       '✈︎ Offline — showing your cached notes. Changes will sync when you reconnect.') : null,
-    h('div', { className: 'gw-shell' },
-      leftRail, centre, rightRail,
+    // 2-column shell (notebooks rail + canvas); the assistant floats over the canvas bottom-right.
+    h('div', { className: `gw-shell gw-shell-2col${_assistantOpen ? ' assistant-open' : ''}` },
+      leftRail, centre, assistant,
       // Backdrop for the mobile rail drawer — tap to close (CSS-hidden ≥900px).
       h('div', { className: 'gw-notes-backdrop', 'aria-hidden': 'true', onClick: (e: Event) => {
         (e.currentTarget as HTMLElement).closest('.gw-shell')?.classList.remove('rail-open');
       } }),
     ),
   );
+}
+
+/**
+ * The floating Assistant dock (design): a pulsing woven-mark BUBBLE bottom-right when collapsed; clicking
+ * it expands to a rounded pop-up PANEL that holds the rail (Assistant/Outline/Links + ask composer). A
+ * minimize control collapses it back to the bubble.
+ */
+function renderFloatingAssistant(rail: HTMLElement, render: () => void): HTMLElement {
+  if (!_assistantOpen) {
+    return h('div', { className: 'gw-assistant-dock' },
+      h('button', { className: 'gw-assistant-bubble', title: 'Open the assistant',
+        onClick: () => { _assistantOpen = true; render(); } },
+        h('span', { className: 'gw-assistant-bubble-mark', innerHTML: wovenMarkSvg(32, 'duo') }),
+        h('span', { className: 'gw-assistant-bubble-dot' })));
+  }
+  return h('div', { className: 'gw-assistant-dock' },
+    h('div', { className: 'gw-assistant-panel' },
+      h('button', { className: 'gw-assistant-min', title: 'Minimize assistant', onClick: () => { _assistantOpen = false; render(); },
+        innerHTML: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>' }),
+      rail));
 }
 
 /** A calm right rail shown when no note is open (matches the design's empty Assistant). */
