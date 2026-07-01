@@ -336,6 +336,26 @@ export interface NoteSuggestionRow {
 
 // ── weaveNotes Phase 5 — notes knowledge graph (m102) ─────────────────────────
 
+/** weaveNotes Phase 4 (m133) — one captured meeting/recording: transcript + structured note. */
+export interface NoteMeetingRow {
+  id: string;
+  note_id: string;
+  user_id: string;
+  tenant_id: string | null;
+  title: string;
+  source: string;
+  language: string | null;
+  duration_sec: number;
+  segments_json: string;
+  summary: string | null;
+  action_items_json: string;
+  decisions_json: string;
+  cited: number;
+  cite_total: number;
+  audio_retained: number;
+  created_at: string;
+}
+
 export interface NoteEntityRow {
   id: string;
   note_id: string;
@@ -476,6 +496,12 @@ export interface WeaveNotesSettingsRow {
   /** weaveNotes Phase 3: entity disambiguation + batched embeddings (m132). Optional for old DBs. */
   entity_resolution_enabled?: number;
   embedding_batch_size?: number;
+  /** weaveNotes Phase 4: voice / meeting capture (m133). Optional for old DBs. */
+  voice_capture_enabled?: number;
+  store_audio?: number;
+  transcription_language?: string;
+  transcription_model?: string;
+  max_recording_seconds?: number;
   local_model_for_sensitive: number;
   /** weaveNotes Phase 3: show live collaborator cursors (0/1). */
   live_cursors_enabled: number;
@@ -712,6 +738,10 @@ export interface IMeStore {
   listNoteEntities(noteId: string): Promise<NoteEntityRow[]>;
   // weaveNotes Phase 3 (m132) — all of a user's entities (for cross-note graph / shared-entity retrieval). tenant_id null-safe.
   listUserNoteEntities(userId: string, tenantId?: string | null): Promise<NoteEntityRow[]>;
+  // weaveNotes Phase 4 (m133) — captured meetings (transcript + structured note). Owner-scoped.
+  createNoteMeeting(row: NoteMeetingRow): Promise<void>;
+  getNoteMeetingByNote(noteId: string, userId: string): Promise<NoteMeetingRow | null>;
+  listUserNoteMeetings(userId: string, tenantId?: string | null): Promise<NoteMeetingRow[]>;
   replaceNoteRelations(noteId: string, rows: NoteRelationRow[]): Promise<void>;
   listNoteRelations(noteId: string): Promise<NoteRelationRow[]>;
   upsertNoteEmbedding(row: NoteEmbeddingRow): Promise<void>;

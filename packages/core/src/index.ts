@@ -273,6 +273,8 @@ export {
   type ImageModel,
   type SpeechRequest,
   type TranscriptionRequest,
+  type TranscriptSegment,
+  type TranscriptionResult,
   type AudioModel,
 } from './models.js';
 

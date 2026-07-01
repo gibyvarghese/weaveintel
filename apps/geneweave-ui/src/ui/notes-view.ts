@@ -33,6 +33,7 @@ import { renderStudyView } from './notes-study.js';
 import { renderTranslateCard } from './notes-translate.js';
 import { renderGovernanceCard } from './notes-governance.js';
 import { renderScheduledAgentsPanel } from './notes-scheduled-agents.js';
+import { renderMeetingRecorder, wireMeetingTranscript } from './notes-meeting.js';
 import { renderMcpPanel } from './notes-mcp.js';
 import { renderCapturePanel } from './notes-capture.js';
 import { saveNotesSnapshot, cacheNote, offlineNotes, offlineNote, setLastNoteId, getLastNoteId } from './notes-offline.js';
@@ -55,6 +56,8 @@ let _activeCursors: LiveCursors | null = null;
 let _activeConn: NoteConnectionsPanel | null = null;
 /** The live proactive-linking bar for the currently-open note (Phase 3). */
 let _activeProactive: ProactiveLinksBar | null = null;
+/** Clickable transcript-citation wiring for a meeting note (Phase 4). */
+let _activeMeeting: { destroy: () => void } | null = null;
 /** Phase 8 panels: version history, comments, synced blocks. */
 let _activeHistory: SimplePanel | null = null;
 let _activeComments: SimplePanel | null = null;
@@ -66,6 +69,7 @@ function teardownCoedit(): void {
   if (_activeCursors) { _activeCursors.destroy(); _activeCursors = null; }
   if (_activeConn) { _activeConn.close(); _activeConn = null; }
   if (_activeProactive) { _activeProactive.destroy(); _activeProactive = null; }
+  if (_activeMeeting) { _activeMeeting.destroy(); _activeMeeting = null; }
   if (_activeHistory) { _activeHistory.close(); _activeHistory = null; }
   if (_activeComments) { _activeComments.close(); _activeComments = null; }
   if (_activeSynced) { _activeSynced.close(); _activeSynced = null; }
@@ -383,6 +387,9 @@ function buildInsertMenu(render: () => void): OverflowItem[] {
     { label: '📝 New note', title: 'Create a blank note', onClick: async () => { const n = await createNote(); if (n) { state.notesItems = [n as NoteListItem, ...(state.notesItems as NoteListItem[])]; await openNote(n.id); } } },
     { label: '⚡ Quick capture', title: 'Jot a quick note (⌘/Ctrl+Shift+K)', onClick: () => { openQuickCaptureModal((id) => { void openNote(id); }); } },
     { label: '⊞ New from template', title: 'Start from a template', onClick: async () => { await loadNoteTemplates(); state.notesView = 'templates'; render(); } },
+    { label: '🎙 Record meeting', title: 'Record → transcribe → a structured note with clickable transcript citations', onClick: () => {
+        openCenterModal('Record a meeting', renderMeetingRecorder((id) => { void loadNotesList().then(() => openNote(id)); }));
+      } },
     { label: '🌐 Capture a web page', title: 'Clip a public page into a note', onClick: async () => {
         const url = prompt('Paste a public web page URL to clip into a note:'); if (!url) return;
         const res = await api.post('/api/me/notes/capture/web', { url }).catch(() => null);
@@ -668,6 +675,8 @@ function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLEle
     // Phase 3: wire the LIVE proactive-linking bar (debounced; shows as you pause typing).
     _activeProactive = wireProactiveLinks({ noteId: note.id, barEl: proactiveBar, onApplied: () => { void loadNote(note.id).then(render); } });
     void _activeProactive.refresh();
+    // Phase 4: for a MEETING note, make the ⟦m:ss⟧ citation markers click-to-jump the transcript.
+    _activeMeeting = wireMeetingTranscript({ noteId: note.id, editorContainer });
     // Phase 8: wire the version-history, comments, and synced-blocks panels (hidden until opened).
     _activeHistory = wireNoteHistory({ noteId: note.id, panelEl: historyPanel, onRestored: () => { void loadNote(note.id).then(render); } });
     _activeComments = wireNoteComments({ noteId: note.id, panelEl: commentsPanel });

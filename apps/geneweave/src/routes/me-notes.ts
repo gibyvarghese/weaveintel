@@ -78,6 +78,7 @@ import { createNotePublishService, type PublishFormat } from '../note-publish-sq
 import { createNoteGraphService } from '../note-graph-sql.js';
 import { createNoteDbService } from '../note-db-sql.js';
 import { createNoteCaptureService } from '../note-capture-sql.js';
+import { createNoteMeetingService, type MeetingTranscribe } from '../note-meeting-sql.js';
 import { createNoteSettingsService } from '../note-settings-sql.js';
 import { createNoteWorkspaceService } from '../note-workspace-sql.js';
 import { createNoteVersionService } from '../note-version-sql.js';
@@ -118,6 +119,8 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
   aiGenerate?: NoteAiGenerate;
   imageGenerate?: import('../note-creative-sql.js').NoteImageGenerate;
   verifyVision?: import('../note-creative-sql.js').NoteVisionVerify;
+  /** weaveNotes Phase 4: detailed speech-to-text (segmented transcript) for voice/meeting capture. */
+  transcribe?: MeetingTranscribe;
   jwtSecret?: string;
   publicBaseUrl?: string;
   /** weaveNotes: run a note action THROUGH the geneWeave SUPERVISOR (which delegates to the
@@ -156,6 +159,11 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
   const noteDb = createNoteDbService(db, opts.aiGenerate ? { generate: opts.aiGenerate } : {});
   // weaveNotes Phase 7: the capture service (run→note, web clip, email→note, daily jot).
   const noteCapture = createNoteCaptureService(db);
+  // weaveNotes Phase 4: voice / meeting capture (transcribe → structured note with anchored citations).
+  const noteMeeting = createNoteMeetingService(db, {
+    ...(opts.transcribe ? { transcribe: opts.transcribe } : {}),
+    ...(opts.aiGenerate ? { generate: opts.aiGenerate } : {}),
+  });
   // weaveNotes Phase 0: settings + activity (record what happens to a note so the AI knows).
   const noteSettings = createNoteSettingsService(db);
   // weaveNotes Phase 8: workspace RAG (cited search over notes+runs), version history,
@@ -1582,6 +1590,89 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     if (typeof body['text'] !== 'string' || !body['text'].trim()) { res.writeHead(400); res.end(JSON.stringify({ error: 'text required' })); return; }
     const result = await noteCapture.jot({ text: body['text'], userId: auth.userId, tenantId: auth.tenantId ?? null });
     res.writeHead(result.ok ? 201 : (result.code ?? 400), { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
+  }, { auth: true });
+
+  // ── weaveNotes Phase 4: voice / meeting capture ─────────────────────────────
+  //   POST /api/me/notes/meeting/transcribe   audio (raw audio/* body or base64 JSON) → timestamped transcript
+  //   POST /api/me/notes/meeting              { segments, title?, source? }          → structured, cited note
+  //   POST /api/me/notes/meeting/summarize    { transcript, title? }                 → structured note from pasted text
+  //   GET  /api/me/notes/:id/meeting                                                 → stored transcript for the UI
+  const MEETING_MAX_AUDIO_BYTES = 25 * 1024 * 1024; // 25 MB (Whisper upload limit)
+  const readRawAudio = async (req: import('node:http').IncomingMessage): Promise<{ audio: Buffer; mimeType?: string }> => {
+    const ct = String(req.headers['content-type'] ?? '');
+    if (ct.includes('audio/') || ct.includes('application/octet-stream') || ct.includes('video/webm')) {
+      const chunks: Buffer[] = []; let total = 0;
+      await new Promise<void>((resolve, reject) => {
+        req.on('data', (c: Buffer) => { total += c.length; if (total > MEETING_MAX_AUDIO_BYTES) { reject(new Error('too large')); req.destroy(); return; } chunks.push(c); });
+        req.on('end', () => resolve());
+        req.on('error', reject);
+      });
+      return { audio: Buffer.concat(chunks), mimeType: ct.split(';')[0]?.trim() };
+    }
+    // base64 JSON fallback: { audio, mimeType }
+    let body: { audio?: string; mimeType?: string } = {};
+    try { body = JSON.parse(await readBody(req, { maxBytes: MEETING_MAX_AUDIO_BYTES * 2 })) as typeof body; } catch { /* empty */ }
+    return { audio: body.audio ? Buffer.from(body.audio, 'base64') : Buffer.alloc(0), ...(body.mimeType ? { mimeType: body.mimeType } : {}) };
+  };
+
+  router.post('/api/me/notes/meeting/transcribe', async (req, res, _params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const cfg = await noteSettings.getConfig();
+    if (!cfg.voiceCaptureEnabled) { res.writeHead(403); res.end(JSON.stringify({ error: 'Voice capture is disabled' })); return; }
+    let audio: Buffer, mimeType: string | undefined;
+    try { ({ audio, mimeType } = await readRawAudio(req)); } catch { res.writeHead(413); res.end(JSON.stringify({ error: 'Audio exceeds the size limit' })); return; }
+    const result = await noteMeeting.transcribe({
+      userId: auth.userId, tenantId: auth.tenantId ?? null, audio,
+      ...(mimeType ? { mimeType } : {}),
+      ...(cfg.transcriptionLanguage ? { language: cfg.transcriptionLanguage } : {}),
+      ...(cfg.transcriptionModel ? { model: cfg.transcriptionModel } : {}),
+    });
+    res.writeHead(result.ok ? 200 : (result.code ?? 400), { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
+  }, { auth: true });
+
+  router.post('/api/me/notes/meeting', async (req, res, _params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const cfg = await noteSettings.getConfig();
+    if (!cfg.voiceCaptureEnabled) { res.writeHead(403); res.end(JSON.stringify({ error: 'Voice capture is disabled' })); return; }
+    let body: { segments?: unknown; title?: unknown; source?: unknown; language?: unknown; durationSec?: unknown } = {};
+    try { body = JSON.parse(await readBody(req)) as typeof body; } catch { /* empty */ }
+    const segments = Array.isArray(body.segments) ? body.segments as import('@weaveintel/notes').TranscriptSegment[] : [];
+    if (!segments.length) { res.writeHead(400); res.end(JSON.stringify({ error: 'segments required' })); return; }
+    const result = await noteMeeting.createMeetingNote({
+      userId: auth.userId, tenantId: auth.tenantId ?? null, segments,
+      ...(typeof body.title === 'string' ? { title: body.title } : {}),
+      ...(typeof body.source === 'string' ? { source: body.source } : {}),
+      ...(typeof body.language === 'string' ? { language: body.language } : {}),
+      ...(typeof body.durationSec === 'number' ? { durationSec: body.durationSec } : {}),
+      sourceLabel: 'Meeting notes',
+      audioRetained: cfg.storeAudio,
+    });
+    if (result.ok) void noteSettings.recordActivity({ noteId: result.noteId!, userId: auth.userId, tenantId: auth.tenantId ?? null, action: 'created', actor: 'ai', summary: `Captured meeting “${result.title}”` });
+    res.writeHead(result.ok ? 201 : (result.code ?? 400), { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
+  }, { auth: true });
+
+  router.post('/api/me/notes/meeting/summarize', async (req, res, _params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const cfg = await noteSettings.getConfig();
+    if (!cfg.voiceCaptureEnabled) { res.writeHead(403); res.end(JSON.stringify({ error: 'Voice capture is disabled' })); return; }
+    let body: { transcript?: unknown; title?: unknown } = {};
+    try { body = JSON.parse(await readBody(req)) as typeof body; } catch { /* empty */ }
+    if (typeof body.transcript !== 'string' || !body.transcript.trim()) { res.writeHead(400); res.end(JSON.stringify({ error: 'transcript required' })); return; }
+    const result = await noteMeeting.agentSummarizeMeeting({ userId: auth.userId, tenantId: auth.tenantId ?? null, transcript: body.transcript, ...(typeof body.title === 'string' ? { title: body.title } : {}) });
+    res.writeHead(result.ok ? 201 : 400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(result));
+  }, { auth: true });
+
+  router.get('/api/me/notes/:id/meeting', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveNoteAccess(db, params['id']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    const result = await noteMeeting.getMeeting(params['id']!, auth.userId);
+    if (!result.ok) { res.writeHead(404); res.end(JSON.stringify({ error: 'No meeting for this note' })); return; }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(result));
   }, { auth: true });
 

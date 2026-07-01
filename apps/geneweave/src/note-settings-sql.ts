@@ -68,6 +68,11 @@ function rowToConfig(row: WeaveNotesSettingsRow | null): WeaveNotesConfig {
     proactiveLinkingEnabled: row.proactive_linking_enabled !== 0, // undefined (pre-m131) → on
     entityResolutionEnabled: row.entity_resolution_enabled !== 0, // undefined (pre-m132) → on
     ...(typeof row.embedding_batch_size === 'number' ? { embeddingBatchSize: row.embedding_batch_size } : {}),
+    voiceCaptureEnabled: row.voice_capture_enabled !== 0, // undefined (pre-m133) → on
+    storeAudio: row.store_audio === 1, // default OFF (privacy)
+    ...(typeof row.transcription_language === 'string' ? { transcriptionLanguage: row.transcription_language } : {}),
+    ...(typeof row.transcription_model === 'string' && row.transcription_model ? { transcriptionModel: row.transcription_model } : {}),
+    ...(typeof row.max_recording_seconds === 'number' ? { maxRecordingSeconds: row.max_recording_seconds } : {}),
     flashcardsEnabled: row.flashcards_enabled !== 0, // undefined (pre-m110) → enabled
     ...(typeof row.daily_new_card_limit === 'number' ? { dailyNewCardLimit: row.daily_new_card_limit } : {}),
     mobileOfflineEnabled: row.mobile_offline_enabled !== 0,  // undefined (pre-m112) → enabled
@@ -139,6 +144,11 @@ export function createNoteSettingsService(db: SettingsDb, opts: { now?: () => nu
       proactive_linking_enabled: config.proactiveLinkingEnabled ? 1 : 0,
       entity_resolution_enabled: config.entityResolutionEnabled ? 1 : 0,
       embedding_batch_size: config.embeddingBatchSize,
+      voice_capture_enabled: config.voiceCaptureEnabled ? 1 : 0,
+      store_audio: config.storeAudio ? 1 : 0,
+      transcription_language: config.transcriptionLanguage,
+      transcription_model: config.transcriptionModel,
+      max_recording_seconds: config.maxRecordingSeconds,
       flashcards_enabled: config.flashcardsEnabled ? 1 : 0,
       daily_new_card_limit: config.dailyNewCardLimit,
       mobile_offline_enabled: config.mobileOfflineEnabled ? 1 : 0,

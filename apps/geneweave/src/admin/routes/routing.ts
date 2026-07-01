@@ -505,6 +505,11 @@ export function registerAdminRoutingRoutes(
     if (body['proactive_linking_enabled'] !== undefined) partial['proactiveLinkingEnabled'] = body['proactive_linking_enabled'];
     if (body['entity_resolution_enabled'] !== undefined) partial['entityResolutionEnabled'] = body['entity_resolution_enabled'];
     if (body['embedding_batch_size'] !== undefined) partial['embeddingBatchSize'] = body['embedding_batch_size'];
+    if (body['voice_capture_enabled'] !== undefined) partial['voiceCaptureEnabled'] = body['voice_capture_enabled'];
+    if (body['store_audio'] !== undefined) partial['storeAudio'] = body['store_audio'];
+    if (body['transcription_language'] !== undefined) partial['transcriptionLanguage'] = body['transcription_language'];
+    if (body['transcription_model'] !== undefined) partial['transcriptionModel'] = body['transcription_model'];
+    if (body['max_recording_seconds'] !== undefined) partial['maxRecordingSeconds'] = body['max_recording_seconds'];
     if (body['mobile_offline_enabled'] !== undefined) partial['mobileOfflineEnabled'] = body['mobile_offline_enabled'];
     if (body['mobile_ink_enabled'] !== undefined) partial['mobileInkEnabled'] = body['mobile_ink_enabled'];
     if (body['mobile_offline_note_limit'] !== undefined) partial['mobileOfflineNoteLimit'] = body['mobile_offline_note_limit'];

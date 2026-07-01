@@ -65,6 +65,7 @@ import { createNotePublishService } from './note-publish-sql.js';
 import { createNoteGraphService } from './note-graph-sql.js';
 import { createNoteDbService } from './note-db-sql.js';
 import { createNoteCaptureService } from './note-capture-sql.js';
+import { createNoteMeetingService } from './note-meeting-sql.js';
 import { createNoteWorkspaceService } from './note-workspace-sql.js';
 import { createNoteSettingsService } from './note-settings-sql.js';
 import {
@@ -429,6 +430,12 @@ export class ChatEngine {
       // weaveNotes Phase 5: wire the `find_related_notes` tool (semantic note search).
       notesSearch: (a: { userId: string; tenantId?: string | null; query: string; limit?: number }) =>
         createNoteGraphService(db).searchNotes({ userId: a.userId, tenantId: a.tenantId ?? null }, a.query, a.limit ?? 5),
+      // weaveNotes Phase 4: wire the `summarize_meeting` tool — pasted transcript → structured note.
+      notesSummarizeMeeting: async (a: { userId: string; tenantId?: string | null; transcript: string; title?: string }) => {
+        const cfg = await createNoteSettingsService(db).getConfig();
+        if (!cfg.voiceCaptureEnabled) return { ok: false, error: 'Voice capture is disabled' };
+        return createNoteMeetingService(db, { generate: createModelTextGenerator(config) }).agentSummarizeMeeting(a);
+      },
       // weaveNotes Phase 3: wire the `suggest_links` tool (proactive linking) — gated by the Builder dial.
       notesLinkSuggest: async (a: { userId: string; tenantId?: string | null; noteId: string; apply?: string; max?: number }) => {
         const cfg = await createNoteSettingsService(db).getConfig();

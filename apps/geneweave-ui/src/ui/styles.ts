@@ -1020,6 +1020,25 @@ input{font-family:inherit;outline:none}
 .notes-suggest-link-btn{margin-left:auto;font-size:11px;padding:2px 8px;border-radius:7px;border:1px solid #9FD8BE;background:#fff;color:#0B7A57;cursor:pointer;font-weight:600}
 .notes-suggest-link-btn:hover{background:#E8F5EE}
 .notes-suggest-link-btn:disabled{opacity:.6;cursor:default}
+/* weaveNotes Phase 4 — meeting / voice capture */
+.notes-meeting-panel{display:flex;flex-direction:column;gap:12px;min-width:440px;max-width:560px}
+.notes-meeting-intro{font-size:13px;line-height:1.5;color:var(--fg2);margin:0}
+.notes-meeting-controls{display:flex;align-items:center;gap:12px}
+.notes-meeting-record{font-size:14px;font-weight:700;padding:9px 18px;border-radius:999px;border:1px solid #E4B4AE;background:#fff;color:#C0392B;cursor:pointer}
+.notes-meeting-record:hover{background:#FBEFEA}
+.notes-meeting-record.recording{background:#C0392B;color:#fff;border-color:#C0392B;animation:notes-meeting-pulse 1.2s ease-in-out infinite}
+.notes-meeting-record:disabled{opacity:.6;cursor:default}
+@keyframes notes-meeting-pulse{0%,100%{box-shadow:0 0 0 0 rgba(192,57,43,.4)}50%{box-shadow:0 0 0 6px rgba(192,57,43,0)}}
+.notes-meeting-timer{font-variant-numeric:tabular-nums;font-size:15px;color:var(--fg1);min-width:44px}
+.notes-meeting-secondary{font-size:12px;padding:6px 12px;border-radius:8px;border:1px solid var(--bg4);background:var(--bg2);color:var(--fg1);cursor:pointer}
+.notes-meeting-secondary:hover{background:var(--bg3)}
+.notes-meeting-status{font-size:12px;min-height:16px;color:var(--fg2)}
+.notes-meeting-status.busy{color:#0B7A57}
+.notes-meeting-status.ok{color:#0B7A57;font-weight:600}
+.notes-meeting-status.err{color:#C0392B}
+.notes-meeting-paste-wrap{display:flex;flex-direction:column;gap:6px;border-top:1px solid var(--bg4);padding-top:10px}
+.notes-meeting-paste{width:100%;box-sizing:border-box;font-size:13px;padding:8px;border-radius:8px;border:1px solid var(--bg4);background:var(--bg1);color:var(--fg1);resize:vertical}
+.notes-meeting-flash{background:#FEF6D8 !important;border-radius:6px;transition:background .4s ease}
 .notes-ws-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
 .notes-ws-title{font-size:12px;font-weight:600;color:var(--fg1)}
 .notes-ws-action{padding:3px 10px;border:none;border-radius:6px;background:var(--accent);color:#fff;font-size:11px;cursor:pointer;white-space:nowrap}

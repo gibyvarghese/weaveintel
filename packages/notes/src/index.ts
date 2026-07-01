@@ -82,6 +82,24 @@ export {
   chunk,
 } from './entities.js';
 
+// weaveNotes Phase 4 — meeting / voice capture: transcript → structured note + anchored citations.
+export {
+  type TranscriptSegment,
+  type TranscriptCitation,
+  type MeetingActionItem,
+  type MeetingHighlight,
+  type MeetingStructured,
+  formatTimestamp,
+  formatTranscript,
+  transcriptDuration,
+  locateInTranscript,
+  buildMeetingPrompt,
+  parseMeetingReply,
+  verifyMeetingCitations,
+  citationCoverage,
+  buildMeetingNoteMarkdown,
+} from './meeting.js';
+
 // weaveNotes Phase 6 — typed database properties, validation + rollups.
 export {
   type PropertyType,

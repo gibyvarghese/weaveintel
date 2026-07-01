@@ -1000,6 +1000,12 @@ export interface ToolRegistryOptions {
    */
   notesLinkSuggest?: (args: { userId: string; tenantId?: string | null; noteId: string; apply?: string; max?: number }) => Promise<{ suggestions?: Array<{ targetId: string; targetTitle: string; kind: string; reason: string }>; applied?: { ok: boolean; linked?: boolean; error?: string } }>;
   /**
+   * weaveNotes Phase 4: meeting capture. When set, the `summarize_meeting` tool turns a pasted
+   * meeting/call TRANSCRIPT into a structured note (summary + decisions + action items, each backed by
+   * a transcript quote). Owner-scoped.
+   */
+  notesSummarizeMeeting?: (args: { userId: string; tenantId?: string | null; transcript: string; title?: string }) => Promise<{ ok: boolean; error?: string; noteId?: string; title?: string; summary?: string; actionItems?: number }>;
+  /**
    * weaveNotes Phase 6: database column auto-fill. When set, the `autofill_database` tool is
    * available so the agent can fill a column of one of the user's note databases from each
    * row's context (the page + workspace + optionally the web), with citations. Owner-scoped.
@@ -2013,6 +2019,28 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
         tags: ['notes', 'memory'],
       }),
     } : {}),
+    // weaveNotes Phase 4: meeting capture — available when notesSummarizeMeeting callback is set.
+    ...(opts?.notesSummarizeMeeting && opts.currentUserId ? {
+      summarize_meeting: weaveTool({
+        name: 'summarize_meeting',
+        description: 'Turn a meeting or call TRANSCRIPT into a structured note: a short summary, the decisions made, and action items (as to-do checkboxes) — where every point is backed by a quote from the transcript. Use when the user pastes a transcript or asks to "summarise this meeting/call", "pull the action items out of this", or "make meeting notes from this". Creates a NEW note and returns its id.',
+        parameters: {
+          type: 'object',
+          properties: {
+            transcript: { type: 'string', description: 'The raw meeting/call transcript text to summarise.' },
+            title: { type: 'string', description: 'Optional title for the note.' },
+          },
+          required: ['transcript'],
+        },
+        execute: async (args: { transcript: string; title?: string }) => {
+          if (!opts.notesSummarizeMeeting || !opts.currentUserId) return { content: 'Meeting summarisation is unavailable in this context.', isError: true };
+          const r = await opts.notesSummarizeMeeting({ userId: opts.currentUserId, tenantId: opts.currentTenantId ?? null, transcript: args.transcript, ...(args.title ? { title: args.title } : {}) });
+          if (!r.ok) return { content: r.error ?? 'Could not summarise the meeting.', isError: true };
+          return JSON.stringify({ created: true, noteId: r.noteId, title: r.title, summary: r.summary, actionItems: r.actionItems });
+        },
+        tags: ['notes', 'meeting', 'output'],
+      }),
+    } : {}),
     // weaveNotes Phase 3.1: create-note tool — available when createNote callback is set.
     ...(opts?.createNote && opts.currentUserId ? {
       create_note: weaveTool({
@@ -2297,7 +2325,7 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
   // fall back to emit_artifact). Skip any already registered from the selection above.
   for (const noteTool of [
     'create_note', 'new_from_template', 'recent_notes', 'export_note', 'note_edit', 'note_publish', 'restructure_note',
-    'find_related_notes', 'suggest_links', 'autofill_database', 'capture_web_page', 'workspace_search', 'read_note_activity',
+    'find_related_notes', 'suggest_links', 'autofill_database', 'capture_web_page', 'summarize_meeting', 'workspace_search', 'read_note_activity',
     // weaveNotes Phase 2/4/5: the CREATIVE + study tools — so the assistant can draw a diagram, sketch
     // ink, colour-code, or make flashcards from a plain chat ("draw a diagram of this"), not only via
     // the selection card. Each is built only when its callback is wired + gated by per-call config.

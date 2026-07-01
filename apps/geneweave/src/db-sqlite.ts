@@ -9288,6 +9288,21 @@ export class SQLiteAdapter implements DatabaseAdapter {
       ? this.d.prepare('SELECT * FROM note_entities WHERE user_id = ?').all(userId)
       : this.d.prepare('SELECT * FROM note_entities WHERE user_id = ? AND tenant_id IS ?').all(userId, tenantId ?? null)) as import('./db-types/adapter-me.js').NoteEntityRow[];
   }
+  // weaveNotes Phase 4 (m133) — captured meetings.
+  async createNoteMeeting(row: import('./db-types/adapter-me.js').NoteMeetingRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO note_meetings (id, note_id, user_id, tenant_id, title, source, language, duration_sec, segments_json, summary, action_items_json, decisions_json, cited, cite_total, audio_retained, created_at)
+       VALUES (@id,@note_id,@user_id,@tenant_id,@title,@source,@language,@duration_sec,@segments_json,@summary,@action_items_json,@decisions_json,@cited,@cite_total,@audio_retained,@created_at)`,
+    ).run(row);
+  }
+  async getNoteMeetingByNote(noteId: string, userId: string): Promise<import('./db-types/adapter-me.js').NoteMeetingRow | null> {
+    return (this.d.prepare('SELECT * FROM note_meetings WHERE note_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT 1').get(noteId, userId) ?? null) as import('./db-types/adapter-me.js').NoteMeetingRow | null;
+  }
+  async listUserNoteMeetings(userId: string, tenantId?: string | null): Promise<import('./db-types/adapter-me.js').NoteMeetingRow[]> {
+    return (tenantId === undefined
+      ? this.d.prepare('SELECT * FROM note_meetings WHERE user_id = ? ORDER BY created_at DESC').all(userId)
+      : this.d.prepare('SELECT * FROM note_meetings WHERE user_id = ? AND tenant_id IS ? ORDER BY created_at DESC').all(userId, tenantId ?? null)) as import('./db-types/adapter-me.js').NoteMeetingRow[];
+  }
   async replaceNoteRelations(noteId: string, rows: import('./db-types/adapter-me.js').NoteRelationRow[]): Promise<void> {
     const del = this.d.prepare('DELETE FROM note_relations WHERE note_id = ?');
     const ins = this.d.prepare('INSERT INTO note_relations (id, note_id, user_id, tenant_id, subject, predicate, object, created_at) VALUES (@id,@note_id,@user_id,@tenant_id,@subject,@predicate,@object,@created_at)');

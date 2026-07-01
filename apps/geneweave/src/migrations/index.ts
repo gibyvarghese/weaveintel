@@ -112,6 +112,7 @@ import { applyM129ScheduledAgents } from './m129-scheduled-agents.js';
 import { applyM130McpNotes } from './m130-mcp-notes.js';
 import { applyM131ProactiveLinking } from './m131-proactive-linking.js';
 import { applyM132GraphQuality } from './m132-graph-quality.js';
+import { applyM133VoiceMeeting } from './m133-voice-meeting.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -232,6 +233,7 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm130-mcp-notes', description: 'weaveNotes Phase 3: MCP server for the note vault. Adds user_mcp_tokens (per-user bearer tokens, hashed, read|readwrite scope, revocable) so an external agent (Claude/ChatGPT/Cursor) can search/read/create/append the user’s notes over the Model Context Protocol — every call owner-scoped from the validated token, never a tool argument. Plus weavenotes_settings.mcp_notes_enabled + mcp_notes_allow_writes Builder dials. Idempotent', run: applyM130McpNotes },
   { id: 'm131-proactive-linking', description: 'weaveNotes Phase 3: proactive linking. Adds weavenotes_settings.proactive_linking_enabled (default ON) — the editor suggests connections as you write (notes you mentioned by name, plus semantically-related notes) and turns each into a one-click [[wiki-link]] (lossless; the backlink appears automatically). Idempotent', run: applyM131ProactiveLinking },
   { id: 'm132-graph-quality', description: 'weaveNotes Phase 3: knowledge-graph quality (GraphRAG-style). Adds note_entities.canonical_key + canonical_name (+ an index) so entity DISAMBIGUATION groups every spelling of a thing ("OpenAI"/"OpenAI, Inc."/"WHO"↔"World Health Organization") as ONE graph node and connects the notes that mention it. Plus weavenotes_settings.entity_resolution_enabled (default ON) and embedding_batch_size (default 16) for BATCHED workspace re-index embeddings (fixes the N+1 embed cost). Idempotent', run: applyM132GraphQuality },
+  { id: 'm133-voice-meeting', description: 'weaveNotes Phase 4: voice / meeting capture. Adds note_meetings (one row per recording: timestamped transcript segments, structured summary/decisions/action-items, citation-coverage counts, duration, source, audio-retained flag; owner-scoped, tenant-isolated) + weavenotes_settings dials (voice_capture_enabled on; store_audio OFF for privacy; transcription_language auto; transcription_model whisper-1; max_recording_seconds 3600) + the summarize_meeting tool in tool_catalog granted to the weaveNotes Editor agent. Record → transcribe → structured note where every point links to the moment it was said. Idempotent', run: applyM133VoiceMeeting },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

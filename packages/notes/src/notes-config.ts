@@ -106,6 +106,16 @@ export interface WeaveNotesConfig {
   entityResolutionEnabled: boolean;
   /** Phase 3: how many notes to embed in one model call during a workspace re-index (batched; anti-N+1). */
   embeddingBatchSize: number;
+  /** Phase 4: record a meeting/voice memo → transcribe → structured note with transcript-anchored citations. */
+  voiceCaptureEnabled: boolean;
+  /** Phase 4: keep the raw audio after transcribing (default OFF — the transcript is stored, audio is discarded). */
+  storeAudio: boolean;
+  /** Phase 4: force a transcription language (ISO code), or '' to auto-detect. */
+  transcriptionLanguage: string;
+  /** Phase 4: the speech-to-text model (e.g. 'whisper-1'). */
+  transcriptionModel: string;
+  /** Phase 4: hard cap on a single recording's length, in seconds (anti-abuse / cost). */
+  maxRecordingSeconds: number;
   /** Phase 7: let the mobile app work OFFLINE — edit notes with no signal and sync when back online. */
   mobileOfflineEnabled: boolean;
   /** Phase 7: let people DRAW freehand ink on a phone/tablet (synced to the web note untouched). */
@@ -200,6 +210,11 @@ export const DEFAULT_WEAVENOTES_CONFIG: WeaveNotesConfig = {
   proactiveLinkingEnabled: true,
   entityResolutionEnabled: true,
   embeddingBatchSize: 16,
+  voiceCaptureEnabled: true,
+  storeAudio: false,
+  transcriptionLanguage: '',
+  transcriptionModel: 'whisper-1',
+  maxRecordingSeconds: 3600,
   mobileOfflineEnabled: true,
   mobileInkEnabled: true,
   mobileOfflineNoteLimit: 200,
@@ -340,6 +355,11 @@ export function validateWeaveNotesConfig(
       proactiveLinkingEnabled: asBool(p.proactiveLinkingEnabled ?? base.proactiveLinkingEnabled, base.proactiveLinkingEnabled),
       entityResolutionEnabled: asBool(p.entityResolutionEnabled ?? base.entityResolutionEnabled, base.entityResolutionEnabled),
       embeddingBatchSize: clampInt(p.embeddingBatchSize ?? base.embeddingBatchSize, 1, 64, base.embeddingBatchSize),
+      voiceCaptureEnabled: asBool(p.voiceCaptureEnabled ?? base.voiceCaptureEnabled, base.voiceCaptureEnabled),
+      storeAudio: asBool(p.storeAudio ?? base.storeAudio, base.storeAudio),
+      transcriptionLanguage: typeof p.transcriptionLanguage === 'string' ? p.transcriptionLanguage.trim().slice(0, 8) : base.transcriptionLanguage,
+      transcriptionModel: typeof p.transcriptionModel === 'string' && p.transcriptionModel.trim() ? p.transcriptionModel.trim().slice(0, 64) : base.transcriptionModel,
+      maxRecordingSeconds: clampInt(p.maxRecordingSeconds ?? base.maxRecordingSeconds, 30, 21600, base.maxRecordingSeconds),
       flashcardsEnabled: asBool(p.flashcardsEnabled ?? base.flashcardsEnabled, base.flashcardsEnabled),
       dailyNewCardLimit: clampInt(p.dailyNewCardLimit ?? base.dailyNewCardLimit, 1, 1000, base.dailyNewCardLimit),
       mobileOfflineEnabled: asBool(p.mobileOfflineEnabled ?? base.mobileOfflineEnabled, base.mobileOfflineEnabled),

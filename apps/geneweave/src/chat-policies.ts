@@ -185,6 +185,7 @@ const TOOL_POLICIES: Record<ChatMode, string[]> = {
     'note_publish', // weaveNotes Phase 4: the agent can publish a note as an artifact
     'find_related_notes', // weaveNotes Phase 5: semantic note search/knowledge-graph nav
     'suggest_links', // weaveNotes Phase 3: proactive linking — list/apply [[wiki-link]] suggestions
+    'summarize_meeting', // weaveNotes Phase 4: transcript → structured meeting note
     'autofill_database', // weaveNotes Phase 6: AI table column auto-fill
     'capture_web_page', // weaveNotes Phase 7: clip a web page into a structured note
     'workspace_search', // weaveNotes Phase 8: cited RAG over the user notes + runs
@@ -206,6 +207,7 @@ const TOOL_POLICIES: Record<ChatMode, string[]> = {
     'note_publish', // weaveNotes Phase 4: publish a note as an artifact
     'find_related_notes', // weaveNotes Phase 5: semantic note search
     'suggest_links', // weaveNotes Phase 3: proactive linking — list/apply [[wiki-link]] suggestions
+    'summarize_meeting', // weaveNotes Phase 4: transcript → structured meeting note
     'autofill_database', // weaveNotes Phase 6: AI table column auto-fill
     'capture_web_page', // weaveNotes Phase 7: clip a web page into a structured note
     'workspace_search', // weaveNotes Phase 8: cited RAG over the user notes + runs
@@ -222,6 +224,7 @@ const TOOL_POLICIES: Record<ChatMode, string[]> = {
     'note_publish', // weaveNotes Phase 4: publish a note as an artifact
     'find_related_notes', // weaveNotes Phase 5: semantic note search
     'suggest_links', // weaveNotes Phase 3: proactive linking — list/apply [[wiki-link]] suggestions
+    'summarize_meeting', // weaveNotes Phase 4: transcript → structured meeting note
     'autofill_database', // weaveNotes Phase 6: AI table column auto-fill
     'capture_web_page', // weaveNotes Phase 7: clip a web page into a structured note
     'workspace_search', // weaveNotes Phase 8: cited RAG over the user notes + runs

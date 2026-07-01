@@ -292,6 +292,8 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     aiGenerate: createModelTextGenerator(chatEngine.modelConfig),
     imageGenerate: createModelImageGenerator(chatEngine.modelConfig),
     verifyVision: createModelVisionVerifier(chatEngine.modelConfig),
+    // weaveNotes Phase 4: detailed (segmented) speech-to-text via the voice engine's audio model.
+    ...(voiceEngine ? { transcribe: (a: { audio: Buffer; mimeType?: string; language?: string; model?: string }) => voiceEngine.transcribeDetailed(a) } : {}),
     jwtSecret,
     ...(publicBaseUrl ? { publicBaseUrl } : {}),
     // Run a note action through the geneWeave SUPERVISOR, which DELEGATES to the weaveNotes Editor

@@ -292,6 +292,30 @@ export interface TranscriptionRequest {
   readonly audio: Buffer | Uint8Array;
   readonly language?: string;
   readonly prompt?: string;
+  /** Optional model override (e.g. 'whisper-1', 'gpt-4o-transcribe'). Provider default when omitted. */
+  readonly model?: string;
+  /** MIME type / container hint for the audio bytes (e.g. 'audio/webm', 'audio/wav', 'audio/mp3'). */
+  readonly mimeType?: string;
+  /** Request timestamped segments (verbose transcription). Used by `transcribeDetailed`. */
+  readonly segments?: boolean;
+}
+
+/** One timestamped chunk of a transcript (seconds from the start of the audio). */
+export interface TranscriptSegment {
+  readonly start: number;
+  readonly end: number;
+  readonly text: string;
+  /** Optional speaker label when diarization is available. */
+  readonly speaker?: string;
+}
+
+/** A rich transcription result: the full text plus timestamped segments + metadata. */
+export interface TranscriptionResult {
+  readonly text: string;
+  readonly language?: string;
+  /** Total audio duration in seconds, when the provider reports it. */
+  readonly duration?: number;
+  readonly segments: TranscriptSegment[];
 }
 
 export interface AudioModel extends HasCapabilities {
@@ -304,4 +328,10 @@ export interface AudioModel extends HasCapabilities {
    */
   speakStream?(ctx: ExecutionContext, request: SpeechRequest): AsyncIterable<Buffer>;
   transcribe?(ctx: ExecutionContext, request: TranscriptionRequest): Promise<string>;
+  /**
+   * Rich transcription: returns the text PLUS timestamped segments (and language/duration when
+   * available). Enables transcript-anchored features (meeting notes with clickable citations).
+   * Optional — callers should fall back to `transcribe()` (text-only) when a provider lacks it.
+   */
+  transcribeDetailed?(ctx: ExecutionContext, request: TranscriptionRequest): Promise<TranscriptionResult>;
 }
