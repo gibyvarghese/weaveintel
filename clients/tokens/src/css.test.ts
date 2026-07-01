@@ -4,7 +4,7 @@
  * stylesheet (light/dark/creative + breakpoints + legacy aliases), and injection-safety of values.
  */
 import { describe, it, expect } from 'vitest';
-import { toCssVariables, themeCss, breakpoints, mediaUp, mediaBelow } from './index.js';
+import { toCssVariables, themeCss, tenantThemeVars, tenantThemeCss, breakpoints, mediaUp, mediaBelow } from './index.js';
 import { themes } from './theme.js';
 
 describe('toCssVariables', () => {
@@ -54,6 +54,50 @@ describe('injection safety', () => {
     expect(v['--gw-color-accent']).not.toContain(';');
     expect(v['--gw-color-accent']).not.toContain('{');
     expect(v['--gw-color-accent']).not.toContain('}');
+  });
+});
+
+describe('tenantThemeVars (per-tenant white-label)', () => {
+  it('emits only the CHANGED --gw-* vars for a valid brand override (font + corner)', () => {
+    // Non-colour overrides never affect contrast, so they always apply in both light + dark.
+    const v = tenantThemeVars({ typography: { families: { display: 'Georgia' } }, radii: { md: 4 } });
+    expect(v.degraded).toBe(false);
+    expect(v.light['--gw-font-display']).toContain('Georgia');
+    expect(v.light['--gw-radius-md']).toBe('4px');
+    expect(v.dark['--gw-radius-md']).toBe('4px');
+    expect(v.light['--gw-color-background']).toBeUndefined(); // unchanged tokens not emitted
+  });
+  it('applies a brand accent PER-THEME — branded where accessible, base where not', () => {
+    // A mid-tone brand blue reads fine on the light canvas but is too dark on the near-black dark
+    // surface (accent-as-text fails AA there). The resolver applies the brand to LIGHT and falls the
+    // DARK theme back to its accessible default, flagging `degraded` so the admin can be told.
+    const v = tenantThemeVars({ colors: { accentStrong: '#1D4ED8', onAccent: '#FFFFFF' } });
+    expect(v.light['--gw-color-accent-strong']).toBe('#1D4ED8'); // branded in light
+    expect(v.dark['--gw-color-accent-strong']).toBeUndefined();  // fell back in dark (accessible)
+    expect(v.degraded).toBe(true);                                // at least one theme fell back
+  });
+  it('DROPS an override that fails WCAG-AA in EITHER theme (accessibility can never be re-branded away)', () => {
+    // White on near-white for the on-accent pair fails in both light and dark.
+    const v = tenantThemeVars({ colors: { accentStrong: '#FEFEFE', onAccent: '#FFFFFF' } });
+    expect(v.degraded).toBe(true);
+    expect(Object.keys(v.light)).toHaveLength(0);
+    expect(Object.keys(v.dark)).toHaveLength(0);
+  });
+  it('allows a failing override when contrast enforcement is off (live preview mode)', () => {
+    const v = tenantThemeVars({ colors: { accentStrong: '#FEFEFE', onAccent: '#FFFFFF' } }, { enforceContrast: false });
+    expect(v.light['--gw-color-accent-strong']).toBe('#FEFEFE');
+  });
+});
+
+describe('tenantThemeCss (server-inject, no-FOUC)', () => {
+  it('wraps the changed vars in :root for a valid override', () => {
+    const css = tenantThemeCss({ colors: { accentStrong: '#1D4ED8', onAccent: '#FFFFFF' } });
+    expect(css).toContain(':root {');
+    expect(css).toMatch(/--gw-color-accent-strong:\s*#1D4ED8/);
+  });
+  it('emits nothing for a fully-degraded override', () => {
+    const css = tenantThemeCss({ colors: { accentStrong: '#FEFEFE', onAccent: '#FFFFFF' } });
+    expect(css).not.toContain('--gw-color-accent-strong');
   });
 });
 

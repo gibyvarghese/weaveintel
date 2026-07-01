@@ -14,7 +14,7 @@
  * neutrals are user content. Creative mode only swaps the *page* surface to warm paper + the *title* font
  * to handwriting; it never recolours across the agency line.
  */
-import { themes, type Theme } from './theme.js';
+import { themes, applyTenantTheme, type Theme, type TenantThemeOverride } from './theme.js';
 import { breakpoints } from './breakpoints.js';
 
 /** camelCase → kebab-case (background, surfaceElevated, hlAmber → background, surface-elevated, hl-amber). */
@@ -136,5 +136,51 @@ export function themeCss(opts: ThemeCssOptions = {}): string {
     }),
     block('@media (prefers-color-scheme: dark) { :root:not([data-theme="light"])', darkVars, '    ') + '\n}',
   ];
+  return parts.join('\n\n');
+}
+
+// ─── Per-tenant appearance / white-label branding ───────────────────────────────
+
+export interface TenantThemeVars {
+  /** Changed `--gw-*` variables for the light theme (empty if the override changes nothing / was dropped). */
+  readonly light: Record<string, string>;
+  /** Changed `--gw-*` variables for the dark theme. */
+  readonly dark: Record<string, string>;
+  /** True if the override failed WCAG-AA and was DROPPED for accessibility (branding falls back to base). */
+  readonly degraded: boolean;
+}
+
+/**
+ * Resolve a tenant's brand override into ONLY the `--gw-*` variables that differ from the base — for both
+ * light and dark themes — so a client can apply them at runtime with `documentElement.style.setProperty`
+ * (CSP-safe; no `<style>` injection needed). Accessibility is enforced: an override that would fail
+ * WCAG-AA contrast is DROPPED (per {@link applyTenantTheme}) and `degraded` is set, so a tenant can never
+ * ship an inaccessible re-brand. Pure.
+ */
+export function tenantThemeVars(override: TenantThemeOverride, opts: { enforceContrast?: boolean } = {}): TenantThemeVars {
+  const changedFor = (base: Theme): { changed: Record<string, string>; degraded: boolean } => {
+    const { theme, degraded } = applyTenantTheme(base, override, { enforceContrast: opts.enforceContrast ?? true });
+    const baseVars = toCssVariables(base);
+    const themeVars = toCssVariables(theme);
+    const changed: Record<string, string> = {};
+    for (const [k, v] of Object.entries(themeVars)) if (v !== baseVars[k]) changed[k] = v;
+    return { changed, degraded };
+  };
+  const l = changedFor(themes.light);
+  const d = changedFor(themes.dark);
+  return { light: l.changed, dark: d.changed, degraded: l.degraded || d.degraded };
+}
+
+/**
+ * Server-side variant: the tenant's brand override as a CSS string (light on `:root`, dark on
+ * `[data-theme="dark"]`) suitable for injecting into an SSR shell for zero-FOUC re-branding. Only the
+ * changed vars are emitted. Accessibility-degraded exactly like {@link tenantThemeVars}.
+ */
+export function tenantThemeCss(override: TenantThemeOverride, opts: { rootSelector?: string; enforceContrast?: boolean } = {}): string {
+  const root = opts.rootSelector ?? ':root';
+  const v = tenantThemeVars(override, { ...(opts.enforceContrast !== undefined ? { enforceContrast: opts.enforceContrast } : {}) });
+  const parts: string[] = ['/* geneWeave tenant brand override — accessibility-enforced. */'];
+  if (Object.keys(v.light).length) parts.push(block(root, v.light));
+  if (Object.keys(v.dark).length) parts.push(block(`${root}[data-theme="dark"], [data-theme="dark"]`, v.dark));
   return parts.join('\n\n');
 }

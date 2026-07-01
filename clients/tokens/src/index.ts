@@ -85,11 +85,15 @@ export {
   type Breakpoints,
 } from './breakpoints.js';
 
-// Web transform — CSS custom properties (`--gw-*`) so the web app shares the native source of truth.
+// Web transform — CSS custom properties (`--gw-*`) so the web app shares the native source of truth,
+// including per-tenant brand overrides (white-label), accessibility-enforced.
 export {
   toCssVariables,
   themeCss,
+  tenantThemeVars,
+  tenantThemeCss,
   type ThemeCssOptions,
+  type TenantThemeVars,
 } from './css.js';
 
 // Assembled themes + per-tenant theming + contrast audit.
