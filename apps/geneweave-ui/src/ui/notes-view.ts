@@ -84,7 +84,9 @@ function teardownCoedit(): void {
 export async function loadNotesList(opts?: { search?: string }): Promise<void> {
   state.notesLoading = true;
   try {
-    const params = new URLSearchParams({ parent: 'null' });
+    // Fetch ALL notes (no parent filter) so the rail can render the notebook FOLDER TREE — top-level notes
+    // are notebooks and sub-notes (parent_note_id) nest underneath. (Previously this filtered to roots only.)
+    const params = new URLSearchParams({ limit: '500' });
     if (opts?.search) params.set('search', opts.search);
     if (state.notesSearch) params.set('search', state.notesSearch as string);
     const res = await api.get(`/api/me/notes?${params}`);
@@ -174,7 +176,7 @@ async function saveNoteTheme(id: string, theme: 'pro' | 'creative'): Promise<voi
   catch (e) { console.warn('[notes-view] saveNoteTheme error', e); }
 }
 
-async function createNote(template?: { id?: string; key?: string | null }): Promise<NoteListItem | null> {
+async function createNote(template?: { id?: string; key?: string | null; parentNoteId?: string }): Promise<NoteListItem | null> {
   try {
     const body: Record<string, unknown> = {};
     // Phase 6: prefer the stable template KEY (system templates); fall back to a note id.
@@ -182,6 +184,8 @@ async function createNote(template?: { id?: string; key?: string | null }): Prom
     if (template?.key) body['template_key'] = template.key;
     else if (template?.id) body['template_id'] = template.id;
     else body['title'] = 'Untitled';
+    // Notebook folders: create the note nested under a parent notebook when asked.
+    if (template?.parentNoteId) body['parent_note_id'] = template.parentNoteId;
     const res = await api.post('/api/me/notes', body);
     if (!res.ok) return null;
     return res.json() as Promise<NoteListItem>;
@@ -821,6 +825,11 @@ export function renderNotesView(render: () => void): HTMLElement {
     onTemplates: async () => { await loadNoteTemplates(); state.notesView = 'templates'; render(); },
     onArchived: async () => { await loadArchivedNotes(); state.notesView = 'archive'; render(); },
     onHome: () => { state.view = 'home'; render(); },
+    onRerender: render,
+    onNewSubNote: async (parentId: string) => {
+      const n = await createNote({ parentNoteId: parentId });
+      if (n) { await loadNotesList(); await loadNote(n.id); state.notesView = 'editor'; render(); }
+    },
   });
 
   // weaveNotes Phase 8 (desktop): an offline banner when the list/note came from the local cache.

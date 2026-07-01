@@ -1145,7 +1145,12 @@ input{font-family:inherit;outline:none}
 .gw-kbd{font-family:var(--mono);font-size:10px;color:var(--fg3);border:1px solid var(--hairline);border-radius:5px;padding:2px 5px}
 .gw-tree{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:2px}
 .gw-tree-label-row{font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--fg3);padding:8px 10px 6px}
-.gw-tree-row{display:flex;align-items:center;gap:9px;padding:7px 10px;font-size:13px;color:var(--fg2);border-radius:9px;cursor:pointer}
+.gw-tree-row{display:flex;align-items:center;gap:7px;padding:7px 10px;font-size:13px;color:var(--fg2);border-radius:9px;cursor:pointer}
+/* notebook folder tree: expand/collapse caret + nested (indented) sub-notes */
+.gw-tree-caret{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;flex:none;border:none;background:none;color:var(--fg3);cursor:pointer;padding:0;transition:transform .15s ease}
+.gw-tree-caret.open{transform:rotate(90deg)}
+.gw-tree-caret-none{visibility:hidden;cursor:default}
+.gw-tree-nest{display:flex;flex-direction:column;gap:2px;margin-left:17px;padding-left:9px;border-left:1px solid var(--hairline)}
 .gw-tree-row:hover{background:var(--bg3)}
 .gw-tree-row.active{color:var(--accent2);background:var(--mint);font-weight:500}
 .gw-tree-icon{display:inline-flex;color:var(--fg3)}
@@ -1154,6 +1159,9 @@ input{font-family:inherit;outline:none}
 .gw-tree-label{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .gw-tree-fav{border:none;background:none;color:var(--fg3);cursor:pointer;font-size:12px;opacity:0}
 .gw-tree-row:hover .gw-tree-fav,.gw-tree-fav.on{opacity:1}
+.gw-tree-add{border:none;background:none;color:var(--fg3);cursor:pointer;font-size:15px;line-height:1;opacity:0;padding:0 2px}
+.gw-tree-row:hover .gw-tree-add{opacity:1}
+.gw-tree-add:hover{color:var(--accent2)}
 .gw-tree-fav.on{color:var(--amber)}
 .gw-tree-empty,.gw-tree-loading{font-size:12px;color:var(--fg3);padding:8px 10px}
 .gw-newnote{display:flex;align-items:center;gap:9px;font-family:var(--font);font-size:13px;font-weight:600;color:var(--accent2);background:var(--surface);border:1px solid var(--mint-deep);border-radius:10px;padding:10px 12px;cursor:pointer;margin-top:8px}

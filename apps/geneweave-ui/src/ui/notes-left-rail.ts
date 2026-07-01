@@ -26,20 +26,38 @@ export interface LeftRailOpts {
   onTemplates: () => void;
   onArchived: () => void;
   onHome: () => void;
+  /** Re-render the view (used when a notebook folder is expanded/collapsed). */
+  onRerender?: () => void;
+  /** Create a new sub-note nested under the given note (turns a note into a notebook folder). */
+  onNewSubNote?: (parentId: string) => void;
 }
 
 const DOC_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 4h12l4 4v12H4z"/><path d="M8 9h6M8 13h8M8 17h5"/></svg>';
+const CHEVRON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="m9 6 6 6-6 6"/></svg>';
 
-function noteRow(note: NoteListItem, active: boolean, opts: LeftRailOpts): HTMLElement {
+// Which folders (notes that contain sub-notes) are expanded. Module-scoped so it survives re-renders;
+// a folder defaults to open the first time it's seen.
+const _expanded = new Set<string>();
+const _seenFolders = new Set<string>();
+
+function noteRow(note: NoteListItem, active: boolean, opts: LeftRailOpts, hasChildren: boolean, expanded: boolean, onToggle: () => void): HTMLElement {
   const isFav = note.favorite === 1;
   return h('div', {
     className: `gw-tree-row${active ? ' active' : ''}`,
     onClick: () => opts.onOpenNote(note.id),
   },
+    hasChildren
+      ? h('button', { className: `gw-tree-caret${expanded ? ' open' : ''}`, title: expanded ? 'Collapse' : 'Expand',
+          onClick: (e: Event) => { e.stopPropagation(); onToggle(); }, innerHTML: CHEVRON })
+      : h('span', { className: 'gw-tree-caret gw-tree-caret-none' }),
     note.icon && note.icon !== '📄'
       ? h('span', { className: 'gw-tree-emoji' }, note.icon)
       : h('span', { className: 'gw-tree-icon', innerHTML: DOC_ICON }),
     h('span', { className: 'gw-tree-label' }, note.title || 'Untitled'),
+    opts.onNewSubNote
+      ? h('button', { className: 'gw-tree-add', title: 'Add a note inside',
+          onClick: (e: Event) => { e.stopPropagation(); opts.onNewSubNote!(note.id); } }, '+')
+      : null,
     h('button', {
       className: `gw-tree-fav${isFav ? ' on' : ''}`,
       title: isFav ? 'Unfavourite' : 'Favourite',
@@ -48,9 +66,39 @@ function noteRow(note: NoteListItem, active: boolean, opts: LeftRailOpts): HTMLE
   );
 }
 
+/** Render a note and (if a folder) its nested children, recursively. */
+function renderTreeNode(note: NoteListItem, childrenOf: Map<string, NoteListItem[]>, opts: LeftRailOpts, depth: number, out: HTMLElement, rerender: () => void): void {
+  const kids = childrenOf.get(note.id) ?? [];
+  const hasChildren = kids.length > 0;
+  if (hasChildren && !_seenFolders.has(note.id)) { _seenFolders.add(note.id); _expanded.add(note.id); }
+  const expanded = _expanded.has(note.id);
+  const row = noteRow(note, opts.currentNoteId === note.id, opts, hasChildren, expanded, () => {
+    if (_expanded.has(note.id)) _expanded.delete(note.id); else _expanded.add(note.id);
+    rerender();
+  });
+  if (depth > 0) row.classList.add('gw-tree-child');
+  out.appendChild(row);
+  if (hasChildren && expanded) {
+    const nest = h('div', { className: 'gw-tree-nest' });
+    for (const k of kids) renderTreeNode(k, childrenOf, opts, depth + 1, nest, rerender);
+    out.appendChild(nest);
+  }
+}
+
 export function renderLeftRail(opts: LeftRailOpts): HTMLElement {
+  const rerender = opts.onRerender ?? (() => { /* no-op */ });
   const favs = opts.notes.filter((n) => n.favorite);
-  const others = opts.notes.filter((n) => !n.favorite);
+
+  // Build the notebook TREE from parent_note_id: top-level notes are notebooks/folders, sub-notes nest
+  // underneath (expandable). Notes whose parent isn't in the list are treated as top-level (no orphans lost).
+  const ids = new Set(opts.notes.map((n) => n.id));
+  const childrenOf = new Map<string, NoteListItem[]>();
+  const roots: NoteListItem[] = [];
+  for (const n of opts.notes) {
+    const parent = n.parent_note_id && ids.has(n.parent_note_id) ? n.parent_note_id : null;
+    if (parent) { (childrenOf.get(parent) ?? childrenOf.set(parent, []).get(parent)!).push(n); }
+    else roots.push(n);
+  }
 
   const searchInput = h('input', {
     className: 'gw-search-input', type: 'text', placeholder: 'Search notes',
@@ -71,16 +119,21 @@ export function renderLeftRail(opts: LeftRailOpts): HTMLElement {
       h('span', { className: 'gw-kbd' }, '⌘K'),
     ),
     // tree
-    h('div', { className: 'gw-tree gw-scroll' },
-      opts.loading ? h('div', { className: 'gw-tree-loading' }, 'Loading…') : null,
-      favs.length > 0 ? h('div', { className: 'gw-tree-label-row' }, 'FAVOURITES') : null,
-      ...favs.map((n) => noteRow(n, opts.currentNoteId === n.id, opts)),
-      h('div', { className: 'gw-tree-label-row' }, 'NOTEBOOKS'),
-      ...others.map((n) => noteRow(n, opts.currentNoteId === n.id, opts)),
-      (!opts.loading && opts.notes.length === 0)
-        ? h('div', { className: 'gw-tree-empty' }, 'No notes yet — start one below.')
-        : null,
-    ),
+    (() => {
+      const tree = h('div', { className: 'gw-tree gw-scroll' });
+      if (opts.loading) tree.appendChild(h('div', { className: 'gw-tree-loading' }, 'Loading…'));
+      if (favs.length > 0) {
+        tree.appendChild(h('div', { className: 'gw-tree-label-row' }, 'FAVOURITES'));
+        // Favourites are shown flat (a shortcut list), regardless of where they sit in the tree.
+        for (const n of favs) tree.appendChild(noteRow(n, opts.currentNoteId === n.id, opts, false, false, () => {}));
+      }
+      tree.appendChild(h('div', { className: 'gw-tree-label-row' }, 'NOTEBOOKS'));
+      for (const root of roots) renderTreeNode(root, childrenOf, opts, 0, tree, rerender);
+      if (!opts.loading && opts.notes.length === 0) {
+        tree.appendChild(h('div', { className: 'gw-tree-empty' }, 'No notes yet — start one below.'));
+      }
+      return tree;
+    })(),
     // footer: + New note (with templates + archived affordances)
     h('button', { className: 'gw-newnote', onClick: opts.onNewNote },
       h('span', { className: 'gw-newnote-plus' }, '+'),
