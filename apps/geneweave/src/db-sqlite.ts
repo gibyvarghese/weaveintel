@@ -9288,6 +9288,20 @@ export class SQLiteAdapter implements DatabaseAdapter {
       ? this.d.prepare('SELECT * FROM note_entities WHERE user_id = ?').all(userId)
       : this.d.prepare('SELECT * FROM note_entities WHERE user_id = ? AND tenant_id IS ?').all(userId, tenantId ?? null)) as import('./db-types/adapter-me.js').NoteEntityRow[];
   }
+  // geneWeave UI rebuild (m135) — per-tenant Appearance / branding.
+  async getTenantAppearance(tenantId: string): Promise<import('./db-types/adapter-me.js').TenantAppearanceRow | null> {
+    return (this.d.prepare('SELECT * FROM tenant_appearance WHERE tenant_id = ?').get(tenantId) ?? null) as import('./db-types/adapter-me.js').TenantAppearanceRow | null;
+  }
+  async upsertTenantAppearance(row: import('./db-types/adapter-me.js').TenantAppearanceRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO tenant_appearance (tenant_id, enabled, brand_name, logo_svg, color_scheme, variant, accent, on_accent, corner_style, font_display, font_body, density, updated_at)
+       VALUES (@tenant_id,@enabled,@brand_name,@logo_svg,@color_scheme,@variant,@accent,@on_accent,@corner_style,@font_display,@font_body,@density,@updated_at)
+       ON CONFLICT(tenant_id) DO UPDATE SET enabled=excluded.enabled, brand_name=excluded.brand_name, logo_svg=excluded.logo_svg, color_scheme=excluded.color_scheme, variant=excluded.variant, accent=excluded.accent, on_accent=excluded.on_accent, corner_style=excluded.corner_style, font_display=excluded.font_display, font_body=excluded.font_body, density=excluded.density, updated_at=excluded.updated_at`,
+    ).run(row);
+  }
+  async listTenantAppearance(): Promise<import('./db-types/adapter-me.js').TenantAppearanceRow[]> {
+    return this.d.prepare('SELECT * FROM tenant_appearance ORDER BY tenant_id ASC').all() as import('./db-types/adapter-me.js').TenantAppearanceRow[];
+  }
   // weaveNotes Phase 5 (m134) — background-memory extraction state.
   async getNoteMemoryState(noteId: string, userId: string): Promise<import('./db-types/adapter-me.js').NoteMemoryStateRow | null> {
     return (this.d.prepare('SELECT * FROM note_memory_state WHERE note_id = ? AND user_id = ?').get(noteId, userId) ?? null) as import('./db-types/adapter-me.js').NoteMemoryStateRow | null;

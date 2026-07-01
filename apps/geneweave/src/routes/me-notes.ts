@@ -81,6 +81,7 @@ import { createNoteDbService } from '../note-db-sql.js';
 import { createNoteCaptureService } from '../note-capture-sql.js';
 import { createNoteMeetingService, type MeetingTranscribe } from '../note-meeting-sql.js';
 import { createNoteMemoryService } from '../note-memory-sql.js';
+import { createTenantAppearanceService } from '../tenant-appearance-sql.js';
 import { createNoteSettingsService } from '../note-settings-sql.js';
 import { createNoteWorkspaceService } from '../note-workspace-sql.js';
 import { createNoteVersionService } from '../note-version-sql.js';
@@ -1745,6 +1746,18 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     const result = await noteMemory.forget({ userId: auth.userId, id: params['id']! });
     res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(result));
+  }, { auth: true });
+
+  // geneWeave UI rebuild — the caller's own workspace Appearance / branding (read-only), applied by the
+  // web client at runtime. Owner-scoped to auth.tenantId (never another tenant's brand).
+  const appearance = createTenantAppearanceService(db);
+  router.get('/api/me/appearance', async (_req, res, _params, auth) => {
+    // Available to any authenticated user (they see their own workspace's brand). No admin needed.
+    const a = auth as { tenantId?: string | null } | null;
+    // Single-tenant / self-host users have no tenant id — they share the 'default' workspace brand.
+    const eff = await appearance.getEffective(a?.tenantId || 'default');
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(eff));
   }, { auth: true });
 
   // ── Note database rows ─────────────────────────────────────────────────────

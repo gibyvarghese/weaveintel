@@ -94,6 +94,9 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
     { key: 'tenant-governance', label: 'Tenant Governance' },
     { key: 'tenant-encryption-policies', label: 'Tenant Encryption' },
   ]},
+  { label: 'Appearance', icon: '\uD83C\uDFA8', tabs: [
+    { key: 'tenant-appearance', label: 'Appearance & branding' },
+  ]},
   { label: 'A2A Protocol', icon: '\uD83E\uDD16\uD83E\uDD1D', tabs: [
     { key: 'a2a-skills', label: 'A2A Skills' },
   ]},

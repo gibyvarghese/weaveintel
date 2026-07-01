@@ -761,6 +761,24 @@ export const PLATFORM_CAPABILITY_ADMIN_TABS: Record<string, AdminTabDef> = {
       { key: 'controls', label: 'Enterprise controls on', readonly: true },
     ],
   },
+  'tenant-appearance': {
+    singular: 'Appearance & branding', apiPath: 'admin/tenant-appearance', listKey: 'tenants',
+    cols: ['tenant_id', 'brand_name', 'color_scheme', 'variant', 'corner_style'],
+    fields: [
+      { key: 'tenant_id', label: 'Tenant ID', readonly: false },
+      { key: 'enabled', label: 'Apply this workspace’s branding', type: 'checkbox', save: 'bool', default: true },
+      { key: 'brand_name', label: 'Workspace / brand name (shown in the top bar)', placeholder: 'Acme Notes' },
+      { key: 'logo_svg', label: 'Logo — paste an inline <svg> (scripts stripped; ≤20 KB)', textarea: true, placeholder: '<svg …>…</svg>' },
+      { key: 'color_scheme', label: 'Default colour scheme', options: ['system', 'light', 'dark'], default: 'system' },
+      { key: 'variant', label: 'Default look', options: ['pro', 'creative'], default: 'pro' },
+      { key: 'accent', label: 'Brand accent (hex, e.g. #2563EB) — used for primary buttons; ignored if it fails contrast. AI stays emerald.', placeholder: '#2563EB' },
+      { key: 'corner_style', label: 'Corner style', options: ['soft', 'sharp', 'round'], default: 'soft' },
+      { key: 'density', label: 'Density', options: ['comfortable', 'compact'], default: 'comfortable' },
+      { key: 'font_display', label: 'Heading font (optional; must be installed/websafe)', placeholder: 'Plus Jakarta Sans' },
+      { key: 'font_body', label: 'Body font (optional)', placeholder: 'Inter' },
+      { key: 'degraded', label: 'Accent fell back for accessibility (read-only)', type: 'checkbox', save: 'bool', readonly: true },
+    ],
+  },
 
   'tenant-configs': {
     singular: 'Tenant Config', apiPath: 'admin/tenant-configs', listKey: 'tenant-configs',

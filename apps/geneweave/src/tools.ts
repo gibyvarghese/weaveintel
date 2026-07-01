@@ -1012,6 +1012,11 @@ export interface ToolRegistryOptions {
    */
   notesRecallMemory?: (args: { userId: string; tenantId?: string | null; query: string; limit?: number }) => Promise<{ ok: boolean; count: number; memories: Array<{ content: string; kind?: string; when?: string }> }>;
   /**
+   * geneWeave UI rebuild: change the WORKSPACE appearance (colour scheme / Pro-Creative / brand accent /
+   * corner style / density). Admin-gated by the app; brand colours are accessibility-checked.
+   */
+  setWorkspaceAppearance?: (args: { userId: string; tenantId?: string | null; colorScheme?: string; variant?: string; accent?: string; cornerStyle?: string; density?: string }) => Promise<{ ok: boolean; error?: string; applied?: Record<string, string>; degraded?: boolean }>;
+  /**
    * weaveNotes Phase 6: database column auto-fill. When set, the `autofill_database` tool is
    * available so the agent can fill a column of one of the user's note databases from each
    * row's context (the page + workspace + optionally the web), with citations. Owner-scoped.
@@ -2047,6 +2052,30 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
         tags: ['notes', 'meeting', 'output'],
       }),
     } : {}),
+    // geneWeave UI rebuild: set workspace appearance — available when setWorkspaceAppearance is set.
+    ...(opts?.setWorkspaceAppearance && opts.currentUserId ? {
+      set_workspace_appearance: weaveTool({
+        name: 'set_workspace_appearance',
+        description: 'Change this workspace’s look & feel: colour scheme (light/dark/system), the default look (pro/creative), a brand accent colour (hex), corner style (soft/sharp/round), or density (comfortable/compact). Use when the user asks to "switch to dark mode", "use our brand colour #2563EB", "make it feel more creative", or "tighten the spacing". Brand colours are accessibility-checked and safely ignored if they fail contrast. Requires workspace-admin rights.',
+        parameters: {
+          type: 'object',
+          properties: {
+            colorScheme: { type: 'string', enum: ['system', 'light', 'dark'], description: 'Colour scheme.' },
+            variant: { type: 'string', enum: ['pro', 'creative'], description: 'Default look.' },
+            accent: { type: 'string', description: 'Brand accent as a hex colour, e.g. #2563EB.' },
+            cornerStyle: { type: 'string', enum: ['soft', 'sharp', 'round'], description: 'Corner style.' },
+            density: { type: 'string', enum: ['comfortable', 'compact'], description: 'Spacing density.' },
+          },
+        },
+        execute: async (args: { colorScheme?: string; variant?: string; accent?: string; cornerStyle?: string; density?: string }) => {
+          if (!opts.setWorkspaceAppearance || !opts.currentUserId) return { content: 'Appearance changes are unavailable in this context.', isError: true };
+          const r = await opts.setWorkspaceAppearance({ userId: opts.currentUserId, tenantId: opts.currentTenantId ?? null, ...args });
+          if (!r.ok) return { content: r.error ?? 'Could not change the appearance.', isError: true };
+          return JSON.stringify({ applied: r.applied, degraded: r.degraded, note: r.degraded ? 'The brand accent failed contrast in one theme; the accessible default is used there.' : undefined });
+        },
+        tags: ['appearance', 'branding', 'admin'],
+      }),
+    } : {}),
     // weaveNotes Phase 5: second-brain recall — available when notesRecallMemory callback is set.
     ...(opts?.notesRecallMemory && opts.currentUserId ? {
       recall_second_brain: weaveTool({
@@ -2353,7 +2382,7 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
   // fall back to emit_artifact). Skip any already registered from the selection above.
   for (const noteTool of [
     'create_note', 'new_from_template', 'recent_notes', 'export_note', 'note_edit', 'note_publish', 'restructure_note',
-    'find_related_notes', 'suggest_links', 'autofill_database', 'capture_web_page', 'summarize_meeting', 'recall_second_brain', 'workspace_search', 'read_note_activity',
+    'find_related_notes', 'suggest_links', 'autofill_database', 'capture_web_page', 'summarize_meeting', 'recall_second_brain', 'set_workspace_appearance', 'workspace_search', 'read_note_activity',
     // weaveNotes Phase 2/4/5: the CREATIVE + study tools — so the assistant can draw a diagram, sketch
     // ink, colour-code, or make flashcards from a plain chat ("draw a diagram of this"), not only via
     // the selection card. Each is built only when its callback is wired + gated by per-call config.

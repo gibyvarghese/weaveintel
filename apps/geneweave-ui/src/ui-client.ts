@@ -1933,6 +1933,40 @@ function render() {
 // INITIALIZATION
 // ============================================================================
 
+/**
+ * geneWeave UI rebuild — apply this workspace's per-tenant Appearance / branding at runtime. Fetches the
+ * caller's own resolved (accessibility-safe) brand and applies it as CSS custom properties + data-*
+ * attributes, so the whole app re-brands with no flash. AI-agency colours (mint/emerald) are never
+ * re-branded. Best-effort — a workspace with no branding just keeps the defaults.
+ */
+async function applyTenantAppearance(): Promise<void> {
+  try {
+    const res = await api.get('/api/me/appearance');
+    if (!res || !(res as Response).ok) return;
+    const a = await (res as Response).json() as {
+      enabled?: boolean; colorScheme?: string; variant?: string; density?: string;
+      brandName?: string | null; logoSvg?: string | null;
+      vars?: { light?: Record<string, string>; dark?: Record<string, string> };
+    };
+    if (!a || a.enabled === false) return;
+    const rootEl = document.documentElement;
+    // Colour scheme — 'system' respects the OS; else force light/dark.
+    let scheme = a.colorScheme || 'system';
+    if (scheme === 'system') scheme = window.matchMedia?.('(prefers-color-scheme: dark)')?.matches ? 'dark' : 'light';
+    if (scheme === 'dark' || scheme === 'light') { rootEl.setAttribute('data-theme', scheme); (state as { theme?: string }).theme = scheme; }
+    // Pro / Creative default look.
+    if (a.variant === 'creative') rootEl.setAttribute('data-variant', 'creative'); else rootEl.removeAttribute('data-variant');
+    // Density.
+    rootEl.setAttribute('data-density', a.density || 'comfortable');
+    // Brand variables for the active scheme (legacy --accent etc. the shipped stylesheet consumes).
+    const vars = (scheme === 'dark' ? a.vars?.dark : a.vars?.light) || {};
+    for (const [k, v] of Object.entries(vars)) { if (/^--[\w-]+$/.test(k)) rootEl.style.setProperty(k, String(v).replace(/[;{}<>]/g, '')); }
+    // Brand name + logo — exposed for the shell wordmark to pick up.
+    if (a.brandName) (window as unknown as Record<string, unknown>)['__gwBrandName'] = a.brandName;
+    if (a.logoSvg) (window as unknown as Record<string, unknown>)['__gwBrandLogo'] = a.logoSvg;
+  } catch { /* keep defaults */ }
+}
+
 export function initialize() {
   document.addEventListener('click', () => {
     if (state.showSettings || state.showProfile || state.showNotifications) {
@@ -1962,6 +1996,8 @@ export function initialize() {
         if (d.authenticated) {
         state.user = d.user;
         state.csrfToken = d.csrfToken;
+        // geneWeave UI rebuild: apply this workspace's per-tenant branding before first render (no flash).
+        await applyTenantAppearance();
         // weaveNotes Phase 8 (desktop): wire the global quick-capture shortcut (⌘/Ctrl+Shift+K, or the
         // Tauri OS-global hotkey). Capturing jumps into the new note. Wired once per session.
         try {

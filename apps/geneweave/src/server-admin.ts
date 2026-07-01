@@ -20,6 +20,7 @@ import { registerScopeRoutes } from './admin/api/scope.js';
 import { registerArtifactRoutes as registerAdminArtifactRoutes } from './admin/api/artifacts.js';
 import { registerTenantArtifactSettingsRoutes } from './admin/api/tenant-artifact-settings.js';
 import { registerTenantGovernanceRoutes } from './admin/api/tenant-governance.js';
+import { registerTenantAppearanceRoutes } from './admin/api/tenant-appearance.js';
 import type { RouterLike } from './admin/api/types.js';
 
 export interface AdminRouteExtras {
@@ -69,4 +70,5 @@ export function registerAdminRoutes(
   registerTenantArtifactSettingsRoutes(router, db, { json, readBody, requireDetailedDescription: () => null });
   // m127: Per-tenant enterprise governance (weaveNotes Phase 2)
   registerTenantGovernanceRoutes(router, db, { json, readBody, requireDetailedDescription: () => null });
+  registerTenantAppearanceRoutes(router, db, { json, readBody, requireDetailedDescription: () => null });
 }

@@ -336,6 +336,23 @@ export interface NoteSuggestionRow {
 
 // ── weaveNotes Phase 5 — notes knowledge graph (m102) ─────────────────────────
 
+/** geneWeave UI rebuild (m135) — per-tenant Appearance / white-label branding. */
+export interface TenantAppearanceRow {
+  tenant_id: string;
+  enabled: number;
+  brand_name: string | null;
+  logo_svg: string | null;
+  color_scheme: string; // system | light | dark
+  variant: string;      // pro | creative
+  accent: string | null;
+  on_accent: string | null;
+  corner_style: string; // soft | sharp | round
+  font_display: string | null;
+  font_body: string | null;
+  density: string;      // comfortable | compact
+  updated_at: string;
+}
+
 /** weaveNotes Phase 5 (m134) — background-memory extraction state per note (content version + memory ids). */
 export interface NoteMemoryStateRow {
   note_id: string;
@@ -763,6 +780,10 @@ export interface IMeStore {
   listNoteEntities(noteId: string): Promise<NoteEntityRow[]>;
   // weaveNotes Phase 3 (m132) — all of a user's entities (for cross-note graph / shared-entity retrieval). tenant_id null-safe.
   listUserNoteEntities(userId: string, tenantId?: string | null): Promise<NoteEntityRow[]>;
+  // geneWeave UI rebuild (m135) — per-tenant Appearance / branding.
+  getTenantAppearance(tenantId: string): Promise<TenantAppearanceRow | null>;
+  upsertTenantAppearance(row: TenantAppearanceRow): Promise<void>;
+  listTenantAppearance(): Promise<TenantAppearanceRow[]>;
   // weaveNotes Phase 5 (m134) — background-memory extraction state.
   getNoteMemoryState(noteId: string, userId: string): Promise<NoteMemoryStateRow | null>;
   upsertNoteMemoryState(row: NoteMemoryStateRow): Promise<void>;

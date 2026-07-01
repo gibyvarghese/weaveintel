@@ -67,6 +67,7 @@ import { createNoteDbService } from './note-db-sql.js';
 import { createNoteCaptureService } from './note-capture-sql.js';
 import { createNoteMeetingService } from './note-meeting-sql.js';
 import { createNoteMemoryService } from './note-memory-sql.js';
+import { createTenantAppearanceService } from './tenant-appearance-sql.js';
 import { createNoteWorkspaceService } from './note-workspace-sql.js';
 import { createNoteSettingsService } from './note-settings-sql.js';
 import {
@@ -431,6 +432,13 @@ export class ChatEngine {
       // weaveNotes Phase 5: wire the `find_related_notes` tool (semantic note search).
       notesSearch: (a: { userId: string; tenantId?: string | null; query: string; limit?: number }) =>
         createNoteGraphService(db).searchNotes({ userId: a.userId, tenantId: a.tenantId ?? null }, a.query, a.limit ?? 5),
+      // geneWeave UI rebuild: wire the `set_workspace_appearance` tool (white-label branding). Admin-gated:
+      // only a workspace admin (tenant/platform admin persona) may change the workspace look.
+      setWorkspaceAppearance: async (a: { userId: string; tenantId?: string | null; colorScheme?: string; variant?: string; accent?: string; cornerStyle?: string; density?: string }) => {
+        const persona = (await db.getUserById?.(a.userId))?.persona ?? '';
+        if (!['tenant_admin', 'platform_admin'].includes(persona)) return { ok: false, error: 'Only a workspace admin can change the workspace appearance.' };
+        return createTenantAppearanceService(db).agentSetAppearance({ tenantId: a.tenantId ?? '', ...(a.colorScheme ? { colorScheme: a.colorScheme } : {}), ...(a.variant ? { variant: a.variant } : {}), ...(a.accent ? { accent: a.accent } : {}), ...(a.cornerStyle ? { cornerStyle: a.cornerStyle } : {}), ...(a.density ? { density: a.density } : {}) });
+      },
       // weaveNotes Phase 5: wire the `recall_second_brain` tool — temporally-aware memory recall.
       notesRecallMemory: async (a: { userId: string; tenantId?: string | null; query: string; limit?: number }) => {
         const cfg = await createNoteSettingsService(db).getConfig();
