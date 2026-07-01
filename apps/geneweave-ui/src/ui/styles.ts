@@ -1267,8 +1267,19 @@ input{font-family:inherit;outline:none}
 .gw-color-swatch:hover{transform:scale(1.1)}
 .gw-hl{width:18px;height:18px;border-radius:50%;cursor:pointer;flex:none;box-shadow:inset 0 0 0 1px rgba(20,32,27,.10)}
 .gw-hl.active{box-shadow:0 0 0 2px var(--surface),0 0 0 3px var(--accent)}
-.gw-ask-ai{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:var(--accent2);background:var(--mint);border:1px solid var(--mint-deep);border-radius:8px;padding:6px 12px;cursor:pointer;margin-left:auto}
+/* columns 1/2/3 segmented control (design's board layout) — pushed to the right of the tool strip */
+.gw-cols-seg{display:flex;align-items:center;gap:2px;background:var(--bg3);border-radius:8px;padding:2px;margin-left:auto}
+.gw-cols-btn{width:28px;height:26px;display:inline-flex;align-items:center;justify-content:center;border:none;background:transparent;color:var(--fg3);border-radius:6px;cursor:pointer;padding:0}
+.gw-cols-btn:hover{color:var(--fg2)}
+.gw-cols-btn.active{background:var(--surface);color:var(--accent2);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.gw-ask-ai{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:var(--accent2);background:var(--mint);border:1px solid var(--mint-deep);border-radius:8px;padding:6px 12px;cursor:pointer;margin-left:10px}
 .gw-ask-ai:hover{background:var(--mint-deep)}
+/* apply the column layout to the editor body only (title + meta stay full width) */
+.gw-canvas[data-cols="2"] .notes-editor-mount [contenteditable]{column-count:2;column-gap:36px}
+.gw-canvas[data-cols="3"] .notes-editor-mount [contenteditable]{column-count:3;column-gap:28px}
+.gw-canvas[data-cols="2"] .notes-editor-mount [contenteditable] > *,
+.gw-canvas[data-cols="3"] .notes-editor-mount [contenteditable] > *{break-inside:avoid}
+.gw-canvas[data-cols="2"] .gw-page,.gw-canvas[data-cols="3"] .gw-page{max-width:920px}
 .gw-ask-mark{display:inline-flex}
 /* — the page — */
 .gw-page-scroll{flex:1;overflow-y:auto;padding:48px 28px 120px}

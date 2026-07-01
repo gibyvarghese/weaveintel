@@ -119,6 +119,15 @@ export async function loadNoteTemplates(): Promise<void> {
   } catch { /* silent */ }
 }
 
+// Per-note column layout (1–3), persisted in localStorage so the choice survives reloads without a
+// schema change. Clamped to the valid range; falls back to 1 (single column) when unset or unavailable.
+function readNoteColumns(id: string): number {
+  try { const v = parseInt(localStorage.getItem(`gw.note.cols.${id}`) ?? '1', 10); return v >= 1 && v <= 3 ? v : 1; } catch { return 1; }
+}
+function writeNoteColumns(id: string, n: number): void {
+  try { localStorage.setItem(`gw.note.cols.${id}`, String(Math.max(1, Math.min(3, n)))); } catch { /* storage unavailable */ }
+}
+
 export async function loadNote(id: string): Promise<void> {
   try {
     const res = await api.get(`/api/me/notes/${id}`);
@@ -645,6 +654,10 @@ function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLEle
       render();
     },
     onAskAi: () => { _railTab = 'assistant'; render(); },
+    // Column layout (1–3): the design's board control. Persisted per note in localStorage (no migration),
+    // applied to the editor body via `data-cols` on the canvas.
+    columns: readNoteColumns(note.id),
+    onSetColumns: (n: number) => { writeNoteColumns(note.id, n); render(); },
     format: {
       bold: () => fmt('toggleBold'), italic: () => fmt('toggleItalic'), underline: () => fmt('toggleUnderline'),
       highlight: (color) => fmt('toggleHighlight', { color }), sticker: () => fmt('setSticker', { emoji: '✨' }),

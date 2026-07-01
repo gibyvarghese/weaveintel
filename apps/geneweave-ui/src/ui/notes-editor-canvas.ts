@@ -39,6 +39,9 @@ export interface EditorCanvasOpts {
     bold: () => void; italic: () => void; underline: () => void; highlight: (color: string) => void; sticker?: () => void;
     run?: (cmd: string, arg?: unknown) => void; textColor?: (c: string) => void; link?: () => void;
   };
+  /** Page column layout (1–3) + setter — the design's "one / two / three columns" board control. */
+  columns?: number;
+  onSetColumns?: (n: number) => void;
   insert: OverflowItem[];
   overflow: OverflowItem[];
 }
@@ -77,6 +80,13 @@ function iconTool(svg: string, title: string, onClick: () => void): HTMLElement 
 
 // Text colours offered in the toolbar (design palette; the AI mint/emerald is never a user text colour).
 const TEXT_COLORS = ['#14201B', '#0B7A57', '#C2562B', '#3E6E8F', '#9aa7a1'];
+
+// Column-count glyphs for the 1 / 2 / 3 board layout control.
+const COL_GLYPH: Record<1 | 2 | 3, string> = {
+  1: '<svg width="15" height="14" viewBox="0 0 15 14" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="2" width="11" height="10" rx="1.5"/></svg>',
+  2: '<svg width="15" height="14" viewBox="0 0 15 14" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="2" width="4.6" height="10" rx="1.2"/><rect x="8.4" y="2" width="4.6" height="10" rx="1.2"/></svg>',
+  3: '<svg width="15" height="14" viewBox="0 0 15 14" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="1.5" y="2" width="3.2" height="10" rx="1"/><rect x="5.9" y="2" width="3.2" height="10" rx="1"/><rect x="10.3" y="2" width="3.2" height="10" rx="1"/></svg>',
+};
 
 // The block-type menu (paragraph / headings / lists / quote / code / divider), wired to editor commands.
 const BLOCK_TYPES: Array<{ label: string; cmd: string; arg?: unknown }> = [
@@ -198,6 +208,14 @@ export function renderEditorCanvas(opts: EditorCanvasOpts): HTMLElement {
       h('span', { className: 'gw-tool', title: 'Pen', innerHTML: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18z"/></svg>' }),
       ...(opts.creative ? [h('span', { className: 'gw-tool gw-tool-sticker', title: 'Sticker', onClick: () => opts.format.sticker?.() }, '✨')] : []),
     ),
+    // columns: one / two / three (the design's board layout control) — pushed to the right.
+    h('div', { className: 'gw-cols-seg' },
+      ...[1, 2, 3].map((n) => h('button', {
+        className: `gw-cols-btn${(opts.columns ?? 1) === n ? ' active' : ''}`,
+        title: `${n === 1 ? 'One column' : n === 2 ? 'Two columns' : 'Three columns'}`,
+        onClick: () => opts.onSetColumns?.(n),
+        innerHTML: COL_GLYPH[n as 1 | 2 | 3],
+      }))),
     h('button', { className: 'gw-ask-ai', onClick: opts.onAskAi },
       h('span', { className: 'gw-ask-mark', innerHTML: wovenMarkSvg(14, 'ai') }), ' Ask AI'),
   );
@@ -220,5 +238,5 @@ export function renderEditorCanvas(opts: EditorCanvasOpts): HTMLElement {
     ),
   );
 
-  return h('main', { className: `gw-canvas${opts.creative ? ' creative' : ''}` }, topbar, toolstrip, page);
+  return h('main', { className: `gw-canvas${opts.creative ? ' creative' : ''}`, 'data-cols': String(opts.columns ?? 1) }, topbar, toolstrip, page);
 }

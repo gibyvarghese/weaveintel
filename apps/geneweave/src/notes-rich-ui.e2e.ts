@@ -54,6 +54,32 @@ test('Notes toolbar — the full rich-text formatting strip renders', async ({ p
   }
 });
 
+test('Notes toolbar — the 1/2/3 column layout control applies to the editor body', async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const { H } = await login(page, 'notes-cols@weaveintel.dev');
+  const paras = Array.from({ length: 6 }, (_, i) => ({ type: 'paragraph', content: [{ type: 'text', text: `Para ${i + 1} with enough words to flow across columns nicely.` }] }));
+  const doc = JSON.stringify({ type: 'doc', content: paras });
+  await page.request.post('/api/me/notes', { headers: H, data: { title: 'Cols note', doc_json: doc } });
+  await goNotes(page);
+  await page.locator('.gw-tree-row', { hasText: 'Cols note' }).first().click();
+  await expect(page.locator('.gw-cols-seg')).toBeVisible({ timeout: 8000 });
+  expect(await page.locator('.gw-cols-btn').count()).toBe(3);
+
+  // Default is a single column; the editor body has no forced column-count.
+  expect(await page.locator('.gw-canvas').getAttribute('data-cols')).toBe('1');
+
+  // Click "two columns" → the canvas flips to data-cols=2 and the editor body computes 2 columns.
+  await page.locator('.gw-cols-btn').nth(1).click();
+  await page.waitForTimeout(300);
+  expect(await page.locator('.gw-canvas').getAttribute('data-cols')).toBe('2');
+  const cc = await page.evaluate(() => {
+    const el = document.querySelector('.notes-editor-mount [contenteditable]');
+    return el ? getComputedStyle(el).columnCount : 'none';
+  });
+  expect(cc).toBe('2');
+});
+
 test('Notes rail — sub-notes render as an expandable notebook folder tree', async ({ page }) => {
   test.setTimeout(60_000);
   await page.setViewportSize({ width: 1440, height: 900 });
