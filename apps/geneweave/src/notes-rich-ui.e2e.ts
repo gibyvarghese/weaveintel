@@ -22,7 +22,9 @@ async function login(page: Page, email: string): Promise<{ H: Record<string, str
 }
 async function goNotes(page: Page): Promise<void> {
   await page.evaluate(() => { const w = window as any; if (w.state) w.state.view = 'notes'; if (w.render) w.render(); });
-  await page.evaluate(async () => { const m = await import('/ui/notes-view.js'); await (m as any).loadNotesList(); (window as any).render?.(); });
+  // Load the notes list via the module's exported loader. The specifier is held in a variable so the
+  // TypeScript build doesn't try to resolve this browser-runtime path (it only exists at runtime, served).
+  await page.evaluate(async () => { const spec = '/ui/notes-view.js'; const m = await import(/* @vite-ignore */ spec); await (m as any).loadNotesList(); (window as any).render?.(); });
   await page.waitForTimeout(600);
 }
 
