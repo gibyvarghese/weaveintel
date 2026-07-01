@@ -48,12 +48,34 @@ test('Notes toolbar — the full rich-text formatting strip renders', async ({ p
   await expect(page.locator('.gw-toolstrip [title="Bulleted list"]')).toBeVisible();
   await expect(page.locator('.gw-toolstrip [title="To-do list"]')).toBeVisible();
 
-  // The block-type menu opens with every block type.
+  // The block-type menu opens with every block type, then close it (deterministic state).
   await page.locator('.gw-block-btn').click();
   await expect(page.locator('.gw-block-menu')).toBeVisible();
   for (const label of ['Heading 1', 'Bulleted list', 'To-do list', 'Quote', 'Code block', 'Divider']) {
     await expect(page.locator('.gw-block-menu', { hasText: label })).toBeVisible();
   }
+  await page.locator('.gw-block-btn').click(); // toggle closed
+  await expect(page.locator('.gw-block-menu')).toBeHidden();
+
+  // FUNCTIONAL: selecting text + clicking Bold actually bolds it (the buttons used to be no-ops because
+  // the editor instance exposed no command runner AND a plain click stole the selection).
+  const para = page.locator('.notes-editor-mount [contenteditable] p').first();
+  await para.click({ clickCount: 3 });
+  await page.locator('.gw-tool-b').click();
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(() => /<strong>/i.test(document.querySelector('.notes-editor-mount [contenteditable]')!.innerHTML))).toBe(true);
+  // And a block command (Heading 2) applies too — open the menu fresh, then pick it.
+  await para.click();
+  await page.locator('.gw-block-btn').click();
+  await expect(page.locator('.gw-block-menu')).toBeVisible();
+  await page.locator('.gw-block-menu button', { hasText: 'Heading 2' }).click();
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(() => /<h2>/i.test(document.querySelector('.notes-editor-mount [contenteditable]')!.innerHTML))).toBe(true);
+
+  // The account avatar in the full-bleed Notes top bar opens the account/profile surface.
+  await expect(page.locator('.gw-topbar .gw-account-avatar')).toBeVisible();
+  await page.locator('.gw-topbar .gw-account-avatar').click();
+  await expect(page.locator('.acct-app')).toBeVisible({ timeout: 8000 });
 });
 
 test('Notes toolbar — the 1/2/3 column layout control applies to the editor body', async ({ page }) => {

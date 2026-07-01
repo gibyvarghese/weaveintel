@@ -196,6 +196,12 @@ function buildSlashMenu(editor: TiptapEditor, query: string, onClose: () => void
 export interface EditorInstance {
   destroy(): void;
   getJSON(): unknown;
+  /**
+   * Run a TipTap command by name against the editor, re-focusing first so the stored selection is
+   * restored (a toolbar button steals DOM focus; `.focus()` puts the caret/selection back before the
+   * command applies). Powers the main formatting tool strip. e.g. cmd('toggleBold'), cmd('setHeading', {level:2}).
+   */
+  cmd(name: string, arg?: unknown): void;
   /** weaveNotes Phase 3: the local caret/selection as ProseMirror positions (for live cursors). */
   getSelection(): { anchor: number; head: number; empty: boolean } | null;
   /** weaveNotes Phase 3: screen coordinates of a ProseMirror position (to draw a remote caret). */
@@ -350,6 +356,13 @@ export async function mountNotesEditor(opts: {
       if (saveTimer) clearTimeout(saveTimer);
       closeSlashMenu();
       editor.destroy();
+    },
+    cmd(name: string, arg?: unknown) {
+      try {
+        const c = editor.chain().focus() as Record<string, (a?: unknown) => { run: () => void }>;
+        const fn = c[name];
+        if (typeof fn === 'function') fn.call(c, arg).run();
+      } catch { /* command unavailable / editor not ready */ }
     },
     getJSON() {
       return editor.getJSON();

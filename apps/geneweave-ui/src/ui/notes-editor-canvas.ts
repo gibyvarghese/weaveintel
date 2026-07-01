@@ -42,6 +42,9 @@ export interface EditorCanvasOpts {
   /** Page column layout (1–3) + setter — the design's "one / two / three columns" board control. */
   columns?: number;
   onSetColumns?: (n: number) => void;
+  /** Account avatar in the notes top bar (Notes is full-bleed, so this is the way back to your profile). */
+  onAccount?: () => void;
+  userInitial?: string;
   insert: OverflowItem[];
   overflow: OverflowItem[];
 }
@@ -69,13 +72,19 @@ const HIGHLIGHTERS = [
   { css: 'var(--hl-blue)', hex: '#B5D4F4' },
 ];
 
-function toolBtn(label: string, title: string, onClick: () => void, extraClass = ''): HTMLElement {
-  return h('button', { className: `gw-tool ${extraClass}`, title, onClick }, label);
+// Formatting buttons run on MOUSEDOWN with preventDefault so the editor never loses its text selection
+// (a plain click blurs the contenteditable and collapses the selection before the command can apply —
+// which is why the tool strip used to do nothing). Same trick the editor's own bubble toolbar uses.
+function pressAction(fn: () => void) {
+  return (e: Event) => { e.preventDefault(); fn(); };
+}
+function toolBtn(label: string, title: string, action: () => void, extraClass = ''): HTMLElement {
+  return h('button', { className: `gw-tool ${extraClass}`, title, onMouseDown: pressAction(action) }, label);
 }
 
 /** An icon tool button (SVG innerHTML). */
-function iconTool(svg: string, title: string, onClick: () => void): HTMLElement {
-  return h('button', { className: 'gw-tool', title, onClick, innerHTML: svg });
+function iconTool(svg: string, title: string, action: () => void): HTMLElement {
+  return h('button', { className: 'gw-tool', title, onMouseDown: pressAction(action), innerHTML: svg });
 }
 
 // Text colours offered in the toolbar (design palette; the AI mint/emerald is never a user text colour).
@@ -150,6 +159,9 @@ export function renderEditorCanvas(opts: EditorCanvasOpts): HTMLElement {
       themeToggle,
       insertMenu,
       overflowMenu,
+      // Account avatar — the way back to your profile/settings from the full-bleed Notes app.
+      h('button', { className: 'gw-account-avatar', title: 'Your account', onClick: () => opts.onAccount?.() },
+        opts.userInitial || 'G'),
     ),
   );
 
@@ -169,7 +181,7 @@ export function renderEditorCanvas(opts: EditorCanvasOpts): HTMLElement {
   // Text-colour dropdown.
   const colorBtn = h('button', { className: 'gw-tool', title: 'Text colour', innerHTML: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16"/><path d="m6 16 6-12 6 12"/><path d="M8.5 12h7"/></svg>' });
   const colorMenu = h('div', { className: 'gw-menu gw-menu-left gw-color-menu' },
-    ...TEXT_COLORS.map((c) => h('button', { className: 'gw-color-swatch', title: c, style: `background:${c}`, onClick: () => { colorMenu.style.display = 'none'; opts.format.textColor?.(c); } }))) as HTMLElement;
+    ...TEXT_COLORS.map((c) => h('button', { className: 'gw-color-swatch', title: c, style: `background:${c}`, onMouseDown: pressAction(() => { colorMenu.style.display = 'none'; opts.format.textColor?.(c); }) }))) as HTMLElement;
   colorMenu.style.display = 'none';
   colorBtn.addEventListener('click', () => { colorMenu.style.display = colorMenu.style.display === 'none' ? '' : 'none'; });
   const colorGroup = h('div', { className: 'gw-menu-anchor' }, colorBtn, colorMenu);
@@ -195,7 +207,7 @@ export function renderEditorCanvas(opts: EditorCanvasOpts): HTMLElement {
     h('div', { className: 'gw-tool-group gw-highlighters' },
       ...HIGHLIGHTERS.map((c, i) => h('span', {
         className: `gw-hl${i === 0 ? ' active' : ''}`, title: 'Highlight', style: `background:${c.css}`,
-        onClick: () => opts.format.highlight(c.hex),
+        onMouseDown: pressAction(() => opts.format.highlight(c.hex)),
       })),
     ),
     // lists

@@ -614,12 +614,11 @@ function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLEle
       } },
   ];
 
-  // — formatting commands drive the live Tiptap instance (no-op until it mounts) —
+  // — formatting commands drive the live Tiptap instance via its exposed cmd() runner (no-op until it
+  //   mounts). cmd() re-focuses the editor first, so a toolbar click that stole focus still applies to
+  //   the right selection. (Previously this reached for a `chain` the instance never exposed → no-op.) —
   const fmt = (cmd: string, arg?: unknown): void => {
-    try {
-      const ed = _activeEditor as unknown as { chain?: () => { focus: () => Record<string, (a?: unknown) => { run: () => void }> } } | null;
-      ed?.chain?.().focus()?.[cmd]?.(arg)?.run();
-    } catch { /* editor not ready / command unavailable */ }
+    try { _activeEditor?.cmd(cmd, arg); } catch { /* editor not ready / command unavailable */ }
   };
 
   // — the Assistant body for the right rail: a mint AI greeting bubble (design), then the
@@ -658,6 +657,9 @@ function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLEle
     // applied to the editor body via `data-cols` on the canvas.
     columns: readNoteColumns(note.id),
     onSetColumns: (n: number) => { writeNoteColumns(note.id, n); render(); },
+    // Account avatar → the profile/settings surface (Notes is full-bleed with no global nav).
+    onAccount: () => { state.view = 'account'; state.accountSection = 'profile'; render(); },
+    userInitial: (((state.user as { name?: string } | null)?.name || 'You').trim()[0] || 'Y').toUpperCase(),
     format: {
       bold: () => fmt('toggleBold'), italic: () => fmt('toggleItalic'), underline: () => fmt('toggleUnderline'),
       highlight: (color) => fmt('toggleHighlight', { color }), sticker: () => fmt('setSticker', { emoji: '✨' }),
@@ -750,6 +752,7 @@ function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLEle
       },
     }).then((inst) => {
       _activeEditor = inst;
+
       // Phase 3: once the editor + room are ready, wire LIVE CURSORS (if enabled for this workspace).
       void _activeCoedit?.ready.then((info) => {
         if (!info.liveCursors || !_activeCoedit) return;

@@ -1240,6 +1240,9 @@ input{font-family:inherit;outline:none}
 .gw-theme-toggle{display:flex;background:var(--bg3);border-radius:999px;padding:3px}
 .gw-theme-tab{font-size:12px;font-weight:600;border:none;border-radius:999px;padding:6px 14px;cursor:pointer;background:transparent;color:var(--fg2);transition:all .15s}
 .gw-theme-tab.active{background:var(--surface);color:var(--accent2);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+/* account avatar in the notes top bar — the way back to profile/settings from the full-bleed Notes app */
+.gw-account-avatar{width:32px;height:32px;flex:none;border-radius:50%;background:var(--solid);color:var(--solid-contrast);border:none;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;cursor:pointer}
+.gw-account-avatar:hover{box-shadow:0 0 0 2px var(--mint-deep)}
 .gw-btn-emerald{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:#fff;background:var(--accent);border:none;border-radius:999px;padding:8px 16px;cursor:pointer}
 .gw-btn-emerald:hover{background:var(--accent2)}
 .gw-plus{font-size:14px;line-height:1}
