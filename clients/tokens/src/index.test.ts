@@ -34,11 +34,12 @@ describe('@geneweave/tokens barrel', () => {
     }
   });
 
-  it('defines the three brand font families', () => {
+  it('defines the four brand font families (dc.html spec)', () => {
     expect(typography.families).toEqual({
-      display: 'Fraunces',
-      body: 'Plus Jakarta Sans',
-      mono: 'DM Mono',
+      display: 'Plus Jakarta Sans',
+      body: 'Inter',
+      mono: 'JetBrains Mono',
+      hand: 'Caveat',
     });
   });
 
