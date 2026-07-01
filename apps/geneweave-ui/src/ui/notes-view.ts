@@ -778,6 +778,11 @@ export function renderNotesView(render: () => void): HTMLElement {
       : composed
         ? composed.center
         : h('main', { className: 'gw-canvas' },
+            // Mobile-only toolbar so the notebooks rail is reachable even before a note is open.
+            h('div', { className: 'gw-empty-topbar' },
+              h('button', { className: 'gw-rail-toggle', type: 'button', 'aria-label': 'Show notebooks',
+                innerHTML: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>',
+                onClick: (e: Event) => { (e.currentTarget as HTMLElement).closest('.gw-shell')?.classList.toggle('rail-open'); } })),
             h('div', { className: 'notes-select-prompt' },
               h('div', { className: 'notes-select-icon', innerHTML: wovenMarkSvg(40, 'ai') }),
               h('div', { className: 'notes-select-msg' }, 'Select a note to start editing'),
@@ -809,7 +814,13 @@ export function renderNotesView(render: () => void): HTMLElement {
   return h('div', { className: 'gw-notes notes-full-view' },
     offline ? h('div', { className: 'gw-notes-offline', title: 'Showing your locally cached notes' },
       '✈︎ Offline — showing your cached notes. Changes will sync when you reconnect.') : null,
-    h('div', { className: 'gw-shell' }, leftRail, centre, rightRail),
+    h('div', { className: 'gw-shell' },
+      leftRail, centre, rightRail,
+      // Backdrop for the mobile rail drawer — tap to close (CSS-hidden ≥900px).
+      h('div', { className: 'gw-notes-backdrop', 'aria-hidden': 'true', onClick: (e: Event) => {
+        (e.currentTarget as HTMLElement).closest('.gw-shell')?.classList.remove('rail-open');
+      } }),
+    ),
   );
 }
 

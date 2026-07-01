@@ -1377,7 +1377,21 @@ input{font-family:inherit;outline:none}
 .gw-canvas .notes-ai-block,.gw-canvas .notes-suggestion{border:1.5px solid var(--mint-border);border-radius:16px;background:var(--mint-wash);overflow:hidden}
 .gw-canvas .notes-ai-block-byline,.gw-canvas .notes-suggestion-byline{display:flex;align-items:center;gap:7px;padding:10px 16px;border-bottom:1px solid var(--mint-deep);font-size:12px;font-weight:600;color:var(--accent2)}
 @media(max-width:1100px){.gw-shell{grid-template-columns:248px minmax(0,1fr)}.gw-rail{display:none}}
-@media(max-width:760px){.gw-shell{grid-template-columns:1fr}.gw-left-rail{display:none}}
+/* Mobile/tablet: the notebooks rail becomes a slide-over DRAWER (opened by the topbar toggle) instead of
+   stacking above the canvas, so the editor stays the full-width hero. Backdrop tap closes it. */
+.gw-rail-toggle{display:none;width:32px;height:32px;flex:none;border-radius:9px;border:1px solid var(--hairline);background:var(--surface);color:var(--fg2);cursor:pointer;align-items:center;justify-content:center}
+.gw-empty-topbar{display:none;padding:12px 16px;border-bottom:1px solid var(--hairline)}
+.gw-topbar-left{display:flex;align-items:center;gap:12px;min-width:0}
+.gw-notes-backdrop{display:none;position:absolute;inset:0;background:rgba(20,32,27,.34);z-index:150;opacity:0;transition:opacity .2s ease}
+@media(max-width:899.98px){
+  .gw-shell{grid-template-columns:1fr;position:relative}
+  .gw-rail-toggle{display:inline-flex}
+  .gw-empty-topbar{display:block}
+  .gw-leftrail{position:absolute;top:0;left:0;bottom:0;z-index:200;width:min(84vw,300px);transform:translateX(-100%);transition:transform .22s ease;box-shadow:var(--shadow-pop);border-right:1px solid var(--hairline)}
+  .gw-shell.rail-open .gw-leftrail{transform:translateX(0)}
+  .gw-shell.rail-open .gw-notes-backdrop{display:block;opacity:1}
+}
+@media(prefers-reduced-motion:reduce){.gw-leftrail{transition:none}}
 
 .notes-loading{padding:16px;text-align:center;color:var(--fg3);font-size:12px}
 

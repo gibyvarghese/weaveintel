@@ -90,11 +90,25 @@ export function renderEditorCanvas(opts: EditorCanvasOpts): HTMLElement {
   const overflowBtn = h('button', { className: 'gw-icon-btn', title: 'More actions' }, '⋯');
   const overflowMenu = dropdown(overflowBtn, opts.overflow, 'right');
 
+  // — mobile-only rail toggle: opens the notebooks rail as a slide-over drawer (hidden ≥900px via CSS).
+  // Recreates the design's show/hide-sidebar affordance without a persistent 3-column grid on small screens.
+  const railToggle = h('button', {
+    className: 'gw-rail-toggle', type: 'button', 'aria-label': 'Show notebooks',
+    innerHTML: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>',
+    onClick: (e: Event) => {
+      const shell = (e.currentTarget as HTMLElement).closest('.gw-shell');
+      if (shell) shell.classList.toggle('rail-open');
+    },
+  });
+
   const topbar = h('header', { className: 'gw-topbar' },
-    h('div', { className: 'gw-breadcrumb' },
-      h('span', null, opts.breadcrumb.notebook),
-      h('span', { className: 'gw-breadcrumb-sep' }, '/'),
-      h('span', { className: 'gw-breadcrumb-cur' }, opts.breadcrumb.title || 'Untitled'),
+    h('div', { className: 'gw-topbar-left' },
+      railToggle,
+      h('div', { className: 'gw-breadcrumb' },
+        h('span', null, opts.breadcrumb.notebook),
+        h('span', { className: 'gw-breadcrumb-sep' }, '/'),
+        h('span', { className: 'gw-breadcrumb-cur' }, opts.breadcrumb.title || 'Untitled'),
+      ),
     ),
     h('div', { className: 'gw-topbar-right' },
       presence,
