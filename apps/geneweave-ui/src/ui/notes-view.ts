@@ -40,7 +40,7 @@ import { renderCapturePanel } from './notes-capture.js';
 import { saveNotesSnapshot, cacheNote, offlineNotes, offlineNote, setLastNoteId, getLastNoteId } from './notes-offline.js';
 import { openQuickCaptureModal } from './notes-quick-capture.js';
 import { wireNoteHistory, wireNoteComments, wireNoteSynced, renderWorkspaceAsk, highlightQuoteInEditor, type SimplePanel } from './notes-workspace-ui.js';
-import { renderEditorCanvas, type OverflowItem } from './notes-editor-canvas.js';
+import { renderEditorCanvas, type OverflowItem, type MenuEntry } from './notes-editor-canvas.js';
 import { renderRightRail } from './notes-right-rail.js';
 import { renderLeftRail } from './notes-left-rail.js';
 import { wovenMarkSvg } from './notes-brand.js';
@@ -398,45 +398,47 @@ function openExportMenu(note: NoteDoc): void {
   openCenterModal('⬇ Export note', body);
 }
 
-function buildInsertMenu(render: () => void): OverflowItem[] {
+function buildInsertMenu(render: () => void): MenuEntry[] {
   const openNote = async (id: string): Promise<void> => { await loadNote(id); state.notesView = 'editor'; render(); };
   return [
-    { label: '📝 New note', title: 'Create a blank note', onClick: async () => { const n = await createNote(); if (n) { state.notesItems = [n as NoteListItem, ...(state.notesItems as NoteListItem[])]; await openNote(n.id); } } },
-    { label: '⚡ Quick capture', title: 'Jot a quick note (⌘/Ctrl+Shift+K)', onClick: () => { openQuickCaptureModal((id) => { void openNote(id); }); } },
-    { label: '⊞ New from template', title: 'Start from a template', onClick: async () => { await loadNoteTemplates(); state.notesView = 'templates'; render(); } },
-    { label: '🎙 Record meeting', title: 'Record → transcribe → a structured note with clickable transcript citations', onClick: () => {
+    // The design's rich Insert popover: a "CAPTURE" card grid, then a plain "WORKSPACE" list.
+    { section: '✦ CAPTURE' },
+    { card: true, icon: '📝', label: 'New note', sub: 'Blank page', title: 'Create a blank note', onClick: async () => { const n = await createNote(); if (n) { state.notesItems = [n as NoteListItem, ...(state.notesItems as NoteListItem[])]; await openNote(n.id); } } },
+    { card: true, icon: '⚡', label: 'Quick capture', sub: '⌘⇧K', title: 'Jot a quick note (⌘/Ctrl+Shift+K)', onClick: () => { openQuickCaptureModal((id) => { void openNote(id); }); } },
+    { card: true, icon: '⊞', label: 'From template', sub: 'Structured', title: 'Start from a template', onClick: async () => { await loadNoteTemplates(); state.notesView = 'templates'; render(); } },
+    { card: true, icon: '🎙', label: 'Record meeting', sub: 'Voice → note', title: 'Record → transcribe → a structured note with clickable transcript citations', onClick: () => {
         openCenterModal('Record a meeting', renderMeetingRecorder((id) => { void loadNotesList().then(() => openNote(id)); }));
       } },
-    { label: '🧠 Your memory', title: 'See + search everything the app remembers about you from your notes (your "second brain")', onClick: () => {
-        openCenterModal('Your memory', renderMemoryPanel((id) => { void openNote(id); }));
-      } },
-    { label: '🌐 Capture a web page', title: 'Clip a public page into a note', onClick: async () => {
+    { card: true, icon: '🌐', label: 'Clip a web page', sub: 'From a URL', title: 'Clip a public page into a note', onClick: async () => {
         const url = prompt('Paste a public web page URL to clip into a note:'); if (!url) return;
         const res = await api.post('/api/me/notes/capture/web', { url }).catch(() => null);
         const data = res && res.ok ? await res.json().catch(() => ({})) as { noteId?: string } : null;
         if (data?.noteId) { await loadNotesList(); await openNote(data.noteId); } else { alert('Could not clip that page.'); }
       } },
-    { label: '✦ Ask your workspace', title: 'Search your notes + chats with citations', onClick: () => {
+    { card: true, icon: '🧠', label: 'Your memory', sub: 'Second brain', title: 'See + search everything the app remembers about you from your notes (your "second brain")', onClick: () => {
+        openCenterModal('Your memory', renderMemoryPanel((id) => { void openNote(id); }));
+      } },
+    { section: 'WORKSPACE' },
+    { icon: '✦', label: 'Ask your workspace', title: 'Search your notes + chats with citations', onClick: () => {
         openCenterModal('Ask your workspace', renderWorkspaceAsk((id, quote) => {
           void (async () => {
             await openNote(id);
             document.querySelector('.gw-modal-overlay')?.remove();
-            // After the editor renders, highlight the exact cited line in the source note.
             if (quote) setTimeout(() => highlightQuoteInEditor(quote), 450);
           })();
         }));
       } },
-    { label: '🗃 Databases', title: 'Tables with AI auto-fill', onClick: () => { state.currentDatabaseId = null; state.notesView = 'databases'; render(); } },
-    { label: '📇 Study (flashcards)', title: 'Make + review flashcards from this note (spaced repetition)', onClick: () => { teardownCoedit(); state.notesView = 'study'; render(); } },
-    { label: '🌍 Translate', title: 'Translate this note into another language (saved as a new note)', onClick: () => {
+    { icon: '🗃', label: 'Databases', title: 'Tables with AI auto-fill', onClick: () => { state.currentDatabaseId = null; state.notesView = 'databases'; render(); } },
+    { icon: '📇', label: 'Study (flashcards)', title: 'Make + review flashcards from this note (spaced repetition)', onClick: () => { teardownCoedit(); state.notesView = 'study'; render(); } },
+    { icon: '🌍', label: 'Translate', title: 'Translate this note into another language (saved as a new note)', onClick: () => {
         const id = state.currentNoteId as string | null;
         if (!id) { alert('Open a note first, then translate it.'); return; }
         openCenterModal('Translate note', renderTranslateCard(id, (newId) => { void openNote(newId); }));
       } },
-    { label: '📥 Archived notes', title: 'View + restore archived notes', onClick: async () => { await loadArchivedNotes(); state.notesView = 'archive'; render(); } },
-    { label: '🛡️ Workspace governance', title: 'See your workspace’s enterprise trust posture (read-only)', onClick: () => { openCenterModal('Workspace governance', renderGovernanceCard()); } },
-    { label: '⏰ Scheduled agents', title: 'Set up recurring AI tasks over your notes (e.g. a daily digest)', onClick: () => { openCenterModal('Scheduled agents', renderScheduledAgentsPanel((id) => { void openNote(id); })); } },
-    { label: '🔌 Connect (MCP)', title: 'Let an outside AI app (Claude, ChatGPT) use your notes via MCP', onClick: () => { openCenterModal('Connect an external app (MCP)', renderMcpPanel()); } },
+    { icon: '📥', label: 'Archived notes', title: 'View + restore archived notes', onClick: async () => { await loadArchivedNotes(); state.notesView = 'archive'; render(); } },
+    { icon: '🛡️', label: 'Workspace governance', title: 'See your workspace’s enterprise trust posture (read-only)', onClick: () => { openCenterModal('Workspace governance', renderGovernanceCard()); } },
+    { icon: '⏰', label: 'Scheduled agents', title: 'Set up recurring AI tasks over your notes (e.g. a daily digest)', onClick: () => { openCenterModal('Scheduled agents', renderScheduledAgentsPanel((id) => { void openNote(id); })); } },
+    { icon: '🔌', label: 'Connect (MCP)', title: 'Let an outside AI app (Claude, ChatGPT) use your notes via MCP', onClick: () => { openCenterModal('Connect an external app (MCP)', renderMcpPanel()); } },
   ];
 }
 

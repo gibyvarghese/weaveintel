@@ -15,7 +15,11 @@
 import { h } from './dom.js';
 import { wovenMarkSvg } from './notes-brand.js';
 
-export interface OverflowItem { label: string; title: string; onClick: () => void; danger?: boolean; active?: boolean }
+export interface OverflowItem { label: string; title: string; onClick: () => void; danger?: boolean; active?: boolean; icon?: string; sub?: string; card?: boolean }
+/** A mono section header inside a menu (e.g. the design's "✦ CAPTURE" / "BLOCKS" labels). */
+export interface OverflowSection { section: string }
+export type MenuEntry = OverflowItem | OverflowSection;
+function isSection(e: MenuEntry): e is OverflowSection { return (e as OverflowSection).section !== undefined; }
 export interface EditorCanvasOpts {
   breadcrumb: { notebook: string; title: string };
   creative: boolean;
@@ -45,22 +49,54 @@ export interface EditorCanvasOpts {
   /** Account avatar in the notes top bar (Notes is full-bleed, so this is the way back to your profile). */
   onAccount?: () => void;
   userInitial?: string;
-  insert: OverflowItem[];
-  overflow: OverflowItem[];
+  insert: MenuEntry[];
+  overflow: MenuEntry[];
 }
 
-/** A small dropdown of items anchored under a trigger button (Insert / overflow ⋯). */
-function dropdown(trigger: HTMLElement, items: OverflowItem[], align: 'left' | 'right'): HTMLElement {
+/**
+ * A dropdown popover anchored under a trigger (Insert / overflow ⋯). Supports the design's structure:
+ * mono SECTION headers, plain rows, and CARD rows (icon + label + sub-label, laid out in a 2-col grid).
+ * Closes on outside-click / Escape.
+ */
+function dropdown(trigger: HTMLElement, entries: MenuEntry[], align: 'left' | 'right'): HTMLElement {
   let open = false;
-  const menu = h('div', { className: `gw-menu gw-menu-${align}` },
-    ...items.map((it) => h('button', {
-      className: `gw-menu-item${it.danger ? ' danger' : ''}${it.active ? ' active' : ''}`, title: it.title,
-      onClick: () => { open = false; menu.style.display = 'none'; it.onClick(); },
-    }, it.label)),
-  ) as HTMLElement;
+  const anchor = h('div', { className: 'gw-menu-anchor' });
+  const menu = h('div', { className: `gw-menu gw-menu-rich gw-menu-${align}` }) as HTMLElement;
+  const close = () => { open = false; menu.style.display = 'none'; };
+
+  // Group consecutive card items so they render in a grid under their section header.
+  let cardGrid: HTMLElement | null = null;
+  for (const e of entries) {
+    if (isSection(e)) { cardGrid = null; menu.appendChild(h('div', { className: 'gw-menu-section' }, e.section)); continue; }
+    const it = e;
+    if (it.card) {
+      if (!cardGrid) { cardGrid = h('div', { className: 'gw-menu-cards' }); menu.appendChild(cardGrid); }
+      cardGrid.appendChild(h('button', { className: 'gw-menu-card', title: it.title, onClick: () => { close(); it.onClick(); } },
+        h('span', { className: 'gw-menu-card-ic' }, it.icon ?? '•'),
+        h('span', { className: 'gw-menu-card-tx' },
+          h('span', { className: 'gw-menu-card-label' }, it.label),
+          it.sub ? h('span', { className: 'gw-menu-card-sub' }, it.sub) : null)));
+    } else {
+      cardGrid = null;
+      menu.appendChild(h('button', {
+        className: `gw-menu-item${it.danger ? ' danger' : ''}${it.active ? ' active' : ''}`, title: it.title,
+        onClick: () => { close(); it.onClick(); },
+      }, it.icon ? h('span', { className: 'gw-menu-item-ic' }, it.icon) : null, h('span', {}, it.label)));
+    }
+  }
   menu.style.display = 'none';
-  trigger.addEventListener('click', () => { open = !open; menu.style.display = open ? '' : 'none'; });
-  return h('div', { className: 'gw-menu-anchor' }, trigger, menu);
+  trigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    open = !open; menu.style.display = open ? '' : 'none';
+    if (open) {
+      const onDoc = (ev: Event) => { if (!anchor.contains(ev.target as Node)) { close(); document.removeEventListener('mousedown', onDoc); } };
+      setTimeout(() => document.addEventListener('mousedown', onDoc), 0);
+      const onEsc = (ev: KeyboardEvent) => { if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', onEsc); } };
+      document.addEventListener('keydown', onEsc);
+    }
+  });
+  anchor.appendChild(trigger); anchor.appendChild(menu);
+  return anchor;
 }
 
 // Display uses the theme token (so dark/light stays consistent); the command gets the

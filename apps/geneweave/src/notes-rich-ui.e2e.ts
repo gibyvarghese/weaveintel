@@ -104,6 +104,24 @@ test('Notes toolbar — the 1/2/3 column layout control applies to the editor bo
   expect(cc).toBe('2');
 });
 
+test('Notes Insert menu — a structured popover (CAPTURE cards + WORKSPACE list) that closes on outside click', async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const { H } = await login(page, 'notes-insert@weaveintel.dev');
+  await page.request.post('/api/me/notes', { headers: H, data: { title: 'Ins note', doc_json: JSON.stringify({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'hi' }] }] }) } });
+  await goNotes(page);
+  await page.locator('.gw-tree-row', { hasText: 'Ins note' }).first().click();
+  await page.waitForTimeout(400);
+  await page.locator('.gw-btn-emerald', { hasText: 'Insert' }).first().click();
+  const menu = page.locator('.gw-menu-rich:visible');
+  await expect(menu).toBeVisible();
+  await expect(menu.locator('.gw-menu-section')).toHaveCount(2); // CAPTURE + WORKSPACE
+  expect(await menu.locator('.gw-menu-card').count()).toBe(6);   // capture card grid
+  // Closes on outside click.
+  await page.mouse.click(600, 500);
+  await expect(page.locator('.gw-menu-rich:visible')).toHaveCount(0);
+});
+
 test('Notes assistant — floats as a pop-up panel that collapses to a bubble and back', async ({ page }) => {
   test.setTimeout(60_000);
   await page.setViewportSize({ width: 1440, height: 900 });
