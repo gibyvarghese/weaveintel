@@ -641,7 +641,21 @@ function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLEle
       render();
     },
     onAskAi: () => { _railTab = 'assistant'; render(); },
-    format: { bold: () => fmt('toggleBold'), italic: () => fmt('toggleItalic'), underline: () => fmt('toggleUnderline'), highlight: (color) => fmt('toggleHighlight', { color }), sticker: () => fmt('setSticker', { emoji: '✨' }) },
+    format: {
+      bold: () => fmt('toggleBold'), italic: () => fmt('toggleItalic'), underline: () => fmt('toggleUnderline'),
+      highlight: (color) => fmt('toggleHighlight', { color }), sticker: () => fmt('setSticker', { emoji: '✨' }),
+      // geneWeave Notes: the full rich-text surface, wired to the editor's existing commands so the visible
+      // toolbar matches the design (headings, lists, quote/code, link, text colour, undo/redo).
+      run: (cmd: string, arg?: unknown) => fmt(cmd, arg),
+      textColor: (c: string) => fmt('setTextColor', c),
+      link: () => {
+        const url = window.prompt('Link URL (https://…)')?.trim();
+        if (url === undefined) return;
+        if (url === '') { fmt('unsetLink'); return; }
+        const href = /^(https?:|mailto:|\/)/i.test(url) ? url : `https://${url}`;
+        fmt('setLink', { href });
+      },
+    },
     insert: buildInsertMenu(render),
     overflow,
   });

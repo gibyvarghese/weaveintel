@@ -149,6 +149,7 @@ export const state: any = {
   accountDraft: null as any,     // working copy for dirty-tracked Profile/Preferences edits
   accountLoaded: false,
   accountLoading: false,
+  accountError: false,
   accountPeople: null as any,    // { people[], canManage }
   accountSaving: false,
 

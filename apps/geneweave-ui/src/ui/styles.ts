@@ -1249,7 +1249,14 @@ input{font-family:inherit;outline:none}
 .gw-tool-group.gw-highlighters{gap:6px}
 .gw-tool{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border-radius:7px;border:none;background:transparent;color:var(--fg2);cursor:pointer;font-size:14px}
 .gw-tool:hover{background:var(--bg3)}
-.gw-tool-b{font-weight:700}.gw-tool-i{font-style:italic;font-family:Georgia,serif}.gw-tool-u{text-decoration:underline}
+.gw-tool-b{font-weight:700}.gw-tool-i{font-style:italic;font-family:Georgia,serif}.gw-tool-u{text-decoration:underline}.gw-tool-s{text-decoration:line-through}
+/* block-type dropdown + text-colour menu in the notes toolbar */
+.gw-block-btn{width:auto;gap:5px;padding:0 8px;font-size:13px;color:var(--fg2)}
+.gw-block-caret{display:inline-flex}
+.gw-block-menu{min-width:184px}
+.gw-color-menu{display:flex;gap:8px;padding:10px;min-width:auto}
+.gw-color-swatch{width:22px;height:22px;border-radius:50%;border:1px solid var(--hairline);cursor:pointer;padding:0}
+.gw-color-swatch:hover{transform:scale(1.1)}
 .gw-hl{width:18px;height:18px;border-radius:50%;cursor:pointer;flex:none;box-shadow:inset 0 0 0 1px rgba(20,32,27,.10)}
 .gw-hl.active{box-shadow:0 0 0 2px var(--surface),0 0 0 3px var(--accent)}
 .gw-ask-ai{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:var(--accent2);background:var(--mint);border:1px solid var(--mint-deep);border-radius:8px;padding:6px 12px;cursor:pointer;margin-left:auto}

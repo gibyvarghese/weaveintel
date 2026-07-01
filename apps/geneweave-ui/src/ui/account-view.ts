@@ -34,17 +34,21 @@ function ic(name: string): HTMLElement {
 async function loadAccount(render: () => void): Promise<void> {
   if (state.accountLoading) return;
   state.accountLoading = true;
+  state.accountError = false;
   try {
     const [acc, ppl] = await Promise.all([
-      api.get('/me/account').then((r) => r.json()).catch(() => null),
-      api.get('/me/account/people').then((r) => r.json()).catch(() => null),
+      api.get('/me/account').then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      api.get('/me/account/people').then((r) => (r.ok ? r.json() : null)).catch(() => null),
     ]);
     if (acc?.account) {
       state.account = acc.account;
       state.accountDraft = JSON.parse(JSON.stringify({ profile: acc.account.profile, preferences: acc.account.preferences }));
+      state.accountLoaded = true;
+    } else {
+      // Load failed (e.g. not authenticated / server error) — surface a friendly retry, never a blank app.
+      state.accountError = true;
     }
     if (ppl) state.accountPeople = ppl;
-    state.accountLoaded = true;
   } finally {
     state.accountLoading = false;
     render();
@@ -355,7 +359,16 @@ export function renderAccountView(render: () => void): HTMLElement {
     h('h1', { className: 'acct-title' }, def.title),
     h('p', { className: 'acct-desc' }, def.desc)));
 
-  if (!state.accountLoaded) {
+  // Robust states: a failed/slow load must NEVER blank the app (the profile/security/prefs/notifs
+  // sections read state.account — guard them so a null never throws out of render()).
+  const ready = !!(state.account && state.accountDraft);
+  const needsAccount = section === 'profile' || section === 'security' || section === 'prefs' || section === 'notifs';
+  if (state.accountError && !ready) {
+    content.appendChild(h('div', { className: 'acct-card', style: 'display:flex;flex-direction:column;gap:12px;align-items:flex-start;' },
+      h('div', { style: 'font-size:14px;font-weight:600;' }, 'Couldn’t load your account'),
+      h('div', { className: 'acct-row-sub' }, 'You may need to sign in again. Check your connection and try once more.'),
+      h('button', { className: 'acct-btn-emerald', onClick: () => { state.accountLoaded = false; state.accountError = false; state.account = null; state.accountDraft = null; render(); } }, 'Retry')));
+  } else if (needsAccount && !ready) {
     content.appendChild(h('div', { className: 'acct-card', style: 'color:var(--fg3);font-size:13px;' }, 'Loading your account…'));
   } else {
     if (section === 'profile') content.appendChild(renderProfile(render));
@@ -370,7 +383,7 @@ export function renderAccountView(render: () => void): HTMLElement {
   app.appendChild(main);
 
   // ── sticky save bar (only for the dirty-tracked Profile/Preferences sections) ──
-  if ((section === 'profile' || section === 'prefs') && state.accountLoaded) {
+  if ((section === 'profile' || section === 'prefs') && ready) {
     const dirty = isDirty();
     app.appendChild(h('div', { className: 'acct-savebar' + (dirty ? ' dirty' : '') },
       h('span', { className: 'acct-savebar-status' }, dirty ? 'Unsaved changes' : 'All changes saved'),
