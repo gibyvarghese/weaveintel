@@ -780,6 +780,37 @@ export const PLATFORM_CAPABILITY_ADMIN_TABS: Record<string, AdminTabDef> = {
     ],
   },
 
+  'ai-transparency': {
+    singular: 'AI transparency', apiPath: 'admin/ai-transparency', listKey: 'tenants',
+    cols: ['tenant_id', 'show_ai_label', 'content_warnings', 'feedback_enabled'],
+    fields: [
+      { key: 'tenant_id', label: 'Tenant ID', readonly: false },
+      { key: 'show_ai_label', label: 'Show an “AI-generated” label on assistant answers', type: 'checkbox', save: 'bool', default: true },
+      { key: 'disclosure_text', label: 'Disclosure wording shown under answers (EU AI Act Article 50)', textarea: true, placeholder: 'AI-generated — may be inaccurate. Check anything important.' },
+      { key: 'content_warnings', label: 'Show a content warning on sensitive-topic answers', type: 'checkbox', save: 'bool', default: true },
+      { key: 'feedback_enabled', label: 'Let people rate answers (thumbs up/down + reasons)', type: 'checkbox', save: 'bool', default: true },
+    ],
+  },
+  'chat-citations': {
+    singular: 'Answer citations', apiPath: 'admin/chat-citations', listKey: 'tenants',
+    cols: ['tenant_id', 'enabled', 'min_citations', 'scope'],
+    fields: [
+      { key: 'tenant_id', label: 'Tenant ID', readonly: false },
+      { key: 'enabled', label: 'Offer “Cite sources” in chat (grounded, verifiable answers)', type: 'checkbox', save: 'bool', default: true },
+      { key: 'min_citations', label: 'Sources required to call an answer “grounded” (0 = citations optional)', type: 'number', save: 'int', default: 1 },
+      { key: 'scope', label: 'What to search for sources', options: ['all', 'notes', 'runs'], default: 'all' },
+      { key: 'max_sources', label: 'How many sources to pull in per answer (1–12)', type: 'number', save: 'int', default: 6 },
+    ],
+  },
+  'answer-versions': {
+    singular: 'Answer versions', apiPath: 'admin/answer-versions', listKey: 'tenants',
+    cols: ['tenant_id', 'enabled', 'max_variants'],
+    fields: [
+      { key: 'tenant_id', label: 'Tenant ID', readonly: false },
+      { key: 'enabled', label: 'Offer “Regenerate” on answers (keeps every version to page between)', type: 'checkbox', save: 'bool', default: true },
+      { key: 'max_variants', label: 'How many versions to keep per answer (2–10; oldest pruned first)', type: 'number', save: 'int', default: 5 },
+    ],
+  },
   'tenant-configs': {
     singular: 'Tenant Config', apiPath: 'admin/tenant-configs', listKey: 'tenant-configs',
     cols: ['name', 'tenant_id', 'scope', 'enabled'],

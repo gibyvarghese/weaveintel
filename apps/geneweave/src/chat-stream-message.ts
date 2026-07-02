@@ -326,6 +326,9 @@ export async function streamMessageImpl(
   // run that wants a specific reasoning model). Otherwise the router decides.
   const pinned = typeof opts?.model === 'string' && opts.model.length > 0;
   const routed = pinned ? null : await routeModel(deps.db, await deps.getAvailableModels(), deps.healthTracker.listHealth(), { ...opts, prompt: content }, blocked);
+  // Snapshot the resolved routing task so the `done` event can carry it — the UI passes it back when the
+  // reader rates the answer, which lets that feedback update the model's routing quality score (m137).
+  const resolvedTaskKey: string | null = routed?.taskKey ?? null;
   if (routed && deps.config.providers[routed.provider]) {
     provider = routed.provider;
     modelId = routed.modelId;
@@ -1094,6 +1097,9 @@ export async function streamMessageImpl(
     }
   }
 
+  // Generate the assistant message id up-front so the `done` event can return it — the UI attaches it to
+  // the just-streamed message so answer feedback (thumbs / tiered) can target it immediately (m137).
+  const assistMsgId = newUUIDv7();
   await deps.writeSseEvent(res, {
     type: 'done',
     usage: finalUsage,
@@ -1102,6 +1108,8 @@ export async function streamMessageImpl(
     model: modelId,
     provider,
     mode: settings.mode,
+    messageId: assistMsgId,
+    taskKey: resolvedTaskKey ?? undefined,
     activeSkills: streamActiveSkills,
     skillTools: streamSkillTools,
     enabledTools: streamMemorySettings.enabledTools,
@@ -1149,7 +1157,6 @@ export async function streamMessageImpl(
     await semanticStore(deps.semanticCache, streamSemanticCfg, processedContent, { content: fullText, usage: finalUsage }, tenantId, userId);
   }
 
-  const assistMsgId = newUUIDv7();
   await deps.db.addMessage({
     id: assistMsgId, chatId, role: 'assistant', content: fullText,
     metadata: JSON.stringify({

@@ -284,6 +284,17 @@ input{font-family:inherit;outline:none}
 .msg .meta{font-size:11px;color:var(--fg3);margin-top:6px}
 .msg .meta span{margin-right:10px}
 .msg-body{position:relative}
+/* Differentiated failure UI (Round 2). Error = clear-but-calm amber card with a matching recovery.
+   Refusal = neutral "declined" note (deliberately NOT styled like a system error). */
+.msg-error{display:flex;align-items:flex-start;gap:10px;margin-top:4px;padding:11px 14px;border-radius:12px;background:var(--danger-zone-bg);border:1px solid var(--danger-zone-border);color:var(--danger-zone-fg);font-size:13.5px;line-height:1.5}
+.msg-error-icon{flex:none;line-height:1.4}
+.msg-error-text{flex:1;min-width:0}
+.msg-error-actions{display:flex;gap:8px;margin-top:9px}
+.msg-retry{font-size:13px;font-weight:600;color:var(--danger-zone-fg);background:var(--surface);border:1px solid var(--danger-zone-border);border-radius:8px;padding:7px 14px;cursor:pointer;min-height:32px}
+.msg-retry:hover{background:var(--danger-zone-bg)}
+.msg-refusal{display:flex;align-items:flex-start;gap:10px;margin-top:4px;padding:11px 14px;border-radius:12px;background:var(--bg3);border:1px solid var(--bg4);color:var(--fg2);font-size:13.5px;line-height:1.5}
+.msg-refusal-icon{flex:none;color:var(--fg3);line-height:1.4}
+.msg-refusal-text{flex:1;min-width:0}
 .resp-corner{position:absolute;top:-8px;right:-8px;display:flex;gap:6px;z-index:3}
 .resp-ind{width:22px;height:22px;border-radius:999px;border:1px solid var(--bg4);background:var(--bg2);color:var(--fg3);display:flex;align-items:center;justify-content:center;font-size:11px;box-shadow:var(--shadow-soft);cursor:help}
 .resp-ind.ok{color:var(--success);border-color:rgba(22,163,74,.25)}
@@ -347,12 +358,58 @@ input{font-family:inherit;outline:none}
 /* ── Response toolbar ───────────────────── */
 .response-toolbar{display:flex;gap:4px;margin-top:8px;opacity:0;transition:opacity .18s ease}
 .msg.assistant:hover .response-toolbar{opacity:1}
+/* Keep the toolbar visible while a feedback reason panel is open, and once an answer has been rated. */
+.response-toolbar:has(.fb-panel),.response-toolbar:has(.fb-on),.response-toolbar:focus-within{opacity:1}
 .tb-btn{display:inline-flex;align-items:center;gap:5px;padding:5px 12px;border-radius:999px;font-size:11px;font-weight:500;color:var(--fg3);background:var(--bg3);border:1px solid var(--bg4);cursor:pointer;transition:all .18s ease;font-family:var(--font)}
 .tb-btn:hover{color:var(--fg);background:var(--bg);border-color:var(--fg3)}
 .tb-btn svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
 .tb-btn.copied{color:var(--success);border-color:var(--success);background:rgba(22,163,74,.06)}
 .copy-toast{position:fixed;bottom:32px;left:50%;transform:translateX(-50%);background:var(--solid);color:var(--solid-contrast);padding:8px 20px;border-radius:999px;font-size:13px;font-weight:500;z-index:10001;opacity:0;transition:opacity .2s;pointer-events:none}
 .copy-toast.show{opacity:1}
+/* m137 — answer feedback (thumbs + tiered reasons) + AI-generated disclosure. Neutrals = you; emerald = AI. */
+.fb-wrap{display:inline-flex;align-items:center;gap:4px;position:relative;flex-wrap:wrap}
+.fb-btn{padding:5px 9px;line-height:1}
+.fb-btn.fb-on{color:var(--accent2);background:var(--accent-dim);border-color:color-mix(in oklab,var(--accent) 40%, var(--bg4))}
+.fb-thanks{font-size:11px;color:var(--fg3);margin-left:2px}
+.fb-panel{position:absolute;top:calc(100% + 6px);left:0;z-index:60;width:290px;max-width:80vw;background:var(--bg);border:1px solid var(--bg4);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.14);padding:12px;display:flex;flex-direction:column;gap:8px}
+.fb-panel-title{font-size:12px;font-weight:600;color:var(--fg)}
+.fb-chips{display:flex;flex-wrap:wrap;gap:6px}
+.fb-chip{font-size:11px;padding:5px 10px;border-radius:999px;color:var(--fg2);background:var(--bg3);border:1px solid var(--bg4);cursor:pointer;font-family:var(--font);transition:all .15s ease}
+.fb-chip:hover{border-color:var(--fg3)}
+.fb-chip.on{color:var(--accent2);background:var(--accent-dim);border-color:color-mix(in oklab,var(--accent) 45%, var(--bg4))}
+.fb-comment{width:100%;box-sizing:border-box;font-family:var(--font);font-size:12px;color:var(--fg);background:var(--bg2);border:1px solid var(--bg4);border-radius:8px;padding:7px 9px;resize:vertical}
+.fb-comment:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in oklab,var(--accent) 14%, transparent)}
+.fb-panel-actions{display:flex;justify-content:flex-end;gap:8px}
+.fb-cancel,.fb-send{font-size:12px;font-weight:500;padding:6px 12px;border-radius:8px;cursor:pointer;font-family:var(--font);border:1px solid var(--bg4)}
+.fb-cancel{color:var(--fg3);background:var(--bg3)}
+.fb-send{color:var(--solid-contrast);background:var(--accent);border-color:var(--accent)}
+.fb-send:hover{background:var(--accent2)}
+.ai-disclosure{display:flex;align-items:center;gap:6px;margin-top:8px;font-size:11px;color:var(--fg3)}
+.ai-disclosure-dot{color:var(--accent)}
+/* m138 — answer citations in chat: the composer toggle + inline [n] chips + verified source cards. */
+.composer-tools{display:flex;gap:6px;align-items:center;margin-top:6px}
+.cite-toggle{display:inline-flex;align-items:center;gap:5px;padding:5px 11px;border-radius:999px;font-size:11px;font-weight:500;color:var(--fg3);background:var(--bg3);border:1px solid var(--bg4);cursor:pointer;font-family:var(--font);transition:all .18s ease}
+.cite-toggle:hover{color:var(--fg);border-color:var(--fg3)}
+.cite-toggle.on{color:var(--accent2);background:var(--accent-dim);border-color:color-mix(in oklab,var(--accent) 45%, var(--bg4))}
+.chat-cite-answer{font-size:14px;line-height:1.7;color:var(--fg1);white-space:pre-wrap}
+.chat-cite-chip{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;margin:0 1px;padding:0 4px;font-size:10px;font-weight:700;color:#0B7A57;background:#E8F5EE;border:1px solid #BfE6D4;border-radius:999px;cursor:pointer;vertical-align:super;line-height:1;font-family:var(--font)}
+.chat-cite-chip:hover{background:#0B7A57;color:#fff}
+.chat-cite-chip.unmatched{color:var(--fg2);background:var(--bg4);border-color:var(--bg4);cursor:default}
+.chat-cite-label{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--fg2);margin:12px 0 6px}
+.chat-cite-card{display:flex;align-items:baseline;gap:6px;border:1px solid var(--bg4);border-left:3px solid #0B7A57;border-radius:6px;padding:6px 8px;margin-bottom:5px}
+.chat-cite-card.openable{cursor:pointer}
+.chat-cite-card.openable:hover{border-color:#0B7A57;background:#F4FBF7}
+.chat-cite-n{font-weight:700;color:var(--accent);font-size:11px}
+.chat-cite-quote{font-size:12px;color:var(--fg1);font-style:italic;flex:1}
+.chat-cite-src{font-size:11px;color:var(--fg2);white-space:nowrap}
+.chat-cite-ungrounded{font-size:12px;color:var(--fg2);border:1px dashed var(--bg4);border-radius:6px;padding:7px 9px;margin-top:8px}
+/* m139 — regenerate + version pager on an assistant answer. */
+.ver-wrap{display:inline-flex;align-items:center;gap:4px}
+.ver-nav{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;padding:0;border-radius:6px;font-size:14px;line-height:1;color:var(--fg3);background:var(--bg3);border:1px solid var(--bg4);cursor:pointer;font-family:var(--font)}
+.ver-nav:hover:not([disabled]){color:var(--fg);border-color:var(--fg3)}
+.ver-nav[disabled]{opacity:.4;cursor:default}
+.ver-count{font-size:11px;font-weight:500;color:var(--fg2);min-width:26px;text-align:center}
+.ver-regen.busy{opacity:.7;cursor:default}
 .empty-chat{flex:1;display:flex;align-items:center;justify-content:center;color:var(--fg3);font-size:15px;flex-direction:column;gap:8px}
 .empty-chat .logo{font-size:48px;margin-bottom:8px}
 
@@ -363,6 +420,9 @@ input{font-family:inherit;outline:none}
 .input-bar .send-btn{padding:12px 24px;border-radius:999px;background:var(--solid);color:var(--solid-contrast);font-weight:600;font-size:14px;height:48px;transition:background .18s ease}
 .input-bar .send-btn:hover{background:var(--solid-hover)}
 .input-bar .send-btn:disabled{opacity:.4;cursor:not-allowed}
+/* Stop-generating control (Round 3): same footprint as Send so the layout doesn't shift when it swaps. */
+.input-bar .send-btn.stop-btn{background:var(--danger);color:#fff;display:inline-flex;align-items:center;gap:7px}
+.input-bar .send-btn.stop-btn:hover{background:var(--coral)}
 .input-bar .model-sel{padding:10px 12px;border-radius:var(--radius);border:1px solid var(--bg4);background:var(--bg2);color:var(--fg2);font-size:13px;height:48px}
 .routing-badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:var(--radius);border:1px solid var(--bg4);background:var(--bg2);color:var(--fg2);font-family:var(--font);font-size:13px;font-weight:500;cursor:help;white-space:nowrap;box-sizing:border-box;line-height:1.4}
 .routing-badge svg{width:12px;height:12px;opacity:.5;color:var(--fg3);flex-shrink:0}
@@ -428,6 +488,12 @@ input{font-family:inherit;outline:none}
 .voice-error{font-size:11px;color:var(--danger);padding:4px 8px;background:rgba(220,38,38,.08);border-radius:6px}
 .composer-wrap{flex:1;display:flex;flex-direction:column;gap:8px}
 .attach-strip{display:flex;flex-wrap:wrap;gap:8px}
+/* rejected-upload alert (Round 3): a specific, dismissable reason per file */
+.upload-reject{display:flex;align-items:flex-start;gap:8px;padding:8px 12px;border-radius:10px;background:var(--danger-zone-bg);border:1px solid var(--danger-zone-border);color:var(--danger-zone-fg);font-size:12.5px;line-height:1.45}
+.upload-reject-icon{flex:none}
+.upload-reject-text{flex:1;min-width:0}
+.upload-reject-x{flex:none;width:20px;height:20px;border:none;background:transparent;color:var(--danger-zone-fg);cursor:pointer;font-size:15px;line-height:1;border-radius:6px}
+.upload-reject-x:hover{background:var(--danger-zone-border)}
 .attach-chip{display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg3);border:1px solid var(--bg4);border-radius:999px;font-size:12px;color:var(--fg2);max-width:340px}
 .attach-chip .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .attach-chip .remove{width:18px;height:18px;border-radius:999px;background:var(--bg2);border:1px solid var(--bg4);display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--fg3)}

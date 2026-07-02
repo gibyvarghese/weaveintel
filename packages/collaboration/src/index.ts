@@ -122,6 +122,32 @@ export {
   annotationsToEvalExamples,
 } from './run-annotation.js';
 export {
+  type FeedbackRating,
+  type FeedbackCategory,
+  type MessageFeedbackInput,
+  type ValidatedMessageFeedback,
+  type FeedbackRow,
+  type FeedbackSummary,
+  FEEDBACK_CATEGORIES,
+  ANSWER_RATING_METRIC,
+  FEEDBACK_COMMENT_MAX,
+  validateMessageFeedback,
+  sanitizeFeedbackCategories,
+  signalToRating,
+  feedbackToAnnotationValue,
+  summarizeMessageFeedback,
+} from './message-feedback.js';
+export {
+  type AnswerVariant,
+  type VariantStack,
+  DEFAULT_MAX_VARIANTS,
+  makeVariantStack,
+  addVariant,
+  selectVariant,
+  activeVariant,
+  variantLabel,
+} from './answer-variants.js';
+export {
   annotationManagerContract,
 } from './run-annotation-contract.js';
 

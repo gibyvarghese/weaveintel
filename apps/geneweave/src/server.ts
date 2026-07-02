@@ -70,6 +70,9 @@ import {
   registerMeMemoryRoutes,
   registerMeAgendaRoutes,
   registerMeAccountRoutes,
+  registerMeFeedbackRoutes,
+  registerMeCitationsRoutes,
+  registerMeVersionsRoutes,
   registerMeNotesRoutes,
   registerMeComplianceRoutes,
   registerVoiceRoutes,
@@ -286,6 +289,12 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   registerMeMemoryRoutes(router, db, { consentManager: config.runtime ? createDurableConsentManager({ runtime: config.runtime, namespace: 'consent' }) : undefined });
   registerMeAgendaRoutes(router, db);
   registerMeAccountRoutes(router, db);
+  registerMeFeedbackRoutes(router, db);
+  // m138: answer citations in chat — grounded answers over the user's own workspace with verified [n]
+  // sources. Reuses the notes "Ask your workspace" engine, so it needs the same LLM text generator.
+  registerMeCitationsRoutes(router, db, { aiGenerate: createModelTextGenerator(chatEngine.modelConfig) });
+  // m139: regenerate an answer, keeping version history — needs an LLM to produce the alternative.
+  registerMeVersionsRoutes(router, db, { aiGenerate: createModelTextGenerator(chatEngine.modelConfig) });
   // weaveNotes Phase 3: give the notes routes an LLM generator (built from the chat
   // engine's resolved providers + default model) so the AI co-author actions work.
   // weaveNotes Phase 4: pass the share-token secret + public base url so a note can be

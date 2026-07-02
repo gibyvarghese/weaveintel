@@ -69,6 +69,8 @@ import { createNoteMeetingService } from './note-meeting-sql.js';
 import { createNoteMemoryService } from './note-memory-sql.js';
 import { createTenantAppearanceService } from './tenant-appearance-sql.js';
 import { createAccountService } from './account-sql.js';
+import { createAnswerFeedbackService } from './answer-feedback-sql.js';
+import { createChatCitationsService } from './chat-citations-sql.js';
 import { createNoteWorkspaceService } from './note-workspace-sql.js';
 import { createNoteSettingsService } from './note-settings-sql.js';
 import {
@@ -430,6 +432,14 @@ export class ChatEngine {
         if (r.ok) void createNoteSettingsService(db).recordActivity({ noteId: a.noteId, userId: a.userId, tenantId: a.tenantId ?? null, action: 'updated', actor: 'ai', summary: `Exported as ${r.format} (assistant)` });
         return r;
       },
+      // Answer feedback (m137): wire the `review_answer_feedback` tool — an aggregate, privacy-safe
+      // read-out of how the assistant's answers have been rated, so it can understand where it falls short.
+      reviewAnswerFeedback: (a: { tenantId: string | null; limit?: number }) =>
+        createAnswerFeedbackService(db).agentReviewFeedback(a),
+      // Answer citations (m138): wire the `cite_sources` tool — a grounded, verified-citation answer over
+      // the user's own workspace, so the assistant can back a claim with a real, checkable source.
+      citeSources: (a: { userId: string; tenantId?: string | null; question: string; limit?: number }) =>
+        createChatCitationsService(db, { aiGenerate: createModelTextGenerator(config) }).agentCiteSources(a),
       // weaveNotes Phase 5: wire the `find_related_notes` tool (semantic note search).
       notesSearch: (a: { userId: string; tenantId?: string | null; query: string; limit?: number }) =>
         createNoteGraphService(db).searchNotes({ userId: a.userId, tenantId: a.tenantId ?? null }, a.query, a.limit ?? 5),

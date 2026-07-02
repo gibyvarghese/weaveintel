@@ -1789,23 +1789,25 @@ export class SQLiteAdapter implements DatabaseAdapter {
   async insertMessageFeedback(row: Omit<MessageFeedbackRow, 'created_at'> & { created_at?: string }): Promise<void> {
     this.d.prepare(
       `INSERT INTO message_feedback (
-         id, message_id, chat_id, user_id, signal, comment,
+         id, message_id, chat_id, user_id, signal, comment, categories, tenant_id,
          model_id, provider, task_key, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))`,
     ).run(
       row.id, row.message_id, row.chat_id ?? null, row.user_id ?? null,
-      row.signal, row.comment ?? null,
+      row.signal, row.comment ?? null, row.categories ?? null, row.tenant_id ?? null,
       row.model_id ?? null, row.provider ?? null, row.task_key ?? null,
       row.created_at ?? null,
     );
   }
 
-  async listMessageFeedback(opts?: { messageId?: string; chatId?: string; signal?: string; limit?: number }): Promise<MessageFeedbackRow[]> {
+  async listMessageFeedback(opts?: { messageId?: string; chatId?: string; signal?: string; tenantId?: string; userId?: string; limit?: number }): Promise<MessageFeedbackRow[]> {
     const where: string[] = [];
     const vals: unknown[] = [];
     if (opts?.messageId) { where.push('message_id = ?'); vals.push(opts.messageId); }
     if (opts?.chatId)    { where.push('chat_id = ?');    vals.push(opts.chatId); }
     if (opts?.signal)    { where.push('signal = ?');     vals.push(opts.signal); }
+    if (opts?.tenantId)  { where.push('tenant_id = ?');  vals.push(opts.tenantId); }
+    if (opts?.userId)    { where.push('user_id = ?');    vals.push(opts.userId); }
     const limit = Math.max(1, Math.min(opts?.limit ?? 200, 5000));
     const sql = `SELECT * FROM message_feedback${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY created_at DESC LIMIT ${limit}`;
     return this.d.prepare(sql).all(...vals) as MessageFeedbackRow[];
@@ -9327,6 +9329,83 @@ export class SQLiteAdapter implements DatabaseAdapter {
   async listTenantAppearance(): Promise<import('./db-types/adapter-me.js').TenantAppearanceRow[]> {
     return this.d.prepare('SELECT * FROM tenant_appearance ORDER BY tenant_id ASC').all() as import('./db-types/adapter-me.js').TenantAppearanceRow[];
   }
+
+  // m137 — per-tenant AI transparency (answer feedback itself is stored via insertMessageFeedback/listMessageFeedback).
+  async getTenantAiTransparency(tenantId: string): Promise<import('./db-types/adapter-me.js').TenantAiTransparencyRow | null> {
+    return (this.d.prepare('SELECT * FROM tenant_ai_transparency WHERE tenant_id = ?').get(tenantId) as import('./db-types/adapter-me.js').TenantAiTransparencyRow | undefined) ?? null;
+  }
+  async upsertTenantAiTransparency(row: import('./db-types/adapter-me.js').TenantAiTransparencyRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO tenant_ai_transparency (tenant_id, show_ai_label, disclosure_text, content_warnings, feedback_enabled)
+       VALUES (@tenant_id, @show_ai_label, @disclosure_text, @content_warnings, @feedback_enabled)
+       ON CONFLICT(tenant_id) DO UPDATE SET
+         show_ai_label=excluded.show_ai_label, disclosure_text=excluded.disclosure_text,
+         content_warnings=excluded.content_warnings, feedback_enabled=excluded.feedback_enabled, updated_at=datetime('now')`,
+    ).run(row);
+  }
+  async listTenantAiTransparency(): Promise<import('./db-types/adapter-me.js').TenantAiTransparencyRow[]> {
+    return this.d.prepare('SELECT * FROM tenant_ai_transparency ORDER BY tenant_id ASC').all() as import('./db-types/adapter-me.js').TenantAiTransparencyRow[];
+  }
+
+  // m138 — answer citations in chat.
+  async insertMessageCitations(rows: import('./db-types/adapter-me.js').MessageCitationRow[]): Promise<void> {
+    if (!rows.length) return;
+    const stmt = this.d.prepare(
+      `INSERT INTO message_citations (id, message_id, chat_id, user_id, tenant_id, n, source_id, source_kind, source_title, quote, char_start, char_end)
+       VALUES (@id, @message_id, @chat_id, @user_id, @tenant_id, @n, @source_id, @source_kind, @source_title, @quote, @char_start, @char_end)`,
+    );
+    const tx = this.d.transaction((rs: import('./db-types/adapter-me.js').MessageCitationRow[]) => { for (const r of rs) stmt.run(r); });
+    tx(rows);
+  }
+  async listMessageCitations(messageId: string): Promise<import('./db-types/adapter-me.js').MessageCitationRow[]> {
+    return this.d.prepare('SELECT * FROM message_citations WHERE message_id = ? ORDER BY n ASC').all(messageId) as import('./db-types/adapter-me.js').MessageCitationRow[];
+  }
+  async getTenantChatCitations(tenantId: string): Promise<import('./db-types/adapter-me.js').TenantChatCitationsRow | null> {
+    return (this.d.prepare('SELECT * FROM tenant_chat_citations WHERE tenant_id = ?').get(tenantId) as import('./db-types/adapter-me.js').TenantChatCitationsRow | undefined) ?? null;
+  }
+  async upsertTenantChatCitations(row: import('./db-types/adapter-me.js').TenantChatCitationsRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO tenant_chat_citations (tenant_id, enabled, min_citations, scope, max_sources)
+       VALUES (@tenant_id, @enabled, @min_citations, @scope, @max_sources)
+       ON CONFLICT(tenant_id) DO UPDATE SET
+         enabled=excluded.enabled, min_citations=excluded.min_citations, scope=excluded.scope,
+         max_sources=excluded.max_sources, updated_at=datetime('now')`,
+    ).run(row);
+  }
+  async listTenantChatCitations(): Promise<import('./db-types/adapter-me.js').TenantChatCitationsRow[]> {
+    return this.d.prepare('SELECT * FROM tenant_chat_citations ORDER BY tenant_id ASC').all() as import('./db-types/adapter-me.js').TenantChatCitationsRow[];
+  }
+
+  // m139 — regenerate with version history.
+  async insertMessageVariants(rows: import('./db-types/adapter-me.js').MessageVariantRow[]): Promise<void> {
+    if (!rows.length) return;
+    const stmt = this.d.prepare(
+      `INSERT INTO message_variants (id, group_id, chat_id, user_id, tenant_id, variant_index, content, model, provider, reason)
+       VALUES (@id, @group_id, @chat_id, @user_id, @tenant_id, @variant_index, @content, @model, @provider, @reason)`,
+    );
+    const tx = this.d.transaction((rs: import('./db-types/adapter-me.js').MessageVariantRow[]) => { for (const r of rs) stmt.run(r); });
+    tx(rows);
+  }
+  async listMessageVariants(groupId: string): Promise<import('./db-types/adapter-me.js').MessageVariantRow[]> {
+    return this.d.prepare('SELECT * FROM message_variants WHERE group_id = ? ORDER BY variant_index ASC').all(groupId) as import('./db-types/adapter-me.js').MessageVariantRow[];
+  }
+  async updateMessageContent(messageId: string, content: string, metadata: string | null): Promise<void> {
+    this.d.prepare('UPDATE messages SET content = ?, metadata = ? WHERE id = ?').run(content, metadata, messageId);
+  }
+  async getTenantAnswerVersions(tenantId: string): Promise<import('./db-types/adapter-me.js').TenantAnswerVersionsRow | null> {
+    return (this.d.prepare('SELECT * FROM tenant_answer_versions WHERE tenant_id = ?').get(tenantId) as import('./db-types/adapter-me.js').TenantAnswerVersionsRow | undefined) ?? null;
+  }
+  async upsertTenantAnswerVersions(row: import('./db-types/adapter-me.js').TenantAnswerVersionsRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO tenant_answer_versions (tenant_id, enabled, max_variants)
+       VALUES (@tenant_id, @enabled, @max_variants)
+       ON CONFLICT(tenant_id) DO UPDATE SET enabled=excluded.enabled, max_variants=excluded.max_variants, updated_at=datetime('now')`,
+    ).run(row);
+  }
+  async listTenantAnswerVersions(): Promise<import('./db-types/adapter-me.js').TenantAnswerVersionsRow[]> {
+    return this.d.prepare('SELECT * FROM tenant_answer_versions ORDER BY tenant_id ASC').all() as import('./db-types/adapter-me.js').TenantAnswerVersionsRow[];
+  }
+
   // weaveNotes Phase 5 (m134) — background-memory extraction state.
   async getNoteMemoryState(noteId: string, userId: string): Promise<import('./db-types/adapter-me.js').NoteMemoryStateRow | null> {
     return (this.d.prepare('SELECT * FROM note_memory_state WHERE note_id = ? AND user_id = ?').get(noteId, userId) ?? null) as import('./db-types/adapter-me.js').NoteMemoryStateRow | null;

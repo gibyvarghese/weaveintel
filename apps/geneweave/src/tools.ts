@@ -987,6 +987,19 @@ export interface ToolRegistryOptions {
    */
   noteExport?: (args: { userId: string; tenantId?: string | null; noteId: string; format?: string }) => Promise<{ ok: boolean; error?: string; format?: string; filename?: string; content?: string }>;
   /**
+   * Answer feedback (m137): read-only aggregate of how the assistant's answers have been rated
+   * (thumbs up/down + reason categories) so it can understand how its answers land and where it
+   * tends to disappoint. When set, the `review_answer_feedback` tool is available. Aggregates only —
+   * never returns individual users' data.
+   */
+  reviewAnswerFeedback?: (args: { tenantId: string | null; limit?: number }) => Promise<{ total: number; up: number; down: number; satisfactionPct: number | null; topReasons: Array<{ reason: string; count: number }> }>;
+  /**
+   * Answer citations (m138): answer a question grounded ONLY in the user's own workspace (their notes + past
+   * chats), with an inline [n] on every claim that points to a source whose quote provably exists (hallucinated
+   * quotes dropped). When set, the `cite_sources` tool is available. Owner-scoped.
+   */
+  citeSources?: (args: { userId: string; tenantId?: string | null; question: string; limit?: number }) => Promise<{ ok: boolean; error?: string; answer: string; grounded: boolean; citations: Array<{ n: number; sourceId: string; sourceKind: string; sourceTitle: string; quote: string }>; sources: Array<{ n: number; id: string; kind: string; title: string }> }>;
+  /**
    * weaveNotes Phase 5: semantic note search. When set, the `find_related_notes` tool is
    * available so the agent can find the user's notes most relevant to a query (knowledge-
    * graph navigation) before answering, editing, or linking. Owner-scoped.
@@ -2204,6 +2217,47 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
         tags: ['notes', 'memory'],
       }),
     } : {}),
+    // Answer feedback (m137): review_answer_feedback tool — available when reviewAnswerFeedback callback is set.
+    ...(opts?.reviewAnswerFeedback ? {
+      review_answer_feedback: weaveTool({
+        name: 'review_answer_feedback',
+        description: 'See how your recent answers have been rated by the people you help — a plain-language read-out of thumbs up vs thumbs down, the overall satisfaction score, and the most common reasons people gave when they were not happy (e.g. "inaccurate", "incomplete", "did not follow instructions"). Use this when the user asks "how am I doing?", "what do people think of your answers?", or when you want to understand where your answers tend to fall short so you can do better. Read-only and privacy-safe: it returns totals only, never any individual person\'s comment or identity.',
+        parameters: {
+          type: 'object',
+          properties: {
+            limit: { type: 'number', description: 'How many recent feedback entries to summarise (default 500, max 2000).' },
+          },
+        },
+        execute: async (args: { limit?: number }) => {
+          if (!opts.reviewAnswerFeedback) return { content: 'Answer-feedback review is unavailable in this context.', isError: true };
+          const r = await opts.reviewAnswerFeedback({ tenantId: opts.currentTenantId ?? null, ...(typeof args.limit === 'number' ? { limit: Math.min(2000, Math.max(1, args.limit)) } : {}) });
+          return JSON.stringify({ ok: true, ...r });
+        },
+        tags: ['notes', 'quality'],
+      }),
+    } : {}),
+    // Answer citations (m138): cite_sources tool — available when citeSources callback is set.
+    ...(opts?.citeSources && opts.currentUserId ? {
+      cite_sources: weaveTool({
+        name: 'cite_sources',
+        description: 'Answer a question using ONLY the user\'s own workspace — their notes and past chats — and back every claim with an inline [n] citation that points to the exact source sentence. Each quote is verified to genuinely exist in its source; anything the model invents is dropped, so the answer is grounded and checkable, never made up. Use this when the user asks something that should be answered from THEIR material ("what did we decide about pricing? cite it", "answer from my notes"), or when they ask you to back a claim with a source. Returns the grounded answer, the verified citations (with the exact quote + which note/chat it came from), and the numbered sources. If nothing in their workspace covers it, say so plainly rather than guessing.',
+        parameters: {
+          type: 'object',
+          properties: {
+            question: { type: 'string', description: 'The question to answer from the user\'s workspace.' },
+            limit: { type: 'number', description: 'How many sources to retrieve/cite (default from workspace config; max 12).' },
+          },
+          required: ['question'],
+        },
+        execute: async (args: { question: string; limit?: number }) => {
+          if (!opts.citeSources || !opts.currentUserId) return { content: 'Cited answers are unavailable in this context.', isError: true };
+          const r = await opts.citeSources({ userId: opts.currentUserId, tenantId: opts.currentTenantId ?? null, question: args.question, ...(typeof args.limit === 'number' ? { limit: args.limit } : {}) });
+          if (!r.ok) return { content: `cite_sources failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, answer: r.answer, grounded: r.grounded, citations: r.citations, sources: r.sources });
+        },
+        tags: ['notes', 'knowledge', 'citations'],
+      }),
+    } : {}),
     // weaveNotes Phase 10: export-note tool — available when noteExport callback is set.
     ...(opts?.noteExport && opts.currentUserId ? {
       export_note: weaveTool({
@@ -2432,6 +2486,7 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
     // (generate_image is intentionally NOT here — it costs money and stays opt-in.)
     'create_diagram', 'draw_ink', 'recolor_ink', 'create_illustration', 'create_visual', 'find_image',
     'make_flashcards', 'translate_note', 'manage_scheduled_agent', 'apply_highlight', 'apply_text_color', 'colorize_semantic',
+    'review_answer_feedback', 'cite_sources',
   ] as const) {
     const t = scopedTools[noteTool];
     if (t && !registeredFromSelection.has(noteTool) && canUseTool(actorPersona, noteTool)) registry.register(t);

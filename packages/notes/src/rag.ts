@@ -348,3 +348,59 @@ export function verifyCitations(raw: RawCitation[], sources: CitableSource[]): C
   }
   return out;
 }
+
+/** How well an answer is grounded in its VERIFIED citations — used to gate/score a cited answer. */
+export interface AnswerCitationCoverage {
+  /** Number of inline [n] markers written in the answer prose. */
+  markers: number;
+  /** Number of [n] markers that resolve to a verified citation (an unverified marker is a dropped quote). */
+  groundedMarkers: number;
+  /** Distinct sources actually cited (by sourceId). */
+  distinctSources: number;
+  /** True when the answer carries at least one verified citation. */
+  grounded: boolean;
+  /** groundedMarkers / markers (1 when there are no markers — nothing to ground). 0–1. */
+  ratio: number;
+}
+
+/**
+ * Measure how well an answer's inline [n] markers are backed by VERIFIED citations. This is the pure signal
+ * behind the app's "citation strictness" config and the UI's grounded/ungrounded badge: an answer full of
+ * [1][2] markers whose quotes were all dropped as hallucinated has markers>0 but groundedMarkers==0.
+ * Counts each distinct marker number once (so "[1] … [1] again" is one marker), matching how the reader sees it.
+ */
+export function answerCitationCoverage(answer: string, citations: Citation[]): AnswerCitationCoverage {
+  const markerNums = new Set<number>();
+  for (const m of (answer ?? '').matchAll(/\[(\d+)\]/g)) markerNums.add(Number(m[1]));
+  const citedNums = new Set(citations.map((c) => c.n));
+  const distinctSources = new Set(citations.map((c) => c.sourceId)).size;
+  let groundedMarkers = 0;
+  for (const n of markerNums) if (citedNums.has(n)) groundedMarkers++;
+  const markers = markerNums.size;
+  return {
+    markers,
+    groundedMarkers,
+    distinctSources,
+    grounded: citations.length > 0,
+    ratio: markers === 0 ? 1 : groundedMarkers / markers,
+  };
+}
+
+/**
+ * A strictness gate for a cited answer. `minCitations` is the admin dial: how many DISTINCT verified sources
+ * an answer must cite to count as adequately grounded (0 = citations optional; the default 1 = the answer must
+ * be backed by at least one real source). Returns a plain reason when the bar isn't met, so the caller can
+ * label the answer "not grounded in your workspace" rather than presenting an unbacked claim as sourced.
+ */
+export function enforceCitationStrictness(citations: Citation[], minCitations: number): { ok: boolean; distinctSources: number; reason?: string } {
+  const distinctSources = new Set(citations.map((c) => c.sourceId)).size;
+  const need = Math.max(0, Math.floor(minCitations));
+  if (distinctSources >= need) return { ok: true, distinctSources };
+  return {
+    ok: false,
+    distinctSources,
+    reason: need === 1
+      ? 'This answer is not backed by anything in your workspace.'
+      : `This answer cites ${distinctSources} source${distinctSources === 1 ? '' : 's'} but at least ${need} are required to count as grounded.`,
+  };
+}

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { describe, it, expect } from 'vitest';
-import { locateQuote, buildCitedAnswerPrompt, parseCitedAnswer, verifyCitations, type CitableSource } from './rag.js';
+import { locateQuote, buildCitedAnswerPrompt, parseCitedAnswer, verifyCitations, answerCitationCoverage, enforceCitationStrictness, type CitableSource, type Citation } from './rag.js';
 
 const HEART = 'The human heart has four chambers: two atria and two ventricles. It pumps blood around the body.';
 const CELL = 'Mitochondria are the powerhouse of the cell, producing ATP through respiration.';
@@ -89,5 +89,61 @@ describe('verifyCitations — keeps verified, DROPS hallucinated', () => {
     // and the returned `quote` is taken from the SOURCE (slice), not echoed from the model.
     const v = verifyCitations([{ source: 1, quote: 'four chambers' }], sources);
     expect(v[0]!.quote).toBe(HEART.slice(v[0]!.charStart, v[0]!.charEnd));
+  });
+});
+
+const cite = (n: number, id: string): Citation => ({ n, sourceId: id, sourceKind: 'note', sourceTitle: id, quote: 'q', charStart: 0, charEnd: 1 });
+
+describe('citationCoverage — grounding quality of an answer', () => {
+  it('POSITIVE — every marker resolves to a verified source', () => {
+    const c = answerCitationCoverage('The heart has four chambers [1] and pumps blood [2].', [cite(1, 'a'), cite(2, 'b')]);
+    expect(c).toMatchObject({ markers: 2, groundedMarkers: 2, distinctSources: 2, grounded: true, ratio: 1 });
+  });
+  it('NEGATIVE — a marker with no verified citation lowers the ratio (hallucinated quote was dropped)', () => {
+    // Answer claims [1] and [2] but only [1] survived verification.
+    const c = answerCitationCoverage('Claim one [1]. Claim two [2].', [cite(1, 'a')]);
+    expect(c.markers).toBe(2);
+    expect(c.groundedMarkers).toBe(1);
+    expect(c.ratio).toBe(0.5);
+  });
+  it('counts a repeated marker once + de-dupes distinct sources', () => {
+    const c = answerCitationCoverage('A [1]. B [1]. C [2].', [cite(1, 'a'), cite(2, 'a')]); // both cites → same source id
+    expect(c.markers).toBe(2);          // [1] and [2]
+    expect(c.distinctSources).toBe(1);  // both point at source id 'a'
+  });
+  it('an answer with NO markers is trivially "grounded ratio 1" but not grounded when there are no citations', () => {
+    expect(answerCitationCoverage('Just prose, no refs.', []).ratio).toBe(1);
+    expect(answerCitationCoverage('Just prose, no refs.', []).grounded).toBe(false);
+  });
+  it('SECURITY/robustness — malformed marker-like text does not throw or over-count', () => {
+    const c = answerCitationCoverage('Weird [x] [ 1 ] [12abc] [3].', [cite(3, 'a')]);
+    expect(c.markers).toBe(1);          // only the well-formed [3]
+    expect(c.groundedMarkers).toBe(1);
+  });
+  it('STRESS — a 20k-marker answer aggregates fast', () => {
+    const big = Array.from({ length: 20_000 }, (_, i) => `claim [${(i % 5) + 1}]`).join(' ');
+    const t = Date.now();
+    const c = answerCitationCoverage(big, [cite(1, 'a'), cite(2, 'b')]);
+    expect(Date.now() - t).toBeLessThan(300);
+    expect(c.markers).toBe(5); // [1..5]
+    expect(c.groundedMarkers).toBe(2);
+  });
+});
+
+describe('enforceCitationStrictness — the grounding gate behind the admin dial', () => {
+  it('passes when distinct sources meet the minimum', () => {
+    expect(enforceCitationStrictness([cite(1, 'a'), cite(2, 'b')], 2)).toMatchObject({ ok: true, distinctSources: 2 });
+  });
+  it('fails with a plain reason when under the minimum', () => {
+    const r = enforceCitationStrictness([], 1);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/not backed by anything/i);
+  });
+  it('min 0 means citations are optional — always ok', () => {
+    expect(enforceCitationStrictness([], 0).ok).toBe(true);
+  });
+  it('a negative / fractional minimum is floored to a sane bar (no crash)', () => {
+    expect(enforceCitationStrictness([cite(1, 'a')], -3).ok).toBe(true);
+    expect(enforceCitationStrictness([cite(1, 'a')], 1.9).ok).toBe(true); // floor(1.9)=1, 1 distinct source
   });
 });

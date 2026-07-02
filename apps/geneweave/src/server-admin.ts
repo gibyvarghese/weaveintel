@@ -21,6 +21,9 @@ import { registerArtifactRoutes as registerAdminArtifactRoutes } from './admin/a
 import { registerTenantArtifactSettingsRoutes } from './admin/api/tenant-artifact-settings.js';
 import { registerTenantGovernanceRoutes } from './admin/api/tenant-governance.js';
 import { registerTenantAppearanceRoutes } from './admin/api/tenant-appearance.js';
+import { registerAiTransparencyRoutes } from './admin/api/ai-transparency.js';
+import { registerChatCitationsRoutes } from './admin/api/chat-citations.js';
+import { registerAnswerVersionsRoutes } from './admin/api/answer-versions.js';
 import type { RouterLike } from './admin/api/types.js';
 
 export interface AdminRouteExtras {
@@ -71,4 +74,10 @@ export function registerAdminRoutes(
   // m127: Per-tenant enterprise governance (weaveNotes Phase 2)
   registerTenantGovernanceRoutes(router, db, { json, readBody, requireDetailedDescription: () => null });
   registerTenantAppearanceRoutes(router, db, { json, readBody, requireDetailedDescription: () => null });
+  // m137: Per-tenant AI transparency (label / disclosure / content warnings) + answer-feedback review
+  registerAiTransparencyRoutes(router, db, { json, readBody, requireDetailedDescription: () => null });
+  // m138: Per-tenant answer-citations config (enabled / strictness / corpus scope)
+  registerChatCitationsRoutes(router, db, { json, readBody, requireDetailedDescription: () => null });
+  // m139: Per-tenant regenerate/answer-versions config (enabled / how many versions to keep)
+  registerAnswerVersionsRoutes(router, db, { json, readBody, requireDetailedDescription: () => null });
 }

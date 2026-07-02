@@ -131,10 +131,19 @@ export async function recordCapabilitySignal(
   };
 }
 
-/** Convenience: ingest a chat UI feedback signal (👍/👎/regenerate/copy). */
+/**
+ * Convenience: ingest a chat UI feedback signal (👍/👎/regenerate/copy).
+ *
+ * m137: `categories` carries the small fixed taxonomy of WHY an answer got a thumbs-down (see
+ * @weaveintel/collaboration FEEDBACK_CATEGORIES) — stored alongside the signal so down-votes become an
+ * actionable, aggregatable reason and not just a free-text comment. modelId/provider/taskKey are the resolved
+ * routing decision; when they are present the feedback ALSO updates the model's production quality score
+ * (the routing learning loop). When they are absent (e.g. a message whose decision wasn't snapshotted), the
+ * raw feedback is still persisted — we simply skip the capability-signal update.
+ */
 export async function recordChatFeedbackSignal(
   db: DatabaseAdapter,
-  input: { signal: string; messageId: string; modelId: string; provider: string; taskKey: string; tenantId?: string | null; chatId?: string | null; userId?: string | null; comment?: string | null; },
+  input: { signal: string; messageId: string; modelId?: string | null; provider?: string | null; taskKey?: string | null; tenantId?: string | null; chatId?: string | null; userId?: string | null; comment?: string | null; categories?: string[] | null; },
 ): Promise<RecordSignalResult & { feedbackId: string }> {
   if (!VALID_CHAT_SIGNALS.has(input.signal)) {
     throw new Error(`Invalid chat feedback signal: ${input.signal}`);
@@ -150,23 +159,28 @@ export async function recordChatFeedbackSignal(
     user_id: input.userId ?? null,
     signal: input.signal,
     comment: input.comment ?? null,
-    model_id: input.modelId,
-    provider: input.provider,
-    task_key: input.taskKey,
+    categories: input.categories && input.categories.length ? JSON.stringify(input.categories) : null,
+    tenant_id: input.tenantId ?? null,
+    model_id: input.modelId ?? null,
+    provider: input.provider ?? null,
+    task_key: input.taskKey ?? null,
   });
 
-  const sigResult = await recordCapabilitySignal(db, {
-    modelId: input.modelId,
-    provider: input.provider,
-    taskKey: input.taskKey,
-    source: 'chat',
-    signalType: input.signal,
-    value,
-    tenantId: input.tenantId ?? null,
-    messageId: input.messageId,
-  });
-
-  return { ...sigResult, feedbackId };
+  // Feed the routing quality signal only when we have the resolved decision to attribute it to.
+  if (input.modelId && input.provider && input.taskKey) {
+    const sigResult = await recordCapabilitySignal(db, {
+      modelId: input.modelId,
+      provider: input.provider,
+      taskKey: input.taskKey,
+      source: 'chat',
+      signalType: input.signal,
+      value,
+      tenantId: input.tenantId ?? null,
+      messageId: input.messageId,
+    });
+    return { ...sigResult, feedbackId };
+  }
+  return { signalId: '', capabilityId: null, productionSignalScore: null, signalSampleCount: 0, feedbackId };
 }
 
 // ─── Regression detection ─────────────────────────────────────

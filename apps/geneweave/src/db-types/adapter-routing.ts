@@ -64,7 +64,7 @@ export interface IRoutingStore {
   listRoutingCapabilitySignals(opts?: { tenantId?: string | null; modelId?: string; provider?: string; taskKey?: string; source?: string; afterIso?: string; beforeIso?: string; limit?: number }): Promise<RoutingCapabilitySignalRow[]>;
   getRoutingCapabilitySignal(id: string): Promise<RoutingCapabilitySignalRow | null>;
   insertMessageFeedback(row: Omit<MessageFeedbackRow, 'created_at'> & { created_at?: string }): Promise<void>;
-  listMessageFeedback(opts?: { messageId?: string; chatId?: string; signal?: string; limit?: number }): Promise<MessageFeedbackRow[]>;
+  listMessageFeedback(opts?: { messageId?: string; chatId?: string; signal?: string; tenantId?: string; userId?: string; limit?: number }): Promise<MessageFeedbackRow[]>;
   getMessageFeedback(id: string): Promise<MessageFeedbackRow | null>;
   insertRoutingSurfaceItem(row: Omit<RoutingSurfaceItemRow, 'created_at' | 'resolved_at'> & { created_at?: string; resolved_at?: string | null }): Promise<void>;
   listRoutingSurfaceItems(opts?: { status?: string; modelId?: string; provider?: string; taskKey?: string; limit?: number }): Promise<RoutingSurfaceItemRow[]>;

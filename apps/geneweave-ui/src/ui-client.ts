@@ -11,6 +11,9 @@ import {
 } from './ui/state.js';
 import { h } from './ui/dom.js';
 import { STYLES } from './ui/styles.js';
+import { buildFeedbackControls, buildAiDisclosure, loadAiTransparency, loadChatFeedback } from './ui/answer-feedback.js';
+import { isCiteMode, sendCitedMessage, renderCitedAnswer, loadChatCitationsConfig } from './ui/chat-citations.js';
+import { buildVersionControls, loadAnswerVersionsConfig } from './ui/answer-versions.js';
 import { 
   getUserAvatarUrl, 
   getAgentAvatarUrl,
@@ -168,7 +171,15 @@ async function sendMessage(text: string) {
   }
   const chatId = state.currentChatId;
   if (!chatId) return;
-  
+
+  // m138 — "Cite sources" mode: answer grounded in the user's own workspace with verified [n] citations
+  // (a distinct, non-streaming path). Attachments aren't part of a cited answer, so only plain text routes here.
+  if (isCiteMode() && content) {
+    state.pendingAttachments = [];
+    await sendCitedMessage(chatId, content, renderMessages);
+    return;
+  }
+
   state.messages.push({
     role: 'user',
     content,
@@ -177,6 +188,48 @@ async function sendMessage(text: string) {
     metadata: attachments.length ? JSON.stringify({ attachments }) : null,
   });
   state.pendingAttachments = [];
+  state.transcriptAtBottom = true; // sending → follow the new reply to the bottom (until the user scrolls up)
+  await runAssistantStream(chatId, content, attachments);
+}
+
+// The in-flight stream's AbortController, so the user's Stop control can cancel generation.
+let _streamAbort: AbortController | null = null;
+function stopStreaming() {
+  try { _streamAbort?.abort(); } catch { /* already done */ }
+}
+
+
+/**
+ * Turn a failed send into a HUMAN, DIFFERENTIATED message + the right recovery — never a raw technical
+ * error or a generic catch-all. A content-policy refusal is its own calm state (`refusal`), not a system
+ * error. Retryable failures get a "Try again"; an expired session gets "Sign in".
+ */
+function classifyFailure(opts: { threw?: boolean; status?: number; code?: string; serverMessage?: string }): {
+  refusal?: boolean; kind: string; text: string; retryable: boolean; signIn?: boolean;
+} {
+  const { threw, status, code, serverMessage } = opts;
+  if (threw) return { kind: 'network', text: 'Can’t reach geneWeave — check your internet connection and try again.', retryable: true };
+  if (status === 401 || status === 419) return { kind: 'auth', text: 'Your session has expired. Please sign in again to continue.', retryable: false, signIn: true };
+  if (status === 403 || status === 451 || code === 'content_policy' || code === 'guardrail' || code === 'blocked' || code === 'safety') {
+    return { refusal: true, kind: 'refusal', text: serverMessage || 'geneWeave declined this request under its safety policy. You can rephrase and try a different approach.', retryable: false };
+  }
+  if (status === 429 || code === 'rate_limited') return { kind: 'rate_limit', text: 'geneWeave is busy right now. Wait a few seconds and try again.', retryable: true };
+  if (status !== undefined && status >= 500) return { kind: 'server', text: 'Something went wrong on our end. Your message is safe — please try again.', retryable: true };
+  if (status === 413 || code === 'too_large') return { kind: 'too_large', text: 'That message (or its attachments) is too large to send.', retryable: false };
+  return { kind: 'request', text: serverMessage || 'That request couldn’t be completed. Please try again.', retryable: true };
+}
+
+/** Retry the last send: drop the failed/refused assistant reply and re-run the stream for the last user message. */
+async function retryLastSend() {
+  if (state.streaming || !state.currentChatId) return;
+  const last = state.messages[state.messages.length - 1] as any;
+  if (last && last.role === 'assistant' && (last.errorKind || last.refusal)) state.messages.pop();
+  const lastUser = [...state.messages].reverse().find((m: any) => m.role === 'user') as any;
+  if (!lastUser) return;
+  await runAssistantStream(state.currentChatId, String(lastUser.content || ''), lastUser.attachments || []);
+}
+
+async function runAssistantStream(chatId: string, content: string, attachments: any[]) {
   state.streaming = true;
   render();
   scrollMessages();
@@ -198,6 +251,7 @@ async function sendMessage(text: string) {
   let assistantMsg: any = null;
   let idleTimer: ReturnType<typeof setInterval> | null = null;
   let streamIdleTimedOut = false;
+  _streamAbort = new AbortController();
 
   try {
     const resp = await fetch(`/api/chats/${chatId}/messages`, {
@@ -205,9 +259,18 @@ async function sendMessage(text: string) {
       headers,
       body: JSON.stringify(body),
       credentials: 'same-origin',
+      signal: _streamAbort.signal,
     });
     if (!resp.ok || !resp.body) {
-      throw new Error(`Streaming request failed (${resp.status})`);
+      // Read the server's structured error (if any) and classify into a human, differentiated message.
+      let code: string | undefined; let serverMessage: string | undefined;
+      try { const j = await resp.json() as { error?: string; message?: string }; code = j?.error; serverMessage = j?.message; } catch { /* non-JSON body */ }
+      const f = classifyFailure({ status: resp.status, code, serverMessage });
+      const msg: any = { role: 'assistant', content: '', created_at: new Date().toISOString(), processState: 'error' };
+      if (f.refusal) { msg.refusal = true; msg.refusalText = f.text; }
+      else { msg.errorKind = f.kind; msg.errorText = f.text; msg.errorRetryable = f.retryable; msg.errorSignIn = f.signIn; }
+      state.messages.push(msg);
+      return; // handled — the `finally` still runs (clears streaming + re-renders)
     }
 
     const reader = resp.body.getReader();
@@ -278,6 +341,12 @@ async function sendMessage(text: string) {
           assistantMsg.usage = d.usage;
           assistantMsg.cost = d.cost;
           assistantMsg.latency_ms = d.latencyMs;
+          // m137 — identity + routing snapshot so answer feedback (thumbs/reasons) can target this exact
+          // message and, when rated, feed the model's routing quality score.
+          if (d.messageId) (assistantMsg as any).id = d.messageId;
+          if (d.model) (assistantMsg as any).model = d.model;
+          if (d.provider) (assistantMsg as any).provider = d.provider;
+          if (d.taskKey) (assistantMsg as any).taskKey = d.taskKey;
           if (d.steps) assistantMsg.steps = d.steps;
           if (d.eval) assistantMsg.evalResult = d.eval;
           if (d.cognitive) assistantMsg.cognitive = d.cognitive;
@@ -341,35 +410,49 @@ async function sendMessage(text: string) {
         }
       }
 
-      render();
-      scrollMessages();
+      // Re-render ONLY the transcript per token (not the whole app). The Stop control + composer live in the
+      // input bar OUTSIDE `.messages`, so they stay stable/clickable as content grows (H16), and the streaming
+      // bubble still gets full markdown rendering. renderMessages self-preserves transcript scroll (follows
+      // the bottom only if the reader is already there — H14). Far cheaper than a full render() per token.
+      renderMessages();
     }
 
     // Flush trailing event if stream ended without a trailing blank line.
     flushEvent();
   } catch (error: unknown) {
-    const errorMsg = error instanceof Error ? error.message : 'Request failed';
-    if (assistantMsg) {
-      assistantMsg.processState = 'error';
-      assistantMsg.content = assistantMsg.content || `Error: ${errorMsg}`;
+    if ((error as any)?.name === 'AbortError' || _streamAbort?.signal.aborted) {
+      // The USER stopped generation — not a failure. Keep whatever partial output arrived; mark it stopped.
+      if (assistantMsg) {
+        assistantMsg.processState = 'completed';
+        assistantMsg.stopped = true;
+        assistantMsg.latency_ms = assistantMsg.latency_ms || (Date.now() - startedAtMs);
+      }
     } else {
-      const errMessage: Message = {
-        role: 'assistant',
-        content: `Error: ${errorMsg}`,
-        created_at: new Date().toISOString(),
-      };
-      state.messages.push(errMessage);
+      // A thrown fetch/stream error is a CONNECTION failure (server never reached, or the stream dropped
+      // mid-flight). Classify as network and attach a human message + retry — never a raw "Failed to fetch".
+      const f = classifyFailure({ threw: true });
+      if (assistantMsg) {
+        assistantMsg.processState = 'error';
+        assistantMsg.errorKind = f.kind; assistantMsg.errorText = f.text; assistantMsg.errorRetryable = f.retryable;
+      } else {
+        state.messages.push({ role: 'assistant', content: '', created_at: new Date().toISOString(), processState: 'error', errorKind: f.kind, errorText: f.text, errorRetryable: f.retryable } as any);
+      }
     }
   } finally {
+    _streamAbort = null;
     if (idleTimer !== null) clearInterval(idleTimer);
     if (assistantMsg && assistantMsg.processState === 'running') {
       if (streamIdleTimedOut) {
-        assistantMsg.content =
-          (assistantMsg.content ? assistantMsg.content + '\n\n' : '') +
-          '_No response received for 45 s — the connection went idle. Please try sending your message again._';
+        // Idle timeout is its own differentiated, retryable failure (not a generic error).
         assistantMsg.processState = 'error';
+        assistantMsg.errorKind = 'timeout';
+        assistantMsg.errorText = 'No response for 45 seconds — the connection went idle. Please try again.';
+        assistantMsg.errorRetryable = true;
       } else {
         assistantMsg.processState = assistantMsg.content ? 'completed' : 'error';
+        if (assistantMsg.processState === 'error' && !assistantMsg.errorKind) {
+          assistantMsg.errorKind = 'empty'; assistantMsg.errorText = 'No response was returned. Please try again.'; assistantMsg.errorRetryable = true;
+        }
         assistantMsg.latency_ms = assistantMsg.latency_ms || (Date.now() - startedAtMs);
       }
     }
@@ -1367,10 +1450,18 @@ function buildArtifactCards(refs: ArtifactRef[]): HTMLElement {
   return container;
 }
 
+const _feedbackLoadedChats = new Set<string>();
 function renderMessages() {
   const container = document.querySelector('.messages');
   if (!container) return;
-  
+
+  // m137 — hydrate my thumbs state for this chat once (so already-rated answers show as rated).
+  const cid = state.currentChatId as string | null;
+  if (cid && !_feedbackLoadedChats.has(cid)) {
+    _feedbackLoadedChats.add(cid);
+    void loadChatFeedback(cid).then(() => { if (state.currentChatId === cid) renderMessages(); });
+  }
+
   container.innerHTML = '';
   
   if (!state.messages.length) {
@@ -1422,7 +1513,16 @@ function renderMessages() {
 
     let bubbleEl: HTMLElement;
     let responseExportHtml = '';
-    if (!isUser && m.content) {
+    const citedCites = !isUser ? (Array.isArray(meta?.citations) ? meta!.citations : null) : null;
+    if (!isUser && (m as any).citing) {
+      // m138 — a cited answer is being built (grounded, non-streaming).
+      bubbleEl = h('div', { className: 'bubble' }, h('span', { className: 'meta' }, '❝ Searching your workspace…'));
+    } else if (!isUser && (meta?.cited) && m.content) {
+      // m138 — a settled cited answer: inline [n] chips + verified source cards.
+      bubbleEl = h('div', { className: 'bubble' },
+        renderCitedAnswer(m.content, citedCites || [], meta!.grounded !== false, meta!.groundingNote));
+      responseExportHtml = mdToHtml(m.content);
+    } else if (!isUser && m.content) {
       const rendered = renderAssistantBubble(m.content);
       bubbleEl = rendered.element;
       responseExportHtml = rendered.exportHtml;
@@ -1486,8 +1586,21 @@ function renderMessages() {
       bar.appendChild(copyBtn);
       bar.appendChild(emailBtn);
       bar.appendChild(wordBtn);
+      // m137 — thumbs up/down + tiered reasons. Only on a settled (non-streaming) answer with an id.
+      if (!isStreamingCurrent) {
+        const fb = buildFeedbackControls(m, state.currentChatId as string, renderMessages);
+        if (fb) bar.appendChild(fb);
+        // m139 — Regenerate + version pager (‹ 2/3 ›). Cited answers keep their own sources, so skip them.
+        if (!meta?.cited) {
+          const ver = buildVersionControls(m, state.currentChatId as string, renderMessages);
+          if (ver) bar.appendChild(ver);
+        }
+      }
       return bar;
     })() : null;
+
+    // m137 — the "AI-generated" disclosure line (EU AI Act Art. 50), per-workspace configurable.
+    const disclosureEl = !isUser && m.content && !isStreamingCurrent ? buildAiDisclosure() : null;
 
     const usage = (m as any).usage;
     const metaBar = !isUser && usage ? h('div', { className: 'meta' },
@@ -1500,14 +1613,36 @@ function renderMessages() {
       ? h('div', { className: 'meta' }, 'Thinking...')
       : null;
 
+    // Differentiated failure UI (Round 2): a content-policy REFUSAL is a calm "declined" note; any other
+    // failure is a human, kind-specific error with a matching recovery (Try again / Sign in) — never a raw
+    // technical string. Rendered only on the message that failed.
+    const ma = m as any;
+    let failureEl: HTMLElement | null = null;
+    if (ma.refusal) {
+      failureEl = h('div', { className: 'msg-refusal', role: 'note' },
+        h('span', { className: 'msg-refusal-icon', 'aria-hidden': 'true' }, '⊘'),
+        h('div', { className: 'msg-refusal-text' }, ma.refusalText || 'geneWeave declined this request.'));
+    } else if (ma.errorKind) {
+      const actions: HTMLElement[] = [];
+      if (ma.errorRetryable) actions.push(h('button', { className: 'msg-retry', type: 'button', onClick: () => { void retryLastSend(); } }, 'Try again'));
+      if (ma.errorSignIn) actions.push(h('button', { className: 'msg-retry', type: 'button', onClick: () => { void doLogout(); } }, 'Sign in'));
+      failureEl = h('div', { className: `msg-error msg-error-${ma.errorKind}`, role: 'alert' },
+        h('span', { className: 'msg-error-icon', 'aria-hidden': 'true' }, '⚠'),
+        h('div', { className: 'msg-error-text' }, ma.errorText || 'Something went wrong. Please try again.'),
+        actions.length ? h('div', { className: 'msg-error-actions' }, ...actions) : null);
+    }
+
     const body = h('div', { className: 'msg-body' },
       corner,
       ...extras,
-      bubbleEl,
+      // Don't show the empty "..." placeholder bubble when the message is purely a failure/refusal.
+      (ma.errorKind || ma.refusal) && !m.content ? null : bubbleEl,
+      failureEl,
       attachmentsEl,
       screenshotsEl,
       artifactCardsEl,
       toolbar,
+      disclosureEl,
       metaBar,
       thinkingIndicator
     );
@@ -1544,6 +1679,13 @@ function renderMessages() {
     
     container.appendChild(msgEl);
   });
+
+  // Preserve transcript scroll across this rebuild (`.messages` element persists; only children changed).
+  // Follow to the bottom ONLY if the reader is already there; otherwise keep their exact position — so a
+  // per-token streaming re-render never yanks a user who scrolled up to read history. (H14/H16.)
+  state.suppressTranscriptScrollPersist = true;
+  (container as HTMLElement).scrollTop = state.transcriptAtBottom !== false ? container.scrollHeight : (state.transcriptScrollTop || 0);
+  requestAnimationFrame(() => { state.suppressTranscriptScrollPersist = false; });
 }
 
 function renderChatView() {
@@ -1551,6 +1693,7 @@ function renderChatView() {
     render,
     renderMessages,
     sendMessage,
+    stopStreaming,
   });
 }
 
@@ -1909,13 +2052,15 @@ function render() {
   document.querySelectorAll('body > .dropdown').forEach((el) => el.remove());
   const root = document.getElementById('root');
   if (!root) return;
+  // Preserve the sidebar scroll across the full-DOM re-render. A single user action (e.g. selecting a
+  // chat) can trigger SEVERAL renders in quick succession; an intermediate render sees a DOM whose scroll
+  // was just reset to 0 by `innerHTML = ''`. Reading that 0 and overwriting the persisted position would
+  // lose the user's place — so take the MAX of the live DOM scroll and the value kept current by the nav's
+  // scroll listener (state.sidebarScrollTop). This makes scroll-retention robust to render bursts.
   const navBeforeRender = root.querySelector('.workspace-nav-scroll') as HTMLElement | null;
-  const previousSidebarScrollTop = navBeforeRender
-    ? navBeforeRender.scrollTop
-    : Math.max(0, state.sidebarScrollTop || 0);
-  if (navBeforeRender) {
-    state.sidebarScrollTop = navBeforeRender.scrollTop;
-  }
+  const domScroll = navBeforeRender ? navBeforeRender.scrollTop : 0;
+  const previousSidebarScrollTop = Math.max(domScroll, state.sidebarScrollTop || 0);
+  state.sidebarScrollTop = previousSidebarScrollTop;
   const thisRenderVersion = ++renderVersion;
   
   if (!state.user) {
@@ -1928,8 +2073,20 @@ function render() {
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         if (thisRenderVersion !== renderVersion) return;
+        // Restore the chat transcript scroll: pin to the bottom only if the user was already there
+        // (so a streaming response keeps following), otherwise restore their exact position (so scrolling
+        // up to read history is never yanked back down). Round 3 / H14 — same pattern as the sidebar.
+        const msgsEl = root.querySelector('.messages') as HTMLElement | null;
+        if (msgsEl) {
+          state.suppressTranscriptScrollPersist = true;
+          msgsEl.scrollTop = state.transcriptAtBottom !== false ? msgsEl.scrollHeight : (state.transcriptScrollTop || 0);
+          requestAnimationFrame(() => { state.suppressTranscriptScrollPersist = false; });
+        }
         const navScrollEl = root.querySelector('.workspace-nav-scroll') as HTMLElement | null;
         if (!navScrollEl) return;
+        // Suppress scroll-listener persistence while we restore, so the restore's own (possibly clamped)
+        // scroll event can't degrade the saved position. Cleared on the next frame.
+        state.suppressSidebarScrollPersist = true;
         navScrollEl.scrollTop = previousSidebarScrollTop;
         const activeSubTab = navScrollEl.querySelector('.admin-subtab.active') as HTMLElement | null;
         if (activeSubTab) {
@@ -1942,7 +2099,11 @@ function render() {
             navScrollEl.scrollTop += elRect.bottom - containerRect.bottom + 12;
           }
         }
-        state.sidebarScrollTop = navScrollEl.scrollTop;
+        // Do NOT re-persist state.sidebarScrollTop from this readback: during a render burst (e.g. the chat
+        // list is momentarily empty while selectChat reloads), the target scroll clamps to a small value,
+        // and persisting that clamped 0 would lose the user's place forever. The nav's own scroll listener
+        // keeps state.sidebarScrollTop authoritative for real user scrolls, so a later render restores it.
+        requestAnimationFrame(() => { state.suppressSidebarScrollPersist = false; });
       });
     });
   }
@@ -1989,7 +2150,17 @@ async function applyTenantAppearance(): Promise<void> {
 export function initialize() {
   // Responsive shell: Escape closes the mobile nav / rail drawers (keyboard accessibility).
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') { document.querySelector('.app')?.classList.remove('nav-open', 'rail-open'); }
+    if (e.key !== 'Escape') return;
+    // Light-dismiss the global-state overlays (profile / notifications / settings) on Esc, and return
+    // focus to whichever trigger opened them (WCAG 2.4.3 focus order / 2.1.2 no keyboard trap).
+    if (state.showProfile || state.showNotifications || state.showSettings) {
+      const returnTo = state.showProfile ? document.querySelector<HTMLElement>('.profile-avatar') : null;
+      state.showProfile = false; state.showNotifications = false; state.showSettings = false;
+      render();
+      returnTo?.focus();
+      return;
+    }
+    document.querySelector('.app')?.classList.remove('nav-open', 'rail-open');
   });
   document.addEventListener('click', () => {
     if (state.showSettings || state.showProfile || state.showNotifications) {
@@ -2021,6 +2192,12 @@ export function initialize() {
         state.csrfToken = d.csrfToken;
         // geneWeave UI rebuild: apply this workspace's per-tenant branding before first render (no flash).
         await applyTenantAppearance();
+        // m137: load this workspace's AI-transparency config (AI-generated label + whether feedback is on).
+        await loadAiTransparency();
+        // m138: load the answer-citations config (whether the composer offers "Cite sources").
+        await loadChatCitationsConfig();
+        // m139: load the answer-versions config (whether answers offer Regenerate + a version pager).
+        await loadAnswerVersionsConfig();
         // weaveNotes Phase 8 (desktop): wire the global quick-capture shortcut (⌘/Ctrl+Shift+K, or the
         // Tauri OS-global hotkey). Capturing jumps into the new note. Wired once per session.
         try {
@@ -2091,6 +2268,8 @@ export function initialize() {
 // Make functions globally available
 (globalThis as any).render = render;
 (globalThis as any).sendMessage = sendMessage;
+(globalThis as any).stopStreaming = stopStreaming;
+(globalThis as any).renderMessages = renderMessages;
 (globalThis as any).createChat = createChat;
 (globalThis as any).selectChat = selectChat;
 (globalThis as any).doLogout = doLogout;

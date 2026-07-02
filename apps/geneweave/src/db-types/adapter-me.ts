@@ -353,6 +353,66 @@ export interface TenantAppearanceRow {
   updated_at: string;
 }
 
+/** m137 — per-tenant AI-transparency switches (label / disclosure / content warnings / feedback). */
+export interface TenantAiTransparencyRow {
+  tenant_id: string;
+  show_ai_label: number;
+  disclosure_text: string;
+  content_warnings: number;
+  feedback_enabled: number;
+  updated_at: string;
+}
+
+/** m138 — one VERIFIED citation on an assistant message (the quote provably exists in source at [start,end)). */
+export interface MessageCitationRow {
+  id: string;
+  message_id: string;
+  chat_id: string | null;
+  user_id: string;
+  tenant_id: string | null;
+  n: number;
+  source_id: string;
+  source_kind: string;
+  source_title: string;
+  quote: string;
+  char_start: number;
+  char_end: number;
+  created_at: string;
+}
+
+/** m138 — per-tenant answer-citations config (enabled / strictness / corpus scope / retrieval breadth). */
+export interface TenantChatCitationsRow {
+  tenant_id: string;
+  enabled: number;
+  min_citations: number;
+  scope: string;        // 'all' | 'notes' | 'runs'
+  max_sources: number;
+  updated_at: string;
+}
+
+/** m139 — one saved version of an assistant answer (append-only history for a question turn). */
+export interface MessageVariantRow {
+  id: string;
+  group_id: string;       // the active assistant messages.id this variant belongs to
+  chat_id: string;
+  user_id: string;
+  tenant_id: string | null;
+  variant_index: number;  // 0-based, oldest first
+  content: string;
+  model: string | null;
+  provider: string | null;
+  reason: string | null;  // 'original' | 'regenerate'
+  created_at: string;
+}
+
+/** m139 — per-tenant regenerate/version config. */
+export interface TenantAnswerVersionsRow {
+  tenant_id: string;
+  enabled: number;
+  max_variants: number;
+  updated_at: string;
+}
+
 /** weaveNotes Phase 5 (m134) — background-memory extraction state per note (content version + memory ids). */
 export interface NoteMemoryStateRow {
   note_id: string;
@@ -784,6 +844,24 @@ export interface IMeStore {
   getTenantAppearance(tenantId: string): Promise<TenantAppearanceRow | null>;
   upsertTenantAppearance(row: TenantAppearanceRow): Promise<void>;
   listTenantAppearance(): Promise<TenantAppearanceRow[]>;
+  // m137 — per-tenant AI transparency (answer feedback itself reuses the routing message_feedback store).
+  getTenantAiTransparency(tenantId: string): Promise<TenantAiTransparencyRow | null>;
+  upsertTenantAiTransparency(row: TenantAiTransparencyRow): Promise<void>;
+  listTenantAiTransparency(): Promise<TenantAiTransparencyRow[]>;
+  // ↑ getMessageFeedback(id) etc. for the raw store live in the routing adapter (IRoutingStore).
+  // m138 — answer citations in chat (verified [n] sources per assistant message) + per-tenant config.
+  insertMessageCitations(rows: MessageCitationRow[]): Promise<void>;
+  listMessageCitations(messageId: string): Promise<MessageCitationRow[]>;
+  getTenantChatCitations(tenantId: string): Promise<TenantChatCitationsRow | null>;
+  upsertTenantChatCitations(row: TenantChatCitationsRow): Promise<void>;
+  listTenantChatCitations(): Promise<TenantChatCitationsRow[]>;
+  // m139 — regenerate with version history: append-only variant store + active-content mirror + config.
+  insertMessageVariants(rows: MessageVariantRow[]): Promise<void>;
+  listMessageVariants(groupId: string): Promise<MessageVariantRow[]>;
+  updateMessageContent(messageId: string, content: string, metadata: string | null): Promise<void>;
+  getTenantAnswerVersions(tenantId: string): Promise<TenantAnswerVersionsRow | null>;
+  upsertTenantAnswerVersions(row: TenantAnswerVersionsRow): Promise<void>;
+  listTenantAnswerVersions(): Promise<TenantAnswerVersionsRow[]>;
   // weaveNotes Phase 5 (m134) — background-memory extraction state.
   getNoteMemoryState(noteId: string, userId: string): Promise<NoteMemoryStateRow | null>;
   upsertNoteMemoryState(row: NoteMemoryStateRow): Promise<void>;

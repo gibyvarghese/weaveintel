@@ -72,7 +72,7 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
     { key: 'routing-simulator', label: 'Routing Simulator' },
     { key: 'routing-decision-traces', label: 'Decision Traces' },
     { key: 'routing-capability-signals', label: 'Capability Signals' },
-    { key: 'message-feedback', label: 'Message Feedback' },
+    { key: 'message-feedback', label: 'Answer Feedback' },
     { key: 'routing-surface-items', label: 'Surface Items' },
     { key: 'routing-experiments', label: 'A/B Experiments' },
     { key: 'cost-by-task', label: 'Cost by Task' },
@@ -94,8 +94,11 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
     { key: 'tenant-governance', label: 'Tenant Governance' },
     { key: 'tenant-encryption-policies', label: 'Tenant Encryption' },
   ]},
-  { label: 'Appearance', icon: '\uD83C\uDFA8', tabs: [
+  { label: 'Appearance & AI', icon: '\uD83C\uDFA8', tabs: [
     { key: 'tenant-appearance', label: 'Appearance & branding' },
+    { key: 'ai-transparency', label: 'AI transparency' },
+    { key: 'chat-citations', label: 'Answer citations' },
+    { key: 'answer-versions', label: 'Answer versions' },
   ]},
   { label: 'A2A Protocol', icon: '\uD83E\uDD16\uD83E\uDD1D', tabs: [
     { key: 'a2a-skills', label: 'A2A Skills' },

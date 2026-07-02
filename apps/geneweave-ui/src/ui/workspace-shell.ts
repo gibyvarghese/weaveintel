@@ -46,14 +46,27 @@ export function renderWorkspaceNav(options: {
     'aria-label': 'Application navigation',
   });
   const navScroll = h('div', { className: 'workspace-nav-scroll', id: 'workspace-nav-scroll' });
-  navScroll.addEventListener('scroll', () => { state.sidebarScrollTop = navScroll.scrollTop; }, { passive: true });
+  navScroll.addEventListener('scroll', () => {
+    // Ignore scroll events fired by the programmatic scroll-restore (they can be clamped/transient during a
+    // render burst); only persist real user scrolls.
+    if (!state.suppressSidebarScrollPersist) state.sidebarScrollTop = navScroll.scrollTop;
+  }, { passive: true });
   const scrollSidebarBy = (delta: number) => {
     navScroll.scrollBy({ top: delta, behavior: 'smooth' });
   };
   nav.appendChild(
     h('div', { className: 'brand' },
-      h('span', { className: 'brand-mark' }, '✦'),
-      h('span', { className: 'word' }, 'geneWeave'),
+      // The logo lockup is a real control that routes HOME from any view (WCAG-friendly + expected UX).
+      h('button', {
+        type: 'button',
+        className: 'brand-home',
+        'aria-label': 'geneWeave home',
+        title: 'Home',
+        onClick: () => { state.view = 'chat'; options.render(); },
+      },
+        h('span', { className: 'brand-mark', 'aria-hidden': 'true' }, '✦'),
+        h('span', { className: 'word' }, 'geneWeave'),
+      ),
       h('button', {
         type: 'button',
         className: 'sidebar-collapse-btn',
@@ -251,9 +264,23 @@ export function renderWorkspaceNav(options: {
           ? state.chats.slice(0, 14).map((chat: Chat) =>
               h('div', {
                   className: 'chat-item' + (state.currentChatId === chat.id ? ' active' : ''),
+                  // Keyboard-operable + SR-navigable: a role=button div (can't be a real <button> because it
+                  // wraps a nested delete <button>), tab-focusable, Enter/Space activates, and aria-current
+                  // marks the open chat for assistive tech.
+                  role: 'button',
+                  tabindex: '0',
+                  'aria-current': state.currentChatId === chat.id ? 'page' : null,
+                  'aria-label': `Open chat: ${chat.title || 'New Chat'}`,
                   onClick: () => {
                     state.view = 'chat';
                     if (state.currentChatId !== chat.id) void options.selectChat(chat.id);
+                  },
+                  onKeyDown: (e: KeyboardEvent) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      state.view = 'chat';
+                      if (state.currentChatId !== chat.id) void options.selectChat(chat.id);
+                    }
                   },
                 },
                 h('div', { className: 'chat-item-copy' },
@@ -296,7 +323,14 @@ export function renderWorkspaceTopCard(options: {
   const profileAnchor = h('div', { className: 'dropdown-anchor' });
   const profileBtn = h(
     'button',
-    { className: 'profile-avatar', title: 'Profile and preferences', onClick: openProfile },
+    {
+      className: 'profile-avatar',
+      title: 'Profile and preferences',
+      'aria-label': 'Profile and preferences',
+      'aria-haspopup': 'true',
+      'aria-expanded': state.showProfile ? 'true' : 'false',
+      onClick: openProfile,
+    },
     h('img', {
       src: getUserAvatarUrl(),
       alt: userName,

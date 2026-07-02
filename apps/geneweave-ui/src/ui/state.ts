@@ -110,6 +110,16 @@ export const state: any = {
   recentChatsExpanded: true,
   sidebarCollapsed: false,
   sidebarScrollTop: 0,
+  // Set true while render() programmatically restores the sidebar scroll, so the nav's scroll listener
+  // doesn't persist the transient/clamped scrollTop that the restore itself triggers (which would degrade
+  // the saved position across a render burst). See render() in ui-client.ts.
+  suppressSidebarScrollPersist: false,
+  // Round 3 — transcript scroll retention/respect during streaming (same pattern as the sidebar).
+  transcriptScrollTop: 0,
+  transcriptAtBottom: true,
+  suppressTranscriptScrollPersist: false,
+  // Round 3 — files rejected on upload (with a reason), surfaced to the user instead of silently dropped.
+  uploadRejections: [] as Array<{ name: string; reason: string }>,
 
   // Calendar (widget)
   calendarTab: 'meetings',
