@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // @weaveintel/collaboration — Shared sessions, presence, live updates, user handoff
 
 import type { ExecutionContext } from '@weaveintel/core';

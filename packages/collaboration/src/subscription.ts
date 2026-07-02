@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // @weaveintel/collaboration — Live run subscriptions
 //
 // RunStatus has been promoted to @weaveintel/core (W1 platform foundation).

@@ -27,10 +27,12 @@
     "sv:cost-gate": "npx tsx src/features/scientific-validation/evals/cost-gate.ts"
   },
   "dependencies": {
+    "@geneweave/tokens": "*",
     "@weaveintel/a2a": "*",
     "@weaveintel/agents": "*",
     "@weaveintel/cache": "*",
     "@weaveintel/capability-packs": "*",
+    "@weaveintel/coedit": "*",
     "@weaveintel/collaboration": "*",
     "@weaveintel/contracts": "*",
     "@weaveintel/core": "*",
@@ -41,7 +43,6 @@
     "@weaveintel/evals": "*",
     "@weaveintel/geneweave-ui": "*",
     "@weaveintel/guardrails": "*",
-    "@weaveintel/scope": "*",
     "@weaveintel/human-tasks": "*",
     "@weaveintel/identity": "*",
     "@weaveintel/live-agents": "*",
@@ -51,6 +52,7 @@
     "@weaveintel/mcp-statsnz": "*",
     "@weaveintel/memory": "*",
     "@weaveintel/models": "*",
+    "@weaveintel/notes": "*",
     "@weaveintel/notifications": "*",
     "@weaveintel/oauth": "*",
     "@weaveintel/observability": "*",
@@ -63,6 +65,7 @@
     "@weaveintel/resilience": "*",
     "@weaveintel/routing": "*",
     "@weaveintel/sandbox": "*",
+    "@weaveintel/scope": "*",
     "@weaveintel/skills": "*",
     "@weaveintel/tenancy": "*",
     "@weaveintel/tools": "*",
@@ -78,10 +81,13 @@
     "redis": "^4.7.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
     "@playwright/test": "^1.59.1",
     "@types/better-sqlite3": "^7.6.13",
     "@vitest/coverage-v8": "^4.1.9",
-    "@weaveintel/testing": "*"
+    "@weaveintel/testing": "*",
+    "axe-core": "^4.12.1",
+    "lighthouse": "^12.8.2"
   },
   "peerDependencies": {
     "@weaveintel/provider-anthropic": "*",

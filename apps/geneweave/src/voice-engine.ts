@@ -271,6 +271,26 @@ export class VoiceEngine {
     return this.db.listVoiceSessions(userId, filter);
   }
 
+  /**
+   * weaveNotes Phase 4 — DETAILED transcription for meeting/voice capture: returns the text PLUS
+   * timestamped segments (so summary points can anchor to the moment they were said). Uses the same
+   * audio model as the voice agent; falls back to text-only (one segment) if the provider lacks the
+   * detailed method. Owner-scoped (the caller passes the authenticated user).
+   */
+  async transcribeDetailed(input: { audio: Buffer; mimeType?: string; language?: string; model?: string }): Promise<import('@weaveintel/core').TranscriptionResult> {
+    const ctx = weaveContext({ deadline: Date.now() + 180_000 });
+    const req = {
+      audio: input.audio,
+      ...(input.mimeType ? { mimeType: input.mimeType } : {}),
+      ...(input.language ? { language: input.language } : {}),
+      ...(input.model ? { model: input.model } : {}),
+      segments: true as const,
+    };
+    if (this.audioModel.transcribeDetailed) return this.audioModel.transcribeDetailed(ctx, req);
+    const text = this.audioModel.transcribe ? await this.audioModel.transcribe(ctx, req) : '';
+    return { text, segments: text.trim() ? [{ start: 0, end: 0, text: text.trim() }] : [] };
+  }
+
   // ── REST turn processing ────────────────────────────────────
 
   /**

@@ -14,8 +14,10 @@ import { pushAdminHash } from './admin-ui.js';
 import { bucketItems, bucketLabel, BUCKET_ORDER, itemCategoryColor, formatItemTime, quickAddAgendaItem } from './agenda-api.js';
 import type { Chat } from './types.js';
 
-function renderSidebarIcon(kind: 'home' | 'connectors' | 'admin' | 'dashboard' | 'calendar' | 'notes') {
+function renderSidebarIcon(kind: 'home' | 'connectors' | 'admin' | 'dashboard' | 'calendar' | 'notes' | 'design' | 'builder') {
   const iconMap: Record<string, string> = {
+    builder: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>',
+    design: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="6.5" cy="10.5" r="2.5"/><circle cx="17" cy="15" r="2.5"/><path d="M8.5 9 11 8M9 12l5.5 2"/></svg>',
     home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.8V21h13V9.8"/><path d="M9.5 21v-6h5v6"/></svg>',
     connectors: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h4a2 2 0 0 1 2 2v0"/><path d="M17 17h-4a2 2 0 0 1-2-2v0"/><rect x="3" y="4" width="4" height="6" rx="1.2"/><rect x="17" y="14" width="4" height="6" rx="1.2"/></svg>',
     admin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a1.7 1.7 0 1 1-2.4 2.4l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V20a1.7 1.7 0 1 1-3.4 0v-.2a1 1 0 0 0-.6-.9 1 1 0 0 0-1.1.2l-.1.1a1.7 1.7 0 1 1-2.4-2.4l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H4a1.7 1.7 0 1 1 0-3.4h.2a1 1 0 0 0 .9-.6 1 1 0 0 0-.2-1.1l-.1-.1a1.7 1.7 0 1 1 2.4-2.4l.1.1a1 1 0 0 0 1.1.2h0a1 1 0 0 0 .6-.9V4a1.7 1.7 0 1 1 3.4 0v.2a1 1 0 0 0 .6.9h0a1 1 0 0 0 1.1-.2l.1-.1a1.7 1.7 0 1 1 2.4 2.4l-.1.1a1 1 0 0 0-.2 1.1v0a1 1 0 0 0 .9.6H20a1.7 1.7 0 1 1 0 3.4h-.2a1 1 0 0 0-.9.6z"/></svg>',
@@ -44,14 +46,27 @@ export function renderWorkspaceNav(options: {
     'aria-label': 'Application navigation',
   });
   const navScroll = h('div', { className: 'workspace-nav-scroll', id: 'workspace-nav-scroll' });
-  navScroll.addEventListener('scroll', () => { state.sidebarScrollTop = navScroll.scrollTop; }, { passive: true });
+  navScroll.addEventListener('scroll', () => {
+    // Ignore scroll events fired by the programmatic scroll-restore (they can be clamped/transient during a
+    // render burst); only persist real user scrolls.
+    if (!state.suppressSidebarScrollPersist) state.sidebarScrollTop = navScroll.scrollTop;
+  }, { passive: true });
   const scrollSidebarBy = (delta: number) => {
     navScroll.scrollBy({ top: delta, behavior: 'smooth' });
   };
   nav.appendChild(
     h('div', { className: 'brand' },
-      h('span', { className: 'brand-mark' }, '✦'),
-      h('span', { className: 'word' }, 'geneWeave'),
+      // The logo lockup is a real control that routes HOME from any view (WCAG-friendly + expected UX).
+      h('button', {
+        type: 'button',
+        className: 'brand-home',
+        'aria-label': 'geneWeave home',
+        title: 'Home',
+        onClick: () => { state.view = 'chat'; options.render(); },
+      },
+        h('span', { className: 'brand-mark', 'aria-hidden': 'true' }, '✦'),
+        h('span', { className: 'word' }, 'geneWeave'),
+      ),
       h('button', {
         type: 'button',
         className: 'sidebar-collapse-btn',
@@ -130,6 +145,8 @@ export function renderWorkspaceNav(options: {
   menu.appendChild(navBtn('chat', 'Home', renderSidebarIcon('home'), () => { state.view = 'chat'; options.render(); }));
   menu.appendChild(navBtn('calendar', 'Calendar', renderSidebarIcon('calendar'), () => { state.view = 'calendar'; options.render(); }));
   menu.appendChild(navBtn('notes', 'Notes', renderSidebarIcon('notes'), () => { state.view = 'notes'; options.render(); }));
+  menu.appendChild(navBtn('design', 'Design', renderSidebarIcon('design'), () => { state.view = 'design'; options.render(); }));
+  menu.appendChild(navBtn('builder', 'Builder', renderSidebarIcon('builder'), () => { state.view = 'builder'; options.render(); }));
   menu.appendChild(navBtn('dashboard', 'Dashboard', renderSidebarIcon('dashboard'), () => { state.view = 'dashboard'; void options.loadDashboard(); }));
   menu.appendChild(navBtn('connectors', 'Connectors', renderSidebarIcon('connectors'), () => { options.openConnectorsView(); }));
   menu.appendChild(h('button', {
@@ -247,9 +264,23 @@ export function renderWorkspaceNav(options: {
           ? state.chats.slice(0, 14).map((chat: Chat) =>
               h('div', {
                   className: 'chat-item' + (state.currentChatId === chat.id ? ' active' : ''),
+                  // Keyboard-operable + SR-navigable: a role=button div (can't be a real <button> because it
+                  // wraps a nested delete <button>), tab-focusable, Enter/Space activates, and aria-current
+                  // marks the open chat for assistive tech.
+                  role: 'button',
+                  tabindex: '0',
+                  'aria-current': state.currentChatId === chat.id ? 'page' : null,
+                  'aria-label': `Open chat: ${chat.title || 'New Chat'}`,
                   onClick: () => {
                     state.view = 'chat';
                     if (state.currentChatId !== chat.id) void options.selectChat(chat.id);
+                  },
+                  onKeyDown: (e: KeyboardEvent) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      state.view = 'chat';
+                      if (state.currentChatId !== chat.id) void options.selectChat(chat.id);
+                    }
                   },
                 },
                 h('div', { className: 'chat-item-copy' },
@@ -292,7 +323,14 @@ export function renderWorkspaceTopCard(options: {
   const profileAnchor = h('div', { className: 'dropdown-anchor' });
   const profileBtn = h(
     'button',
-    { className: 'profile-avatar', title: 'Profile and preferences', onClick: openProfile },
+    {
+      className: 'profile-avatar',
+      title: 'Profile and preferences',
+      'aria-label': 'Profile and preferences',
+      'aria-haspopup': 'true',
+      'aria-expanded': state.showProfile ? 'true' : 'false',
+      onClick: openProfile,
+    },
     h('img', {
       src: getUserAvatarUrl(),
       alt: userName,
@@ -612,7 +650,8 @@ export function renderProfileDropdown(options: {
     h('div', { className: 'pf-name' }, user.name || 'User'),
     h('div', { className: 'pf-email' }, user.email || ''),
     h('div', { className: 'pf-divider' }),
-    h('button', { className: 'pf-btn', onClick: () => { state.view = 'preferences'; state.showProfile = false; options.render(); } }, '⚙ Preferences'),
+    h('button', { className: 'pf-btn', onClick: () => { state.view = 'account'; state.accountSection = 'profile'; state.showProfile = false; options.render(); } }, '👤 Profile & account'),
+    h('button', { className: 'pf-btn', onClick: () => { state.view = 'account'; state.accountSection = 'prefs'; state.showProfile = false; options.render(); } }, '⚙ Preferences'),
     h('button', { className: 'pf-btn', onClick: () => { state.view = 'dashboard'; state.showProfile = false; options.render(); void options.loadDashboard(); } }, '📊 Dashboard'),
     h('button', { className: 'pf-btn', onClick: () => { state.view = 'admin'; state.adminMenuExpanded = true; state.showProfile = false; options.render(); void options.loadAdmin(); } }, '⚙ Admin'),
     h('div', { className: 'pf-divider' }),

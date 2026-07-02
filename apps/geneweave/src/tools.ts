@@ -804,6 +804,8 @@ export interface ToolRegistryOptions {
   defaultTimezone?: string;
   temporalStore?: TemporalStore;
   currentUserId?: string;
+  /** Tenant of the current user (weaveNotes Phase 3.1) — stamped on notes the agent creates. */
+  currentTenantId?: string | null;
   currentChatId?: string;
   /** Run id (set on the /api/me/runs path) so emitted artifacts are run-scoped. */
   currentRunId?: string;
@@ -935,6 +937,145 @@ export interface ToolRegistryOptions {
     preview_enabled: boolean;
     sandbox_html: boolean;
   };
+  /**
+   * weaveNotes Phase 3: note co-author callback. When set, the `note_edit` built-in
+   * tool is available so the agent can write into one of the user's notes — either
+   * `direct` (applied as a co-editing peer, converging live) or `suggest` (staged as
+   * a track-changes suggestion a human accepts/rejects). The callback resolves the
+   * user's access to the note itself, so the agent can never edit a note the user
+   * cannot, and viewers are refused.
+   */
+  noteEdit?: (args: { userId: string; noteId: string; markdown: string; mode: 'direct' | 'suggest' }) => Promise<{ ok: boolean; error?: string; applied?: number; suggestionId?: string }>;
+  /**
+   * weaveNotes: note restructure callback. When set, the `restructure_note` built-in tool is
+   * available so the agent can reorganise a WHOLE note (reorder/group sections, fix the heading
+   * hierarchy) while keeping every fact — staged as one track-changes suggestion. An optional
+   * `outline` lets the user dictate the section order. Resolves the user's access itself.
+   */
+  noteRestructure?: (args: { userId: string; noteId: string; outline?: string }) => Promise<{ ok: boolean; error?: string; suggestionId?: string; preview?: string }>;
+  /**
+   * weaveNotes Phase 4: note publish callback. When set, the `note_publish` built-in
+   * tool is available so the agent can turn one of the user's notes into a shareable
+   * artifact (Markdown/HTML). The callback resolves the user's note access + enforces
+   * the sensitivity gate (a `restricted` note is refused; secrets/PII are redacted), and
+   * — for safety — the agent creates the artifact PRIVATELY (it never auto-mints a public
+   * link; a human opts into public sharing).
+   */
+  notePublish?: (args: { userId: string; noteId: string; format?: 'markdown' | 'html' }) => Promise<{ ok: boolean; error?: string; artifactId?: string; redactions?: number; sourceSensitivity?: string }>;
+  /**
+   * weaveNotes Phase 3.1: note creation callback. When set, the `create_note` built-in
+   * tool is available so the agent can create a brand-new note for the user and seed it
+   * with Markdown content it produced (research, a summary, a plan, to-dos). Returns the
+   * new note id, which the agent can pass to `note_edit` / `note_publish`.
+   */
+  createNote?: (args: { userId: string; tenantId?: string | null; title: string; markdown?: string }) => Promise<{ ok: boolean; error?: string; noteId?: string }>;
+  /**
+   * weaveNotes Phase 6: create a note from a ready-made TEMPLATE. When set, the `new_from_template`
+   * tool is available so the agent can start a meeting-minutes / Cornell / study-sheet / project-brief
+   * / daily-planner note (etc.) from the system template gallery. Returns the new note id.
+   */
+  noteNewFromTemplate?: (args: { userId: string; tenantId?: string | null; templateKey: string; title?: string }) => Promise<{ ok: boolean; error?: string; noteId?: string; title?: string; templateKey?: string; available?: string[] }>;
+  /**
+   * weaveNotes Phase 8: list the user's RECENT notes. When set, the `recent_notes` tool is available
+   * so the agent can see what the user has just created/edited ("what was I working on?", "open my
+   * last note", "summarise today's notes"). Read-only + owner-scoped.
+   */
+  noteRecentNotes?: (args: { userId: string; tenantId?: string | null; limit?: number }) => Promise<{ ok: boolean; notes: Array<{ noteId: string; title: string; updatedAt: string; favorite: boolean }> }>;
+  /**
+   * weaveNotes Phase 10: export a note. When set, the `export_note` tool is available so the agent can
+   * export/download one of the user's notes as Markdown / HTML / Word / lossless JSON. Owner-scoped.
+   */
+  noteExport?: (args: { userId: string; tenantId?: string | null; noteId: string; format?: string }) => Promise<{ ok: boolean; error?: string; format?: string; filename?: string; content?: string }>;
+  /**
+   * Answer feedback (m137): read-only aggregate of how the assistant's answers have been rated
+   * (thumbs up/down + reason categories) so it can understand how its answers land and where it
+   * tends to disappoint. When set, the `review_answer_feedback` tool is available. Aggregates only —
+   * never returns individual users' data.
+   */
+  reviewAnswerFeedback?: (args: { tenantId: string | null; limit?: number }) => Promise<{ total: number; up: number; down: number; satisfactionPct: number | null; topReasons: Array<{ reason: string; count: number }> }>;
+  /**
+   * Answer citations (m138): answer a question grounded ONLY in the user's own workspace (their notes + past
+   * chats), with an inline [n] on every claim that points to a source whose quote provably exists (hallucinated
+   * quotes dropped). When set, the `cite_sources` tool is available. Owner-scoped.
+   */
+  citeSources?: (args: { userId: string; tenantId?: string | null; question: string; limit?: number }) => Promise<{ ok: boolean; error?: string; answer: string; grounded: boolean; citations: Array<{ n: number; sourceId: string; sourceKind: string; sourceTitle: string; quote: string }>; sources: Array<{ n: number; id: string; kind: string; title: string }> }>;
+  /**
+   * weaveNotes Phase 5: semantic note search. When set, the `find_related_notes` tool is
+   * available so the agent can find the user's notes most relevant to a query (knowledge-
+   * graph navigation) before answering, editing, or linking. Owner-scoped.
+   */
+  notesSearch?: (args: { userId: string; tenantId?: string | null; query: string; limit?: number }) => Promise<Array<{ noteId: string; title: string; score: number }>>;
+  /**
+   * weaveNotes Phase 3: proactive linking. When set, the `suggest_links` tool is available so the
+   * agent can list a note's unlinked connections (notes mentioned by name or semantically related)
+   * and optionally turn one into a `[[wiki-link]]` (lossless; the backlink appears automatically).
+   * Owner-scoped.
+   */
+  notesLinkSuggest?: (args: { userId: string; tenantId?: string | null; noteId: string; apply?: string; max?: number }) => Promise<{ suggestions?: Array<{ targetId: string; targetTitle: string; kind: string; reason: string }>; applied?: { ok: boolean; linked?: boolean; error?: string } }>;
+  /**
+   * weaveNotes Phase 4: meeting capture. When set, the `summarize_meeting` tool turns a pasted
+   * meeting/call TRANSCRIPT into a structured note (summary + decisions + action items, each backed by
+   * a transcript quote). Owner-scoped.
+   */
+  notesSummarizeMeeting?: (args: { userId: string; tenantId?: string | null; transcript: string; title?: string }) => Promise<{ ok: boolean; error?: string; noteId?: string; title?: string; summary?: string; actionItems?: number }>;
+  /**
+   * weaveNotes Phase 5: background memory / "second brain". When set, the `recall_second_brain` tool
+   * recalls durable memories the app has learned about the user from their notes over time — ranked so
+   * recent, important and relevant ones surface first (superseded facts excluded). Owner-scoped.
+   */
+  notesRecallMemory?: (args: { userId: string; tenantId?: string | null; query: string; limit?: number }) => Promise<{ ok: boolean; count: number; memories: Array<{ content: string; kind?: string; when?: string }> }>;
+  /**
+   * geneWeave UI rebuild: change the WORKSPACE appearance (colour scheme / Pro-Creative / brand accent /
+   * corner style / density). Admin-gated by the app; brand colours are accessibility-checked.
+   */
+  setWorkspaceAppearance?: (args: { userId: string; tenantId?: string | null; colorScheme?: string; variant?: string; accent?: string; cornerStyle?: string; density?: string }) => Promise<{ ok: boolean; error?: string; applied?: Record<string, string>; degraded?: boolean }>;
+  /**
+   * geneWeave UI rebuild: update the SIGNED-IN user's own account (profile + preferences + notifications).
+   * Always scoped to the current user; never touches another person's account.
+   */
+  updateAccountProfile?: (args: { userId: string; profile?: Record<string, unknown>; notification?: { event: string; in_app?: boolean; email?: boolean; push?: boolean } }) => Promise<{ ok: boolean; error?: string; applied?: Record<string, string | null>; notification?: string }>;
+  /**
+   * weaveNotes Phase 6: database column auto-fill. When set, the `autofill_database` tool is
+   * available so the agent can fill a column of one of the user's note databases from each
+   * row's context (the page + workspace + optionally the web), with citations. Owner-scoped.
+   */
+  dbAutofill?: (args: { userId: string; tenantId?: string | null; databaseId: string; propertyKey: string; useWeb?: boolean }) => Promise<{ ok: boolean; error?: string; filled?: number }>;
+  /**
+   * weaveNotes Phase 7: web capture. When set, the `capture_web_page` tool is available so the
+   * agent can clip a public web page into a new structured note (readable text + a provenance
+   * header + source link). SSRF-guarded (public http(s) only). Owner-scoped. Returns the note id.
+   */
+  captureWeb?: (args: { userId: string; tenantId?: string | null; url: string }) => Promise<{ ok: boolean; error?: string; noteId?: string }>;
+  /**
+   * weaveNotes Phase 8: workspace RAG. When set, the `workspace_search` tool is available so
+   * the agent can search the user's OWN content (notes + past chat runs) and ground its answer
+   * in it WITH citations. Returns a numbered context block the agent answers from + the sources.
+   * Owner-scoped.
+   */
+  workspaceSearch?: (args: { userId: string; tenantId?: string | null; query: string; limit?: number }) => Promise<{ ok: boolean; query: string; context: string; sources: Array<{ n: number; id: string; kind: string; title: string }> }>;
+  /**
+   * weaveNotes Phase 0: note activity. When set, the `read_note_activity` tool is available so
+   * the agent can read a note's recent change history (created / updated / AI-edited) and
+   * understand WHAT HAS BEEN HAPPENING before it acts. Owner-scoped, read-only.
+   */
+  readNoteActivity?: (args: { userId: string; tenantId?: string | null; noteId: string; limit?: number }) => Promise<{ ok: boolean; error?: string; noteId: string; events: Array<{ action: string; actor: string; summary: string | null; createdAt: string }> }>;
+  // weaveNotes Phase 2 — the AI selection card's colour tools (each stages a track-changes suggestion).
+  noteApplyHighlight?: (args: { userId: string; noteId: string; phrase: string; color?: string }) => Promise<{ ok: boolean; error?: string; suggestionId?: string; count?: number }>;
+  noteApplyTextColor?: (args: { userId: string; noteId: string; phrase: string; color?: string }) => Promise<{ ok: boolean; error?: string; suggestionId?: string; count?: number }>;
+  noteColorize?: (args: { userId: string; noteId: string; scheme: string; instruction?: string }) => Promise<{ ok: boolean; error?: string; suggestionId?: string; count?: number }>;
+  // weaveNotes Phase 4 — the AI creative tools (ink + diagrams; each stages a track-changes suggestion).
+  noteCreateDiagram?: (args: { userId: string; noteId: string; instruction: string }) => Promise<{ ok: boolean; error?: string; suggestionId?: string; artifactId?: string | null }>;
+  noteDrawInk?: (args: { userId: string; noteId: string; instruction: string }) => Promise<{ ok: boolean; error?: string; suggestionId?: string; artifactId?: string | null }>;
+  // weaveNotes Phase 4 (creative expansion) — illustrations, generated images, and the auto router.
+  noteCreateIllustration?: (args: { userId: string; noteId: string; instruction: string }) => Promise<{ ok: boolean; error?: string; suggestionId?: string; artifactId?: string | null }>;
+  noteGenerateImage?: (args: { userId: string; noteId: string; instruction: string }) => Promise<{ ok: boolean; error?: string; suggestionId?: string; artifactId?: string | null }>;
+  noteCreateVisual?: (args: { userId: string; noteId: string; instruction: string; kind?: string }) => Promise<{ ok: boolean; error?: string; suggestionId?: string; artifactId?: string | null; kind?: string }>;
+  // weaveNotes — source a REAL, free-to-use image from the web (with attribution) into a note.
+  noteFindImage?: (args: { userId: string; noteId: string; query: string }) => Promise<{ ok: boolean; error?: string; suggestionId?: string; artifactId?: string | null }>;
+  // weaveNotes Phase 5 — turn a note into flashcards (active recall + SM-2 spaced repetition).
+  noteMakeFlashcards?: (args: { userId: string; noteId: string; count?: number }) => Promise<{ ok: boolean; error?: string; created?: number }>;
+  noteTranslate?: (args: { userId: string; noteId: string; targetLanguage: string; formality?: 'default' | 'formal' | 'informal'; glossary?: string[] }) => Promise<{ ok: boolean; error?: string; noteId?: string; language?: { code: string; name: string; rtl: boolean }; warnings?: string[] }>;
+  noteScheduledAgent?: (args: { userId: string; op: 'create' | 'list' | 'run'; agentId?: string; name?: string; recipe?: string; cron?: string; timezone?: string; scope?: string; taskPrompt?: string }) => Promise<{ ok: boolean; error?: string; agents?: unknown[]; agent?: unknown; run?: unknown }>;
 }
 
 export function filterToolNamesByPersona(toolNames: string[], persona: string | null | undefined): string[] {
@@ -1474,6 +1615,693 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
     agenda_delete: agendaDeleteTool,
     // P4-3: Knowledge graph tools — only available when graphStore is provided
     ...(opts?.graphStore ? Object.fromEntries(createGraphMemoryToolSet(opts.graphStore).map((t: Tool) => [t.schema.name, t])) : {}),
+    // weaveNotes Phase 3: note co-author tool — available when noteEdit callback is set.
+    ...(opts?.noteEdit && opts.currentUserId ? {
+      note_edit: weaveTool({
+        name: 'note_edit',
+        description: 'Write content into one of the user\'s notes (the AI as a co-author). Provide Markdown. mode="suggest" (default) stages it as a track-changes suggestion the user accepts or reject; mode="direct" applies it immediately as a co-editing peer (use only when the user explicitly asked the AI to edit the note). The note must be one the user owns or can edit; you only need its id.',
+        parameters: {
+          type: 'object',
+          properties: {
+            noteId: { type: 'string', description: 'The id of the note to edit (the user must own it or be a collaborator).' },
+            markdown: { type: 'string', description: 'The content to add, as Markdown (headings, lists, to-dos, etc.).' },
+            mode: { type: 'string', enum: ['suggest', 'direct'], description: 'suggest = stage for human review (default); direct = apply immediately.' },
+          },
+          required: ['noteId', 'markdown'],
+        },
+        execute: async (args: { noteId: string; markdown: string; mode?: 'direct' | 'suggest' }) => {
+          if (!opts.noteEdit || !opts.currentUserId) return { content: 'Note editing is unavailable in this context.', isError: true };
+          const r = await opts.noteEdit({ userId: opts.currentUserId, noteId: args.noteId, markdown: args.markdown, mode: args.mode === 'direct' ? 'direct' : 'suggest' });
+          if (!r.ok) return { content: `note_edit failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, mode: args.mode === 'direct' ? 'direct' : 'suggest', applied: r.applied ?? 0, suggestionId: r.suggestionId ?? null });
+        },
+        tags: ['notes', 'output'],
+      }),
+    } : {}),
+    // weaveNotes: whole-note restructure tool — available when noteRestructure callback is set.
+    ...(opts?.noteRestructure && opts.currentUserId ? {
+      restructure_note: weaveTool({
+        name: 'restructure_note',
+        description: 'Reorganise the WHOLE of one of the user\'s notes — reorder and group its sections, fix the heading hierarchy, and tidy the structure — while keeping every fact (nothing is added or removed). The result is staged as a single track-changes suggestion the user accepts or rejects. Use this when the user asks to "restructure / reorganise / reorder / tidy up / fix the structure of" a note, or gives an outline/section order they want it to follow. Optionally pass `outline` (a list of section headings, one per line) to dictate the order; otherwise the AI picks the clearest structure. You only need the note id.',
+        parameters: {
+          type: 'object',
+          properties: {
+            noteId: { type: 'string', description: 'The id of the note to restructure (the user must own it or be a collaborator).' },
+            outline: { type: 'string', description: 'Optional desired section order/structure — a list of headings, one per line. Omit to let the AI choose the clearest structure.' },
+          },
+          required: ['noteId'],
+        },
+        execute: async (args: { noteId: string; outline?: string }) => {
+          if (!opts.noteRestructure || !opts.currentUserId) return { content: 'Note restructuring is unavailable in this context.', isError: true };
+          const r = await opts.noteRestructure({ userId: opts.currentUserId, noteId: args.noteId, ...(args.outline ? { outline: args.outline } : {}) });
+          if (!r.ok) return { content: `restructure_note failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, suggestionId: r.suggestionId ?? null, staged: true });
+        },
+        tags: ['notes', 'output'],
+      }),
+    } : {}),
+    // weaveNotes Phase 6: database column auto-fill — available when dbAutofill callback is set.
+    ...(opts?.dbAutofill && opts.currentUserId ? {
+      autofill_database: weaveTool({
+        name: 'autofill_database',
+        description: 'Fill in a column of one of the user\'s note databases (tables) using AI — e.g. a Summary, Category, Priority, or a looked-up fact for every row. Each filled cell records citations. Set useWeb=true to let it search the web for facts it cannot find in the existing data. You need the database id and the column\'s property key.',
+        parameters: {
+          type: 'object',
+          properties: {
+            databaseId: { type: 'string', description: 'The id of the note database (table) to fill.' },
+            propertyKey: { type: 'string', description: 'The key of the column (property) to fill.' },
+            useWeb: { type: 'boolean', description: 'Allow a web search for facts not present in the rows (default false).' },
+          },
+          required: ['databaseId', 'propertyKey'],
+        },
+        execute: async (args: { databaseId: string; propertyKey: string; useWeb?: boolean }) => {
+          if (!opts.dbAutofill || !opts.currentUserId) return { content: 'Database auto-fill is unavailable in this context.', isError: true };
+          const r = await opts.dbAutofill({ userId: opts.currentUserId, tenantId: opts.currentTenantId ?? null, databaseId: args.databaseId, propertyKey: args.propertyKey, useWeb: args.useWeb === true });
+          if (!r.ok) return { content: `autofill_database failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, filled: r.filled ?? 0 });
+        },
+        tags: ['notes', 'database', 'output'],
+      }),
+    } : {}),
+    // weaveNotes Phase 0: read a note's recent activity — available when readNoteActivity is set.
+    ...(opts?.readNoteActivity && opts.currentUserId ? {
+      read_note_activity: weaveTool({
+        name: 'read_note_activity',
+        description: 'Read the recent change history of one of the user\'s notes — what was created, updated, or AI-edited, and by whom (you or the user) — so you understand what has been happening before you change it. Use this before editing a note to avoid redoing or undoing recent work, or when the user asks "what changed?". You only need the note id. Returns a list of recent events (action, actor, summary, time), newest first.',
+        parameters: {
+          type: 'object',
+          properties: {
+            noteId: { type: 'string', description: 'The id of the note whose activity to read.' },
+            limit: { type: 'number', description: 'Max events to return (default 20, max 100).' },
+          },
+          required: ['noteId'],
+        },
+        execute: async (args: { noteId: string; limit?: number }) => {
+          if (!opts.readNoteActivity || !opts.currentUserId) return { content: 'Note activity is unavailable in this context.', isError: true };
+          const limit = Math.max(1, Math.min(100, Number(args.limit ?? 20)));
+          const r = await opts.readNoteActivity({ userId: opts.currentUserId, tenantId: opts.currentTenantId ?? null, noteId: args.noteId, limit });
+          if (!r.ok) return { content: `read_note_activity failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, noteId: r.noteId, count: r.events.length, events: r.events });
+        },
+        tags: ['notes', 'memory'],
+      }),
+    } : {}),
+    // weaveNotes Phase 2: the AI selection card's colour tools — each stages a track-changes suggestion.
+    ...(opts?.noteApplyHighlight && opts.currentUserId ? {
+      apply_highlight: weaveTool({
+        name: 'apply_highlight',
+        description: 'Highlight a specific phrase in one of the user\'s notes. Copy the phrase VERBATIM from the note so it can be located. Optionally pass a colour (a hex like "#FAC775", or leave blank for the default amber). Staged as a track-changes suggestion the user accepts or rejects.',
+        parameters: {
+          type: 'object',
+          properties: {
+            noteId: { type: 'string', description: 'The id of the note (the user must own it or be a collaborator).' },
+            phrase: { type: 'string', description: 'The exact phrase to highlight, copied verbatim from the note.' },
+            color: { type: 'string', description: 'Optional highlight colour as hex (e.g. "#9FE1CB"). Defaults to amber.' },
+          },
+          required: ['noteId', 'phrase'],
+        },
+        execute: async (args: { noteId: string; phrase: string; color?: string }) => {
+          if (!opts.noteApplyHighlight || !opts.currentUserId) return { content: 'Highlighting is unavailable in this context.', isError: true };
+          const r = await opts.noteApplyHighlight({ userId: opts.currentUserId, noteId: args.noteId, phrase: args.phrase, ...(args.color ? { color: args.color } : {}) });
+          if (!r.ok) return { content: `apply_highlight failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, suggestionId: r.suggestionId ?? null, count: r.count ?? 0 });
+        },
+        tags: ['notes', 'output'],
+      }),
+    } : {}),
+    ...(opts?.noteApplyTextColor && opts.currentUserId ? {
+      apply_text_color: weaveTool({
+        name: 'apply_text_color',
+        description: 'Colour the TEXT of a specific phrase in one of the user\'s notes. Copy the phrase VERBATIM. Optionally pass a hex colour (defaults to coral). Staged as a track-changes suggestion the user accepts or rejects.',
+        parameters: {
+          type: 'object',
+          properties: {
+            noteId: { type: 'string', description: 'The id of the note.' },
+            phrase: { type: 'string', description: 'The exact phrase to colour, copied verbatim from the note.' },
+            color: { type: 'string', description: 'Optional text colour as hex (e.g. "#1F5FA8"). Defaults to coral.' },
+          },
+          required: ['noteId', 'phrase'],
+        },
+        execute: async (args: { noteId: string; phrase: string; color?: string }) => {
+          if (!opts.noteApplyTextColor || !opts.currentUserId) return { content: 'Text colouring is unavailable in this context.', isError: true };
+          const r = await opts.noteApplyTextColor({ userId: opts.currentUserId, noteId: args.noteId, phrase: args.phrase, ...(args.color ? { color: args.color } : {}) });
+          if (!r.ok) return { content: `apply_text_color failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, suggestionId: r.suggestionId ?? null, count: r.count ?? 0 });
+        },
+        tags: ['notes', 'output'],
+      }),
+    } : {}),
+    ...(opts?.noteColorize && opts.currentUserId ? {
+      colorize_semantic: weaveTool({
+        name: 'colorize_semantic',
+        description: 'Colour-code one of the user\'s notes BY MEANING. Pick a scheme — "topic" (group related spans), "importance" (critical/high/normal/low), "status" (done/in_progress/blocked/todo), or "sentiment" (positive/neutral/negative). The AI chooses which phrases to mark and a pre-validated WCAG-AA colour for each. Staged as one track-changes suggestion the user accepts or rejects.',
+        parameters: {
+          type: 'object',
+          properties: {
+            noteId: { type: 'string', description: 'The id of the note to colour-code.' },
+            scheme: { type: 'string', enum: ['topic', 'importance', 'status', 'sentiment'], description: 'The colour-coding scheme.' },
+            instruction: { type: 'string', description: 'Optional extra guidance (e.g. "focus on the risks section").' },
+          },
+          required: ['noteId', 'scheme'],
+        },
+        execute: async (args: { noteId: string; scheme: string; instruction?: string }) => {
+          if (!opts.noteColorize || !opts.currentUserId) return { content: 'Colour-coding is unavailable in this context.', isError: true };
+          const r = await opts.noteColorize({ userId: opts.currentUserId, noteId: args.noteId, scheme: args.scheme, ...(args.instruction ? { instruction: args.instruction } : {}) });
+          if (!r.ok) return { content: `colorize_semantic failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, suggestionId: r.suggestionId ?? null, count: r.count ?? 0 });
+        },
+        tags: ['notes', 'output'],
+      }),
+    } : {}),
+    // weaveNotes Phase 4: the AI creative tools — each stages a track-changes suggestion.
+    ...(opts?.noteCreateDiagram && opts.currentUserId ? {
+      create_diagram: weaveTool({
+        name: 'create_diagram',
+        description: 'Draw a native, editable, colour-coded DIAGRAM in one of the user\'s notes (a flow, mind-map, or graph). Describe what to diagram in plain words; the AI designs the nodes + edges and picks intentional WCAG-AA colours (e.g. colour the decision node amber). Staged as a track-changes suggestion the user accepts or rejects. Example: "draw a colour-coded flow of these 4 steps".',
+        parameters: {
+          type: 'object',
+          properties: {
+            noteId: { type: 'string', description: 'The id of the note to add the diagram to.' },
+            instruction: { type: 'string', description: 'What to diagram, in plain words (e.g. "a flow of: gather data, train, evaluate, deploy; colour the eval step amber").' },
+          },
+          required: ['noteId', 'instruction'],
+        },
+        execute: async (args: { noteId: string; instruction: string }) => {
+          if (!opts.noteCreateDiagram || !opts.currentUserId) return { content: 'Diagrams are unavailable in this context.', isError: true };
+          const r = await opts.noteCreateDiagram({ userId: opts.currentUserId, noteId: args.noteId, instruction: args.instruction });
+          if (!r.ok) return { content: `create_diagram failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, suggestionId: r.suggestionId ?? null, artifactId: r.artifactId ?? null });
+        },
+        tags: ['notes', 'output'],
+      }),
+    } : {}),
+    ...(opts?.noteDrawInk && opts.currentUserId ? {
+      draw_ink: weaveTool({
+        name: 'draw_ink',
+        description: 'Draw real, editable freehand INK in one of the user\'s notes — an underline, a line, an arrow, a box, a circle, or a check, in a chosen colour. Describe what to draw in plain words. Staged as a track-changes suggestion. Example: "underline this in blue ink" or "sketch an arrow pointing right".',
+        parameters: {
+          type: 'object',
+          properties: {
+            noteId: { type: 'string', description: 'The id of the note to draw in.' },
+            instruction: { type: 'string', description: 'What to draw, in plain words (e.g. "a blue underline", "a red circle around the total", "an arrow from left to right").' },
+          },
+          required: ['noteId', 'instruction'],
+        },
+        execute: async (args: { noteId: string; instruction: string }) => {
+          if (!opts.noteDrawInk || !opts.currentUserId) return { content: 'Ink is unavailable in this context.', isError: true };
+          const r = await opts.noteDrawInk({ userId: opts.currentUserId, noteId: args.noteId, instruction: args.instruction });
+          if (!r.ok) return { content: `draw_ink failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, suggestionId: r.suggestionId ?? null, artifactId: r.artifactId ?? null });
+        },
+        tags: ['notes', 'output'],
+      }),
+    } : {}),
+    // weaveNotes Phase 4 (creative expansion): illustrations, generated images, + the auto router.
+    ...(opts?.noteCreateIllustration && opts.currentUserId ? {
+      create_illustration: weaveTool({
+        name: 'create_illustration',
+        description: 'Draw a detailed VECTOR illustration (an SVG — e.g. an anatomical heart, a leaf, a logo, a labelled figure) in one of the user\'s notes. Use this for a real picture the boxes-and-arrows diagram tool can\'t express. Describe the subject in plain words. Staged as a track-changes suggestion the user accepts or rejects.',
+        parameters: { type: 'object', properties: { noteId: { type: 'string', description: 'The id of the note.' }, instruction: { type: 'string', description: 'What to illustrate (e.g. "the human heart in cross-section, labelled").' } }, required: ['noteId', 'instruction'] },
+        execute: async (args: { noteId: string; instruction: string }) => {
+          if (!opts.noteCreateIllustration || !opts.currentUserId) return { content: 'Illustrations are unavailable here.', isError: true };
+          const r = await opts.noteCreateIllustration({ userId: opts.currentUserId, noteId: args.noteId, instruction: args.instruction });
+          if (!r.ok) return { content: `create_illustration failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, suggestionId: r.suggestionId ?? null, artifactId: r.artifactId ?? null });
+        },
+        tags: ['notes', 'output'],
+      }),
+    } : {}),
+    ...(opts?.noteGenerateImage && opts.currentUserId ? {
+      generate_image: weaveTool({
+        name: 'generate_image',
+        description: 'Generate a realistic RASTER image with an image model and embed it in one of the user\'s notes. Use this only when the user wants a photo-like / painterly picture (not a diagram or vector drawing). May be disabled by the workspace (it costs money). Staged as a track-changes suggestion.',
+        parameters: { type: 'object', properties: { noteId: { type: 'string', description: 'The id of the note.' }, instruction: { type: 'string', description: 'A description of the image to generate.' } }, required: ['noteId', 'instruction'] },
+        execute: async (args: { noteId: string; instruction: string }) => {
+          if (!opts.noteGenerateImage || !opts.currentUserId) return { content: 'Image generation is unavailable here.', isError: true };
+          const r = await opts.noteGenerateImage({ userId: opts.currentUserId, noteId: args.noteId, instruction: args.instruction });
+          if (!r.ok) return { content: `generate_image failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, suggestionId: r.suggestionId ?? null, artifactId: r.artifactId ?? null });
+        },
+        tags: ['notes', 'output'],
+      }),
+    } : {}),
+    ...(opts?.noteCreateVisual && opts.currentUserId ? {
+      create_visual: weaveTool({
+        name: 'create_visual',
+        description: 'The ONE-STOP visual tool: describe any picture for one of the user\'s notes — a process / business / block diagram, freeform ink, a vector illustration, or a realistic image — and the AI picks the best kind automatically. Prefer this when the user just says "draw / make / visualize X" without specifying a format. Optionally force kind = "diagram" | "ink" | "illustration" | "image". Honours the workspace\'s enabled modes. Staged as a track-changes suggestion.',
+        parameters: { type: 'object', properties: { noteId: { type: 'string', description: 'The id of the note.' }, instruction: { type: 'string', description: 'What to draw / visualize, in plain words.' }, kind: { type: 'string', enum: ['auto', 'diagram', 'ink', 'illustration', 'image'], description: 'Force a kind, or omit for auto.' } }, required: ['noteId', 'instruction'] },
+        execute: async (args: { noteId: string; instruction: string; kind?: string }) => {
+          if (!opts.noteCreateVisual || !opts.currentUserId) return { content: 'Visuals are unavailable here.', isError: true };
+          const r = await opts.noteCreateVisual({ userId: opts.currentUserId, noteId: args.noteId, instruction: args.instruction, ...(args.kind ? { kind: args.kind } : {}) });
+          if (!r.ok) return { content: `create_visual failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, kind: r.kind ?? null, suggestionId: r.suggestionId ?? null, artifactId: r.artifactId ?? null });
+        },
+        tags: ['notes', 'output'],
+      }),
+    } : {}),
+    // weaveNotes: find a REAL, free-to-use image from the web — available when noteFindImage is set.
+    ...(opts?.noteFindImage && opts.currentUserId ? {
+      find_image: weaveTool({
+        name: 'find_image',
+        description: 'Find a REAL, free-to-use image on the web (Openverse / Wikimedia / Unsplash / Pexels / Pixabay) and insert it into one of the user\'s notes WITH its licence + attribution. Use this when the user asks to "show / add / insert / find a picture/photo/image of …", OR when they ask to "draw" something that is far better shown as a real picture than as boxes-and-arrows — e.g. an anatomical organ ("draw the human heart"), an animal, a place, a real object. (For a process / flow / relationship, use create_diagram instead.) The fetch is SSRF-hardened and only public images under allowed licences are used. Staged as a track-changes suggestion. You only need the note id and a short search query.',
+        parameters: {
+          type: 'object',
+          properties: {
+            noteId: { type: 'string', description: 'The id of the note to add the image to.' },
+            query: { type: 'string', description: 'A short image search query, e.g. "human heart anatomy" or "golden gate bridge".' },
+          },
+          required: ['noteId', 'query'],
+        },
+        execute: async (args: { noteId: string; query: string }) => {
+          if (!opts.noteFindImage || !opts.currentUserId) return { content: 'Image search is unavailable in this context.', isError: true };
+          const r = await opts.noteFindImage({ userId: opts.currentUserId, noteId: args.noteId, query: args.query });
+          if (!r.ok) return { content: `find_image failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, suggestionId: r.suggestionId ?? null, artifactId: r.artifactId ?? null });
+        },
+        tags: ['notes', 'output'],
+      }),
+    } : {}),
+    // weaveNotes Phase 5: turn a note into flashcards — available when noteMakeFlashcards is set.
+    ...(opts?.noteMakeFlashcards && opts.currentUserId ? {
+      make_flashcards: weaveTool({
+        name: 'make_flashcards',
+        description: 'Turn one of the user\'s notes into question→answer FLASHCARDS for active-recall study, scheduled with spaced repetition (SM-2). Use this when the user asks to "make flashcards", "quiz me on this", "help me study/memorise this note", or "turn this into study cards". You only need the note id (and optionally how many cards). The user then reviews the deck on a schedule.',
+        parameters: {
+          type: 'object',
+          properties: {
+            noteId: { type: 'string', description: 'The id of the note to make flashcards from.' },
+            count: { type: 'number', description: 'Roughly how many cards to make (3–40; default 10).' },
+          },
+          required: ['noteId'],
+        },
+        execute: async (args: { noteId: string; count?: number }) => {
+          if (!opts.noteMakeFlashcards || !opts.currentUserId) return { content: 'Flashcards are unavailable in this context.', isError: true };
+          const r = await opts.noteMakeFlashcards({ userId: opts.currentUserId, noteId: args.noteId, ...(typeof args.count === 'number' ? { count: args.count } : {}) });
+          if (!r.ok) return { content: `make_flashcards failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, created: r.created ?? 0 });
+        },
+        tags: ['notes', 'study', 'output'],
+      }),
+    } : {}),
+    // weaveNotes Phase 2: translate a note into another language — available when noteTranslate is set.
+    ...(opts?.noteTranslate && opts.currentUserId ? {
+      translate_note: weaveTool({
+        name: 'translate_note',
+        description: 'Translate one of the user\'s notes into another language and save it as a NEW note (the original is left untouched). Use this when the user asks to "translate this note", "put my note in Spanish/French/Japanese/…", or "what does this note say in German?". You need the note id and the target language (a name like "Spanish" or an ISO code like "es"). Code, links and formatting are preserved. Optionally pass formality ("formal"/"informal") or a glossary of terms to keep verbatim.',
+        parameters: {
+          type: 'object',
+          properties: {
+            noteId: { type: 'string', description: 'The id of the note to translate.' },
+            targetLanguage: { type: 'string', description: 'Target language — a name ("Spanish", "Brazilian Portuguese") or ISO 639-1 code ("es", "ja").' },
+            formality: { type: 'string', enum: ['default', 'formal', 'informal'], description: 'Optional register, for languages that distinguish it (e.g. German Sie/du).' },
+            glossary: { type: 'array', items: { type: 'string' }, description: 'Optional terms (brand/product names) to keep exactly as written.' },
+          },
+          required: ['noteId', 'targetLanguage'],
+        },
+        execute: async (args: { noteId: string; targetLanguage: string; formality?: 'default' | 'formal' | 'informal'; glossary?: string[] }) => {
+          if (!opts.noteTranslate || !opts.currentUserId) return { content: 'Translation is unavailable in this context.', isError: true };
+          const r = await opts.noteTranslate({ userId: opts.currentUserId, noteId: args.noteId, targetLanguage: args.targetLanguage, ...(args.formality ? { formality: args.formality } : {}), ...(Array.isArray(args.glossary) ? { glossary: args.glossary } : {}) });
+          if (!r.ok) return { content: `translate_note failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, noteId: r.noteId, language: r.language?.name, warnings: r.warnings ?? [] });
+        },
+        tags: ['notes', 'translate', 'output'],
+      }),
+    } : {}),
+    // weaveNotes Phase 3: set up / run a scheduled workspace agent — available when noteScheduledAgent is set.
+    ...(opts?.noteScheduledAgent && opts.currentUserId ? {
+      manage_scheduled_agent: weaveTool({
+        name: 'manage_scheduled_agent',
+        description: 'Set up, list, or run a SCHEDULED workspace agent — a recurring AI task over the user\'s OWN notes (e.g. "every weekday at 8am, digest the notes I touched yesterday"). Use op="create" to make one (give a name, a recipe, and a cron schedule), op="list" to show the user\'s agents, or op="run" to run one now by agentId. Recipes: daily_digest, link_suggester, action_items, stale_flagger, custom (with taskPrompt). Each run is budget-bounded and produces a NEW note (never overwrites). Use when the user asks to "schedule", "automate", "every day/week summarise my notes", or "run my scheduled agent".',
+        parameters: {
+          type: 'object',
+          properties: {
+            op: { type: 'string', enum: ['create', 'list', 'run'], description: 'create a new agent, list existing ones, or run one now.' },
+            agentId: { type: 'string', description: 'The agent id (for op="run").' },
+            name: { type: 'string', description: 'A label for a new agent (op="create").' },
+            recipe: { type: 'string', enum: ['daily_digest', 'link_suggester', 'action_items', 'stale_flagger', 'custom'], description: 'The task recipe (op="create").' },
+            cron: { type: 'string', description: 'A 5-field cron schedule, e.g. "0 8 * * MON-FRI" (op="create").' },
+            timezone: { type: 'string', description: 'IANA timezone for the schedule, e.g. "America/New_York" (op="create").' },
+            scope: { type: 'string', enum: ['recent', 'all', 'tag'], description: 'Which notes to consider (op="create").' },
+            taskPrompt: { type: 'string', description: 'Extra instruction (required for recipe="custom").' },
+          },
+          required: ['op'],
+        },
+        execute: async (args: { op: 'create' | 'list' | 'run'; agentId?: string; name?: string; recipe?: string; cron?: string; timezone?: string; scope?: string; taskPrompt?: string }) => {
+          if (!opts.noteScheduledAgent || !opts.currentUserId) return { content: 'Scheduled agents are unavailable in this context.', isError: true };
+          const r = await opts.noteScheduledAgent({ userId: opts.currentUserId, ...args });
+          if (!r.ok) return { content: `manage_scheduled_agent failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, ...(r.agents ? { agents: r.agents } : {}), ...(r.agent ? { agent: r.agent } : {}), ...(r.run ? { run: r.run } : {}) });
+        },
+        tags: ['notes', 'agent', 'schedule', 'output'],
+      }),
+    } : {}),
+    // weaveNotes Phase 8: workspace RAG search — available when workspaceSearch callback is set.
+    ...(opts?.workspaceSearch && opts.currentUserId ? {
+      workspace_search: weaveTool({
+        name: 'workspace_search',
+        description: 'Search the USER\'S OWN workspace — their notes AND their past chat runs — for content relevant to a question, and get back a numbered context block with the most relevant excerpts plus their sources. Use this whenever the user asks about "my notes", "what we discussed/decided", "what did we learn about X", "summarize my research on Y", or anything that should be answered from their own material rather than general knowledge. Then write your answer FROM the returned excerpts and cite each claim with its bracketed number, e.g. "... rises 16 metres [1].". Returns { context, sources:[{n,id,kind,title}] }.',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: 'What to look for across the user\'s notes + past chats.' },
+            limit: { type: 'number', description: 'Max sources to return (default 6, max 12).' },
+          },
+          required: ['query'],
+        },
+        execute: async (args: { query: string; limit?: number }) => {
+          if (!opts.workspaceSearch || !opts.currentUserId) return { content: 'Workspace search is unavailable in this context.', isError: true };
+          const r = await opts.workspaceSearch({ userId: opts.currentUserId, tenantId: opts.currentTenantId ?? null, query: args.query, ...(args.limit ? { limit: args.limit } : {}) });
+          if (!r.context) return JSON.stringify({ ok: true, query: r.query, found: 0, context: '', sources: [], note: 'No relevant content found in the workspace yet. Answer from general knowledge or ask the user to add notes.' });
+          return JSON.stringify({ ok: true, query: r.query, found: r.sources.length, context: r.context, sources: r.sources });
+        },
+        tags: ['notes', 'retrieval', 'memory'],
+      }),
+    } : {}),
+    // weaveNotes Phase 7: web capture (clip a page → note) — available when captureWeb callback is set.
+    ...(opts?.captureWeb && opts.currentUserId ? {
+      capture_web_page: weaveTool({
+        name: 'capture_web_page',
+        description: 'Clip a public web page into a NEW note for the user: it fetches the page, extracts the readable article text, and saves a note with a provenance header (where it came from) and a source link. Use this when the user asks to "save/clip/capture this page", "read <url> and make a note", or "add this article to my notes". Only public http(s) URLs are allowed (private/localhost addresses are refused). Returns the new note id.',
+        parameters: {
+          type: 'object',
+          properties: {
+            url: { type: 'string', description: 'The public http(s) URL of the page to clip into a note.' },
+          },
+          required: ['url'],
+        },
+        execute: async (args: { url: string }) => {
+          if (!opts.captureWeb || !opts.currentUserId) return { content: 'Web capture is unavailable in this context.', isError: true };
+          const r = await opts.captureWeb({ userId: opts.currentUserId, tenantId: opts.currentTenantId ?? null, url: args.url });
+          if (!r.ok) return { content: `capture_web_page failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, noteId: r.noteId });
+        },
+        tags: ['notes', 'capture', 'output'],
+      }),
+    } : {}),
+    // weaveNotes Phase 5: semantic note search — available when notesSearch callback is set.
+    ...(opts?.notesSearch && opts.currentUserId ? {
+      find_related_notes: weaveTool({
+        name: 'find_related_notes',
+        description: 'Search the user\'s notes for the ones most relevant to a query (semantic similarity over their knowledge base). Use this before answering questions about "my notes", to find a note to edit/link/publish, or to discover related material. Returns matching notes with id + title + a relevance score.',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: 'What to look for across the user\'s notes.' },
+            limit: { type: 'number', description: 'Max results (default 5, max 20).' },
+          },
+          required: ['query'],
+        },
+        execute: async (args: { query: string; limit?: number }) => {
+          if (!opts.notesSearch || !opts.currentUserId) return { content: 'Note search is unavailable in this context.', isError: true };
+          const limit = Math.max(1, Math.min(20, Number(args.limit ?? 5)));
+          const results = await opts.notesSearch({ userId: opts.currentUserId, tenantId: opts.currentTenantId ?? null, query: args.query, limit });
+          return JSON.stringify({ query: args.query, count: results.length, notes: results });
+        },
+        tags: ['notes', 'memory'],
+      }),
+    } : {}),
+    // weaveNotes Phase 3: proactive linking — available when notesLinkSuggest callback is set.
+    ...(opts?.notesLinkSuggest && opts.currentUserId ? {
+      suggest_links: weaveTool({
+        name: 'suggest_links',
+        description: 'Find the connections a note already implies but hasn\'t linked yet: other notes it mentions BY NAME (high-confidence) plus notes that are semantically related. Call with just a `noteId` to LIST the suggestions; call with `noteId` + `apply` (a suggested note title) to turn the first plain mention of that title into a [[wiki-link]] — lossless, and the backlink appears on the other note automatically. Use this to tidy up a note\'s links or when the user asks to "link this up" / "connect related notes".',
+        parameters: {
+          type: 'object',
+          properties: {
+            noteId: { type: 'string', description: 'The note to find link suggestions for (or apply a link to).' },
+            apply: { type: 'string', description: 'Optional: a suggested note title to link. When set, the first plain mention of it becomes a [[wiki-link]].' },
+            max: { type: 'number', description: 'Max suggestions to list (default 8, max 20).' },
+          },
+          required: ['noteId'],
+        },
+        execute: async (args: { noteId: string; apply?: string; max?: number }) => {
+          if (!opts.notesLinkSuggest || !opts.currentUserId) return { content: 'Link suggestions are unavailable in this context.', isError: true };
+          const max = Math.max(1, Math.min(20, Number(args.max ?? 8)));
+          const r = await opts.notesLinkSuggest({ userId: opts.currentUserId, tenantId: opts.currentTenantId ?? null, noteId: args.noteId, ...(args.apply ? { apply: args.apply } : {}), max });
+          if (args.apply) {
+            if (r.applied?.ok && r.applied.linked) return JSON.stringify({ applied: true, linkedTo: args.apply });
+            if (r.applied?.ok && !r.applied.linked) return JSON.stringify({ applied: false, reason: 'No plain (unlinked) mention of that title was found in the note.' });
+            return { content: r.applied?.error ?? 'Could not apply the link.', isError: true };
+          }
+          return JSON.stringify({ noteId: args.noteId, count: r.suggestions?.length ?? 0, suggestions: r.suggestions ?? [] });
+        },
+        tags: ['notes', 'memory'],
+      }),
+    } : {}),
+    // weaveNotes Phase 4: meeting capture — available when notesSummarizeMeeting callback is set.
+    ...(opts?.notesSummarizeMeeting && opts.currentUserId ? {
+      summarize_meeting: weaveTool({
+        name: 'summarize_meeting',
+        description: 'Turn a meeting or call TRANSCRIPT into a structured note: a short summary, the decisions made, and action items (as to-do checkboxes) — where every point is backed by a quote from the transcript. Use when the user pastes a transcript or asks to "summarise this meeting/call", "pull the action items out of this", or "make meeting notes from this". Creates a NEW note and returns its id.',
+        parameters: {
+          type: 'object',
+          properties: {
+            transcript: { type: 'string', description: 'The raw meeting/call transcript text to summarise.' },
+            title: { type: 'string', description: 'Optional title for the note.' },
+          },
+          required: ['transcript'],
+        },
+        execute: async (args: { transcript: string; title?: string }) => {
+          if (!opts.notesSummarizeMeeting || !opts.currentUserId) return { content: 'Meeting summarisation is unavailable in this context.', isError: true };
+          const r = await opts.notesSummarizeMeeting({ userId: opts.currentUserId, tenantId: opts.currentTenantId ?? null, transcript: args.transcript, ...(args.title ? { title: args.title } : {}) });
+          if (!r.ok) return { content: r.error ?? 'Could not summarise the meeting.', isError: true };
+          return JSON.stringify({ created: true, noteId: r.noteId, title: r.title, summary: r.summary, actionItems: r.actionItems });
+        },
+        tags: ['notes', 'meeting', 'output'],
+      }),
+    } : {}),
+    // geneWeave UI rebuild: set workspace appearance — available when setWorkspaceAppearance is set.
+    ...(opts?.setWorkspaceAppearance && opts.currentUserId ? {
+      set_workspace_appearance: weaveTool({
+        name: 'set_workspace_appearance',
+        description: 'Change this workspace’s look & feel: colour scheme (light/dark/system), the default look (pro/creative), a brand accent colour (hex), corner style (soft/sharp/round), or density (comfortable/compact). Use when the user asks to "switch to dark mode", "use our brand colour #2563EB", "make it feel more creative", or "tighten the spacing". Brand colours are accessibility-checked and safely ignored if they fail contrast. Requires workspace-admin rights.',
+        parameters: {
+          type: 'object',
+          properties: {
+            colorScheme: { type: 'string', enum: ['system', 'light', 'dark'], description: 'Colour scheme.' },
+            variant: { type: 'string', enum: ['pro', 'creative'], description: 'Default look.' },
+            accent: { type: 'string', description: 'Brand accent as a hex colour, e.g. #2563EB.' },
+            cornerStyle: { type: 'string', enum: ['soft', 'sharp', 'round'], description: 'Corner style.' },
+            density: { type: 'string', enum: ['comfortable', 'compact'], description: 'Spacing density.' },
+          },
+        },
+        execute: async (args: { colorScheme?: string; variant?: string; accent?: string; cornerStyle?: string; density?: string }) => {
+          if (!opts.setWorkspaceAppearance || !opts.currentUserId) return { content: 'Appearance changes are unavailable in this context.', isError: true };
+          const r = await opts.setWorkspaceAppearance({ userId: opts.currentUserId, tenantId: opts.currentTenantId ?? null, ...args });
+          if (!r.ok) return { content: r.error ?? 'Could not change the appearance.', isError: true };
+          return JSON.stringify({ applied: r.applied, degraded: r.degraded, note: r.degraded ? 'The brand accent failed contrast in one theme; the accessible default is used there.' : undefined });
+        },
+        tags: ['appearance', 'branding', 'admin'],
+      }),
+    } : {}),
+    // geneWeave UI rebuild: update the signed-in user's own account — when updateAccountProfile is set.
+    ...(opts?.updateAccountProfile && opts.currentUserId ? {
+      update_account_profile: weaveTool({
+        name: 'update_account_profile',
+        description: 'Update the signed-in person’s OWN account. Two things you can change: (1) their profile & formatting preferences — display name, pronouns, role/title, working hours, a short "about" blurb, their status line (e.g. "Focusing · back at 2:00"), interface language, timezone, date format, start of week, or the Pro/Creative editor look; (2) which notifications reach them and where. Use for requests like "set my status to focusing", "call me they/them", "start my week on Sunday", or "turn off email for comments". Only ever changes the current user’s own account.',
+        parameters: {
+          type: 'object',
+          properties: {
+            profile: {
+              type: 'object',
+              description: 'Profile & preference fields to change. Any subset of: display_name, pronouns, role_title, working_hours, about, status_text, status_emoji, language, timezone, date_format, week_start (monday/sunday/saturday), ui_variant (pro/creative).',
+              properties: {
+                display_name: { type: 'string' }, pronouns: { type: 'string' }, role_title: { type: 'string' },
+                working_hours: { type: 'string' }, about: { type: 'string' }, status_text: { type: 'string' }, status_emoji: { type: 'string' },
+                language: { type: 'string' }, timezone: { type: 'string' }, date_format: { type: 'string' },
+                week_start: { type: 'string', enum: ['monday', 'sunday', 'saturday'] }, ui_variant: { type: 'string', enum: ['pro', 'creative'] },
+              },
+            },
+            notification: {
+              type: 'object',
+              description: 'Turn a notification channel on/off for one event.',
+              properties: {
+                event: { type: 'string', enum: ['mentions', 'shares', 'comments', 'assistant_finished', 'weekly_digest'] },
+                in_app: { type: 'boolean' }, email: { type: 'boolean' }, push: { type: 'boolean' },
+              },
+              required: ['event'],
+            },
+          },
+        },
+        execute: async (args: { profile?: Record<string, unknown>; notification?: { event: string; in_app?: boolean; email?: boolean; push?: boolean } }) => {
+          if (!opts.updateAccountProfile || !opts.currentUserId) return { content: 'Account changes are unavailable in this context.', isError: true };
+          const r = await opts.updateAccountProfile({ userId: opts.currentUserId, ...args });
+          if (!r.ok) return { content: r.error ?? 'Could not update your account.', isError: true };
+          return JSON.stringify({ ok: true, applied: r.applied, notification: r.notification });
+        },
+        tags: ['account', 'profile', 'preferences'],
+      }),
+    } : {}),
+    // weaveNotes Phase 5: second-brain recall — available when notesRecallMemory callback is set.
+    ...(opts?.notesRecallMemory && opts.currentUserId ? {
+      recall_second_brain: weaveTool({
+        name: 'recall_second_brain',
+        description: 'Recall what you already know about the user from their notes over time — durable facts, preferences, decisions, people and commitments — ranked so the most recent, important and relevant surface first (superseded facts are excluded). Use this to ground an answer in what the user has told you before, e.g. "what do I know about the Polaris project?", "what are their preferences?", "what did they decide about the launch?". Returns short memory statements, each with when it was learned.',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: 'The topic, person, or question to recall memories about.' },
+            limit: { type: 'number', description: 'Max memories to return (default 5, max 20).' },
+          },
+          required: ['query'],
+        },
+        execute: async (args: { query: string; limit?: number }) => {
+          if (!opts.notesRecallMemory || !opts.currentUserId) return { content: 'Memory recall is unavailable in this context.', isError: true };
+          const limit = Math.max(1, Math.min(20, Number(args.limit ?? 5)));
+          const r = await opts.notesRecallMemory({ userId: opts.currentUserId, tenantId: opts.currentTenantId ?? null, query: args.query, limit });
+          return JSON.stringify({ query: args.query, count: r.count, memories: r.memories });
+        },
+        tags: ['notes', 'memory', 'personalization'],
+      }),
+    } : {}),
+    // weaveNotes Phase 3.1: create-note tool — available when createNote callback is set.
+    ...(opts?.createNote && opts.currentUserId ? {
+      create_note: weaveTool({
+        name: 'create_note',
+        description: 'Create a brand-new note for the user and fill it with content you provide as Markdown. Use this when the user asks to "create/make/start a note", "save this as a note", or "write up … as a note". Put the actual content (headings, bullet points, to-dos as "- [ ] task", code blocks, etc.) in `markdown`, based on what the user asked about or the information discussed. Returns the new note id (which you can then pass to note_edit to add more, or note_publish to share).',
+        parameters: {
+          type: 'object',
+          properties: {
+            title: { type: 'string', description: 'A short, descriptive title for the note.' },
+            markdown: { type: 'string', description: 'The note body as Markdown — the research/summary/plan the user asked for. Supports headings, bullet/numbered lists, to-dos ("- [ ] task"), code blocks, quotes, bold/italic/links.' },
+          },
+          required: ['title'],
+        },
+        execute: async (args: { title: string; markdown?: string }) => {
+          if (!opts.createNote || !opts.currentUserId) return { content: 'Note creation is unavailable in this context.', isError: true };
+          const r = await opts.createNote({ userId: opts.currentUserId, tenantId: opts.currentTenantId ?? null, title: args.title, ...(args.markdown ? { markdown: args.markdown } : {}) });
+          if (!r.ok) return { content: `create_note failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, noteId: r.noteId, title: args.title });
+        },
+        tags: ['notes', 'output'],
+      }),
+    } : {}),
+    // weaveNotes Phase 6: start a note from a ready-made TEMPLATE — when noteNewFromTemplate is set.
+    ...(opts?.noteNewFromTemplate && opts.currentUserId ? {
+      new_from_template: weaveTool({
+        name: 'new_from_template',
+        description: 'Create a new note for the user from a ready-made TEMPLATE. Use this when the user asks to start a structured note like "meeting minutes", "Cornell notes", "a study sheet", "a project brief", "a daily planner", "a comparison", or "a Zettelkasten note". Pass the template `key` and an optional `title`. Known keys: blank, cornell, meeting-minutes, study-sheet, active-recall, outline, mind-map, comparison, zettelkasten, action-board, daily-planner, project-brief. If you pass an unknown key the tool returns the list of available keys so you can retry. Returns the new note id. (For a free-form note with content you write yourself, use create_note instead.)',
+        parameters: {
+          type: 'object',
+          properties: {
+            key: { type: 'string', description: 'The template key, e.g. "meeting-minutes", "cornell", "project-brief".' },
+            title: { type: 'string', description: 'Optional title for the new note. Defaults to the template name (e.g. "Meeting minutes").' },
+          },
+          required: ['key'],
+        },
+        execute: async (args: { key: string; title?: string }) => {
+          if (!opts.noteNewFromTemplate || !opts.currentUserId) return { content: 'Templates are unavailable in this context.', isError: true };
+          const r = await opts.noteNewFromTemplate({ userId: opts.currentUserId, tenantId: opts.currentTenantId ?? null, templateKey: args.key, ...(args.title ? { title: args.title } : {}) });
+          if (!r.ok) return { content: `new_from_template failed: ${r.error ?? 'unknown error'}${r.available ? ` (available keys: ${r.available.join(', ')})` : ''}`, isError: true };
+          return JSON.stringify({ ok: true, noteId: r.noteId, title: r.title, templateKey: r.templateKey });
+        },
+        tags: ['notes', 'templates', 'output'],
+      }),
+    } : {}),
+    // weaveNotes Phase 8: recent-notes tool — available when noteRecentNotes is set.
+    ...(opts?.noteRecentNotes && opts.currentUserId ? {
+      recent_notes: weaveTool({
+        name: 'recent_notes',
+        description: 'List the user\'s most recently created or edited notes (newest first). Use this when the user asks what they have been working on lately, wants to pick up where they left off ("open my last note"), or asks you to summarise recent work ("what did I write today?"). Read-only; returns each note\'s id, title, when it was last updated, and whether it is a favourite.',
+        parameters: {
+          type: 'object',
+          properties: {
+            limit: { type: 'number', description: 'How many recent notes to return (default 10, max 50).' },
+          },
+        },
+        execute: async (args: { limit?: number }) => {
+          if (!opts.noteRecentNotes || !opts.currentUserId) return { content: 'Recent notes are unavailable in this context.', isError: true };
+          const r = await opts.noteRecentNotes({ userId: opts.currentUserId, tenantId: opts.currentTenantId ?? null, ...(typeof args.limit === 'number' ? { limit: args.limit } : {}) });
+          return JSON.stringify({ ok: true, notes: r.notes });
+        },
+        tags: ['notes', 'memory'],
+      }),
+    } : {}),
+    // Answer feedback (m137): review_answer_feedback tool — available when reviewAnswerFeedback callback is set.
+    ...(opts?.reviewAnswerFeedback ? {
+      review_answer_feedback: weaveTool({
+        name: 'review_answer_feedback',
+        description: 'See how your recent answers have been rated by the people you help — a plain-language read-out of thumbs up vs thumbs down, the overall satisfaction score, and the most common reasons people gave when they were not happy (e.g. "inaccurate", "incomplete", "did not follow instructions"). Use this when the user asks "how am I doing?", "what do people think of your answers?", or when you want to understand where your answers tend to fall short so you can do better. Read-only and privacy-safe: it returns totals only, never any individual person\'s comment or identity.',
+        parameters: {
+          type: 'object',
+          properties: {
+            limit: { type: 'number', description: 'How many recent feedback entries to summarise (default 500, max 2000).' },
+          },
+        },
+        execute: async (args: { limit?: number }) => {
+          if (!opts.reviewAnswerFeedback) return { content: 'Answer-feedback review is unavailable in this context.', isError: true };
+          const r = await opts.reviewAnswerFeedback({ tenantId: opts.currentTenantId ?? null, ...(typeof args.limit === 'number' ? { limit: Math.min(2000, Math.max(1, args.limit)) } : {}) });
+          return JSON.stringify({ ok: true, ...r });
+        },
+        tags: ['notes', 'quality'],
+      }),
+    } : {}),
+    // Answer citations (m138): cite_sources tool — available when citeSources callback is set.
+    ...(opts?.citeSources && opts.currentUserId ? {
+      cite_sources: weaveTool({
+        name: 'cite_sources',
+        description: 'Answer a question using ONLY the user\'s own workspace — their notes and past chats — and back every claim with an inline [n] citation that points to the exact source sentence. Each quote is verified to genuinely exist in its source; anything the model invents is dropped, so the answer is grounded and checkable, never made up. Use this when the user asks something that should be answered from THEIR material ("what did we decide about pricing? cite it", "answer from my notes"), or when they ask you to back a claim with a source. Returns the grounded answer, the verified citations (with the exact quote + which note/chat it came from), and the numbered sources. If nothing in their workspace covers it, say so plainly rather than guessing.',
+        parameters: {
+          type: 'object',
+          properties: {
+            question: { type: 'string', description: 'The question to answer from the user\'s workspace.' },
+            limit: { type: 'number', description: 'How many sources to retrieve/cite (default from workspace config; max 12).' },
+          },
+          required: ['question'],
+        },
+        execute: async (args: { question: string; limit?: number }) => {
+          if (!opts.citeSources || !opts.currentUserId) return { content: 'Cited answers are unavailable in this context.', isError: true };
+          const r = await opts.citeSources({ userId: opts.currentUserId, tenantId: opts.currentTenantId ?? null, question: args.question, ...(typeof args.limit === 'number' ? { limit: args.limit } : {}) });
+          if (!r.ok) return { content: `cite_sources failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, answer: r.answer, grounded: r.grounded, citations: r.citations, sources: r.sources });
+        },
+        tags: ['notes', 'knowledge', 'citations'],
+      }),
+    } : {}),
+    // weaveNotes Phase 10: export-note tool — available when noteExport callback is set.
+    ...(opts?.noteExport && opts.currentUserId ? {
+      export_note: weaveTool({
+        name: 'export_note',
+        description: 'Export one of the user\'s notes in a chosen format so they can keep a copy, share it, or open it in another app. Use when the user asks to "export", "download", or "save this note as" Markdown / a web page (HTML) / Word / a lossless JSON backup. Pass the note id and the format ("markdown" | "html" | "word" | "json"; default markdown). Returns the exported content (you can show it or save it).',
+        parameters: {
+          type: 'object',
+          properties: {
+            noteId: { type: 'string', description: 'The id of the note to export.' },
+            format: { type: 'string', enum: ['markdown', 'html', 'word', 'json'], description: 'Export format (default markdown).' },
+          },
+          required: ['noteId'],
+        },
+        execute: async (args: { noteId: string; format?: string }) => {
+          if (!opts.noteExport || !opts.currentUserId) return { content: 'Note export is unavailable in this context.', isError: true };
+          const r = await opts.noteExport({ userId: opts.currentUserId, tenantId: opts.currentTenantId ?? null, noteId: args.noteId, ...(args.format ? { format: args.format } : {}) });
+          if (!r.ok) return { content: `export_note failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, format: r.format, filename: r.filename, content: r.content });
+        },
+        tags: ['notes', 'output'],
+      }),
+    } : {}),
+    // weaveNotes Phase 4: note publish tool — available when notePublish callback is set.
+    ...(opts?.notePublish && opts.currentUserId ? {
+      note_publish: weaveTool({
+        name: 'note_publish',
+        description: 'Publish one of the user\'s notes as a shareable artifact (a typed, versioned document). Use when the user asks to "publish", "export", or "turn this note into a document/report". You only need the note id. A "restricted" note is refused; secrets and (for confidential notes) personal data are redacted automatically. For safety the artifact is created privately — a human chooses whether to make a public link.',
+        parameters: {
+          type: 'object',
+          properties: {
+            noteId: { type: 'string', description: 'The id of the note to publish (the user must own it or be a collaborator).' },
+            format: { type: 'string', enum: ['markdown', 'html'], description: 'Artifact format (default markdown).' },
+          },
+          required: ['noteId'],
+        },
+        execute: async (args: { noteId: string; format?: 'markdown' | 'html' }) => {
+          if (!opts.notePublish || !opts.currentUserId) return { content: 'Note publishing is unavailable in this context.', isError: true };
+          const r = await opts.notePublish({ userId: opts.currentUserId, noteId: args.noteId, ...(args.format ? { format: args.format } : {}) });
+          if (!r.ok) return { content: `note_publish failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, artifactId: r.artifactId, format: args.format ?? 'markdown', redactions: r.redactions ?? 0, sensitivity: r.sourceSensitivity });
+        },
+        tags: ['notes', 'artifacts', 'output'],
+      }),
+    } : {}),
     // m77: Artifact emission tool — available when artifactSave callback is set
     ...(opts?.artifactSave ? {
       emit_artifact: weaveTool({
@@ -1636,11 +2464,32 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
       tags: ['ui', 'output'],
     }),
   };
+  const registeredFromSelection = new Set<string>();
   for (const name of filterToolNamesByPersona(toolNames, actorPersona)) {
     // Skip tools disabled in the operator-managed tool catalog
     if (opts?.disabledToolKeys && opts.disabledToolKeys.has(name)) continue;
     const tool = scopedTools[name];
-    if (tool) registry.register(tool);
+    if (tool) { registry.register(tool); registeredFromSelection.add(name); }
+  }
+  // weaveNotes (Phase 3-4): the note-agent tools — create_note / note_edit / note_publish —
+  // are CORE capabilities, each gated by per-call access checks (viewers/strangers refused).
+  // Make them available whenever their callbacks are wired, REGARDLESS of the chat's saved
+  // tool selection: mode policies only apply when `enabled_tools` is empty, so a user with a
+  // custom tool selection would otherwise never get them (and "create a note" would silently
+  // fall back to emit_artifact). Skip any already registered from the selection above.
+  for (const noteTool of [
+    'create_note', 'new_from_template', 'recent_notes', 'export_note', 'note_edit', 'note_publish', 'restructure_note',
+    'find_related_notes', 'suggest_links', 'autofill_database', 'capture_web_page', 'summarize_meeting', 'recall_second_brain', 'set_workspace_appearance', 'update_account_profile', 'workspace_search', 'read_note_activity',
+    // weaveNotes Phase 2/4/5: the CREATIVE + study tools — so the assistant can draw a diagram, sketch
+    // ink, colour-code, or make flashcards from a plain chat ("draw a diagram of this"), not only via
+    // the selection card. Each is built only when its callback is wired + gated by per-call config.
+    // (generate_image is intentionally NOT here — it costs money and stays opt-in.)
+    'create_diagram', 'draw_ink', 'recolor_ink', 'create_illustration', 'create_visual', 'find_image',
+    'make_flashcards', 'translate_note', 'manage_scheduled_agent', 'apply_highlight', 'apply_text_color', 'colorize_semantic',
+    'review_answer_feedback', 'cite_sources',
+  ] as const) {
+    const t = scopedTools[noteTool];
+    if (t && !registeredFromSelection.has(noteTool) && canUseTool(actorPersona, noteTool)) registry.register(t);
   }
   if (customTools) {
     for (const tool of customTools) {

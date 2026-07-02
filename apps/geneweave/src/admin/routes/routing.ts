@@ -450,6 +450,205 @@ export function registerAdminRoutingRoutes(
     await runStreamConfigPut(req, res);
   }, { auth: true, csrf: true });
 
+  // ── Admin: weaveNotes Settings (Phase 0 single global config row) ──
+  // The notes-AI capability config; validated through @weaveintel/notes so a value can never
+  // be saved out of range or with an unknown tool. Edited via the Builder.
+  const noteSettings = (async () => (await import('../../note-settings-sql.js')).createNoteSettingsService(db))();
+  router.get('/api/admin/weavenotes-settings', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const row = await db.getWeaveNotesSettings();
+    json(res, 200, { 'weavenotes-settings': row ? [row] : [], config: row });
+  });
+  const weaveNotesSettingsPut = async (req: any, res: any) => {
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    // Map the admin form's snake_case columns → the camelCase config the validator expects.
+    const partial: Record<string, unknown> = {};
+    if (body['default_theme'] !== undefined) partial['defaultTheme'] = body['default_theme'];
+    if (body['agency_color_enabled'] !== undefined) partial['agencyColorEnabled'] = body['agency_color_enabled'];
+    if (body['ai_suggestions_require_approval'] !== undefined) partial['aiSuggestionsRequireApproval'] = body['ai_suggestions_require_approval'];
+    if (body['activity_tracking_enabled'] !== undefined) partial['activityTrackingEnabled'] = body['activity_tracking_enabled'];
+    if (body['activity_retention_days'] !== undefined) partial['activityRetentionDays'] = body['activity_retention_days'];
+    if (body['max_ai_tokens_per_edit'] !== undefined) partial['maxAiTokensPerEdit'] = body['max_ai_tokens_per_edit'];
+    if (body['ai_rate_per_min_per_user'] !== undefined) partial['aiRatePerMinPerUser'] = body['ai_rate_per_min_per_user'];
+    if (body['local_model_for_sensitive'] !== undefined) partial['localModelForSensitive'] = body['local_model_for_sensitive'];
+    if (body['live_cursors_enabled'] !== undefined) partial['liveCursorsEnabled'] = body['live_cursors_enabled'];
+    if (body['ai_presence_enabled'] !== undefined) partial['aiPresenceEnabled'] = body['ai_presence_enabled'];
+    if (body['diagrams_enabled'] !== undefined) partial['diagramsEnabled'] = body['diagrams_enabled'];
+    if (body['ink_enabled'] !== undefined) partial['inkEnabled'] = body['ink_enabled'];
+    if (body['illustration_enabled'] !== undefined) partial['illustrationEnabled'] = body['illustration_enabled'];
+    if (body['image_generation_enabled'] !== undefined) partial['imageGenerationEnabled'] = body['image_generation_enabled'];
+    if (body['image_model'] !== undefined) partial['imageModel'] = body['image_model'];
+    if (body['visual_verify_enabled'] !== undefined) partial['visualVerifyEnabled'] = body['visual_verify_enabled'];
+    if (body['visual_verify_threshold'] !== undefined) partial['visualVerifyThreshold'] = body['visual_verify_threshold'];
+    if (body['visual_verify_max_retries'] !== undefined) partial['visualVerifyMaxRetries'] = body['visual_verify_max_retries'];
+    if (body['image_verify_enabled'] !== undefined) partial['imageVerifyEnabled'] = body['image_verify_enabled'];
+    if (body['image_verify_min_confidence'] !== undefined) partial['imageVerifyMinConfidence'] = body['image_verify_min_confidence'];
+    if (body['citations_enabled'] !== undefined) partial['citationsEnabled'] = body['citations_enabled'];
+    if (body['citation_max_sources'] !== undefined) partial['citationMaxSources'] = body['citation_max_sources'];
+    if (body['query_expansion_enabled'] !== undefined) partial['queryExpansionEnabled'] = body['query_expansion_enabled'];
+    if (body['query_expansion_variants'] !== undefined) partial['queryExpansionVariants'] = body['query_expansion_variants'];
+    if (body['flashcards_enabled'] !== undefined) partial['flashcardsEnabled'] = body['flashcards_enabled'];
+    if (body['daily_new_card_limit'] !== undefined) partial['dailyNewCardLimit'] = body['daily_new_card_limit'];
+    if (body['fsrs_enabled'] !== undefined) partial['fsrsEnabled'] = body['fsrs_enabled'];
+    if (body['fsrs_target_retention'] !== undefined) partial['fsrsTargetRetention'] = body['fsrs_target_retention'];
+    if (body['translate_enabled'] !== undefined) partial['translateEnabled'] = body['translate_enabled'];
+    if (body['db_autofill_web_search'] !== undefined) partial['dbAutofillWebSearch'] = body['db_autofill_web_search'];
+    if (body['db_autofill_redact_pii'] !== undefined) partial['dbAutofillRedactPii'] = body['db_autofill_redact_pii'];
+    if (body['image_provenance_enabled'] !== undefined) partial['imageProvenanceEnabled'] = body['image_provenance_enabled'];
+    if (body['scheduled_agents_enabled'] !== undefined) partial['scheduledAgentsEnabled'] = body['scheduled_agents_enabled'];
+    if (body['scheduled_agent_max_token_budget'] !== undefined) partial['scheduledAgentMaxTokenBudget'] = body['scheduled_agent_max_token_budget'];
+    if (body['scheduled_agent_max_per_user'] !== undefined) partial['scheduledAgentMaxPerUser'] = body['scheduled_agent_max_per_user'];
+    if (body['mcp_notes_enabled'] !== undefined) partial['mcpNotesEnabled'] = body['mcp_notes_enabled'];
+    if (body['mcp_notes_allow_writes'] !== undefined) partial['mcpNotesAllowWrites'] = body['mcp_notes_allow_writes'];
+    if (body['proactive_linking_enabled'] !== undefined) partial['proactiveLinkingEnabled'] = body['proactive_linking_enabled'];
+    if (body['entity_resolution_enabled'] !== undefined) partial['entityResolutionEnabled'] = body['entity_resolution_enabled'];
+    if (body['embedding_batch_size'] !== undefined) partial['embeddingBatchSize'] = body['embedding_batch_size'];
+    if (body['voice_capture_enabled'] !== undefined) partial['voiceCaptureEnabled'] = body['voice_capture_enabled'];
+    if (body['store_audio'] !== undefined) partial['storeAudio'] = body['store_audio'];
+    if (body['transcription_language'] !== undefined) partial['transcriptionLanguage'] = body['transcription_language'];
+    if (body['transcription_model'] !== undefined) partial['transcriptionModel'] = body['transcription_model'];
+    if (body['max_recording_seconds'] !== undefined) partial['maxRecordingSeconds'] = body['max_recording_seconds'];
+    if (body['background_memory_enabled'] !== undefined) partial['backgroundMemoryEnabled'] = body['background_memory_enabled'];
+    if (body['memory_importance_threshold'] !== undefined) partial['memoryImportanceThreshold'] = body['memory_importance_threshold'];
+    if (body['memory_max_per_note'] !== undefined) partial['memoryMaxPerNote'] = body['memory_max_per_note'];
+    if (body['memory_recall_count'] !== undefined) partial['memoryRecallCount'] = body['memory_recall_count'];
+    if (body['memory_decay_half_life_days'] !== undefined) partial['memoryDecayHalfLifeDays'] = body['memory_decay_half_life_days'];
+    if (body['mobile_offline_enabled'] !== undefined) partial['mobileOfflineEnabled'] = body['mobile_offline_enabled'];
+    if (body['mobile_ink_enabled'] !== undefined) partial['mobileInkEnabled'] = body['mobile_ink_enabled'];
+    if (body['mobile_offline_note_limit'] !== undefined) partial['mobileOfflineNoteLimit'] = body['mobile_offline_note_limit'];
+    if (body['desktop_offline_enabled'] !== undefined) partial['desktopOfflineEnabled'] = body['desktop_offline_enabled'];
+    if (body['quick_capture_enabled'] !== undefined) partial['quickCaptureEnabled'] = body['quick_capture_enabled'];
+    if (body['desktop_offline_note_limit'] !== undefined) partial['desktopOfflineNoteLimit'] = body['desktop_offline_note_limit'];
+    if (body['export_enabled'] !== undefined) partial['exportEnabled'] = body['export_enabled'];
+    if (body['allowed_export_formats'] !== undefined) {
+      let arr: unknown = body['allowed_export_formats'];
+      try { if (typeof arr === 'string') arr = JSON.parse(arr); } catch { arr = []; }
+      partial['allowedExportFormats'] = arr;
+    }
+    if (body['enabled_ai_tools'] !== undefined) {
+      let arr: unknown = body['enabled_ai_tools'];
+      try { if (typeof arr === 'string') arr = JSON.parse(arr); } catch { arr = []; }
+      partial['enabledAiTools'] = arr;
+    }
+    if (body['image_search_enabled'] !== undefined) partial['imageSearchEnabled'] = body['image_search_enabled'];
+    if (body['image_search_provider'] !== undefined) partial['imageSearchProvider'] = body['image_search_provider'];
+    if (body['image_search_require_attribution'] !== undefined) partial['imageSearchRequireAttribution'] = body['image_search_require_attribution'];
+    if (body['image_search_allowed_licenses'] !== undefined) {
+      let arr: unknown = body['image_search_allowed_licenses'];
+      try { if (typeof arr === 'string') arr = JSON.parse(arr); } catch { arr = []; }
+      partial['imageSearchAllowedLicenses'] = arr;
+    }
+    const { warnings } = await (await noteSettings).updateConfig(partial);
+    const row = await db.getWeaveNotesSettings();
+    json(res, 200, { 'weavenotes-settings': row, warnings });
+  };
+  router.put('/api/admin/weavenotes-settings', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await weaveNotesSettingsPut(req, res);
+  }, { auth: true, csrf: true });
+  router.put('/api/admin/weavenotes-settings/:id', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await weaveNotesSettingsPut(req, res);
+  }, { auth: true, csrf: true });
+
+  // ── Admin: weaveNotes Action Routing (per-tenant mode for each note AI action) ──
+  // Multi-row CRUD: each row sets, for one (tenant, action), whether it runs direct / agent /
+  // supervisor. tenant_id '' = the global default for that action. Resolution at call time:
+  // tenant row → global row → 'direct'. Edited via the Builder (weaveNotes → Action Routing).
+  const NOTE_ACTION_KEYS = ['diagram', 'ink', 'illustration', 'visual', 'restructure', 'find_image'];
+  const NOTE_ACTION_MODE_VALUES = ['direct', 'agent', 'supervisor'];
+  router.get('/api/admin/note-action-modes', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    json(res, 200, { 'note-action-modes': await db.listNoteActionModes() });
+  });
+  const readActionModeBody = async (req: any): Promise<{ tenant_id: string; action_key: string; mode: string } | { error: string }> => {
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(await readBody(req)); } catch { return { error: 'Invalid JSON' }; }
+    const action_key = String(body['action_key'] ?? '').trim();
+    const mode = String(body['mode'] ?? 'direct').trim();
+    const tenant_id = String(body['tenant_id'] ?? '').trim();
+    if (!NOTE_ACTION_KEYS.includes(action_key)) return { error: `action_key must be one of: ${NOTE_ACTION_KEYS.join(', ')}` };
+    if (!NOTE_ACTION_MODE_VALUES.includes(mode)) return { error: `mode must be one of: ${NOTE_ACTION_MODE_VALUES.join(', ')}` };
+    return { tenant_id, action_key, mode };
+  };
+  router.post('/api/admin/note-action-modes', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const parsed = await readActionModeBody(req);
+    if ('error' in parsed) { json(res, 400, { error: parsed.error }); return; }
+    const id = `noteact-${parsed.tenant_id || 'global'}-${parsed.action_key}`.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 80);
+    await db.createNoteActionMode({ id, ...parsed });
+    // The upsert may have merged into an existing (tenant, action) row under its own id — return the
+    // resolved row by key, not by our computed id.
+    const row = (await db.listNoteActionModes()).find((r) => r.tenant_id === parsed.tenant_id && r.action_key === parsed.action_key) ?? null;
+    json(res, 200, { 'note-action-modes': row });
+  }, { auth: true, csrf: true });
+  router.put('/api/admin/note-action-modes/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const parsed = await readActionModeBody(req);
+    if ('error' in parsed) { json(res, 400, { error: parsed.error }); return; }
+    await db.updateNoteActionMode(params['id']!, parsed);
+    json(res, 200, { 'note-action-modes': await db.getNoteActionMode(params['id']!) });
+  }, { auth: true, csrf: true });
+  router.del('/api/admin/note-action-modes/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteNoteActionMode(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // ── Admin: weaveNotes Activity / Audit (Phase 0-B) ──────────────────────────────────────────
+  // A read-only, TENANT-scoped compliance feed of every note action (who / what / when, user or AI),
+  // with KEYSET pagination (stable on a live append-only log) + filters, plus a CSV/JSON/JSONL export.
+  // Always scoped to the admin's own tenant (auth.tenantId) — never cross-tenant.
+  const buildActivityQuery = (req: IncomingMessage): import('../../db-types/adapter-me.js').NoteActivityQuery => {
+    const u = new URL(req.url ?? '', 'http://localhost');
+    const q: import('../../db-types/adapter-me.js').NoteActivityQuery = {};
+    const lim = Number.parseInt(u.searchParams.get('limit') ?? '', 10);
+    if (Number.isFinite(lim)) q.limit = lim;
+    for (const k of ['action', 'actor', 'userId', 'noteId', 'fromDate', 'toDate', 'beforeCreatedAt', 'beforeId'] as const) {
+      const v = u.searchParams.get(k);
+      if (v) (q as Record<string, unknown>)[k] = v;
+    }
+    return q;
+  };
+  router.get('/api/admin/note-activity', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const q = buildActivityQuery(req);
+    q.limit = Math.max(1, Math.min(500, q.limit ?? 100));
+    const rows = await db.listTenantNoteActivity(auth.tenantId ?? null, q);
+    // Keyset cursor for the NEXT (older) page: pass back the last row's (created_at, id).
+    const last = rows[rows.length - 1];
+    const nextCursor = rows.length >= q.limit && last ? { beforeCreatedAt: last.created_at, beforeId: last.id } : null;
+    json(res, 200, { 'note-activity': rows, nextCursor });
+  }, { auth: true });
+  router.get('/api/admin/note-activity/export', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const u = new URL(req.url ?? '', 'http://localhost');
+    const format = (u.searchParams.get('format') ?? 'csv').toLowerCase();
+    const q = buildActivityQuery(req);
+    q.limit = Math.max(1, Math.min(10000, q.limit ?? 10000)); // bounded export
+    const rows = await db.listTenantNoteActivity(auth.tenantId ?? null, q);
+    const cols = ['created_at', 'actor', 'action', 'user_id', 'note_id', 'note_title', 'summary', 'id'] as const;
+    if (format === 'json') {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Disposition': 'attachment; filename="note-activity.json"' });
+      res.end(JSON.stringify(rows, null, 2)); return;
+    }
+    if (format === 'jsonl') { // one JSON object per line — SIEM/stream-friendly, constant memory
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'Content-Disposition': 'attachment; filename="note-activity.jsonl"' });
+      res.end(rows.map((r) => JSON.stringify(r)).join('\n') + (rows.length ? '\n' : '')); return;
+    }
+    // CSV (default). Quote everything; defeat CSV FORMULA INJECTION by prefixing a leading =,+,-,@ with '.
+    const cell = (v: unknown): string => {
+      let s = v == null ? '' : String(v);
+      if (/^[=+\-@]/.test(s)) s = `'${s}`;
+      return `"${s.replace(/"/g, '""')}"`;
+    };
+    const csv = [cols.join(','), ...rows.map((r) => cols.map((c) => cell((r as unknown as Record<string, unknown>)[c])).join(','))].join('\n');
+    res.writeHead(200, { 'Content-Type': 'text/csv', 'Content-Disposition': 'attachment; filename="note-activity.csv"' });
+    res.end(csv);
+  }, { auth: true });
+
   // ── Admin: Agent Plan Cache Config (Phase 8 single global row) ──
   router.get('/api/admin/agent-plan-cache-config', async (_req, res, _params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }

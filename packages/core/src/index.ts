@@ -27,6 +27,8 @@ export {
   type RunObjectDelta,
   type RunObjectComplete,
   type RunFilePart,
+  type RunPresenceParticipant,
+  type RunPresenceSnapshot,
   RUN_EVENT_KINDS,
   TERMINAL_RUN_EVENT_KINDS,
   RUN_STREAM_CONFIG_DEFAULTS,
@@ -34,6 +36,65 @@ export {
   isKnownRunEventKind,
   reconnectBackoffMs,
 } from './run-events.js';
+
+// Canonical SSE byte→event decoder (Collaboration Phase 0 — de-duplicated from
+// client + a2a + geneweave-ui into this one browser-safe primitive).
+export {
+  parseSseStream,
+  SseStallError,
+  type SseEvent,
+  type ParseSseOptions,
+} from './sse-parser.js';
+
+// Canonical SSE WRITER — the emit half of the transport (Collaboration Phase 6).
+// One way to format resumable (`id:`/`retry:`) SSE frames + keepalives, shared by
+// the geneWeave run-stream route and the a2a server.
+export {
+  type SseSink,
+  type SseFrame,
+  SSE_RESPONSE_HEADERS,
+  formatSseFrame,
+  formatSseComment,
+  writeSseFrame,
+  writeSseComment,
+  resolveResumeCursor,
+} from './sse-writer.js';
+
+// JSON Patch (RFC 6902) + JSON Pointer (RFC 6901) — the wire format for AG-UI
+// `STATE_DELTA` collaborative-state updates (Collaboration Phase 6).
+export {
+  type JsonPatchOp,
+  type JsonPatch,
+  parsePointer,
+  toPointer,
+  applyJsonPatch,
+  diffJsonPatch,
+} from './json-patch.js';
+
+// Run-lifecycle substrate (Collaboration Phase 0 — relocated from
+// @weaveintel/collaboration). The PORTS (RunRegistry / RunJournal) + a reference
+// KV adapter; geneWeave's SQL tables are another adapter behind the same ports.
+export {
+  type RunRegistry,
+  type RunListFilter,
+  type KvRunRegistryOptions,
+  createKvRunRegistry,
+} from './run-registry.js';
+export {
+  type RunJournal,
+  type RunJournalAppendOptions,
+  type RunJournalReadOptions,
+  type KvRunJournalOptions,
+  createKvRunJournal,
+  RunCursorTooOldError,
+  RUN_JOURNAL_DEFAULTS,
+} from './run-journal.js';
+// Shared conformance suites — every adapter (KV here, SQL in geneWeave) runs these.
+export {
+  type ContractTestApi,
+  runRegistryContract,
+  runJournalContract,
+} from './run-substrate-contract.js';
 
 // Structured logger (A-8). Replace bare console.* with WeaveLogger for level
 // filtering, structured fields, and request correlation.
@@ -212,6 +273,8 @@ export {
   type ImageModel,
   type SpeechRequest,
   type TranscriptionRequest,
+  type TranscriptSegment,
+  type TranscriptionResult,
   type AudioModel,
 } from './models.js';
 

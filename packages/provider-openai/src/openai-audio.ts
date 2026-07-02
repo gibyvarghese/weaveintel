@@ -9,6 +9,8 @@ import type {
   AudioModel,
   SpeechRequest,
   TranscriptionRequest,
+  TranscriptionResult,
+  TranscriptSegment,
   ModelInfo,
   ExecutionContext,
 } from '@weaveintel/core';
@@ -178,7 +180,78 @@ export function weaveOpenAIAudioModel(
         throw normalizeError(err, 'openai');
       }
     },
+
+    // Rich transcription: request `verbose_json` so the provider returns timestamped SEGMENTS in
+    // addition to the flat text. Powers transcript-anchored features (meeting notes with clickable
+    // citations). Honours request.model / request.mimeType; falls back gracefully if segments are absent.
+    async transcribeDetailed(ctx: ExecutionContext, request: TranscriptionRequest): Promise<TranscriptionResult> {
+      const signal = deadlineSignal(ctx);
+      const url = `${baseUrl}/audio/transcriptions`;
+      const mimeType = request.mimeType && request.mimeType.trim() ? request.mimeType : 'audio/wav';
+      const ext = extForMime(mimeType);
+
+      const formData = new FormData();
+      const audioBytes = request.audio.buffer.slice(request.audio.byteOffset, request.audio.byteOffset + request.audio.byteLength) as ArrayBuffer;
+      formData.append('file', new Blob([audioBytes], { type: mimeType }), `audio.${ext}`);
+      formData.append('model', request.model && request.model.trim() ? request.model : 'whisper-1');
+      formData.append('response_format', 'verbose_json');
+      // segment granularity is the whisper-1 default for verbose_json; keep it explicit + portable.
+      if (request.language) formData.append('language', request.language);
+      if (request.prompt) formData.append('prompt', request.prompt);
+
+      try {
+        const res = await openaiFetch(url, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            ...(opts.organization ? { 'OpenAI-Organization': opts.organization } : {}),
+            ...opts.defaultHeaders,
+          },
+          body: formData,
+          signal,
+        });
+        if (!res.ok) {
+          const errorBody = await res.text().catch(() => '');
+          throw new WeaveIntelError({
+            code: 'PROVIDER_ERROR',
+            message: `OpenAI STT error (${res.status}): ${errorBody}`,
+            provider: 'openai',
+            retryable: res.status >= 500,
+          });
+        }
+        const result = (await res.json()) as Record<string, unknown>;
+        const text = String(result['text'] ?? '');
+        const rawSegments = Array.isArray(result['segments']) ? (result['segments'] as Array<Record<string, unknown>>) : [];
+        const segments: TranscriptSegment[] = rawSegments.map((s) => ({
+          start: Number(s['start'] ?? 0),
+          end: Number(s['end'] ?? 0),
+          text: String(s['text'] ?? '').trim(),
+        })).filter((s) => s.text.length > 0);
+        // If the provider returned no segments (e.g. an older format), fall back to one segment = whole text.
+        const finalSegments = segments.length ? segments : (text.trim() ? [{ start: 0, end: Number(result['duration'] ?? 0), text: text.trim() }] : []);
+        return {
+          text,
+          ...(typeof result['language'] === 'string' ? { language: result['language'] as string } : {}),
+          ...(result['duration'] !== undefined ? { duration: Number(result['duration']) } : {}),
+          segments: finalSegments,
+        };
+      } catch (err) {
+        throw normalizeError(err, 'openai');
+      }
+    },
   };
+}
+
+/** Map a MIME type to a filename extension the OpenAI upload accepts. */
+function extForMime(mime: string): string {
+  const m = mime.toLowerCase();
+  if (m.includes('webm')) return 'webm';
+  if (m.includes('mp4') || m.includes('m4a')) return 'm4a';
+  if (m.includes('mpeg') || m.includes('mp3')) return 'mp3';
+  if (m.includes('ogg') || m.includes('opus')) return 'ogg';
+  if (m.includes('wav')) return 'wav';
+  if (m.includes('flac')) return 'flac';
+  return 'wav';
 }
 
 /** Convenience function */

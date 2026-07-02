@@ -56,6 +56,7 @@ export type {
   FilePart,
   ObjectView,
   FileView,
+  RunPresenceParticipant,
   RunEventEnvelope,
 } from './reducer.js';
 export { streamReducer, emptyRunViewModel } from './reducer.js';
@@ -65,8 +66,21 @@ export type { PartialJsonResult, PartialJsonState } from './partial-json.js';
 export { parsePartialJson, extractJsonCandidate } from './partial-json.js';
 
 // AG-UI wire adapter (Phase 7, optional — ecosystem interop)
-export type { AGUIEvent, AGUIEventType } from './ag-ui.js';
+export type { AGUIEvent, AGUIEventType, AGUICollabState } from './ag-ui.js';
 export { toAGUIEvents } from './ag-ui.js';
+
+// Collaboration Phase 6 — bidirectional run control-channel client (cancel /
+// steer / presence over WebSocket, idempotent + resumable).
+export type {
+  ControlAck,
+  ControlError,
+  ControlSnapshot,
+  MinimalWebSocket,
+  WebSocketImpl,
+  RunControlChannel,
+  RunControlChannelOptions,
+} from './run-control.js';
+export { createRunControlChannel } from './run-control.js';
 
 // Run client
 export type {

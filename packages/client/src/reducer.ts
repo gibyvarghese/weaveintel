@@ -6,8 +6,10 @@
  * that UI layers can render directly.
  */
 
-import type { RunEventEnvelope } from '@weaveintel/core';
+import type { RunEventEnvelope, RunPresenceParticipant } from '@weaveintel/core';
 import { parsePartialJson, extractJsonCandidate } from './partial-json.js';
+
+export type { RunPresenceParticipant };
 
 // ---------------------------------------------------------------------------
 // Run status mirrors @weaveintel/core RunStatus
@@ -215,6 +217,40 @@ export interface FileView {
   direction?: 'input' | 'output';
 }
 
+/**
+ * Collaboration Phase 4 — a review comment as carried over the live wire and
+ * rendered anchored to a part. The server is the source of truth (body is
+ * pre-sanitized into `bodyHtml`); this is the minimal shape the UI needs.
+ */
+export interface RunCommentView {
+  id: string;
+  threadId: string;
+  parentId: string | null;
+  authorId: string;
+  bodyHtml: string;
+  anchor: { partId: string; createdAtSeq: number };
+  resolvedAt: number | null;
+  deletedAt: number | null;
+  createdAt: number;
+}
+
+/**
+ * Collaboration Phase 5 — a handoff as carried over the live wire. The minimal
+ * shape the UI needs to render the baton-pass + its lifecycle state.
+ */
+export interface RunHandoffView {
+  id: string;
+  runId: string;
+  scope: 'user_to_user' | 'agent_to_human' | 'agent_to_agent';
+  fromActor: { type: string; id: string };
+  toActor: { type: string; id: string };
+  state: string;
+  reason: string;
+  rejectionReason: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
 // ---------------------------------------------------------------------------
 // The accumulated view model
 // ---------------------------------------------------------------------------
@@ -255,6 +291,34 @@ export interface RunViewModel {
   object?: ObjectView;
   /** Phase 7 — multimodal file parts (image / document), in order. */
   files: FileView[];
+  /**
+   * Collaboration Phase 1 — who is currently present on this run (humans + the
+   * agent). A live SNAPSHOT replaced on every `presence.update`; ephemeral (not
+   * derived from the journal). Empty until the first presence event arrives.
+   */
+  presence: RunPresenceParticipant[];
+  /**
+   * Collaboration Phase 2 / CVE-2026-53843 — set when the server force-closed
+   * this stream because the viewer's access was REVOKED mid-watch (removed from
+   * the shared run, or sharing ended). The UI should stop auto-reconnecting and
+   * show "you no longer have access" rather than silently retrying forever.
+   */
+  accessRevoked?: { reason: string };
+  /**
+   * Collaboration Phase 4 — review comments on this run, keyed by id and kept
+   * live via ephemeral `comment.added`/`comment.updated`/`comment.deleted`/
+   * `comment.resolvedd`/`comment.reopenedd` events (sequence -1). Each carries an
+   * `anchor.partId` so the UI can render the comment next to its part. Seeded by
+   * a one-shot `listComments()` fetch; updated live as collaborators comment.
+   */
+  comments: RunCommentView[];
+  /**
+   * Collaboration Phase 5 — handoffs on this run, keyed by id and kept live via
+   * ephemeral `handoff.update` events (sequence -1). Each carries the lifecycle
+   * `state` (requested/accepted/in_progress/handed_back/completed/…) so the UI
+   * can show "this run was handed to Alice — accepted" without a refetch.
+   */
+  handoffs: RunHandoffView[];
   /** Phase 2 — ordered typed parts with per-part streaming state. */
   parts: RunPart[];
   /** All items in event order (for a linear render). */
@@ -277,6 +341,9 @@ export function emptyRunViewModel(): RunViewModel {
     diagnostics: [],
     approvals: [],
     files: [],
+    presence: [],
+    comments: [],
+    handoffs: [],
     parts: [],
     items: [],
   };
@@ -516,6 +583,56 @@ function lastIndex(parts: RunPart[], pred: (p: RunPart) => boolean): number {
  * Never mutates the input state.
  */
 export function streamReducer(state: RunViewModel, envelope: RunEventEnvelope): RunViewModel {
+  // Collaboration Phase 1 — `presence.update` is an EPHEMERAL snapshot, not a
+  // journaled event: it carries `sequence: -1` and must bypass the sequence
+  // dedup below. Replace the whole presence set (snapshots are idempotent and
+  // gap-safe) and leave `sequence`/parts/items untouched.
+  if (envelope.kind === 'presence.update') {
+    const raw = (envelope.payload as { participants?: unknown }).participants;
+    const participants = Array.isArray(raw) ? (raw as RunPresenceParticipant[]) : [];
+    return { ...state, presence: participants };
+  }
+
+  // CVE-2026-53843 — the server force-closed this stream because access was
+  // revoked. Also ephemeral (`sequence: -1`); record it so the consumer can stop
+  // reconnecting and surface a clear message. Never throws, never advances seq.
+  if (envelope.kind === 'access.revoked') {
+    const reason = typeof (envelope.payload as { reason?: unknown }).reason === 'string'
+      ? (envelope.payload as { reason: string }).reason
+      : 'access revoked';
+    return { ...state, accessRevoked: { reason } };
+  }
+
+  // Collaboration Phase 4 — live review comments. All ephemeral (`sequence: -1`),
+  // so they bypass the journal dedup and update `comments` without touching
+  // run output. The UI renders each anchored to `anchor.partId`.
+  if (envelope.kind === 'comment.added' || envelope.kind === 'comment.updated') {
+    const incoming = (envelope.payload as { comment?: RunCommentView }).comment;
+    if (!incoming || typeof incoming.id !== 'string') return state;
+    const rest = state.comments.filter((c) => c.id !== incoming.id);
+    return { ...state, comments: [...rest, incoming].sort((a, b) => a.createdAt - b.createdAt) };
+  }
+  if (envelope.kind === 'comment.deleted') {
+    const id = (envelope.payload as { id?: string }).id;
+    return id ? { ...state, comments: state.comments.filter((c) => c.id !== id) } : state;
+  }
+  if (envelope.kind === 'comment.resolvedd' || envelope.kind === 'comment.reopenedd') {
+    // Note: kinds are `comment.${action}d` where action is resolve/reopen.
+    const threadId = (envelope.payload as { threadId?: string }).threadId;
+    if (!threadId) return state;
+    const resolvedAt = envelope.kind === 'comment.resolvedd' ? (envelope.timestamp ?? Date.now()) : null;
+    return { ...state, comments: state.comments.map((c) => c.threadId === threadId ? { ...c, resolvedAt } : c) };
+  }
+
+  // Collaboration Phase 5 — live handoff lifecycle. Ephemeral (`sequence: -1`):
+  // upsert the handoff into `handoffs` so the UI tracks the baton-pass state.
+  if (envelope.kind === 'handoff.update') {
+    const incoming = (envelope.payload as { handoff?: RunHandoffView }).handoff;
+    if (!incoming || typeof incoming.id !== 'string') return state;
+    const rest = state.handoffs.filter((h) => h.id !== incoming.id);
+    return { ...state, handoffs: [...rest, incoming].sort((a, b) => a.createdAt - b.createdAt) };
+  }
+
   // Skip already-seen or out-of-order events (idempotent)
   if (envelope.sequence <= state.sequence) return state;
 

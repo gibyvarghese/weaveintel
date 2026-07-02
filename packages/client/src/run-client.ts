@@ -96,6 +96,96 @@ export interface RunClient {
    * Post a client-originated event into a running run.
    */
   postEvent(runId: string, payload: Record<string, unknown>): Promise<void>;
+  /**
+   * Collaboration Phase 1 — send a presence heartbeat for a run ("I'm watching").
+   * Identity is server-derived from auth; `displayName` is a cosmetic label.
+   * Pass `{ leave: true }` to leave. Returns the current participant snapshot.
+   */
+  setPresence(runId: string, body: { presence?: string; displayName?: string; cursor?: Record<string, unknown>; leave?: boolean }): Promise<{ participants: unknown[] }>;
+  /**
+   * Collaboration Phase 2 — share a run (owner only). Mints an invite token
+   * (default role `viewer`) and returns it ONCE plus the share URL.
+   */
+  shareRun(runId: string, body?: { role?: 'viewer' | 'collaborator'; expiresInMs?: number; maxUses?: number }): Promise<{ sessionId: string; token: string; tokenId: string; role: string; url: string; expiresAt: number | null }>;
+  /** Collaboration Phase 2 — join a shared run via an invite token. */
+  joinSession(token: string): Promise<{ runId: string; sessionId: string; role: string }>;
+  /**
+   * Collaboration Phase 2 / CVE-2026-53843 — remove a member from a shared run
+   * (owner only). The server immediately force-closes the removed member's live
+   * stream(s). Returns how many streams were closed.
+   */
+  removeMember(runId: string, userId: string): Promise<{ removed: boolean; streamsClosed: number }>;
+  /** Collaboration Phase 2 — end sharing entirely (owner only); closes all guest streams. */
+  endShare(runId: string): Promise<{ ended: boolean; streamsClosed: number }>;
+  /**
+   * Collaboration Phase 3 — durably subscribe to a run ("notify me when it
+   * finishes, even if I close the tab"). `inapp` is always included. Idempotent.
+   */
+  subscribeRun(runId: string, channels?: Array<'inapp' | 'email' | 'push' | 'webhook'>): Promise<{ subscribed: boolean; runId: string; channels: string[] }>;
+  /** Collaboration Phase 3 — cancel a run subscription (idempotent). */
+  unsubscribeRun(runId: string): Promise<{ subscribed: boolean }>;
+  /** Collaboration Phase 3 — am I subscribed to this run? (drives the bell toggle). */
+  getSubscription(runId: string): Promise<{ subscribed: boolean; channels: string[] }>;
+  /** Collaboration Phase 3 — the in-app notification feed + unread badge count. */
+  listNotifications(opts?: { unreadOnly?: boolean; limit?: number }): Promise<{ items: unknown[]; unreadCount: number }>;
+  /** Collaboration Phase 3 — mark every in-app notification read. */
+  markAllNotificationsRead(): Promise<{ read: number }>;
+  /**
+   * Collaboration Phase 4 — add a review comment, anchored to a run part
+   * (`anchor.partId`, e.g. `tool-3`; '' = run-level). Optional `parentId` makes
+   * it a reply; `mentions` are user ids (validated + notified server-side).
+   */
+  addComment(runId: string, input: { body: string; anchor: { partId: string; createdAtSeq: number; subRange?: unknown }; parentId?: string; mentions?: string[] }): Promise<{ comment: unknown }>;
+  /** Collaboration Phase 4 — list all comments on a run (with viewer capabilities). */
+  listComments(runId: string): Promise<{ comments: unknown[]; role: string }>;
+  /** Collaboration Phase 4 — edit a comment (author only). */
+  editComment(runId: string, commentId: string, body: string, mentions?: string[]): Promise<{ comment: unknown }>;
+  /** Collaboration Phase 4 — soft-delete a comment (author; owner moderates). */
+  deleteComment(runId: string, commentId: string): Promise<{ deleted: boolean }>;
+  /** Collaboration Phase 4 — resolve a comment thread. */
+  resolveThread(runId: string, threadId: string): Promise<{ resolved: boolean }>;
+  /** Collaboration Phase 4 — reopen a resolved thread. */
+  reopenThread(runId: string, threadId: string): Promise<{ reopened: boolean }>;
+  /** Collaboration Phase 4 — add a structured score / annotation to a run or part. */
+  addAnnotation(runId: string, input: { name: string; dataType?: 'numeric' | 'categorical' | 'boolean' | 'text'; value?: number; stringValue?: string; comment?: string; partId?: string; source?: string }): Promise<{ annotation: unknown }>;
+  /** Collaboration Phase 4 — list annotations + a per-name summary. */
+  listAnnotations(runId: string): Promise<{ annotations: unknown[]; summary: unknown[] }>;
+  /** Collaboration Phase 4 — mint a public, read-only share link (owner only). */
+  createRunPublicShare(runId: string, opts?: { expiresInMs?: number }): Promise<{ id: string; token: string; url: string; expiresAt: number | null }>;
+  /**
+   * Collaboration Phase 5 — request a handoff on a run (pass the baton). `scope`
+   * is user_to_user / agent_to_human / agent_to_agent; context travels as a
+   * scoped briefing (auto-built from the run unless `briefing` is supplied).
+   */
+  requestHandoff(runId: string, input: { toUserId: string; reason: string; scope?: 'user_to_user' | 'agent_to_human' | 'agent_to_agent'; briefing?: unknown; ttlMs?: number; referenceTaskIds?: string[]; parentHandoffId?: string }): Promise<{ handoff: unknown }>;
+  /** Collaboration Phase 5 — all handoffs on a run. */
+  listHandoffs(runId: string): Promise<{ handoffs: unknown[] }>;
+  /** Collaboration Phase 5 — the append-only audit trail for one handoff. */
+  handoffAudit(runId: string, handoffId: string): Promise<{ audit: unknown[] }>;
+  /** Collaboration Phase 5 — my inbox: handoffs assigned to me. */
+  handoffInbox(): Promise<{ handoffs: unknown[] }>;
+  /**
+   * Collaboration Phase 5 — drive a handoff transition. `action` is one of
+   * accept / reject / cancel / start / hand-back / complete / fail. `reject`/`fail`
+   * require a `reason`; `hand-back` may carry a `briefing`.
+   */
+  handoffAction(runId: string, handoffId: string, action: 'accept' | 'reject' | 'cancel' | 'start' | 'hand-back' | 'complete' | 'fail', body?: { reason?: string; note?: string; briefing?: unknown }): Promise<{ handoff: unknown }>;
+  /**
+   * Collaboration Phase 7 — create (idempotently) the run's CRDT co-edit doc.
+   * Returns the current text + full snapshot + state vector, and the SITE ID this
+   * user edits as (server-derived — never forge it).
+   */
+  coeditEnsure(runId: string, opts?: { title?: string }): Promise<{ docId: string; text: string; snapshot: unknown; stateVector: Record<string, number>; siteId: string }>;
+  /** Collaboration Phase 7 — read the current co-edit doc. */
+  coeditGet(runId: string): Promise<{ docId: string; text: string; snapshot: unknown; stateVector: Record<string, number>; siteId: string }>;
+  /** Collaboration Phase 7 — submit local CRDT ops (collaborator+); broadcast live. */
+  coeditSubmitOps(runId: string, ops: unknown[]): Promise<{ applied: number; text: string; stateVector: Record<string, number> }>;
+  /** Collaboration Phase 7 — fetch the ops this peer is missing (offline reconcile). */
+  coeditOpsSince(runId: string, since: Record<string, number>): Promise<{ ops: unknown[] }>;
+  /** Collaboration Phase 7 — broadcast an awareness (cursor/presence) update. */
+  coeditAwareness(runId: string, entry: { clock: number; state: unknown }): Promise<{ ok: boolean }>;
+  /** Collaboration Phase 7 — merge the run's agent output into the doc as the agent peer. */
+  coeditAgentSync(runId: string): Promise<{ applied: number; text: string }>;
 }
 
 export interface CreateRunClientOptions {
@@ -203,6 +293,25 @@ export function createRunClient(opts: CreateRunClientOptions): RunClient {
               if (controller.signal.aborted) return true; // stop
               try {
                 const envelope = JSON.parse(rawEvent.data) as RunEventEnvelope;
+                // Ephemeral events (Collaboration Phase 1 presence) carry
+                // `sequence: -1` — they are NOT journaled and must bypass the
+                // resume-overlap dedup (which would always drop a negative
+                // sequence). Deliver them without advancing the resume cursor.
+                if (envelope.sequence < 0) {
+                  reconnectCount = 0;
+                  onEvent(envelope);
+                  // CVE-2026-53843 — the server force-closed us because access
+                  // was revoked. Treat like a terminal stop: do NOT reconnect
+                  // (every retry would just 404), and surface completion so the
+                  // consumer can show "no longer have access".
+                  if (envelope.kind === 'access.revoked') {
+                    terminal = true;
+                    onComplete?.();
+                    controller.abort();
+                    return true; // stop
+                  }
+                  return false;
+                }
                 if (envelope.sequence <= lastSeq) return false; // dedup (resume overlap)
                 lastSeq = envelope.sequence;
                 reconnectCount = 0; // forward progress resets the backoff budget
@@ -248,6 +357,113 @@ export function createRunClient(opts: CreateRunClientOptions): RunClient {
 
     async postEvent(runId, payload) {
       await json.post<unknown>(`/api/me/runs/${runId}/events`, payload);
+    },
+
+    async setPresence(runId, body) {
+      return json.post<{ participants: unknown[] }>(`/api/me/runs/${runId}/presence`, body);
+    },
+
+    async shareRun(runId, body = {}) {
+      return json.post(`/api/me/runs/${runId}/share`, body);
+    },
+
+    async joinSession(token) {
+      return json.post('/api/me/sessions/join', { token });
+    },
+
+    async removeMember(runId, userId) {
+      return json.post(`/api/me/runs/${runId}/members/remove`, { userId });
+    },
+
+    async endShare(runId) {
+      return json.post(`/api/me/runs/${runId}/share/end`, {});
+    },
+
+    async subscribeRun(runId, channels) {
+      return json.post(`/api/me/runs/${runId}/subscribe`, channels ? { channels } : {});
+    },
+    async unsubscribeRun(runId) {
+      return json.post(`/api/me/runs/${runId}/unsubscribe`, {});
+    },
+    async getSubscription(runId) {
+      return (await json.get<{ subscribed: boolean; channels: string[] }>(`/api/me/runs/${runId}/subscription`)) ?? { subscribed: false, channels: [] };
+    },
+    async listNotifications(listOpts) {
+      const qs = new URLSearchParams();
+      if (listOpts?.unreadOnly) qs.set('unread', '1');
+      if (typeof listOpts?.limit === 'number') qs.set('limit', String(listOpts.limit));
+      const suffix = qs.toString() ? `?${qs.toString()}` : '';
+      return (await json.get<{ items: unknown[]; unreadCount: number }>(`/api/me/notifications${suffix}`)) ?? { items: [], unreadCount: 0 };
+    },
+    async markAllNotificationsRead() {
+      return json.post('/api/me/notifications/read-all', {});
+    },
+
+    async addComment(runId, input) {
+      return json.post(`/api/me/runs/${runId}/comments`, input);
+    },
+    async listComments(runId) {
+      return (await json.get<{ comments: unknown[]; role: string }>(`/api/me/runs/${runId}/comments`)) ?? { comments: [], role: 'viewer' };
+    },
+    async editComment(runId, commentId, body, mentions) {
+      return json.post(`/api/me/runs/${runId}/comments/${commentId}/edit`, mentions ? { body, mentions } : { body });
+    },
+    async deleteComment(runId, commentId) {
+      return json.post(`/api/me/runs/${runId}/comments/${commentId}/delete`, {});
+    },
+    async resolveThread(runId, threadId) {
+      return json.post(`/api/me/runs/${runId}/threads/${threadId}/resolve`, {});
+    },
+    async reopenThread(runId, threadId) {
+      return json.post(`/api/me/runs/${runId}/threads/${threadId}/reopen`, {});
+    },
+    async addAnnotation(runId, input) {
+      return json.post(`/api/me/runs/${runId}/annotations`, input);
+    },
+    async listAnnotations(runId) {
+      return (await json.get<{ annotations: unknown[]; summary: unknown[] }>(`/api/me/runs/${runId}/annotations`)) ?? { annotations: [], summary: [] };
+    },
+    async createRunPublicShare(runId, shareOpts) {
+      return json.post(`/api/me/runs/${runId}/public-share`, shareOpts ?? {});
+    },
+
+    async requestHandoff(runId, input) {
+      return json.post(`/api/me/runs/${runId}/handoff`, input);
+    },
+    async listHandoffs(runId) {
+      return (await json.get<{ handoffs: unknown[] }>(`/api/me/runs/${runId}/handoffs`)) ?? { handoffs: [] };
+    },
+    async handoffAudit(runId, handoffId) {
+      return (await json.get<{ audit: unknown[] }>(`/api/me/runs/${runId}/handoffs/${handoffId}/audit`)) ?? { audit: [] };
+    },
+    async handoffInbox() {
+      return (await json.get<{ handoffs: unknown[] }>('/api/me/handoffs/inbox')) ?? { handoffs: [] };
+    },
+    async handoffAction(runId, handoffId, action, body) {
+      return json.post(`/api/me/runs/${runId}/handoffs/${handoffId}/${action}`, body ?? {});
+    },
+
+    async coeditEnsure(runId, coeditOpts) {
+      return json.post(`/api/me/runs/${runId}/coedit`, coeditOpts ?? {});
+    },
+    async coeditGet(runId) {
+      return (await json.get<{ docId: string; text: string; snapshot: unknown; stateVector: Record<string, number>; siteId: string }>(`/api/me/runs/${runId}/coedit`)) ?? { docId: '', text: '', snapshot: { nodes: [] }, stateVector: {}, siteId: '' };
+    },
+    async coeditSubmitOps(runId, ops) {
+      return json.post(`/api/me/runs/${runId}/coedit/ops`, { ops });
+    },
+    async coeditOpsSince(runId, since) {
+      // base64url-encode the state vector so it rides safely in the query string.
+      const enc = typeof btoa === 'function'
+        ? btoa(JSON.stringify(since)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+        : Buffer.from(JSON.stringify(since)).toString('base64url');
+      return (await json.get<{ ops: unknown[] }>(`/api/me/runs/${runId}/coedit/ops?since=${enc}`)) ?? { ops: [] };
+    },
+    async coeditAwareness(runId, entry) {
+      return json.post(`/api/me/runs/${runId}/coedit/awareness`, { entry });
+    },
+    async coeditAgentSync(runId) {
+      return json.post(`/api/me/runs/${runId}/coedit/agent-sync`, {});
     },
   };
 }

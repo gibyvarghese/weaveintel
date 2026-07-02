@@ -1,65 +1,41 @@
 /**
- * @weaveintel/a2a — SSE stream parser
+ * @weaveintel/a2a — SSE helpers for the A2A wire protocol.
+ *
+ * Collaboration Phase 0 (de-duplication): the byte→event DECODING used to be a
+ * second hand-rolled copy of the loop that also lived in `@weaveintel/client`.
+ * It now delegates to the ONE canonical `parseSseStream` in `@weaveintel/core`;
+ * this module only layers the A2A-specific JSON typing + the server-side emit
+ * helpers on top.
  *
  * A2A v1.0 SSE format:
  *   - Each event is a `data:` line containing a JSON `A2AStreamEvent`
  *     (field-presence union: { task } | { message } | { statusUpdate } | { artifactUpdate })
- *   - No `[DONE]` sentinel — stream closes when the server closes the connection
+ *   - No `[DONE]` sentinel — the stream closes when the server closes the connection
  *   - Comment lines (`: keepalive`) are ignored
- *   - Blank lines separate events (per SSE spec)
+ *   - Blank lines separate events (per the SSE spec)
  *
  * Note: For `SendStreamingMessage`, the SSE data is the unwrapped `A2AStreamEvent`
  * directly — it is NOT wrapped in a JSON-RPC 2.0 envelope on the wire.
  */
+import { parseSseStream as parseSseBytes } from '@weaveintel/core';
 
 /**
- * Parse a `ReadableStream<Uint8Array>` SSE body into a typed async iterable.
- * Handles chunked UTF-8 delivery correctly (chunks may split event boundaries).
- * Skips empty lines, comment lines (starting with `:`), and invalid JSON payloads.
+ * Parse an A2A SSE body into a typed async iterable of JSON events.
+ *
+ * Wraps the core SSE decoder: each `data:` record's text is `JSON.parse`d into
+ * `T`. Empty records, the legacy `[DONE]` sentinel, and malformed JSON are
+ * skipped silently so one bad frame never breaks the stream.
  */
 export async function* parseSseStream<T>(body: ReadableStream<Uint8Array>): AsyncIterable<T> {
-  const reader = body.getReader();
-  const decoder = new TextDecoder('utf-8');
-  let buffer = '';
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-
-      // SSE events are separated by blank lines (\n\n or \r\n\r\n).
-      // Split on newlines and collect complete events.
-      const lines = buffer.split('\n');
-      // The last element may be an incomplete line — keep it in buffer.
-      buffer = lines.pop() ?? '';
-
-      for (const line of lines) {
-        const trimmed = line.trimEnd();
-
-        // Ignore comment lines (keepalive pings)
-        if (trimmed.startsWith(':')) continue;
-
-        // Data line — extract payload
-        if (trimmed.startsWith('data: ')) {
-          const data = trimmed.slice(6).trim();
-
-          // A2A v1.0 has no [DONE] sentinel — stream ends when connection closes.
-          // Kept here for resilience against misconfigured legacy servers.
-          if (!data || data === '[DONE]') continue;
-
-          try {
-            yield JSON.parse(data) as T;
-          } catch {
-            // Malformed JSON — skip silently; don't break the stream.
-          }
-        }
-        // Other field types (event:, id:, retry:) are ignored.
-      }
+  for await (const ev of parseSseBytes(body)) {
+    const data = ev.data.trim();
+    // A2A v1.0 has no [DONE] sentinel — kept for resilience against legacy servers.
+    if (!data || data === '[DONE]') continue;
+    try {
+      yield JSON.parse(data) as T;
+    } catch {
+      // Malformed JSON — skip silently; don't break the stream.
     }
-  } finally {
-    reader.releaseLock();
   }
 }
 

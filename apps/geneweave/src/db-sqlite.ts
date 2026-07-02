@@ -710,6 +710,31 @@ export class SQLiteAdapter implements DatabaseAdapter {
     ).run(userId, defaultMode, theme, showFlag);
   }
 
+  // m136 — Account settings surface. `patch` is a whitelist-validated set of columns from the service layer.
+  async updateUserAccountPrefs(userId: string, patch: Record<string, string | null>): Promise<void> {
+    const cols = Object.keys(patch);
+    if (cols.length === 0) return;
+    // Ensure a row exists first (a fresh user may have no preferences row yet).
+    this.d.prepare(`INSERT OR IGNORE INTO user_preferences (user_id, default_mode, theme, show_process_card) VALUES (?, 'direct', 'light', 1)`).run(userId);
+    const setClause = cols.map((c) => `${c}=@${c}`).join(', ');
+    this.d.prepare(`UPDATE user_preferences SET ${setClause}, updated_at=datetime('now') WHERE user_id=@user_id`).run({ ...patch, user_id: userId });
+  }
+
+  async getUserNotificationPrefs(userId: string): Promise<import('./db-types/core.js').UserNotificationPrefRow[]> {
+    return this.d.prepare('SELECT * FROM user_notification_prefs WHERE user_id = ? ORDER BY event_key').all(userId) as import('./db-types/core.js').UserNotificationPrefRow[];
+  }
+
+  async setUserNotificationPref(userId: string, eventKey: string, channels: { in_app?: boolean; email?: boolean; push?: boolean }): Promise<void> {
+    const existing = this.d.prepare('SELECT * FROM user_notification_prefs WHERE user_id = ? AND event_key = ?').get(userId, eventKey) as import('./db-types/core.js').UserNotificationPrefRow | undefined;
+    const inApp = channels.in_app === undefined ? (existing?.in_app ?? 1) : (channels.in_app ? 1 : 0);
+    const email = channels.email === undefined ? (existing?.email ?? 0) : (channels.email ? 1 : 0);
+    const push = channels.push === undefined ? (existing?.push ?? 0) : (channels.push ? 1 : 0);
+    this.d.prepare(
+      `INSERT INTO user_notification_prefs (user_id, event_key, in_app, email, push) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(user_id, event_key) DO UPDATE SET in_app=excluded.in_app, email=excluded.email, push=excluded.push, updated_at=datetime('now')`,
+    ).run(userId, eventKey, inApp, email, push);
+  }
+
   // ── Chat Settings ──────────────────────────────────────────
 
   async getChatSettings(chatId: string): Promise<ChatSettingsRow | null> {
@@ -1764,23 +1789,25 @@ export class SQLiteAdapter implements DatabaseAdapter {
   async insertMessageFeedback(row: Omit<MessageFeedbackRow, 'created_at'> & { created_at?: string }): Promise<void> {
     this.d.prepare(
       `INSERT INTO message_feedback (
-         id, message_id, chat_id, user_id, signal, comment,
+         id, message_id, chat_id, user_id, signal, comment, categories, tenant_id,
          model_id, provider, task_key, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))`,
     ).run(
       row.id, row.message_id, row.chat_id ?? null, row.user_id ?? null,
-      row.signal, row.comment ?? null,
+      row.signal, row.comment ?? null, row.categories ?? null, row.tenant_id ?? null,
       row.model_id ?? null, row.provider ?? null, row.task_key ?? null,
       row.created_at ?? null,
     );
   }
 
-  async listMessageFeedback(opts?: { messageId?: string; chatId?: string; signal?: string; limit?: number }): Promise<MessageFeedbackRow[]> {
+  async listMessageFeedback(opts?: { messageId?: string; chatId?: string; signal?: string; tenantId?: string; userId?: string; limit?: number }): Promise<MessageFeedbackRow[]> {
     const where: string[] = [];
     const vals: unknown[] = [];
     if (opts?.messageId) { where.push('message_id = ?'); vals.push(opts.messageId); }
     if (opts?.chatId)    { where.push('chat_id = ?');    vals.push(opts.chatId); }
     if (opts?.signal)    { where.push('signal = ?');     vals.push(opts.signal); }
+    if (opts?.tenantId)  { where.push('tenant_id = ?');  vals.push(opts.tenantId); }
+    if (opts?.userId)    { where.push('user_id = ?');    vals.push(opts.userId); }
     const limit = Math.max(1, Math.min(opts?.limit ?? 200, 5000));
     const sql = `SELECT * FROM message_feedback${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY created_at DESC LIMIT ${limit}`;
     return this.d.prepare(sql).all(...vals) as MessageFeedbackRow[];
@@ -8828,6 +8855,15 @@ export class SQLiteAdapter implements DatabaseAdapter {
     return (this.d.prepare('SELECT * FROM user_runs WHERE id = ? AND user_id = ?').get(id, userId) as import('./db-types/adapter-me.js').UserRunRow | undefined) ?? null;
   }
 
+  /**
+   * Owner-agnostic run lookup by id (Collaboration Phase 3). Used by the
+   * notification outbox, where we have a runId from a terminal event but not the
+   * owner. NOT an access-control path — callers must authorize separately.
+   */
+  async getUserRunById(id: string): Promise<import('./db-types/adapter-me.js').UserRunRow | null> {
+    return (this.d.prepare('SELECT * FROM user_runs WHERE id = ?').get(id) as import('./db-types/adapter-me.js').UserRunRow | undefined) ?? null;
+  }
+
   async listUserRuns(userId: string, filter: { status?: 'pending'|'running'|'completed'|'failed'|'cancelled'; limit?: number; offset?: number } = {}): Promise<import('./db-types/adapter-me.js').UserRunRow[]> {
     const limit = filter.limit ?? 50;
     const offset = filter.offset ?? 0;
@@ -8849,6 +8885,769 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async listUserRunEvents(runId: string, afterSequence = -1): Promise<import('./db-types/adapter-me.js').UserRunEventRow[]> {
     return this.d.prepare('SELECT * FROM user_run_events WHERE run_id = ? AND sequence > ? ORDER BY sequence ASC').all(runId, afterSequence) as import('./db-types/adapter-me.js').UserRunEventRow[];
+  }
+
+  // Per-run journal purge (Collaboration Phase 0 — backs the core RunJournal
+  // port's `purgeRun`, e.g. after a run is archived). Distinct from the global
+  // `pruneUserRunEvents` retention sweep below.
+  async deleteUserRunEvents(runId: string): Promise<number> {
+    return this.d.prepare('DELETE FROM user_run_events WHERE run_id = ?').run(runId).changes;
+  }
+
+  // ── Presence (m94, Collaboration Phase 1) — current-state, heartbeat/TTL ─────
+  // Backs the collaboration PresenceManager SQL adapter. UPSERT on heartbeat,
+  // DELETE on leave/expiry. NEVER appended to the journal (ephemeral).
+  async upsertRunPresence(row: {
+    id: string; run_id: string; tenant_id?: string | null; user_id: string; display_name: string;
+    presence: string; peer_type: string; color?: string | null; cursor_json?: string | null;
+    last_heartbeat_at: number; expires_at: number;
+  }): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO run_presence
+         (id, run_id, tenant_id, user_id, display_name, presence, peer_type, color, cursor_json, last_heartbeat_at, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(run_id, user_id) DO UPDATE SET
+         display_name = excluded.display_name, presence = excluded.presence, peer_type = excluded.peer_type,
+         color = excluded.color, cursor_json = excluded.cursor_json,
+         last_heartbeat_at = excluded.last_heartbeat_at, expires_at = excluded.expires_at`,
+    ).run(
+      row.id, row.run_id, row.tenant_id ?? null, row.user_id, row.display_name, row.presence, row.peer_type,
+      row.color ?? null, row.cursor_json ?? null, row.last_heartbeat_at, row.expires_at,
+    );
+  }
+
+  async listActiveRunPresence(runId: string, now: number): Promise<import('./db-types/adapter-me.js').RunPresenceRow[]> {
+    return this.d.prepare(
+      'SELECT * FROM run_presence WHERE run_id = ? AND expires_at > ? ORDER BY peer_type DESC, user_id ASC',
+    ).all(runId, now) as import('./db-types/adapter-me.js').RunPresenceRow[];
+  }
+
+  async deleteRunPresence(runId: string, userId: string): Promise<number> {
+    return this.d.prepare('DELETE FROM run_presence WHERE run_id = ? AND user_id = ?').run(runId, userId).changes;
+  }
+
+  /** Sweep expired presence; returns the distinct affected runs (for re-broadcast). */
+  async deleteExpiredRunPresence(now: number): Promise<Array<{ run_id: string; tenant_id: string | null }>> {
+    const affected = this.d.prepare(
+      'SELECT DISTINCT run_id, tenant_id FROM run_presence WHERE expires_at <= ?',
+    ).all(now) as Array<{ run_id: string; tenant_id: string | null }>;
+    this.d.prepare('DELETE FROM run_presence WHERE expires_at <= ?').run(now);
+    return affected;
+  }
+
+  async getCollaborationConfig(): Promise<import('./db-types/adapter-me.js').CollaborationConfigRow | null> {
+    return (this.d.prepare(`SELECT * FROM collaboration_config WHERE id = 'global'`).get() ?? null) as import('./db-types/adapter-me.js').CollaborationConfigRow | null;
+  }
+
+  // ── Shared sessions + invite links (m95, Collaboration Phase 2) ─────────────
+  async createSharedSession(row: { id: string; run_id: string; tenant_id?: string | null; owner_id: string; max_participants: number; created_at: number }): Promise<void> {
+    // Idempotent per run via UNIQUE(run_id) + the owner is participant #1.
+    this.d.prepare(
+      `INSERT OR IGNORE INTO shared_sessions (id, run_id, tenant_id, owner_id, status, max_participants, created_at)
+       VALUES (?, ?, ?, ?, 'live', ?, ?)`,
+    ).run(row.id, row.run_id, row.tenant_id ?? null, row.owner_id, row.max_participants, row.created_at);
+  }
+  async getSharedSessionById(id: string): Promise<import('./db-types/adapter-me.js').SharedSessionRow | null> {
+    return (this.d.prepare('SELECT * FROM shared_sessions WHERE id = ?').get(id) ?? null) as import('./db-types/adapter-me.js').SharedSessionRow | null;
+  }
+  async getSharedSessionByRun(runId: string): Promise<import('./db-types/adapter-me.js').SharedSessionRow | null> {
+    return (this.d.prepare('SELECT * FROM shared_sessions WHERE run_id = ?').get(runId) ?? null) as import('./db-types/adapter-me.js').SharedSessionRow | null;
+  }
+  async endSharedSession(id: string, endedAt: number): Promise<void> {
+    this.d.prepare(`UPDATE shared_sessions SET status = 'ended', ended_at = ? WHERE id = ?`).run(endedAt, id);
+  }
+  async upsertSessionParticipant(row: { id: string; session_id: string; tenant_id?: string | null; user_id: string; role: string; joined_at: number; invited_via_token_id?: string | null }): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO session_participants (id, session_id, tenant_id, user_id, role, joined_at, invited_via_token_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(session_id, user_id) DO UPDATE SET role = excluded.role`,
+    ).run(row.id, row.session_id, row.tenant_id ?? null, row.user_id, row.role, row.joined_at, row.invited_via_token_id ?? null);
+  }
+  async getSessionParticipant(sessionId: string, userId: string): Promise<import('./db-types/adapter-me.js').SessionParticipantRow | null> {
+    return (this.d.prepare('SELECT * FROM session_participants WHERE session_id = ? AND user_id = ?').get(sessionId, userId) ?? null) as import('./db-types/adapter-me.js').SessionParticipantRow | null;
+  }
+  async listSessionParticipants(sessionId: string): Promise<import('./db-types/adapter-me.js').SessionParticipantRow[]> {
+    return this.d.prepare('SELECT * FROM session_participants WHERE session_id = ? ORDER BY joined_at ASC').all(sessionId) as import('./db-types/adapter-me.js').SessionParticipantRow[];
+  }
+  async deleteSessionParticipant(sessionId: string, userId: string): Promise<number> {
+    return this.d.prepare('DELETE FROM session_participants WHERE session_id = ? AND user_id = ?').run(sessionId, userId).changes;
+  }
+  async createShareToken(row: { id: string; session_id: string; tenant_id?: string | null; role: string; token_hash: string; token_prefix: string; max_uses?: number | null; expires_at?: number | null; created_by: string; created_at: number }): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO session_share_tokens (id, session_id, tenant_id, role, token_hash, token_prefix, max_uses, uses, expires_at, created_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+    ).run(row.id, row.session_id, row.tenant_id ?? null, row.role, row.token_hash, row.token_prefix, row.max_uses ?? null, row.expires_at ?? null, row.created_by, row.created_at);
+  }
+  async getShareTokenByHash(tokenHash: string): Promise<import('./db-types/adapter-me.js').ShareTokenRow | null> {
+    return (this.d.prepare('SELECT * FROM session_share_tokens WHERE token_hash = ?').get(tokenHash) ?? null) as import('./db-types/adapter-me.js').ShareTokenRow | null;
+  }
+  async incrementShareTokenUses(id: string): Promise<void> {
+    this.d.prepare('UPDATE session_share_tokens SET uses = uses + 1 WHERE id = ?').run(id);
+  }
+  async revokeShareToken(id: string, revokedAt: number): Promise<void> {
+    this.d.prepare('UPDATE session_share_tokens SET revoked_at = ? WHERE id = ?').run(revokedAt, id);
+  }
+
+  // ── Durable subscriptions + notifications (m96, Collaboration Phase 3) ──────
+  async upsertRunSubscription(row: { id: string; run_id: string; tenant_id?: string | null; user_id: string; channels: string; created_at: number }): Promise<import('./db-types/adapter-me.js').RunSubscriptionRow> {
+    // Idempotent per (run, user): re-subscribing updates the channel set but
+    // preserves the original created_at and the existing row id.
+    this.d.prepare(
+      `INSERT INTO run_subscriptions (id, run_id, tenant_id, user_id, channels, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(run_id, user_id) DO UPDATE SET channels = excluded.channels`,
+    ).run(row.id, row.run_id, row.tenant_id ?? null, row.user_id, row.channels, row.created_at);
+    return this.d.prepare('SELECT * FROM run_subscriptions WHERE run_id = ? AND user_id = ?').get(row.run_id, row.user_id) as import('./db-types/adapter-me.js').RunSubscriptionRow;
+  }
+  async deleteRunSubscription(runId: string, userId: string): Promise<number> {
+    return this.d.prepare('DELETE FROM run_subscriptions WHERE run_id = ? AND user_id = ?').run(runId, userId).changes;
+  }
+  async getRunSubscription(runId: string, userId: string): Promise<import('./db-types/adapter-me.js').RunSubscriptionRow | null> {
+    return (this.d.prepare('SELECT * FROM run_subscriptions WHERE run_id = ? AND user_id = ?').get(runId, userId) ?? null) as import('./db-types/adapter-me.js').RunSubscriptionRow | null;
+  }
+  async listRunSubscribers(runId: string): Promise<import('./db-types/adapter-me.js').RunSubscriptionRow[]> {
+    return this.d.prepare('SELECT * FROM run_subscriptions WHERE run_id = ? ORDER BY created_at ASC').all(runId) as import('./db-types/adapter-me.js').RunSubscriptionRow[];
+  }
+  async listSubscriptionsForUser(userId: string): Promise<import('./db-types/adapter-me.js').RunSubscriptionRow[]> {
+    return this.d.prepare('SELECT * FROM run_subscriptions WHERE user_id = ? ORDER BY created_at DESC').all(userId) as import('./db-types/adapter-me.js').RunSubscriptionRow[];
+  }
+
+  // Notification feed (in-app inbox) — fan-out-on-write, dedupe per principal.
+  async appendNotificationFeed(row: import('./db-types/adapter-me.js').NotificationFeedRow): Promise<import('./db-types/adapter-me.js').NotificationFeedRow> {
+    // Idempotent on (principal_id, dedupe_key): the partial UNIQUE index means a
+    // duplicate insert is ignored; we then return the surviving row.
+    this.d.prepare(
+      `INSERT OR IGNORE INTO notification_feed (id, tenant_id, principal_id, category, title, body, deep_link, priority, dedupe_key, created_at, read_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(row.id, row.tenant_id ?? null, row.principal_id, row.category, row.title, row.body ?? null, row.deep_link ?? null, row.priority, row.dedupe_key ?? null, row.created_at, row.read_at ?? null);
+    if (row.dedupe_key) {
+      const existing = this.d.prepare('SELECT * FROM notification_feed WHERE principal_id = ? AND dedupe_key = ?').get(row.principal_id, row.dedupe_key);
+      if (existing) return existing as import('./db-types/adapter-me.js').NotificationFeedRow;
+    }
+    return (this.d.prepare('SELECT * FROM notification_feed WHERE id = ?').get(row.id) ?? row) as import('./db-types/adapter-me.js').NotificationFeedRow;
+  }
+  async listNotificationFeed(tenantId: string, principalId: string, opts?: { limit?: number; unreadOnly?: boolean }): Promise<import('./db-types/adapter-me.js').NotificationFeedRow[]> {
+    const unread = opts?.unreadOnly ? 'AND read_at IS NULL' : '';
+    const limit = typeof opts?.limit === 'number' ? `LIMIT ${Math.max(0, Math.floor(opts.limit))}` : '';
+    return this.d.prepare(
+      `SELECT * FROM notification_feed WHERE tenant_id IS ? AND principal_id = ? ${unread} ORDER BY created_at DESC ${limit}`,
+    ).all(tenantId === '__global__' ? null : tenantId, principalId) as import('./db-types/adapter-me.js').NotificationFeedRow[];
+  }
+  async countUnreadNotificationFeed(tenantId: string, principalId: string): Promise<number> {
+    const r = this.d.prepare('SELECT COUNT(*) AS n FROM notification_feed WHERE tenant_id IS ? AND principal_id = ? AND read_at IS NULL').get(tenantId === '__global__' ? null : tenantId, principalId) as { n: number };
+    return r.n;
+  }
+  async markNotificationFeedRead(tenantId: string, principalId: string, id: string, now: number): Promise<boolean> {
+    return this.d.prepare('UPDATE notification_feed SET read_at = ? WHERE id = ? AND tenant_id IS ? AND principal_id = ? AND read_at IS NULL').run(now, id, tenantId === '__global__' ? null : tenantId, principalId).changes > 0;
+  }
+  async markAllNotificationFeedRead(tenantId: string, principalId: string, now: number): Promise<number> {
+    return this.d.prepare('UPDATE notification_feed SET read_at = ? WHERE tenant_id IS ? AND principal_id = ? AND read_at IS NULL').run(now, tenantId === '__global__' ? null : tenantId, principalId).changes;
+  }
+
+  // Transactional outbox — crash-safe at-least-once delivery.
+  async enqueueNotificationOutbox(row: { id: string; run_id: string; tenant_id?: string | null; user_id: string; channels: string; payload: string; idempotency_key: string; next_attempt_at: number; created_at: number }): Promise<boolean> {
+    // UNIQUE(run_id, user_id): exactly one delivery per subscriber per run terminal.
+    return this.d.prepare(
+      `INSERT OR IGNORE INTO notification_outbox (id, run_id, tenant_id, user_id, channels, payload, idempotency_key, status, attempts, next_attempt_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
+    ).run(row.id, row.run_id, row.tenant_id ?? null, row.user_id, row.channels, row.payload, row.idempotency_key, row.next_attempt_at, row.created_at).changes > 0;
+  }
+  async claimNotificationOutbox(now: number, leaseUntil: number, limit: number): Promise<import('./db-types/adapter-me.js').NotificationOutboxRow[]> {
+    // Atomically lease due rows. A row is claimable when it is pending/failed and
+    // due, OR stuck in 'sending' past its lease (the previous worker crashed).
+    const claim = this.d.transaction((n: number, lease: number, lim: number) => {
+      const rows = this.d.prepare(
+        `SELECT * FROM notification_outbox
+          WHERE ((status = 'pending' AND next_attempt_at <= ?)
+                 OR (status = 'sending' AND lease_until IS NOT NULL AND lease_until <= ?))
+          ORDER BY next_attempt_at ASC LIMIT ?`,
+      ).all(n, n, lim) as import('./db-types/adapter-me.js').NotificationOutboxRow[];
+      const upd = this.d.prepare(`UPDATE notification_outbox SET status = 'sending', lease_until = ?, attempts = attempts + 1 WHERE id = ?`);
+      for (const r of rows) upd.run(lease, r.id);
+      return rows;
+    });
+    return claim(now, leaseUntil, Math.max(1, Math.floor(limit)));
+  }
+  async markNotificationOutboxSent(id: string, sentAt: number): Promise<void> {
+    this.d.prepare(`UPDATE notification_outbox SET status = 'sent', sent_at = ?, lease_until = NULL, last_error = NULL WHERE id = ?`).run(sentAt, id);
+  }
+  async rescheduleNotificationOutbox(id: string, nextAttemptAt: number, attempts: number, lastError: string, failed: boolean): Promise<void> {
+    // `failed` = exhausted the retry budget → dead-letter (status 'failed', not retried).
+    this.d.prepare(`UPDATE notification_outbox SET status = ?, next_attempt_at = ?, last_error = ?, lease_until = NULL WHERE id = ?`)
+      .run(failed ? 'failed' : 'pending', nextAttemptAt, lastError.slice(0, 500), id);
+    void attempts; // attempts already incremented at claim time
+  }
+  async hasNotificationOutboxForRun(runId: string): Promise<boolean> {
+    return this.d.prepare('SELECT 1 FROM notification_outbox WHERE run_id = ? LIMIT 1').get(runId) !== undefined;
+  }
+  async listTerminalRunsWithSubscribers(limit: number): Promise<import('./db-types/adapter-me.js').UserRunRow[]> {
+    return this.d.prepare(
+      `SELECT r.* FROM user_runs r
+        WHERE r.status IN ('completed','failed','cancelled')
+          AND EXISTS (SELECT 1 FROM run_subscriptions s WHERE s.run_id = r.id)
+        ORDER BY r.created_at DESC LIMIT ?`,
+    ).all(Math.max(1, Math.floor(limit))) as import('./db-types/adapter-me.js').UserRunRow[];
+  }
+
+  // ── Run comments + annotations + public share (m97, Collaboration Phase 4) ──
+  async createRunComment(row: import('./db-types/adapter-me.js').RunCommentRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO run_comments (id, run_id, tenant_id, thread_id, parent_id, author_id, body, body_html, mentions_json, anchor_part_id, anchor_seq, anchor_range_json, created_at, updated_at, edited_at, deleted_at, deleted_by, resolved_at, resolved_by)
+       VALUES (@id, @run_id, @tenant_id, @thread_id, @parent_id, @author_id, @body, @body_html, @mentions_json, @anchor_part_id, @anchor_seq, @anchor_range_json, @created_at, @updated_at, @edited_at, @deleted_at, @deleted_by, @resolved_at, @resolved_by)`,
+    ).run(row);
+  }
+  async getRunComment(id: string): Promise<import('./db-types/adapter-me.js').RunCommentRow | null> {
+    return (this.d.prepare('SELECT * FROM run_comments WHERE id = ?').get(id) ?? null) as import('./db-types/adapter-me.js').RunCommentRow | null;
+  }
+  async listRunComments(runId: string): Promise<import('./db-types/adapter-me.js').RunCommentRow[]> {
+    return this.d.prepare('SELECT * FROM run_comments WHERE run_id = ? ORDER BY created_at ASC').all(runId) as import('./db-types/adapter-me.js').RunCommentRow[];
+  }
+  async listRunCommentThread(threadId: string): Promise<import('./db-types/adapter-me.js').RunCommentRow[]> {
+    return this.d.prepare('SELECT * FROM run_comments WHERE thread_id = ? ORDER BY created_at ASC').all(threadId) as import('./db-types/adapter-me.js').RunCommentRow[];
+  }
+  async updateRunCommentBody(id: string, body: string, bodyHtml: string, mentionsJson: string, editedAt: number, updatedAt: number): Promise<void> {
+    this.d.prepare('UPDATE run_comments SET body = ?, body_html = ?, mentions_json = ?, edited_at = ?, updated_at = ? WHERE id = ?').run(body, bodyHtml, mentionsJson, editedAt, updatedAt, id);
+  }
+  async softDeleteRunComment(id: string, deletedBy: string, deletedAt: number): Promise<void> {
+    // Tombstone: scrub the body but keep the row so replies are not orphaned.
+    this.d.prepare(`UPDATE run_comments SET body = '', body_html = '', mentions_json = '[]', deleted_at = ?, deleted_by = ?, updated_at = ? WHERE id = ?`).run(deletedAt, deletedBy, deletedAt, id);
+  }
+  async setRunThreadResolution(threadId: string, resolvedAt: number | null, resolvedBy: string | null, updatedAt: number): Promise<void> {
+    // Resolution is recorded on the ROOT (id === thread_id); reads mirror it across the thread.
+    this.d.prepare('UPDATE run_comments SET resolved_at = ?, resolved_by = ?, updated_at = ? WHERE id = ?').run(resolvedAt, resolvedBy, updatedAt, threadId);
+  }
+  async createRunAnnotation(row: import('./db-types/adapter-me.js').RunAnnotationRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO run_annotations (id, run_id, tenant_id, part_id, author_id, name, data_type, value, string_value, comment, source, created_at)
+       VALUES (@id, @run_id, @tenant_id, @part_id, @author_id, @name, @data_type, @value, @string_value, @comment, @source, @created_at)`,
+    ).run(row);
+  }
+  async getRunAnnotation(id: string): Promise<import('./db-types/adapter-me.js').RunAnnotationRow | null> {
+    return (this.d.prepare('SELECT * FROM run_annotations WHERE id = ?').get(id) ?? null) as import('./db-types/adapter-me.js').RunAnnotationRow | null;
+  }
+  async listRunAnnotations(runId: string): Promise<import('./db-types/adapter-me.js').RunAnnotationRow[]> {
+    return this.d.prepare('SELECT * FROM run_annotations WHERE run_id = ? ORDER BY created_at ASC').all(runId) as import('./db-types/adapter-me.js').RunAnnotationRow[];
+  }
+  async deleteRunAnnotation(id: string): Promise<number> {
+    return this.d.prepare('DELETE FROM run_annotations WHERE id = ?').run(id).changes;
+  }
+  async createRunPublicShare(row: { id: string; run_id: string; tenant_id?: string | null; token_hash: string; token_prefix: string; created_by: string; created_at: number; expires_at?: number | null }): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO run_public_shares (id, run_id, tenant_id, token_hash, token_prefix, created_by, created_at, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(row.id, row.run_id, row.tenant_id ?? null, row.token_hash, row.token_prefix, row.created_by, row.created_at, row.expires_at ?? null);
+  }
+  async getRunPublicShareByHash(tokenHash: string): Promise<import('./db-types/adapter-me.js').RunPublicShareRow | null> {
+    return (this.d.prepare('SELECT * FROM run_public_shares WHERE token_hash = ?').get(tokenHash) ?? null) as import('./db-types/adapter-me.js').RunPublicShareRow | null;
+  }
+  async listRunPublicShares(runId: string): Promise<import('./db-types/adapter-me.js').RunPublicShareRow[]> {
+    return this.d.prepare('SELECT * FROM run_public_shares WHERE run_id = ? AND revoked_at IS NULL ORDER BY created_at ASC').all(runId) as import('./db-types/adapter-me.js').RunPublicShareRow[];
+  }
+  async revokeRunPublicShare(id: string, runId: string, revokedAt: number): Promise<number> {
+    return this.d.prepare('UPDATE run_public_shares SET revoked_at = ? WHERE id = ? AND run_id = ?').run(revokedAt, id, runId).changes;
+  }
+
+  // ── Unified handoff (m98, Collaboration Phase 5) ────────────────────────────
+  async insertSessionHandoff(row: import('./db-types/adapter-me.js').SessionHandoffRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO session_handoffs (id, run_id, tenant_id, scope, from_actor_type, from_actor_id, to_actor_type, to_actor_id, state, reason, briefing_json, rejection_reason, hand_back_briefing_json, depth, parent_handoff_id, reference_task_ids_json, created_at, updated_at, resolved_at, expires_at)
+       VALUES (@id, @run_id, @tenant_id, @scope, @from_actor_type, @from_actor_id, @to_actor_type, @to_actor_id, @state, @reason, @briefing_json, @rejection_reason, @hand_back_briefing_json, @depth, @parent_handoff_id, @reference_task_ids_json, @created_at, @updated_at, @resolved_at, @expires_at)`,
+    ).run(row);
+  }
+  async getSessionHandoff(id: string): Promise<import('./db-types/adapter-me.js').SessionHandoffRow | null> {
+    return (this.d.prepare('SELECT * FROM session_handoffs WHERE id = ?').get(id) ?? null) as import('./db-types/adapter-me.js').SessionHandoffRow | null;
+  }
+  async updateSessionHandoff(id: string, fields: Partial<Pick<import('./db-types/adapter-me.js').SessionHandoffRow, 'state' | 'rejection_reason' | 'hand_back_briefing_json' | 'updated_at' | 'resolved_at'>>): Promise<void> {
+    const keys = Object.keys(fields);
+    if (keys.length === 0) return;
+    const set = keys.map((k) => `${k} = @${k}`).join(', ');
+    this.d.prepare(`UPDATE session_handoffs SET ${set} WHERE id = @id`).run({ ...fields, id });
+  }
+  async listSessionHandoffsForRun(runId: string): Promise<import('./db-types/adapter-me.js').SessionHandoffRow[]> {
+    return this.d.prepare('SELECT * FROM session_handoffs WHERE run_id = ? ORDER BY created_at DESC').all(runId) as import('./db-types/adapter-me.js').SessionHandoffRow[];
+  }
+  async listSessionHandoffsForActor(actorId: string): Promise<import('./db-types/adapter-me.js').SessionHandoffRow[]> {
+    return this.d.prepare('SELECT * FROM session_handoffs WHERE to_actor_id = ? ORDER BY created_at DESC').all(actorId) as import('./db-types/adapter-me.js').SessionHandoffRow[];
+  }
+  async listDueSessionHandoffs(now: number): Promise<import('./db-types/adapter-me.js').SessionHandoffRow[]> {
+    return this.d.prepare(`SELECT * FROM session_handoffs WHERE state IN ('requested','accepted') AND expires_at IS NOT NULL AND expires_at <= ?`).all(now) as import('./db-types/adapter-me.js').SessionHandoffRow[];
+  }
+  async insertHandoffEvent(row: import('./db-types/adapter-me.js').HandoffEventRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO handoff_events (id, handoff_id, at, actor_id, from_state, to_state, note)
+       VALUES (@id, @handoff_id, @at, @actor_id, @from_state, @to_state, @note)`,
+    ).run(row);
+  }
+  async listHandoffEvents(handoffId: string): Promise<import('./db-types/adapter-me.js').HandoffEventRow[]> {
+    // Order by INSERTION (rowid), not (at, id): many transitions land in the same
+    // millisecond and UUIDv7 ids are not reliably monotonic within a ms, which
+    // would scramble the audit trail. rowid is strict insertion order.
+    return this.d.prepare('SELECT * FROM handoff_events WHERE handoff_id = ? ORDER BY rowid ASC').all(handoffId) as import('./db-types/adapter-me.js').HandoffEventRow[];
+  }
+
+  // ── CRDT co-editing (m99, Collaboration Phase 7) ────────────────────────────
+  async createCoeditDoc(row: { id: string; run_id: string; tenant_id?: string | null; owner_id: string; title?: string | null; snapshot_json: string; state_vector_json: string; created_at: number; updated_at: number }): Promise<boolean> {
+    // Idempotent per run via UNIQUE(run_id).
+    return this.d.prepare(
+      `INSERT OR IGNORE INTO coedit_docs (id, run_id, tenant_id, owner_id, title, snapshot_json, state_vector_json, agent_written, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+    ).run(row.id, row.run_id, row.tenant_id ?? null, row.owner_id, row.title ?? null, row.snapshot_json, row.state_vector_json, row.created_at, row.updated_at).changes > 0;
+  }
+  async getCoeditDoc(id: string): Promise<import('./db-types/adapter-me.js').CoeditDocRow | null> {
+    return (this.d.prepare('SELECT * FROM coedit_docs WHERE id = ?').get(id) ?? null) as import('./db-types/adapter-me.js').CoeditDocRow | null;
+  }
+  async getCoeditDocByRun(runId: string): Promise<import('./db-types/adapter-me.js').CoeditDocRow | null> {
+    return (this.d.prepare('SELECT * FROM coedit_docs WHERE run_id = ?').get(runId) ?? null) as import('./db-types/adapter-me.js').CoeditDocRow | null;
+  }
+  async updateCoeditDoc(id: string, fields: { snapshot_json: string; state_vector_json: string; agent_written: number; updated_at: number }): Promise<void> {
+    this.d.prepare('UPDATE coedit_docs SET snapshot_json = ?, state_vector_json = ?, agent_written = ?, updated_at = ? WHERE id = ?')
+      .run(fields.snapshot_json, fields.state_vector_json, fields.agent_written, fields.updated_at, id);
+  }
+  async appendCoeditOp(row: import('./db-types/adapter-me.js').CoeditOpRow): Promise<boolean> {
+    return this.d.prepare(
+      `INSERT OR IGNORE INTO coedit_ops (id, doc_id, op_site, op_counter, op_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(row.id, row.doc_id, row.op_site, row.op_counter, row.op_json, row.created_at).changes > 0;
+  }
+  async listCoeditOps(docId: string): Promise<import('./db-types/adapter-me.js').CoeditOpRow[]> {
+    return this.d.prepare('SELECT * FROM coedit_ops WHERE doc_id = ? ORDER BY rowid ASC').all(docId) as import('./db-types/adapter-me.js').CoeditOpRow[];
+  }
+
+  // ── weaveNotes Phase 2 — collaborative NOTE co-editing (m100) ────────────────
+  async createNoteCoeditDoc(row: { id: string; note_id: string; tenant_id?: string | null; owner_id: string; snapshot_json: string; state_vector_json: string; created_at: number; updated_at: number }): Promise<boolean> {
+    // Idempotent per note via UNIQUE(note_id).
+    return this.d.prepare(
+      `INSERT OR IGNORE INTO note_coedit_docs (id, note_id, tenant_id, owner_id, snapshot_json, state_vector_json, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(row.id, row.note_id, row.tenant_id ?? null, row.owner_id, row.snapshot_json, row.state_vector_json, row.created_at, row.updated_at).changes > 0;
+  }
+  async getNoteCoeditDoc(id: string): Promise<import('./db-types/adapter-me.js').NoteCoeditDocRow | null> {
+    return (this.d.prepare('SELECT * FROM note_coedit_docs WHERE id = ?').get(id) ?? null) as import('./db-types/adapter-me.js').NoteCoeditDocRow | null;
+  }
+  async getNoteCoeditDocByNote(noteId: string): Promise<import('./db-types/adapter-me.js').NoteCoeditDocRow | null> {
+    return (this.d.prepare('SELECT * FROM note_coedit_docs WHERE note_id = ?').get(noteId) ?? null) as import('./db-types/adapter-me.js').NoteCoeditDocRow | null;
+  }
+  async updateNoteCoeditDoc(id: string, fields: { snapshot_json: string; state_vector_json: string; updated_at: number }): Promise<void> {
+    this.d.prepare('UPDATE note_coedit_docs SET snapshot_json = ?, state_vector_json = ?, updated_at = ? WHERE id = ?')
+      .run(fields.snapshot_json, fields.state_vector_json, fields.updated_at, id);
+  }
+  async appendNoteCoeditOp(row: import('./db-types/adapter-me.js').NoteCoeditOpRow): Promise<boolean> {
+    return this.d.prepare(
+      `INSERT OR IGNORE INTO note_coedit_ops (id, doc_id, op_site, op_counter, op_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(row.id, row.doc_id, row.op_site, row.op_counter, row.op_json, row.created_at).changes > 0;
+  }
+  async listNoteCoeditOps(docId: string): Promise<import('./db-types/adapter-me.js').NoteCoeditOpRow[]> {
+    return this.d.prepare('SELECT * FROM note_coedit_ops WHERE doc_id = ? ORDER BY rowid ASC').all(docId) as import('./db-types/adapter-me.js').NoteCoeditOpRow[];
+  }
+  // Note sharing — membership + invite tokens.
+  async getNoteForOwner(noteId: string, ownerId: string): Promise<{ id: string; owner_user_id: string; tenant_id: string | null } | null> {
+    return (this.d.prepare('SELECT id, owner_user_id, tenant_id FROM notes WHERE id = ? AND owner_user_id = ?').get(noteId, ownerId) ?? null) as { id: string; owner_user_id: string; tenant_id: string | null } | null;
+  }
+  async getNoteShare(noteId: string, userId: string): Promise<import('./db-types/adapter-me.js').NoteShareRow | null> {
+    return (this.d.prepare('SELECT * FROM note_shares WHERE note_id = ? AND user_id = ?').get(noteId, userId) ?? null) as import('./db-types/adapter-me.js').NoteShareRow | null;
+  }
+  async listNoteShares(noteId: string): Promise<import('./db-types/adapter-me.js').NoteShareRow[]> {
+    return this.d.prepare('SELECT * FROM note_shares WHERE note_id = ? ORDER BY joined_at ASC').all(noteId) as import('./db-types/adapter-me.js').NoteShareRow[];
+  }
+  async upsertNoteShare(row: import('./db-types/adapter-me.js').NoteShareRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO note_shares (id, note_id, tenant_id, owner_id, user_id, role, joined_at, invited_via_token_id)
+       VALUES (@id, @note_id, @tenant_id, @owner_id, @user_id, @role, @joined_at, @invited_via_token_id)
+       ON CONFLICT(note_id, user_id) DO UPDATE SET role = excluded.role, invited_via_token_id = excluded.invited_via_token_id`,
+    ).run(row);
+  }
+  async deleteNoteShare(noteId: string, userId: string): Promise<number> {
+    return this.d.prepare('DELETE FROM note_shares WHERE note_id = ? AND user_id = ?').run(noteId, userId).changes;
+  }
+  async createNoteShareToken(row: import('./db-types/adapter-me.js').NoteShareTokenRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO note_share_tokens (id, note_id, tenant_id, owner_id, role, token_hash, token_prefix, max_uses, uses, expires_at, revoked_at, created_by, created_at)
+       VALUES (@id, @note_id, @tenant_id, @owner_id, @role, @token_hash, @token_prefix, @max_uses, @uses, @expires_at, @revoked_at, @created_by, @created_at)`,
+    ).run(row);
+  }
+  async getNoteShareTokenByHash(hash: string): Promise<import('./db-types/adapter-me.js').NoteShareTokenRow | null> {
+    return (this.d.prepare('SELECT * FROM note_share_tokens WHERE token_hash = ?').get(hash) ?? null) as import('./db-types/adapter-me.js').NoteShareTokenRow | null;
+  }
+  async listNoteShareTokens(noteId: string): Promise<import('./db-types/adapter-me.js').NoteShareTokenRow[]> {
+    return this.d.prepare('SELECT * FROM note_share_tokens WHERE note_id = ? ORDER BY created_at DESC').all(noteId) as import('./db-types/adapter-me.js').NoteShareTokenRow[];
+  }
+  async incrementNoteShareTokenUses(id: string): Promise<void> {
+    this.d.prepare('UPDATE note_share_tokens SET uses = uses + 1 WHERE id = ?').run(id);
+  }
+  async revokeNoteShareToken(id: string, noteId: string, revokedAt: number): Promise<number> {
+    return this.d.prepare('UPDATE note_share_tokens SET revoked_at = ? WHERE id = ? AND note_id = ? AND revoked_at IS NULL').run(revokedAt, id, noteId).changes;
+  }
+  // weaveNotes Phase 3 — AI co-author suggestions (track-changes).
+  async createNoteSuggestion(row: import('./db-types/adapter-me.js').NoteSuggestionRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO note_suggestions (id, note_id, doc_id, tenant_id, author_kind, author_id, author_site, action, status, ops_json, preview_text, before_text, anchor_json, created_at, resolved_at, resolved_by)
+       VALUES (@id, @note_id, @doc_id, @tenant_id, @author_kind, @author_id, @author_site, @action, @status, @ops_json, @preview_text, @before_text, @anchor_json, @created_at, @resolved_at, @resolved_by)`,
+    ).run({ ...row, before_text: row.before_text ?? '' });
+  }
+  async getNoteSuggestion(id: string): Promise<import('./db-types/adapter-me.js').NoteSuggestionRow | null> {
+    return (this.d.prepare('SELECT * FROM note_suggestions WHERE id = ?').get(id) ?? null) as import('./db-types/adapter-me.js').NoteSuggestionRow | null;
+  }
+  async listNoteSuggestions(noteId: string, status?: 'pending' | 'accepted' | 'rejected'): Promise<import('./db-types/adapter-me.js').NoteSuggestionRow[]> {
+    const sql = status
+      ? 'SELECT * FROM note_suggestions WHERE note_id = ? AND status = ? ORDER BY created_at DESC'
+      : 'SELECT * FROM note_suggestions WHERE note_id = ? ORDER BY created_at DESC';
+    const args = status ? [noteId, status] : [noteId];
+    return this.d.prepare(sql).all(...args) as import('./db-types/adapter-me.js').NoteSuggestionRow[];
+  }
+  async resolveNoteSuggestion(id: string, status: 'accepted' | 'rejected', resolvedAt: number, resolvedBy: string): Promise<number> {
+    // Only a still-pending suggestion can be resolved (idempotency / double-accept guard).
+    return this.d.prepare("UPDATE note_suggestions SET status = ?, resolved_at = ?, resolved_by = ? WHERE id = ? AND status = 'pending'")
+      .run(status, resolvedAt, resolvedBy, id).changes;
+  }
+
+  // weaveNotes Phase 5 — notes knowledge graph.
+  async replaceNoteEntities(noteId: string, rows: import('./db-types/adapter-me.js').NoteEntityRow[]): Promise<void> {
+    const del = this.d.prepare('DELETE FROM note_entities WHERE note_id = ?');
+    const ins = this.d.prepare('INSERT INTO note_entities (id, note_id, user_id, tenant_id, name, name_key, type, created_at, canonical_key, canonical_name) VALUES (@id,@note_id,@user_id,@tenant_id,@name,@name_key,@type,@created_at,@canonical_key,@canonical_name)');
+    this.d.transaction(() => { del.run(noteId); for (const r of rows) ins.run({ canonical_key: null, canonical_name: null, ...r }); })();
+  }
+  async listNoteEntities(noteId: string): Promise<import('./db-types/adapter-me.js').NoteEntityRow[]> {
+    return this.d.prepare('SELECT * FROM note_entities WHERE note_id = ? ORDER BY created_at ASC').all(noteId) as import('./db-types/adapter-me.js').NoteEntityRow[];
+  }
+  async listUserNoteEntities(userId: string, tenantId?: string | null): Promise<import('./db-types/adapter-me.js').NoteEntityRow[]> {
+    return (tenantId === undefined
+      ? this.d.prepare('SELECT * FROM note_entities WHERE user_id = ?').all(userId)
+      : this.d.prepare('SELECT * FROM note_entities WHERE user_id = ? AND tenant_id IS ?').all(userId, tenantId ?? null)) as import('./db-types/adapter-me.js').NoteEntityRow[];
+  }
+  // geneWeave UI rebuild (m135) — per-tenant Appearance / branding.
+  async getTenantAppearance(tenantId: string): Promise<import('./db-types/adapter-me.js').TenantAppearanceRow | null> {
+    return (this.d.prepare('SELECT * FROM tenant_appearance WHERE tenant_id = ?').get(tenantId) ?? null) as import('./db-types/adapter-me.js').TenantAppearanceRow | null;
+  }
+  async upsertTenantAppearance(row: import('./db-types/adapter-me.js').TenantAppearanceRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO tenant_appearance (tenant_id, enabled, brand_name, logo_svg, color_scheme, variant, accent, on_accent, corner_style, font_display, font_body, density, updated_at)
+       VALUES (@tenant_id,@enabled,@brand_name,@logo_svg,@color_scheme,@variant,@accent,@on_accent,@corner_style,@font_display,@font_body,@density,@updated_at)
+       ON CONFLICT(tenant_id) DO UPDATE SET enabled=excluded.enabled, brand_name=excluded.brand_name, logo_svg=excluded.logo_svg, color_scheme=excluded.color_scheme, variant=excluded.variant, accent=excluded.accent, on_accent=excluded.on_accent, corner_style=excluded.corner_style, font_display=excluded.font_display, font_body=excluded.font_body, density=excluded.density, updated_at=excluded.updated_at`,
+    ).run(row);
+  }
+  async listTenantAppearance(): Promise<import('./db-types/adapter-me.js').TenantAppearanceRow[]> {
+    return this.d.prepare('SELECT * FROM tenant_appearance ORDER BY tenant_id ASC').all() as import('./db-types/adapter-me.js').TenantAppearanceRow[];
+  }
+
+  // m137 — per-tenant AI transparency (answer feedback itself is stored via insertMessageFeedback/listMessageFeedback).
+  async getTenantAiTransparency(tenantId: string): Promise<import('./db-types/adapter-me.js').TenantAiTransparencyRow | null> {
+    return (this.d.prepare('SELECT * FROM tenant_ai_transparency WHERE tenant_id = ?').get(tenantId) as import('./db-types/adapter-me.js').TenantAiTransparencyRow | undefined) ?? null;
+  }
+  async upsertTenantAiTransparency(row: import('./db-types/adapter-me.js').TenantAiTransparencyRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO tenant_ai_transparency (tenant_id, show_ai_label, disclosure_text, content_warnings, feedback_enabled)
+       VALUES (@tenant_id, @show_ai_label, @disclosure_text, @content_warnings, @feedback_enabled)
+       ON CONFLICT(tenant_id) DO UPDATE SET
+         show_ai_label=excluded.show_ai_label, disclosure_text=excluded.disclosure_text,
+         content_warnings=excluded.content_warnings, feedback_enabled=excluded.feedback_enabled, updated_at=datetime('now')`,
+    ).run(row);
+  }
+  async listTenantAiTransparency(): Promise<import('./db-types/adapter-me.js').TenantAiTransparencyRow[]> {
+    return this.d.prepare('SELECT * FROM tenant_ai_transparency ORDER BY tenant_id ASC').all() as import('./db-types/adapter-me.js').TenantAiTransparencyRow[];
+  }
+
+  // m138 — answer citations in chat.
+  async insertMessageCitations(rows: import('./db-types/adapter-me.js').MessageCitationRow[]): Promise<void> {
+    if (!rows.length) return;
+    const stmt = this.d.prepare(
+      `INSERT INTO message_citations (id, message_id, chat_id, user_id, tenant_id, n, source_id, source_kind, source_title, quote, char_start, char_end)
+       VALUES (@id, @message_id, @chat_id, @user_id, @tenant_id, @n, @source_id, @source_kind, @source_title, @quote, @char_start, @char_end)`,
+    );
+    const tx = this.d.transaction((rs: import('./db-types/adapter-me.js').MessageCitationRow[]) => { for (const r of rs) stmt.run(r); });
+    tx(rows);
+  }
+  async listMessageCitations(messageId: string): Promise<import('./db-types/adapter-me.js').MessageCitationRow[]> {
+    return this.d.prepare('SELECT * FROM message_citations WHERE message_id = ? ORDER BY n ASC').all(messageId) as import('./db-types/adapter-me.js').MessageCitationRow[];
+  }
+  async getTenantChatCitations(tenantId: string): Promise<import('./db-types/adapter-me.js').TenantChatCitationsRow | null> {
+    return (this.d.prepare('SELECT * FROM tenant_chat_citations WHERE tenant_id = ?').get(tenantId) as import('./db-types/adapter-me.js').TenantChatCitationsRow | undefined) ?? null;
+  }
+  async upsertTenantChatCitations(row: import('./db-types/adapter-me.js').TenantChatCitationsRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO tenant_chat_citations (tenant_id, enabled, min_citations, scope, max_sources)
+       VALUES (@tenant_id, @enabled, @min_citations, @scope, @max_sources)
+       ON CONFLICT(tenant_id) DO UPDATE SET
+         enabled=excluded.enabled, min_citations=excluded.min_citations, scope=excluded.scope,
+         max_sources=excluded.max_sources, updated_at=datetime('now')`,
+    ).run(row);
+  }
+  async listTenantChatCitations(): Promise<import('./db-types/adapter-me.js').TenantChatCitationsRow[]> {
+    return this.d.prepare('SELECT * FROM tenant_chat_citations ORDER BY tenant_id ASC').all() as import('./db-types/adapter-me.js').TenantChatCitationsRow[];
+  }
+
+  // m139 — regenerate with version history.
+  async insertMessageVariants(rows: import('./db-types/adapter-me.js').MessageVariantRow[]): Promise<void> {
+    if (!rows.length) return;
+    const stmt = this.d.prepare(
+      `INSERT INTO message_variants (id, group_id, chat_id, user_id, tenant_id, variant_index, content, model, provider, reason)
+       VALUES (@id, @group_id, @chat_id, @user_id, @tenant_id, @variant_index, @content, @model, @provider, @reason)`,
+    );
+    const tx = this.d.transaction((rs: import('./db-types/adapter-me.js').MessageVariantRow[]) => { for (const r of rs) stmt.run(r); });
+    tx(rows);
+  }
+  async listMessageVariants(groupId: string): Promise<import('./db-types/adapter-me.js').MessageVariantRow[]> {
+    return this.d.prepare('SELECT * FROM message_variants WHERE group_id = ? ORDER BY variant_index ASC').all(groupId) as import('./db-types/adapter-me.js').MessageVariantRow[];
+  }
+  async updateMessageContent(messageId: string, content: string, metadata: string | null): Promise<void> {
+    this.d.prepare('UPDATE messages SET content = ?, metadata = ? WHERE id = ?').run(content, metadata, messageId);
+  }
+  async getTenantAnswerVersions(tenantId: string): Promise<import('./db-types/adapter-me.js').TenantAnswerVersionsRow | null> {
+    return (this.d.prepare('SELECT * FROM tenant_answer_versions WHERE tenant_id = ?').get(tenantId) as import('./db-types/adapter-me.js').TenantAnswerVersionsRow | undefined) ?? null;
+  }
+  async upsertTenantAnswerVersions(row: import('./db-types/adapter-me.js').TenantAnswerVersionsRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO tenant_answer_versions (tenant_id, enabled, max_variants)
+       VALUES (@tenant_id, @enabled, @max_variants)
+       ON CONFLICT(tenant_id) DO UPDATE SET enabled=excluded.enabled, max_variants=excluded.max_variants, updated_at=datetime('now')`,
+    ).run(row);
+  }
+  async listTenantAnswerVersions(): Promise<import('./db-types/adapter-me.js').TenantAnswerVersionsRow[]> {
+    return this.d.prepare('SELECT * FROM tenant_answer_versions ORDER BY tenant_id ASC').all() as import('./db-types/adapter-me.js').TenantAnswerVersionsRow[];
+  }
+
+  // weaveNotes Phase 5 (m134) — background-memory extraction state.
+  async getNoteMemoryState(noteId: string, userId: string): Promise<import('./db-types/adapter-me.js').NoteMemoryStateRow | null> {
+    return (this.d.prepare('SELECT * FROM note_memory_state WHERE note_id = ? AND user_id = ?').get(noteId, userId) ?? null) as import('./db-types/adapter-me.js').NoteMemoryStateRow | null;
+  }
+  async upsertNoteMemoryState(row: import('./db-types/adapter-me.js').NoteMemoryStateRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO note_memory_state (note_id, user_id, tenant_id, content_hash, memory_ids_json, memory_count, last_extracted_at)
+       VALUES (@note_id,@user_id,@tenant_id,@content_hash,@memory_ids_json,@memory_count,@last_extracted_at)
+       ON CONFLICT(note_id) DO UPDATE SET content_hash=excluded.content_hash, memory_ids_json=excluded.memory_ids_json, memory_count=excluded.memory_count, last_extracted_at=excluded.last_extracted_at`,
+    ).run(row);
+  }
+  async listNotesNeedingMemoryExtraction(limit: number): Promise<import('./db-types/adapter-me.js').NoteNeedingMemoryRow[]> {
+    return this.d.prepare(
+      `SELECT n.id AS id, n.owner_user_id AS owner_user_id, n.tenant_id AS tenant_id, n.updated_at AS updated_at
+         FROM notes n
+         LEFT JOIN note_memory_state s ON s.note_id = n.id
+        WHERE (n.is_template = 0 OR n.is_template IS NULL)
+          AND (n.archived_at IS NULL)
+          AND (s.note_id IS NULL OR datetime(n.updated_at) > datetime(s.last_extracted_at))
+        ORDER BY n.updated_at DESC
+        LIMIT ?`,
+    ).all(Math.max(1, Math.min(200, limit))) as import('./db-types/adapter-me.js').NoteNeedingMemoryRow[];
+  }
+  // weaveNotes Phase 4 (m133) — captured meetings.
+  async createNoteMeeting(row: import('./db-types/adapter-me.js').NoteMeetingRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO note_meetings (id, note_id, user_id, tenant_id, title, source, language, duration_sec, segments_json, summary, action_items_json, decisions_json, cited, cite_total, audio_retained, created_at)
+       VALUES (@id,@note_id,@user_id,@tenant_id,@title,@source,@language,@duration_sec,@segments_json,@summary,@action_items_json,@decisions_json,@cited,@cite_total,@audio_retained,@created_at)`,
+    ).run(row);
+  }
+  async getNoteMeetingByNote(noteId: string, userId: string): Promise<import('./db-types/adapter-me.js').NoteMeetingRow | null> {
+    return (this.d.prepare('SELECT * FROM note_meetings WHERE note_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT 1').get(noteId, userId) ?? null) as import('./db-types/adapter-me.js').NoteMeetingRow | null;
+  }
+  async listUserNoteMeetings(userId: string, tenantId?: string | null): Promise<import('./db-types/adapter-me.js').NoteMeetingRow[]> {
+    return (tenantId === undefined
+      ? this.d.prepare('SELECT * FROM note_meetings WHERE user_id = ? ORDER BY created_at DESC').all(userId)
+      : this.d.prepare('SELECT * FROM note_meetings WHERE user_id = ? AND tenant_id IS ? ORDER BY created_at DESC').all(userId, tenantId ?? null)) as import('./db-types/adapter-me.js').NoteMeetingRow[];
+  }
+  async replaceNoteRelations(noteId: string, rows: import('./db-types/adapter-me.js').NoteRelationRow[]): Promise<void> {
+    const del = this.d.prepare('DELETE FROM note_relations WHERE note_id = ?');
+    const ins = this.d.prepare('INSERT INTO note_relations (id, note_id, user_id, tenant_id, subject, predicate, object, created_at) VALUES (@id,@note_id,@user_id,@tenant_id,@subject,@predicate,@object,@created_at)');
+    this.d.transaction(() => { del.run(noteId); for (const r of rows) ins.run(r); })();
+  }
+  async listNoteRelations(noteId: string): Promise<import('./db-types/adapter-me.js').NoteRelationRow[]> {
+    return this.d.prepare('SELECT * FROM note_relations WHERE note_id = ? ORDER BY created_at ASC').all(noteId) as import('./db-types/adapter-me.js').NoteRelationRow[];
+  }
+  async upsertNoteEmbedding(row: import('./db-types/adapter-me.js').NoteEmbeddingRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO note_embeddings (note_id, user_id, tenant_id, dim, embedding_json, content_hash, title, updated_at)
+       VALUES (@note_id,@user_id,@tenant_id,@dim,@embedding_json,@content_hash,@title,@updated_at)
+       ON CONFLICT(note_id) DO UPDATE SET embedding_json=excluded.embedding_json, dim=excluded.dim, content_hash=excluded.content_hash, title=excluded.title, updated_at=excluded.updated_at`,
+    ).run(row);
+  }
+  async getNoteEmbedding(noteId: string, tenantId?: string | null): Promise<import('./db-types/adapter-me.js').NoteEmbeddingRow | null> {
+    // tenant_id IS ? is null-safe (matches NULL rows when tenantId is null). When tenantId is
+    // undefined we skip the tenant gate for backward-compatible internal callers.
+    const row = tenantId === undefined
+      ? this.d.prepare('SELECT * FROM note_embeddings WHERE note_id = ?').get(noteId)
+      : this.d.prepare('SELECT * FROM note_embeddings WHERE note_id = ? AND tenant_id IS ?').get(noteId, tenantId ?? null);
+    return (row ?? null) as import('./db-types/adapter-me.js').NoteEmbeddingRow | null;
+  }
+  async listUserNoteEmbeddings(userId: string, tenantId?: string | null): Promise<import('./db-types/adapter-me.js').NoteEmbeddingRow[]> {
+    return (tenantId === undefined
+      ? this.d.prepare('SELECT * FROM note_embeddings WHERE user_id = ?').all(userId)
+      : this.d.prepare('SELECT * FROM note_embeddings WHERE user_id = ? AND tenant_id IS ?').all(userId, tenantId ?? null)) as import('./db-types/adapter-me.js').NoteEmbeddingRow[];
+  }
+
+  // weaveNotes Phase 8 — run output embeddings (workspace RAG over runs).
+  async upsertRunEmbedding(row: import('./db-types/adapter-me.js').RunEmbeddingRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO run_embeddings (run_id, user_id, tenant_id, dim, embedding_json, content_hash, title, content, updated_at)
+       VALUES (@run_id,@user_id,@tenant_id,@dim,@embedding_json,@content_hash,@title,@content,@updated_at)
+       ON CONFLICT(run_id) DO UPDATE SET embedding_json=excluded.embedding_json, dim=excluded.dim, content_hash=excluded.content_hash, title=excluded.title, content=excluded.content, updated_at=excluded.updated_at`,
+    ).run(row);
+  }
+  async getRunEmbedding(runId: string, tenantId?: string | null): Promise<import('./db-types/adapter-me.js').RunEmbeddingRow | null> {
+    const row = tenantId === undefined
+      ? this.d.prepare('SELECT * FROM run_embeddings WHERE run_id = ?').get(runId)
+      : this.d.prepare('SELECT * FROM run_embeddings WHERE run_id = ? AND tenant_id IS ?').get(runId, tenantId ?? null);
+    return (row ?? null) as import('./db-types/adapter-me.js').RunEmbeddingRow | null;
+  }
+  async listUserRunEmbeddings(userId: string, tenantId?: string | null): Promise<import('./db-types/adapter-me.js').RunEmbeddingRow[]> {
+    return (tenantId === undefined
+      ? this.d.prepare('SELECT * FROM run_embeddings WHERE user_id = ?').all(userId)
+      : this.d.prepare('SELECT * FROM run_embeddings WHERE user_id = ? AND tenant_id IS ?').all(userId, tenantId ?? null)) as import('./db-types/adapter-me.js').RunEmbeddingRow[];
+  }
+
+  // weaveNotes Phase 8 — per-note version history.
+  async createNoteVersion(row: import('./db-types/adapter-me.js').NoteVersionRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO note_versions (id, note_id, user_id, tenant_id, title, doc_json, label, reason, word_count, created_by, created_at)
+       VALUES (@id, @note_id, @user_id, @tenant_id, @title, @doc_json, @label, @reason, @word_count, @created_by, @created_at)`,
+    ).run(row);
+  }
+  async listNoteVersions(noteId: string): Promise<import('./db-types/adapter-me.js').NoteVersionRow[]> {
+    return this.d.prepare('SELECT * FROM note_versions WHERE note_id = ? ORDER BY created_at DESC').all(noteId) as import('./db-types/adapter-me.js').NoteVersionRow[];
+  }
+  async getNoteVersion(id: string): Promise<import('./db-types/adapter-me.js').NoteVersionRow | null> {
+    return (this.d.prepare('SELECT * FROM note_versions WHERE id = ?').get(id) ?? null) as import('./db-types/adapter-me.js').NoteVersionRow | null;
+  }
+
+  // weaveNotes Phase 8 — block comments on notes (mirrors run_comments).
+  async createNoteComment(row: import('./db-types/adapter-me.js').NoteCommentRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO note_comments (id, note_id, tenant_id, thread_id, parent_id, author_id, body, body_html, mentions_json, anchor_block_id, created_at, updated_at, edited_at, deleted_at, deleted_by, resolved_at, resolved_by)
+       VALUES (@id, @note_id, @tenant_id, @thread_id, @parent_id, @author_id, @body, @body_html, @mentions_json, @anchor_block_id, @created_at, @updated_at, @edited_at, @deleted_at, @deleted_by, @resolved_at, @resolved_by)`,
+    ).run(row);
+  }
+  async getNoteComment(id: string): Promise<import('./db-types/adapter-me.js').NoteCommentRow | null> {
+    return (this.d.prepare('SELECT * FROM note_comments WHERE id = ?').get(id) ?? null) as import('./db-types/adapter-me.js').NoteCommentRow | null;
+  }
+  async listNoteComments(noteId: string): Promise<import('./db-types/adapter-me.js').NoteCommentRow[]> {
+    return this.d.prepare('SELECT * FROM note_comments WHERE note_id = ? ORDER BY created_at ASC').all(noteId) as import('./db-types/adapter-me.js').NoteCommentRow[];
+  }
+  async listNoteCommentThread(threadId: string): Promise<import('./db-types/adapter-me.js').NoteCommentRow[]> {
+    return this.d.prepare('SELECT * FROM note_comments WHERE thread_id = ? ORDER BY created_at ASC').all(threadId) as import('./db-types/adapter-me.js').NoteCommentRow[];
+  }
+  async updateNoteCommentBody(id: string, body: string, bodyHtml: string, mentionsJson: string, editedAt: number, updatedAt: number): Promise<void> {
+    this.d.prepare('UPDATE note_comments SET body = ?, body_html = ?, mentions_json = ?, edited_at = ?, updated_at = ? WHERE id = ?').run(body, bodyHtml, mentionsJson, editedAt, updatedAt, id);
+  }
+  async softDeleteNoteComment(id: string, deletedBy: string, deletedAt: number): Promise<void> {
+    this.d.prepare(`UPDATE note_comments SET body = '', body_html = '', mentions_json = '[]', deleted_at = ?, deleted_by = ?, updated_at = ? WHERE id = ?`).run(deletedAt, deletedBy, deletedAt, id);
+  }
+  async setNoteThreadResolution(threadId: string, resolvedAt: number | null, resolvedBy: string | null, updatedAt: number): Promise<void> {
+    this.d.prepare('UPDATE note_comments SET resolved_at = ?, resolved_by = ?, updated_at = ? WHERE id = ?').run(resolvedAt, resolvedBy, updatedAt, threadId);
+  }
+
+  // weaveNotes Phase 8 — synced blocks (transclusion).
+  async createNoteSyncedBlock(row: import('./db-types/adapter-me.js').NoteSyncedBlockRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO note_synced_blocks (id, note_id, user_id, tenant_id, source_note_id, source_block_id, created_at)
+       VALUES (@id, @note_id, @user_id, @tenant_id, @source_note_id, @source_block_id, @created_at)`,
+    ).run(row);
+  }
+  async getNoteSyncedBlock(id: string): Promise<import('./db-types/adapter-me.js').NoteSyncedBlockRow | null> {
+    return (this.d.prepare('SELECT * FROM note_synced_blocks WHERE id = ?').get(id) ?? null) as import('./db-types/adapter-me.js').NoteSyncedBlockRow | null;
+  }
+  async listNoteSyncedBlocks(noteId: string): Promise<import('./db-types/adapter-me.js').NoteSyncedBlockRow[]> {
+    return this.d.prepare('SELECT * FROM note_synced_blocks WHERE note_id = ? ORDER BY created_at ASC').all(noteId) as import('./db-types/adapter-me.js').NoteSyncedBlockRow[];
+  }
+  async deleteNoteSyncedBlock(id: string, noteId: string): Promise<void> {
+    this.d.prepare('DELETE FROM note_synced_blocks WHERE id = ? AND note_id = ?').run(id, noteId);
+  }
+
+  // weaveNotes Phase 0 — capability config (single 'global' row) + activity log.
+  async getWeaveNotesSettings(): Promise<import('./db-types/adapter-me.js').WeaveNotesSettingsRow | null> {
+    return (this.d.prepare("SELECT * FROM weavenotes_settings WHERE id = 'global'").get() ?? null) as import('./db-types/adapter-me.js').WeaveNotesSettingsRow | null;
+  }
+  async updateWeaveNotesSettings(fields: Partial<Omit<import('./db-types/adapter-me.js').WeaveNotesSettingsRow, 'id'>>): Promise<void> {
+    const keys = Object.keys(fields);
+    if (!keys.length) return;
+    const set = keys.map((k) => `${k} = @${k}`).join(', ');
+    this.d.prepare(`UPDATE weavenotes_settings SET ${set}, updated_at = datetime('now') WHERE id = 'global'`).run(fields as Record<string, unknown>);
+  }
+  // weaveNotes — per-tenant routing mode for a note AI action. Resolution: tenant row → global ('')
+  // row → 'direct'. So a tenant override wins, otherwise the global default, otherwise the safe fast path.
+  async resolveNoteActionMode(tenantId: string | null, actionKey: string): Promise<'direct' | 'agent' | 'supervisor'> {
+    const pick = (tid: string): string | undefined =>
+      (this.d.prepare('SELECT mode FROM note_action_modes WHERE tenant_id = ? AND action_key = ?').get(tid, actionKey) as { mode?: string } | undefined)?.mode;
+    const mode = (tenantId ? pick(tenantId) : undefined) ?? pick('') ?? 'direct';
+    return mode === 'agent' || mode === 'supervisor' ? mode : 'direct';
+  }
+  async getNoteImageLanguage(userId: string): Promise<string> {
+    const row = this.d.prepare('SELECT notes_image_language FROM user_preferences WHERE user_id = ?').get(userId) as { notes_image_language?: string } | undefined;
+    return (typeof row?.notes_image_language === 'string' && row.notes_image_language.trim()) ? row.notes_image_language : 'en';
+  }
+  async setNoteImageLanguage(userId: string, language: string): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO user_preferences (user_id, notes_image_language) VALUES (?, ?)
+         ON CONFLICT(user_id) DO UPDATE SET notes_image_language = excluded.notes_image_language, updated_at = datetime('now')`,
+    ).run(userId, language);
+  }
+  async listNoteActionModes(): Promise<import('./db-types/adapter-me.js').NoteActionModeRow[]> {
+    return this.d.prepare('SELECT * FROM note_action_modes ORDER BY tenant_id ASC, action_key ASC').all() as import('./db-types/adapter-me.js').NoteActionModeRow[];
+  }
+  async getNoteActionMode(id: string): Promise<import('./db-types/adapter-me.js').NoteActionModeRow | null> {
+    return (this.d.prepare('SELECT * FROM note_action_modes WHERE id = ?').get(id) ?? null) as import('./db-types/adapter-me.js').NoteActionModeRow | null;
+  }
+  async createNoteActionMode(row: { id: string; tenant_id: string; action_key: string; mode: string }): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO note_action_modes (id, tenant_id, action_key, mode, updated_at)
+         VALUES (@id, @tenant_id, @action_key, @mode, datetime('now'))
+       ON CONFLICT(tenant_id, action_key) DO UPDATE SET mode = excluded.mode, updated_at = datetime('now')`,
+    ).run(row);
+  }
+  async updateNoteActionMode(id: string, fields: Partial<Pick<import('./db-types/adapter-me.js').NoteActionModeRow, 'tenant_id' | 'action_key' | 'mode'>>): Promise<void> {
+    const keys = Object.keys(fields);
+    if (!keys.length) return;
+    const set = keys.map((k) => `${k} = @${k}`).join(', ');
+    this.d.prepare(`UPDATE note_action_modes SET ${set}, updated_at = datetime('now') WHERE id = @id`).run({ ...fields, id });
+  }
+  async deleteNoteActionMode(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM note_action_modes WHERE id = ?').run(id);
+  }
+  async recordNoteActivity(row: import('./db-types/adapter-me.js').NoteActivityRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO note_activity (id, note_id, user_id, tenant_id, action, actor, summary, detail_json, created_at)
+       VALUES (@id, @note_id, @user_id, @tenant_id, @action, @actor, @summary, @detail_json, COALESCE(@created_at, datetime('now')))`,
+    ).run(row);
+  }
+  async listNoteActivity(noteId: string, limit = 50): Promise<import('./db-types/adapter-me.js').NoteActivityRow[]> {
+    return this.d.prepare('SELECT * FROM note_activity WHERE note_id = ? ORDER BY created_at DESC, id DESC LIMIT ?').all(noteId, Math.max(1, Math.min(500, limit))) as import('./db-types/adapter-me.js').NoteActivityRow[];
+  }
+  // Phase 0-B — TENANT-scoped audit feed for the admin/compliance viewer + export.
+  // KEYSET pagination on (created_at, id) DESC — NOT offset, which on a live append-only log would
+  // skip/duplicate rows as new events land. tenant_id is null-safe (`IS ?`). Joins the note title.
+  async listTenantNoteActivity(tenantId: string | null, opts: import('./db-types/adapter-me.js').NoteActivityQuery = {}): Promise<Array<import('./db-types/adapter-me.js').NoteActivityRow & { note_title?: string | null }>> {
+    const limit = Math.max(1, Math.min(1000, opts.limit ?? 100));
+    const where: string[] = ['a.tenant_id IS ?'];
+    const args: unknown[] = [tenantId ?? null];
+    if (opts.action) { where.push('a.action = ?'); args.push(opts.action); }
+    if (opts.actor) { where.push('a.actor = ?'); args.push(opts.actor); }
+    if (opts.userId) { where.push('a.user_id = ?'); args.push(opts.userId); }
+    if (opts.noteId) { where.push('a.note_id = ?'); args.push(opts.noteId); }
+    if (opts.fromDate) { where.push('a.created_at >= ?'); args.push(opts.fromDate); }
+    if (opts.toDate) { where.push('a.created_at <= ?'); args.push(opts.toDate); }
+    // Keyset cursor: fetch the page strictly OLDER than (beforeCreatedAt, beforeId).
+    if (opts.beforeCreatedAt && opts.beforeId) { where.push('(a.created_at, a.id) < (?, ?)'); args.push(opts.beforeCreatedAt, opts.beforeId); }
+    args.push(limit);
+    return this.d.prepare(
+      `SELECT a.*, n.title AS note_title FROM note_activity a LEFT JOIN notes n ON n.id = a.note_id
+       WHERE ${where.join(' AND ')} ORDER BY a.created_at DESC, a.id DESC LIMIT ?`,
+    ).all(...args as never[]) as Array<import('./db-types/adapter-me.js').NoteActivityRow & { note_title?: string | null }>;
+  }
+  // Phase 0-B — retention pruning. Deletes activity older than the cutoff ISO timestamp. Returns count.
+  async pruneNoteActivity(beforeIso: string): Promise<number> {
+    const info = this.d.prepare('DELETE FROM note_activity WHERE created_at < ?').run(beforeIso);
+    return info.changes ?? 0;
+  }
+
+  // Registered outbound webhook endpoints.
+  async createWebhookEndpoint(row: { id: string; tenant_id?: string | null; user_id: string; url: string; signing_secret: string; created_at: number }): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO webhook_endpoints (id, tenant_id, user_id, url, signing_secret, enabled, created_at)
+       VALUES (?, ?, ?, ?, ?, 1, ?)`,
+    ).run(row.id, row.tenant_id ?? null, row.user_id, row.url, row.signing_secret, row.created_at);
+  }
+  async listWebhookEndpoints(userId: string): Promise<import('./db-types/adapter-me.js').WebhookEndpointRow[]> {
+    return this.d.prepare('SELECT * FROM webhook_endpoints WHERE user_id = ? AND revoked_at IS NULL AND enabled = 1 ORDER BY created_at ASC').all(userId) as import('./db-types/adapter-me.js').WebhookEndpointRow[];
+  }
+  async revokeWebhookEndpoint(id: string, userId: string, revokedAt: number): Promise<number> {
+    return this.d.prepare('UPDATE webhook_endpoints SET revoked_at = ?, enabled = 0 WHERE id = ? AND user_id = ?').run(revokedAt, id, userId).changes;
   }
 
   // ── HITL approvals (m64 table, m93 run-scoped) ─────────────────────────────
@@ -9228,6 +10027,8 @@ export class SQLiteAdapter implements DatabaseAdapter {
       }
     }
     if (filter?.favorite) { conditions.push('favorite = 1'); }
+    // weaveNotes Phase 6: by default show only ACTIVE notes; `archived` shows only the trash.
+    conditions.push(filter?.archived ? 'archived_at IS NOT NULL' : 'archived_at IS NULL');
     if (filter?.search) {
       conditions.push('(title LIKE ? OR doc_json LIKE ?)');
       const q = `%${filter.search}%`;
@@ -9236,7 +10037,8 @@ export class SQLiteAdapter implements DatabaseAdapter {
     const limit = filter?.limit ?? 100;
     return this.d.prepare(
       `SELECT id, owner_user_id, tenant_id, title, icon, cover, parent_note_id,
-              sensitivity, is_template, template_key, favorite, created_at, updated_at
+              sensitivity, is_template, template_key, favorite,
+              page_theme, freeform_mode, cover_image_artifact_id, archived_at, created_at, updated_at
        FROM notes WHERE ${conditions.join(' AND ')}
        ORDER BY favorite DESC, updated_at DESC LIMIT ?`,
     ).all(...params, limit) as import('./db-types/adapter-agenda-notes.js').NoteRow[];
@@ -9259,23 +10061,27 @@ export class SQLiteAdapter implements DatabaseAdapter {
     tenant_id?: string | null; icon?: string | null; cover?: string | null;
     parent_note_id?: string | null; sensitivity?: string;
     doc_json?: string; is_template?: number; template_key?: string | null; favorite?: number;
+    page_theme?: string; freeform_mode?: number; cover_image_artifact_id?: string | null;
   }): Promise<void> {
     this.d.prepare(`
       INSERT INTO notes
         (id, owner_user_id, tenant_id, title, icon, cover, parent_note_id,
-         sensitivity, doc_json, is_template, template_key, favorite)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         sensitivity, doc_json, is_template, template_key, favorite,
+         page_theme, freeform_mode, cover_image_artifact_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       row.id, row.owner_user_id, row.tenant_id ?? null, row.title,
       row.icon ?? null, row.cover ?? null, row.parent_note_id ?? null,
       row.sensitivity ?? 'normal',
       row.doc_json ?? '{"type":"doc","content":[]}',
       row.is_template ?? 0, row.template_key ?? null, row.favorite ?? 0,
+      row.page_theme ?? 'pro', row.freeform_mode ?? 0, row.cover_image_artifact_id ?? null,
     );
   }
 
   async updateNote(id: string, userId: string, patch: Partial<Pick<import('./db-types/adapter-agenda-notes.js').NoteRow,
     'title' | 'icon' | 'cover' | 'parent_note_id' | 'sensitivity' | 'doc_json' | 'favorite'
+    | 'page_theme' | 'freeform_mode' | 'cover_image_artifact_id'
   >>): Promise<void> {
     const fields: string[] = [];
     const values: unknown[] = [];
@@ -9287,10 +10093,30 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (patch.sensitivity !== undefined) set('sensitivity', patch.sensitivity);
     if (patch.doc_json !== undefined) set('doc_json', patch.doc_json);
     if (patch.favorite !== undefined) set('favorite', patch.favorite);
+    if (patch.page_theme !== undefined) set('page_theme', patch.page_theme);
+    if (patch.freeform_mode !== undefined) set('freeform_mode', patch.freeform_mode);
+    if (patch.cover_image_artifact_id !== undefined) set('cover_image_artifact_id', patch.cover_image_artifact_id);
     if (fields.length === 0) return;
     fields.push('updated_at = datetime(\'now\')');
     values.push(id, userId);
     this.d.prepare(`UPDATE notes SET ${fields.join(', ')} WHERE id = ? AND owner_user_id = ?`).run(...values);
+  }
+
+  async archiveNote(id: string, userId: string, at: string): Promise<boolean> {
+    // Owner-scoped soft-delete; only flips an ACTIVE note (archived_at IS NULL) so re-archiving is a no-op.
+    const r = this.d.prepare(
+      `UPDATE notes SET archived_at = ?, updated_at = datetime('now')
+       WHERE id = ? AND owner_user_id = ? AND archived_at IS NULL`,
+    ).run(at, id, userId);
+    return r.changes > 0;
+  }
+
+  async restoreNote(id: string, userId: string): Promise<boolean> {
+    const r = this.d.prepare(
+      `UPDATE notes SET archived_at = NULL, updated_at = datetime('now')
+       WHERE id = ? AND owner_user_id = ? AND archived_at IS NOT NULL`,
+    ).run(id, userId);
+    return r.changes > 0;
   }
 
   async deleteNote(id: string, userId: string): Promise<boolean> {
@@ -9373,6 +10199,30 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async deleteNoteDbRow(id: string, databaseId: string): Promise<void> {
     this.d.prepare('DELETE FROM note_db_rows WHERE id = ? AND database_id = ?').run(id, databaseId);
+  }
+
+  // ─── weaveNotes Phase 5: flashcards (SM-2) ──────────────────────────────────
+  async createNoteFlashcard(row: import('./db-types/adapter-agenda-notes.js').NoteFlashcardRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO note_flashcards (id, note_id, owner_user_id, tenant_id, front, back, ease_factor, interval_days, repetitions, due_at, last_reviewed_at, created_at)
+       VALUES (@id, @note_id, @owner_user_id, @tenant_id, @front, @back, @ease_factor, @interval_days, @repetitions, @due_at, @last_reviewed_at, @created_at)`,
+    ).run(row);
+  }
+  async listNoteFlashcards(noteId: string, ownerUserId: string): Promise<import('./db-types/adapter-agenda-notes.js').NoteFlashcardRow[]> {
+    return this.d.prepare('SELECT * FROM note_flashcards WHERE note_id = ? AND owner_user_id = ? ORDER BY created_at ASC').all(noteId, ownerUserId) as import('./db-types/adapter-agenda-notes.js').NoteFlashcardRow[];
+  }
+  async getNoteFlashcard(id: string, ownerUserId: string): Promise<import('./db-types/adapter-agenda-notes.js').NoteFlashcardRow | null> {
+    return (this.d.prepare('SELECT * FROM note_flashcards WHERE id = ? AND owner_user_id = ?').get(id, ownerUserId) as import('./db-types/adapter-agenda-notes.js').NoteFlashcardRow) ?? null;
+  }
+  async listDueFlashcards(ownerUserId: string, nowMs: number, limit: number): Promise<import('./db-types/adapter-agenda-notes.js').NoteFlashcardRow[]> {
+    return this.d.prepare('SELECT * FROM note_flashcards WHERE owner_user_id = ? AND due_at <= ? ORDER BY due_at ASC LIMIT ?').all(ownerUserId, nowMs, Math.max(1, Math.min(500, limit))) as import('./db-types/adapter-agenda-notes.js').NoteFlashcardRow[];
+  }
+  async updateNoteFlashcardSchedule(id: string, ownerUserId: string, sched: { ease_factor: number; interval_days: number; repetitions: number; due_at: number; last_reviewed_at: number; stability?: number | null; difficulty?: number | null }): Promise<void> {
+    this.d.prepare('UPDATE note_flashcards SET ease_factor = ?, interval_days = ?, repetitions = ?, due_at = ?, last_reviewed_at = ?, stability = ?, difficulty = ? WHERE id = ? AND owner_user_id = ?')
+      .run(sched.ease_factor, sched.interval_days, sched.repetitions, sched.due_at, sched.last_reviewed_at, sched.stability ?? null, sched.difficulty ?? null, id, ownerUserId);
+  }
+  async countNoteFlashcards(noteId: string, ownerUserId: string): Promise<number> {
+    return (this.d.prepare('SELECT COUNT(*) AS n FROM note_flashcards WHERE note_id = ? AND owner_user_id = ?').get(noteId, ownerUserId) as { n: number }).n;
   }
 
   // ─── Voice configs ────────────────────────────────────────────────────────
@@ -9941,6 +10791,122 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async deleteTenantArtifactSettings(tenantId: string): Promise<void> {
     try { this.d.prepare(`DELETE FROM tenant_artifact_settings WHERE tenant_id = ?`).run(tenantId); } catch { /* ignore */ }
+  }
+
+  // ─── Tenant enterprise governance (m127) ─────────────────────────────────────
+
+  async getTenantGovernance(tenantId: string): Promise<import('./db-types/governance.js').TenantGovernanceRow | null> {
+    try { return (this.d.prepare(`SELECT * FROM tenant_governance WHERE tenant_id = ?`).get(tenantId) as import('./db-types/governance.js').TenantGovernanceRow) ?? null; } catch { return null; }
+  }
+
+  async listTenantGovernance(): Promise<import('./db-types/governance.js').TenantGovernanceRow[]> {
+    try { return this.d.prepare(`SELECT * FROM tenant_governance ORDER BY tenant_id ASC`).all() as import('./db-types/governance.js').TenantGovernanceRow[]; } catch { return []; }
+  }
+
+  async upsertTenantGovernance(
+    tenantId: string,
+    fields: Partial<Omit<import('./db-types/governance.js').TenantGovernanceRow, 'id' | 'tenant_id' | 'created_at' | 'updated_at'>>,
+  ): Promise<import('./db-types/governance.js').TenantGovernanceRow> {
+    const now = new Date().toISOString();
+    const existing = await this.getTenantGovernance(tenantId);
+    const cols = ['data_residency', 'allow_model_training', 'allow_analytics', 'sso_required', 'sso_protocol', 'scim_enabled', 'activity_retention_days', 'audit_retention_days', 'legal_hold'] as const;
+    if (existing) {
+      const sets: string[] = []; const vals: unknown[] = [];
+      for (const c of cols) { const v = (fields as Record<string, unknown>)[c]; if (v !== undefined) { sets.push(`${c} = ?`); vals.push(v); } }
+      if (sets.length > 0) { sets.push('updated_at = ?'); vals.push(now, tenantId); this.d.prepare(`UPDATE tenant_governance SET ${sets.join(', ')} WHERE tenant_id = ?`).run(...vals); }
+    } else {
+      const { newUUIDv7 } = await import('@weaveintel/core');
+      this.d.prepare(`
+        INSERT INTO tenant_governance
+          (id, tenant_id, data_residency, allow_model_training, allow_analytics, sso_required, sso_protocol, scim_enabled, activity_retention_days, audit_retention_days, legal_hold, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        newUUIDv7(), tenantId,
+        fields.data_residency ?? 'unrestricted',
+        fields.allow_model_training ?? 1, fields.allow_analytics ?? 1,
+        fields.sso_required ?? 0, fields.sso_protocol ?? 'none', fields.scim_enabled ?? 0,
+        fields.activity_retention_days ?? 0, fields.audit_retention_days ?? 365, fields.legal_hold ?? 0,
+        now,
+      );
+    }
+    return (await this.getTenantGovernance(tenantId))!;
+  }
+
+  async deleteTenantGovernance(tenantId: string): Promise<void> {
+    try { this.d.prepare(`DELETE FROM tenant_governance WHERE tenant_id = ?`).run(tenantId); } catch { /* ignore */ }
+  }
+
+  /** Per-tenant note_activity prune older than cutoff (for per-tenant retention enforcement). */
+  async pruneNoteActivityForTenant(tenantId: string, cutoffIso: string): Promise<number> {
+    try { const r = this.d.prepare(`DELETE FROM note_activity WHERE tenant_id = ? AND created_at < ?`).run(tenantId, cutoffIso); return r.changes ?? 0; } catch { return 0; }
+  }
+
+  // ─── Scheduled note agents (m129) ────────────────────────────────────────────
+  async createScheduledNoteAgent(row: import('./db-types/scheduled-agents.js').ScheduledNoteAgentRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO scheduled_note_agents (id, user_id, tenant_id, name, recipe, task_prompt, trigger_type, cron, timezone, scope, scope_tag, lookback_days, max_notes, token_budget, max_steps, require_approval, enabled, last_run_id, last_run_at, next_run_at, created_at, updated_at)
+       VALUES (@id, @user_id, @tenant_id, @name, @recipe, @task_prompt, @trigger_type, @cron, @timezone, @scope, @scope_tag, @lookback_days, @max_notes, @token_budget, @max_steps, @require_approval, @enabled, @last_run_id, @last_run_at, @next_run_at, @created_at, @updated_at)`,
+    ).run(row);
+  }
+  async listScheduledNoteAgents(userId: string): Promise<import('./db-types/scheduled-agents.js').ScheduledNoteAgentRow[]> {
+    return this.d.prepare(`SELECT * FROM scheduled_note_agents WHERE user_id = ? ORDER BY created_at DESC`).all(userId) as import('./db-types/scheduled-agents.js').ScheduledNoteAgentRow[];
+  }
+  async getScheduledNoteAgent(id: string, userId: string): Promise<import('./db-types/scheduled-agents.js').ScheduledNoteAgentRow | null> {
+    return (this.d.prepare(`SELECT * FROM scheduled_note_agents WHERE id = ? AND user_id = ?`).get(id, userId) as import('./db-types/scheduled-agents.js').ScheduledNoteAgentRow) ?? null;
+  }
+  async countScheduledNoteAgents(userId: string): Promise<number> {
+    return (this.d.prepare(`SELECT COUNT(*) AS n FROM scheduled_note_agents WHERE user_id = ?`).get(userId) as { n: number }).n;
+  }
+  async updateScheduledNoteAgent(id: string, userId: string, fields: Partial<import('./db-types/scheduled-agents.js').ScheduledNoteAgentRow>): Promise<void> {
+    const cols = ['name', 'recipe', 'task_prompt', 'trigger_type', 'cron', 'timezone', 'scope', 'scope_tag', 'lookback_days', 'max_notes', 'token_budget', 'max_steps', 'require_approval', 'enabled', 'last_run_id', 'last_run_at', 'next_run_at'] as const;
+    const sets: string[] = []; const vals: unknown[] = [];
+    for (const c of cols) { const v = (fields as Record<string, unknown>)[c]; if (v !== undefined) { sets.push(`${c} = ?`); vals.push(v); } }
+    if (!sets.length) return;
+    sets.push(`updated_at = datetime('now')`); vals.push(id, userId);
+    this.d.prepare(`UPDATE scheduled_note_agents SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`).run(...vals);
+  }
+  async deleteScheduledNoteAgent(id: string, userId: string): Promise<void> {
+    this.d.prepare(`DELETE FROM scheduled_note_agents WHERE id = ? AND user_id = ?`).run(id, userId);
+  }
+  async listDueScheduledNoteAgents(nowMs: number, limit = 50): Promise<import('./db-types/scheduled-agents.js').ScheduledNoteAgentRow[]> {
+    return this.d.prepare(`SELECT * FROM scheduled_note_agents WHERE enabled = 1 AND trigger_type = 'schedule' AND next_run_at IS NOT NULL AND next_run_at <= ? ORDER BY next_run_at ASC LIMIT ?`).all(nowMs, Math.max(1, Math.min(200, limit))) as import('./db-types/scheduled-agents.js').ScheduledNoteAgentRow[];
+  }
+  async createScheduledNoteAgentRun(row: import('./db-types/scheduled-agents.js').ScheduledNoteAgentRunRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO scheduled_note_agent_runs (id, agent_id, user_id, tenant_id, trigger, status, started_at, finished_at, steps, tokens_used, notes_scanned, suggestions_created, output_note_id, summary, error, detail_json)
+       VALUES (@id, @agent_id, @user_id, @tenant_id, @trigger, @status, @started_at, @finished_at, @steps, @tokens_used, @notes_scanned, @suggestions_created, @output_note_id, @summary, @error, @detail_json)`,
+    ).run(row);
+  }
+  async updateScheduledNoteAgentRun(id: string, fields: Partial<import('./db-types/scheduled-agents.js').ScheduledNoteAgentRunRow>): Promise<void> {
+    const cols = ['status', 'finished_at', 'steps', 'tokens_used', 'notes_scanned', 'suggestions_created', 'output_note_id', 'summary', 'error', 'detail_json'] as const;
+    const sets: string[] = []; const vals: unknown[] = [];
+    for (const c of cols) { const v = (fields as Record<string, unknown>)[c]; if (v !== undefined) { sets.push(`${c} = ?`); vals.push(v); } }
+    if (!sets.length) return;
+    vals.push(id);
+    this.d.prepare(`UPDATE scheduled_note_agent_runs SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+  async listScheduledNoteAgentRuns(agentId: string, userId: string, limit = 20): Promise<import('./db-types/scheduled-agents.js').ScheduledNoteAgentRunRow[]> {
+    return this.d.prepare(`SELECT * FROM scheduled_note_agent_runs WHERE agent_id = ? AND user_id = ? ORDER BY started_at DESC LIMIT ?`).all(agentId, userId, Math.max(1, Math.min(100, limit))) as import('./db-types/scheduled-agents.js').ScheduledNoteAgentRunRow[];
+  }
+
+  // ─── Per-user MCP tokens (m130) ──────────────────────────────────────────────
+  async createUserMcpToken(row: import('./db-types/mcp-notes.js').UserMcpTokenRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO user_mcp_tokens (id, user_id, tenant_id, name, token_hash, token_prefix, scope, enabled, created_at, last_used_at, expires_at)
+       VALUES (@id, @user_id, @tenant_id, @name, @token_hash, @token_prefix, @scope, @enabled, @created_at, @last_used_at, @expires_at)`,
+    ).run(row);
+  }
+  async listUserMcpTokens(userId: string): Promise<import('./db-types/mcp-notes.js').UserMcpTokenRow[]> {
+    return this.d.prepare(`SELECT * FROM user_mcp_tokens WHERE user_id = ? ORDER BY created_at DESC`).all(userId) as import('./db-types/mcp-notes.js').UserMcpTokenRow[];
+  }
+  async getUserMcpTokenByHash(tokenHash: string): Promise<import('./db-types/mcp-notes.js').UserMcpTokenRow | null> {
+    return (this.d.prepare(`SELECT * FROM user_mcp_tokens WHERE token_hash = ?`).get(tokenHash) as import('./db-types/mcp-notes.js').UserMcpTokenRow) ?? null;
+  }
+  async revokeUserMcpToken(id: string, userId: string): Promise<void> {
+    this.d.prepare(`UPDATE user_mcp_tokens SET enabled = 0 WHERE id = ? AND user_id = ?`).run(id, userId);
+  }
+  async touchUserMcpToken(id: string): Promise<void> {
+    try { this.d.prepare(`UPDATE user_mcp_tokens SET last_used_at = datetime('now') WHERE id = ?`).run(id); } catch { /* best-effort */ }
   }
 
   // ─── Live artifact configs (m80 / Phase 6) ────────────────────────────────────

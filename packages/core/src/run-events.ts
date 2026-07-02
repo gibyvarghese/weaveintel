@@ -56,6 +56,12 @@ export const RUN_EVENT_KINDS = [
   'object.delta',     // an incremental chunk of a streamed structured (JSON) object
   'object.complete',  // the structured object finished (carries the final value)
   'file.part',        // a multimodal file part (image / document) in/out of the run
+  // Collaboration Phase 1 — presence ("who else is watching this run").
+  // EPHEMERAL: this is a live snapshot broadcast to current subscribers; it is
+  // NEVER written to the run journal (presence is high-churn, last-write-wins,
+  // disposable — it only ever means "current"). A run_presence table holds the
+  // current state; this event is the realtime push of that state.
+  'presence.update',  // the full set of currently-present participants (a snapshot)
 ] as const;
 
 export type RunEventKind = (typeof RUN_EVENT_KINDS)[number];
@@ -141,6 +147,50 @@ export interface RunObjectDelta {
 export interface RunObjectComplete {
   /** The fully-parsed object (when the server could parse it). */
   value?: unknown;
+}
+
+/**
+ * Collaboration Phase 1 — one participant currently present on a run.
+ *
+ * "Presence" = who is watching/working on this run right now. A participant can
+ * be a human (`peerType: 'human'`) or an AI agent (`peerType: 'agent'`, the
+ * mid-2026 "agent as a first-class peer" pattern — the server shows the agent as
+ * present with a `working`/`streaming` status while the run produces output).
+ *
+ * Identity (`userId`, `displayName`) is SERVER-DERIVED from the caller's auth —
+ * never client-supplied — so presence cannot be spoofed.
+ */
+export interface RunPresenceParticipant {
+  /** Stable identity (server-derived). For agents, a reserved id like `__agent`. */
+  userId: string;
+  /** Display label only — no PII (no email / internal ids). */
+  displayName: string;
+  /** Human: online/idle/typing/away/offline. Agent: working/streaming/thinking/idle. */
+  presence: string;
+  /** `'human'` or `'agent'`. */
+  peerType: 'human' | 'agent';
+  /** Optional UI color for the participant's cursor/badge. */
+  color?: string;
+  /**
+   * Collaboration Phase 2 — the participant's role in the shared session
+   * (`owner` / `collaborator` / `viewer`), when the run is shared. Surfaced so a
+   * UI can badge who can edit vs only watch.
+   */
+  role?: 'owner' | 'collaborator' | 'viewer';
+  /** Epoch ms of the participant's last heartbeat (drives TTL expiry). */
+  lastHeartbeatAt?: number;
+  /** Optional cursor / viewport the participant is looking at. */
+  cursor?: Record<string, unknown>;
+}
+
+/**
+ * Collaboration Phase 1 — the `presence.update` payload: the FULL set of
+ * currently-present participants (a snapshot, not a delta). Snapshots are
+ * idempotent and gap-safe over SSE — the client replaces its whole presence set
+ * on each update, so a dropped/reordered event self-corrects on the next one.
+ */
+export interface RunPresenceSnapshot {
+  participants: RunPresenceParticipant[];
 }
 
 /** Phase 7 — a multimodal file part (image / document) attached to a run. */

@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { fusedMemorySearch } from './retrieval.js';
+import { fusedMemorySearch, recencyDecay } from './retrieval.js';
 import type { MemoryEntry, MemoryStore, ExecutionContext } from '@weaveintel/core';
 
 function makeCtx(userId?: string): ExecutionContext {
@@ -157,5 +157,59 @@ describe('fusedMemorySearch — scores are normalised [0, 1]', () => {
       expect(r.score).toBeGreaterThanOrEqual(0);
       expect(r.score).toBeLessThanOrEqual(1.0001); // floating point tolerance
     }
+  });
+});
+
+// ─── Phase 5 (weaveNotes second brain): temporal recency + importance + supersede ───
+describe('fusedMemorySearch — recency signal (temporal awareness)', () => {
+  it('ranks a recent memory above an equally-relevant old one when recencyWeight is set', async () => {
+    const NOW = Date.parse('2026-07-01T00:00:00Z');
+    const store = makeStore([
+      makeEntry({ id: 'old', type: 'semantic', content: 'The project deadline is important', createdAt: '2026-01-01T00:00:00Z' }),
+      makeEntry({ id: 'new', type: 'semantic', content: 'The project deadline is important', createdAt: '2026-06-30T00:00:00Z' }),
+    ]);
+    const results = await fusedMemorySearch(store, makeCtx(), { query: 'project deadline', topK: 2, recencyWeight: 0.5, keywordWeight: 0.5, nowMs: NOW, halfLifeMs: 30 * 24 * 3600 * 1000 });
+    expect(results[0]!.entry.id).toBe('new');
+    expect(results[0]!.signals.recency).toBeGreaterThan(results[1]!.signals.recency ?? 0);
+  });
+  it('recencyDecay halves at one half-life', () => {
+    const hl = 1000;
+    expect(recencyDecay(0, hl)).toBeCloseTo(1, 5);
+    expect(recencyDecay(hl, hl)).toBeCloseTo(0.5, 5);
+    expect(recencyDecay(2 * hl, hl)).toBeCloseTo(0.25, 5);
+  });
+});
+
+describe('fusedMemorySearch — importance signal', () => {
+  it('ranks a high-importance memory above a low-importance one', async () => {
+    const store = makeStore([
+      makeEntry({ id: 'low', type: 'semantic', content: 'user likes coffee', importance: 0.1 }),
+      makeEntry({ id: 'high', type: 'semantic', content: 'user likes coffee', importance: 0.95 }),
+    ]);
+    const results = await fusedMemorySearch(store, makeCtx(), { query: 'coffee', topK: 2, importanceWeight: 0.6, keywordWeight: 0.4 });
+    expect(results[0]!.entry.id).toBe('high');
+    expect(results[0]!.signals.importance).toBeGreaterThan(results[1]!.signals.importance ?? 0);
+  });
+  it('reads importance from metadata when the field is absent', async () => {
+    const store = makeStore([makeEntry({ id: 'm', type: 'semantic', content: 'a fact about launch', metadata: { importance: 0.8 } })]);
+    const results = await fusedMemorySearch(store, makeCtx(), { query: 'launch', topK: 1, importanceWeight: 1 });
+    expect(results[0]!.signals.importance).toBeCloseTo(0.8, 5);
+  });
+});
+
+describe('fusedMemorySearch — excludeSuperseded (bi-temporal)', () => {
+  it('drops a memory whose invalidAt is in the past', async () => {
+    const NOW = Date.parse('2026-07-01T00:00:00Z');
+    const store = makeStore([
+      makeEntry({ id: 'stale', type: 'semantic', content: 'user works at Acme', invalidAt: '2026-05-01T00:00:00Z' }),
+      makeEntry({ id: 'current', type: 'semantic', content: 'user works at Globex' }),
+    ]);
+    const results = await fusedMemorySearch(store, makeCtx(), { query: 'user works', topK: 5, excludeSuperseded: true, nowMs: NOW });
+    expect(results.map((r) => r.entry.id)).toEqual(['current']);
+  });
+  it('keeps superseded memories when excludeSuperseded is off', async () => {
+    const store = makeStore([makeEntry({ id: 'stale', type: 'semantic', content: 'user works at Acme', invalidAt: '2026-05-01T00:00:00Z' })]);
+    const results = await fusedMemorySearch(store, makeCtx(), { query: 'user works', topK: 5, nowMs: Date.parse('2026-07-01T00:00:00Z') });
+    expect(results).toHaveLength(1);
   });
 });
