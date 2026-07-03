@@ -1,7 +1,7 @@
 {
   "name": "@weaveintel/testing",
   "version": "0.0.1",
-  "description": "Testing harnesses \u2014 fake models, fake vector stores, fake MCP servers",
+  "description": "Testing harnesses — fake models, fake vector stores, fake MCP servers",
   "type": "module",
   "exports": {
     ".": {
@@ -25,5 +25,11 @@
   "devDependencies": {
     "typescript": "^5.7.0",
     "vitest": "^3.2.6"
-  }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist"
+  ]
 }

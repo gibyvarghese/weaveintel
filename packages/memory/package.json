@@ -1,7 +1,7 @@
 {
   "name": "@weaveintel/memory",
   "version": "0.0.1",
-  "description": "Memory implementations \u2014 conversation, semantic, entity",
+  "description": "Memory implementations — conversation, semantic, entity",
   "type": "module",
   "exports": {
     ".": {
@@ -33,5 +33,11 @@
     "@types/better-sqlite3": "^7.6.13",
     "typescript": "^5.7.0",
     "vitest": "^3.2.6"
-  }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist"
+  ]
 }
