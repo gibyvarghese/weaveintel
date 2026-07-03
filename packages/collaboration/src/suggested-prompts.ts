@@ -120,7 +120,7 @@ export function buildChatCandidates(chats: readonly RecentChatSignal[] | undefin
     out.push({
       id: `chat:${c.chatId}`,
       title: `Continue: ${title}`,
-      prompt: `Let's continue our conversation about “${title}”. Give me a quick recap and ask what I'd like to do next.`,
+      prompt: `Let's pick up where we left off on “${title}”. Give me a quick recap and ask what I'd like to do next.`,
       category: 'personalized', source: 'chat', icon: '💬',
     });
   }
@@ -178,7 +178,7 @@ export function buildSuggestPromptsPrompt(ctx: { notes?: readonly RecentNoteSign
   const noteTitles = (ctx.notes ?? []).map((n) => sanitizePromptText(n.title, TITLE_MAX)).filter(Boolean).slice(0, 12);
   const chatTitles = (ctx.chats ?? []).map((c) => sanitizePromptText(c.title, TITLE_MAX)).filter(Boolean).slice(0, 8);
   const system = [
-    'You suggest short, useful "conversation starter" prompts for a work assistant’s home screen.',
+    'You suggest short, useful opening prompts for a work assistant’s home screen.',
     `Return EXACTLY a JSON array of ${count} objects, each: {"title": string, "prompt": string, "category": one of "ask"|"create"|"summarize"|"plan"|"organize"}.`,
     'Rules:',
     '1. Output ONLY the JSON array — no prose, no code fence, no commentary.',

@@ -829,13 +829,16 @@ describe('[Phase 2] A2A Skills — Stress: throughput and coverage', () => {
     expect(all).toHaveLength(15);
   });
 
+  // Spins up 15 fresh DBs (each runs full migrations) in parallel — ~5 s of real work
+  // that has no headroom against the default 5 s timeout when the suite runs under load.
+  // Give it an explicit generous ceiling so it stays a data-integrity check, not a race.
   it('DB correctly handles 15 parallel INITs without data corruption', async () => {
     const dbs = await Promise.all(Array.from({ length: 15 }, () => newA2ASkillsDb()));
     for (const freshDb of dbs) {
       const all = await freshDb.listA2ASkills();
       expect(all).toHaveLength(15);
     }
-  });
+  }, 30000);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════

@@ -88,6 +88,10 @@
     { "path": "apps/geneweave-ui" },
     { "path": "apps/live-agents-demo" },
     { "path": "clients/tokens" },
-    { "path": "clients/api-client" }
+    { "path": "clients/api-client" },
+    { "path": "packages/a11y" },
+    { "path": "packages/i18n" },
+    { "path": "packages/scope" },
+    { "path": "packages/voice" }
   ]
 }

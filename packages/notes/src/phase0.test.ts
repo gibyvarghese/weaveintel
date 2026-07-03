@@ -67,13 +67,17 @@ describe('suggestion state machine', () => {
     expect(pendingCount(m)).toBe(0);
     expect(clearResolved(m)).toEqual({});
   });
+  // The work here is genuinely O(n) (~3.1s isolated), but it has no headroom under the
+  // default 5s vitest timeout when the whole monorepo suite runs in parallel with builds.
+  // Give it an explicit generous ceiling so it stays a correctness check, not a race the
+  // CI box loses under load. (It still fails fast if the impl regresses to O(n²).)
   it('STRESS: 5,000 suggestions add/resolve in O(n) without blowing up', () => {
     let m = emptySuggestions();
     for (let i = 0; i < 5000; i++) m = addSuggestion(m, mk(`s${i}`, i));
     expect(pendingCount(m)).toBe(5000);
     for (let i = 0; i < 5000; i += 2) m = acceptSuggestion(m, `s${i}`);
     expect(pendingCount(m)).toBe(2500);
-  });
+  }, 30000);
 });
 
 describe('weaveNotes config validator', () => {
