@@ -12,7 +12,9 @@
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -b",
     "clean": "rm -rf dist"
@@ -24,5 +26,8 @@
     "typescript": "^5.3.3",
     "vitest": "^3.2.6",
     "@weaveintel/persistence": "*"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

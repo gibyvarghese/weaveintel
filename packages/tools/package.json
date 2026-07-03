@@ -25,5 +25,8 @@
     "@weaveintel/core": "*",
     "@weaveintel/resilience": "*"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  }
 }
