@@ -4,7 +4,7 @@
  * `weaveCostLedger({ sink, pricing })` returns a CostLedger that delegates
  * record() to the sink and computes total/breakdown by replaying entries
  * from an in-memory mirror. For durable read-side queries, query the sink's
- * backing store directly (see `apps/geneweave/src/admin/api/cost-ledger.ts`).
+ * backing store directly (see the reference app's admin cost-ledger API).
  */
 
 import type { CostLedger, CostLedgerEntry, CostLedgerSink } from './types.js';

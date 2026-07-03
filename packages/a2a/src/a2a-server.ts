@@ -8,7 +8,7 @@
  *   const result = await dispatcher(ctx, { method, body, headers });
  *   // result is { kind: 'json', status, data } or { kind: 'stream', events, taskId, contextId }
  *
- * geneWeave wires this at POST /api/a2a.
+ * A host application typically wires this at POST /api/a2a.
  * `weaveA2AServer` is a convenience re-export for callers who want the function by name.
  *
  * A2A v1.0 method dispatch table:
@@ -374,7 +374,7 @@ async function* taskUpdatesToStreamEvents(
 /**
  * Encode an A2A stream into SSE wire format (for Node.js `res.write()`).
  *
- * Usage in geneWeave route:
+ * Usage in a host application route:
  *   for await (const chunk of streamToSse(events)) {
  *     res.write(chunk);
  *   }

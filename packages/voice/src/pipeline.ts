@@ -42,7 +42,7 @@ import {
 
 /**
  * Minimal interface for what VoicePipeline needs from the LLM layer.
- * In GeneWeave this is implemented by wrapping ChatEngine.sendMessage().
+ * In a consuming application this is implemented by wrapping ChatEngine.sendMessage().
  */
 export interface VoiceTurnSender {
   /**

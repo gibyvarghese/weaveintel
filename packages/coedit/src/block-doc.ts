@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/coedit — BlockDoc: a rich-text / block-document CRDT (weaveNotes Phase 1).
+ * @weaveintel/coedit — BlockDoc: a rich-text / block-document CRDT (for a notes/document product).
  *
  * Phase 7's {@link RgaDoc} co-edits PLAIN text. A "note" is a STRUCTURED document
  * (headings, paragraphs, bullet/numbered lists, to-dos, code, quotes) with inline
@@ -35,7 +35,7 @@ import { idGreater, idKey, type RgaId } from './rga.js';
 export type { RgaId };
 
 /**
- * A block's structural type. The StarterKit subset weaveNotes Phase 0 targets,
+ * A block's structural type. The StarterKit subset a notes/document product targets,
  * PLUS the Phase 1 creative blocks (callout / toggle / image / sticker / washi
  * divider). Listing them here means the CRDT round-trip PRESERVES them (a
  * concurrent merge never silently flattens a callout back to a paragraph); the

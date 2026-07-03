@@ -4,7 +4,7 @@
  * Built-in scope definitions and cross-scope policies for weaveIntel.
  *
  * This module defines the WEAVEINTEL_DEFAULT_SCOPES and WEAVEINTEL_DEFAULT_POLICIES
- * that ship with every geneweave deployment. They can be extended (or overridden
+ * that ship with every host-application deployment. They can be extended (or overridden
  * by tenant-specific policies) but these defaults cover the standard skill taxonomy.
  *
  * Scope Topology:

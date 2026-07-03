@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/extraction — AI DATABASE auto-fill with citations (weaveNotes Phase 6).
+ * @weaveintel/extraction — AI DATABASE auto-fill with citations.
  *
  * "Auto-fill" is the Notion-2026 feature where the AI fills a whole COLUMN of a table
  * from each row's context — a Summary, a Category, a Priority, an estimated cost — so
@@ -9,7 +9,7 @@
  * instead of taking an opaque guess on faith.
  *
  * This module is model-AGNOSTIC (you pass a `generate` callback) and pure: it owns the
- * prompt + the strict JSON parsing/sanitizing. The host (geneWeave) gathers each row's
+ * prompt + the strict JSON parsing/sanitizing. The host application gathers each row's
  * context — the page, related rows in the workspace, and web-search snippets — labels
  * the sources with ids, and this returns a typed value + the cited source ids per row.
  *

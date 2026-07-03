@@ -27,7 +27,7 @@
  *
  * Ports & adapters (same pattern as the Phase 0 run substrate): the
  * {@link PresenceManager} PORT lives here with an in-memory reference adapter
- * ({@link createInMemoryPresenceManager}); geneWeave provides a SQL adapter over
+ * ({@link createInMemoryPresenceManager}); a consuming application provides a SQL adapter over
  * the `run_presence` table. Both pass {@link presenceManagerContract}.
  */
 import type { RunPresenceParticipant } from '@weaveintel/core';
@@ -93,7 +93,7 @@ function toPublic(p: StoredParticipant): RunPresenceParticipant {
 }
 
 /**
- * In-memory reference {@link PresenceManager}. Single-process; the geneWeave SQL
+ * In-memory reference {@link PresenceManager}. Single-process; the host application's SQL
  * adapter is the durable, cross-process implementation. Both pass the same
  * conformance suite.
  */

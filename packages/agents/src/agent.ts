@@ -291,7 +291,7 @@ export interface ToolCallingAgentOptions {
    * conversation history, so memory context does not accumulate across steps.
    *
    * Mirrors the `buildMemoryContext` + augmented-system-prompt pattern from
-   * geneWeave's `chat-send-message.ts`, made portable for standalone agents.
+   * a host application's `chat-send-message.ts`, made portable for standalone agents.
    */
   memoryContext?: {
     /**

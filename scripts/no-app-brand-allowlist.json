@@ -1,0 +1,16 @@
+{
+  "_README": "Allowlist for scripts/check-no-app-brand.mjs. 'deferredPaths' are packages whose de-brand is scheduled for a LATER restructure phase (they still contain app-brand today, on purpose); each entry MUST name the phase that will empty it, and the entry is deleted when that phase lands. 'allowedExamples' are the few places a comment may cite an app by name as an EXAMPLE CONSUMER (never as the assumed reader) — permanent, but keep them rare.",
+  "deferredPaths": [
+    {
+      "prefix": "packages/notes/",
+      "reason": "The notes package is split three ways in Phase 2 (slim generic core stays; product features + brand move to apps/geneweave). De-branding it before the split would be wasted, conflicting work.",
+      "phase": "Phase 2 — Split notes"
+    },
+    {
+      "prefix": "clients/tokens/",
+      "reason": "The geneWeave palette, --gw- variable names and brand values move to the app in Phase 4 (tokens engine/brand split). The engine stays brand-neutral; the brand values are app-owned.",
+      "phase": "Phase 4 — Tokens engine/brand split"
+    }
+  ],
+  "allowedExamples": []
+}

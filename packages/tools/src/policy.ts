@@ -2,8 +2,8 @@
  * @weaveintel/tools — Tool Policy Enforcement
  *
  * Phase 2 of the Tool Platform. Provides:
- *  - ToolPolicyResolver interface (DB-backed in GeneWeave, in-memory for tests)
- *  - ToolAuditEmitter interface (DB-backed in GeneWeave, noop for tests)
+ *  - ToolPolicyResolver interface (DB-backed in a consuming application, in-memory for tests)
+ *  - ToolAuditEmitter interface (DB-backed in a consuming application, noop for tests)
  *  - ToolRateLimiter & ToolApprovalGate interfaces
  *  - resolveEffectivePolicy() — merges policy sources in precedence order
  *  - createPolicyEnforcedTool() — wraps a single Tool with enforcement
@@ -57,7 +57,7 @@ export interface PolicyResolutionContext {
 
 /**
  * Contract for looking up the effective policy for a tool.
- * GeneWeave supplies a DB-backed implementation (DbToolPolicyResolver).
+ * A consuming application supplies a DB-backed implementation (DbToolPolicyResolver).
  * Tests use InMemoryToolPolicyResolver.
  */
 export interface ToolPolicyResolver {
@@ -110,7 +110,7 @@ export class InMemoryToolPolicyResolver implements ToolPolicyResolver {
 
 /**
  * Contract for persisting tool audit events.
- * GeneWeave implements this against the tool_audit_events table.
+ * A consuming application implements this against the tool_audit_events table.
  */
 export interface ToolAuditEmitter {
   emit(event: ToolAuditEvent): Promise<void>;
@@ -125,7 +125,7 @@ export const noopAuditEmitter: ToolAuditEmitter = {
 
 /**
  * Contract for per-tool, per-scope rate limiting.
- * GeneWeave implements this using a sliding window in SQLite.
+ * A consuming application implements this using a sliding window in SQLite.
  */
 export interface ToolRateLimiter {
   /** Returns true if the call is allowed (increments the counter). */
@@ -142,7 +142,7 @@ export type ApprovalDecision =
 
 /**
  * Contract for blocking tool execution pending human approval.
- * GeneWeave integrates this with the existing human_task_policies table.
+ * A consuming application integrates this with the existing human_task_policies table.
  */
 export interface ToolApprovalGate {
   check(toolName: string, chatId: string, input: ToolInput): Promise<ApprovalDecision>;
@@ -209,7 +209,7 @@ export interface PolicyEnforcedToolOptions {
    * visible cross-process.
    *
    * Defaults to disabled to preserve the existing per-tool health tracker
-   * semantics for callers that haven't opted in. GeneWeave enables this in
+   * semantics for callers that haven't opted in. A consuming application enables this in
    * its `createToolRegistry()` wiring so MCP/A2A/HTTP tools share the same
    * circuit/limit view as direct LLM calls.
    */
@@ -463,7 +463,7 @@ export function createPolicyEnforcedTool(
 
 /**
  * Wraps an entire ToolRegistry, applying policy enforcement to every tool.
- * This is the primary integration point for GeneWeave.
+ * This is the primary integration point for a consuming application.
  *
  * The returned registry is a new registry containing enforced versions of all
  * tools from the original. New tools registered after this call are NOT automatically

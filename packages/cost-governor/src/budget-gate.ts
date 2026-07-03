@@ -13,8 +13,8 @@
  *   - Adapter:     `weaveCostLedgerFromBreakdown({ readBreakdown })` is a
  *                  thin DB-backed `CostLedger` adapter for apps that
  *                  persist entries via `CostLedgerSink` (append-only) but
- *                  need a `total(runId)` reader for the gate. Geneweave
- *                  uses this on top of `readCostBreakdown(db, runId)`.
+ *                  need a `total(runId)` reader for the gate. A host
+ *                  application uses this on top of `readCostBreakdown(db, runId)`.
  *
  * Reusability invariant: imports only from the cost-governor's own types.
  * NEVER blocks the pipeline on ledger errors — `check()` swallows ledger

@@ -3,18 +3,18 @@
  *
  * This is the runtime-package companion to the in-memory `weaveModelResolver`
  * shipped from `@weaveintel/live-agents` in Phase 1. It lifts the per-tick
- * routing pattern previously hand-written inside geneweave's kaggle
- * heartbeat (see `apps/geneweave/src/live-agents/kaggle/heartbeat-runner.ts`)
- * into a reusable resolver any live-agents app can wire in.
+ * routing pattern previously hand-written inside a consuming app's
+ * per-tick heartbeat runner into a reusable resolver any live-agents app
+ * can wire in.
  *
  * --- Why dependency injection ---
  *
  * The plan (`docs/live-agents/LLM_FIRST_CLASS_CAPABILITY_PLAN.md` §3 Phase 2)
- * is explicit: "no geneweave dependency leaks into the package". The
+ * is explicit: "no host-app dependency leaks into the package". The
  * resolver therefore takes the routing brain (`routeModel`), the model
  * factory (`getOrCreateModel`), and the candidate enumerator
- * (`listCandidates`) as plain function injections. Geneweave (or any other
- * host) supplies its own implementations; tests inject deterministic fakes.
+ * (`listCandidates`) as plain function injections. The host application (or any
+ * other host) supplies its own implementations; tests inject deterministic fakes.
  *
  * --- Resolution order per tick ---
  *
@@ -74,7 +74,7 @@ export interface ModelCandidate {
 
 /**
  * Routing hints the resolver passes to the host's `routeModel(...)` brain.
- * Mirrors the subset of `RouteModelOpts` from geneweave's chat path that is
+ * Mirrors the subset of `RouteModelOpts` from the host's chat path that is
  * relevant to live-agents per-tick selection — kept narrow so apps can
  * adapt without leaking their full routing options shape into this package.
  */
@@ -90,7 +90,7 @@ export interface DbModelRoutingHints {
 }
 
 /**
- * Result shape `routeModel` returns. Subset of geneweave's `routeModel`
+ * Result shape `routeModel` returns. Subset of the host's `routeModel`
  * return value — only the fields this resolver actually needs.
  */
 export interface DbRoutingDecision {

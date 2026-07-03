@@ -1,7 +1,7 @@
 /**
  * @weaveintel/a11y — Focus restoration across a full re-render.
  *
- * Framework-free UIs that rebuild the DOM on every state change (e.g. geneWeave's `root.innerHTML = ''`
+ * Framework-free UIs that rebuild the DOM on every state change (e.g. a `root.innerHTML = ''`
  * render) DESTROY keyboard focus: after any action a keyboard or screen-reader user is dumped back at the
  * top of the page (WCAG 2.4.3 Focus Order). The fix is: before the re-render, capture a STABLE key for the
  * focused control; after the re-render, find the matching element and refocus it.

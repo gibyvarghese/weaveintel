@@ -6,7 +6,7 @@
  * a human-approval task via a caller-provided handler.
  *
  * Design: the task handler is a callback so this module has NO hard dependency
- * on `@weaveintel/human-tasks`. geneWeave's chat pipeline can supply a handler
+ * on `@weaveintel/human-tasks`. A host application's chat pipeline can supply a handler
  * that calls `createApprovalTask`; standalone consumers can wire their own.
  *
  * Usage:

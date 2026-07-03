@@ -352,7 +352,7 @@ export function emptyRunViewModel(): RunViewModel {
 // ---------------------------------------------------------------------------
 // Envelope shape — canonical contract from @weaveintel/core (Phase 0).
 // Re-exported here so existing import sites (`from './reducer.js'`) keep working
-// while the producer (geneweave executor) and consumer (this reducer) share one
+// while the producer (the host application's executor) and consumer (this reducer) share one
 // definition and can never drift.
 // ---------------------------------------------------------------------------
 

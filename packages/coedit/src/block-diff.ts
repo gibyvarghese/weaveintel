@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 /**
  * @weaveintel/coedit — `diffBlocks`: turn a whole edited document into block ops
- * (weaveNotes Phase 2, the "diff-on-save" path).
+ * (for a notes/document product, the "diff-on-save" path).
  *
  * --- Why this exists ---
  * A rich-text editor (Tiptap/ProseMirror) hands us its FULL document on every

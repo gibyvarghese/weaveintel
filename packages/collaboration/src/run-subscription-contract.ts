@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 /**
  * Shared conformance test for any {@link SubscriptionManager} adapter (Phase 3).
- * The in-memory reference adapter and geneWeave's SQL adapter must both pass it —
+ * The in-memory reference adapter and a consuming application's SQL adapter must both pass it —
  * proving identical behaviour behind the one port (the Phase 0/1/2 pattern).
  */
 import type { SubscriptionManager } from './run-subscription.js';

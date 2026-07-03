@@ -15,7 +15,7 @@
  *   - createSubWorkflowResolver(deps) kind="subworkflow" — starts another workflow run
  *
  * The dependency-injected resolvers accept narrow structural interfaces so
- * the package never imports geneweave or service-shaped types.
+ * the package never imports the host application or service-shaped types.
  */
 import type { HandlerResolver } from './handler-resolver.js';
 import type { StepHandler } from './steps.js';

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/coedit — block → Markdown / HTML serializers (weaveNotes Phase 1).
+ * @weaveintel/coedit — block → Markdown / HTML serializers.
  *
  * Turn a {@link BlockDoc}'s rendered blocks into Markdown (for feeding a note to
  * an AI model, and for the Phase 4 "emit a note as an artifact" flow) or sanitized

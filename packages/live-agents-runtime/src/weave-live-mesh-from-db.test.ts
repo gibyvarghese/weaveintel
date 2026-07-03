@@ -155,6 +155,28 @@ describe('weaveLiveMeshFromDb (boot existing)', () => {
     await handle.stop();
   });
 
+  // De-branding: the framework now defaults worker ids + the background-tick
+  // system principal to neutral 'weaveintel-*' values; a consuming app injects
+  // its own so its telemetry/audit name its product. This proves the injected
+  // values flow through the mesh entry point into the supervisor without error.
+  it('accepts an app-injected workerIdPrefix and systemPrincipal', async () => {
+    const db = makeStubDb({ meshes: [{ id: 'mesh-1', status: 'ACTIVE' }], agents: [], bindings: [] });
+    const store = weaveInMemoryStateStore();
+
+    const handle = await weaveLiveMeshFromDb(db, {
+      store,
+      extraHandlerKinds: [echoKind],
+      intervalMs: 60_000,
+      refreshMs: 60_000,
+      workerIdPrefix: 'acme-live-worker',
+      systemPrincipal: 'human:acme-system',
+      logger: () => {},
+    });
+
+    expect(handle.supervisor).toBeDefined();
+    await handle.stop();
+  });
+
   it('uses caller-supplied handler registry when provided', async () => {
     const db = makeStubDb({ meshes: [], agents: [], bindings: [] });
     const store = weaveInMemoryStateStore();

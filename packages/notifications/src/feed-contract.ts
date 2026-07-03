@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 /**
  * Shared conformance test for any {@link NotificationFeedStore} adapter (Phase 3).
- * The in-memory reference adapter and geneWeave's SQL adapter must both pass it.
+ * The in-memory reference adapter and a consuming app's SQL adapter must both pass it.
  */
 import type { NotificationFeedStore, FeedNotification } from './feed.js';
 

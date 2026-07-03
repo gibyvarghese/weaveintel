@@ -3,7 +3,7 @@
  *
  * Collaboration Phase 0 (de-duplication): this used to be re-implemented in
  * three places — `@weaveintel/client` (the run-stream transport), `@weaveintel/a2a`
- * (the agent-to-agent SSE reader), and `apps/geneweave-ui`. It now lives once in
+ * (the agent-to-agent SSE reader), and a consuming app's UI. It now lives once in
  * `@weaveintel/core` (the dependency-light, browser-safe contracts package) and
  * everyone else consumes it. `@weaveintel/client` re-exports it; `@weaveintel/a2a`
  * layers a JSON `.map` on top.

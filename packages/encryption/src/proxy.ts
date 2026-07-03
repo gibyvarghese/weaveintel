@@ -28,7 +28,7 @@
  *
  * The helper is intentionally framework-free: it depends only on
  * `@weaveintel/core` (transitively, via key-manager) and `node:crypto`
- * (also transitive). Any app — geneweave, future apps, sample repos — can
+ * (also transitive). Any app — consuming applications, sample repos — can
  * wire it without pulling in DB-specific types.
  */
 

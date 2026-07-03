@@ -33,8 +33,8 @@
  * --- Required HandlerContext extras ---
  *
  *   ctx.approvalDb — minimal slice of DatabaseAdapter exposing the
- *   `tool_approval_requests` CRUD methods used here. Geneweave wires this
- *   in via `human.approval` registration at boot.
+ *   `tool_approval_requests` CRUD methods used here. The host application
+ *   wires this in via `human.approval` registration at boot.
  */
 
 import type {
@@ -69,14 +69,14 @@ export interface ApprovalRequestRowLike {
   resolution_note: string | null;
 }
 
-/** DB slice the handler needs. Geneweave passes `db` directly. */
+/** DB slice the handler needs. The host application passes `db` directly. */
 export interface ApprovalDb {
   createToolApprovalRequest(r: Omit<ApprovalRequestRowLike, 'requested_at'>): Promise<void>;
   getApprovedToolRequest(toolName: string, chatId: string): Promise<ApprovalRequestRowLike | null>;
   getPendingToolRequest(toolName: string, chatId: string): Promise<ApprovalRequestRowLike | null>;
 }
 
-/** ID generator (geneweave injects `newUUIDv7`). Defaults to `newUUIDv7` from @weaveintel/core. */
+/** ID generator (the host application injects `newUUIDv7`). Defaults to `newUUIDv7` from @weaveintel/core. */
 export type ApprovalIdGenerator = () => string;
 
 /** Optional extension to `HandlerContext` for `human.approval` only. */
@@ -124,7 +124,7 @@ function buildHumanApproval(
   if (!ctx.approvalDb) {
     throw new Error(
       `human.approval: binding ${ctx.binding.id} requires HandlerContext.approvalDb. ` +
-        'Geneweave must wire DatabaseAdapter into the handler context.',
+        'The host application must wire DatabaseAdapter into the handler context.',
     );
   }
   const newId = ctx.newApprovalId ?? (() => newUUIDv7());

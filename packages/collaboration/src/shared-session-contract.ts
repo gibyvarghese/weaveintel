@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 /**
  * Shared conformance test for any {@link SessionManager} adapter (Phase 2).
- * The in-memory reference adapter and geneWeave's SQL adapter must both pass it —
+ * The in-memory reference adapter and a consuming application's SQL adapter must both pass it —
  * proving identical behaviour behind the one port (the Phase 0/1 pattern).
  */
 import type { SessionManager } from './shared-session.js';

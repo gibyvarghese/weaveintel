@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/coedit — the AI agent as a BLOCK co-editor (weaveNotes Phase 1).
+ * @weaveintel/coedit — the AI agent as a BLOCK co-editor (for a notes/document product).
  *
  * Models emit Markdown natively, so the agent contributes to a note by producing
  * Markdown which we parse into structured block ops and merge into the shared

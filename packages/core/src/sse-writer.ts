@@ -2,7 +2,7 @@
 /**
  * Server-Sent Events WRITER (Collaboration Phase 6) — the emit half of the SSE
  * transport. `@weaveintel/core` already owns the canonical READER
- * (`parseSseStream`); this is its counterpart so the geneWeave run-stream route,
+ * (`parseSseStream`); this is its counterpart so the host application's run-stream route,
  * the a2a server, and any other producer format frames ONE way instead of three.
  *
  * --- For someone new to this ---

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/coedit — ProseMirror ⇄ BlockDoc conversion + schema repair (weaveNotes Phase 1).
+ * @weaveintel/coedit — ProseMirror ⇄ BlockDoc conversion + schema repair.
  *
  * Notes are stored as Tiptap/ProseMirror JSON (a TREE). The {@link BlockDoc} CRDT
  * works on a FLAT list of blocks. These pure functions translate between the two:
@@ -58,7 +58,7 @@ function listItemInline(item: PMNode): { text: string; marks: NonNullable<BlockS
  * The combined inline text + marks of a WRAPPER block (callout / toggle body) whose
  * children are paragraphs. The flat block model holds one text per block, so a
  * multi-paragraph callout collapses to a single newline-joined block — fine for the
- * short callouts/toggles weaveNotes Phase 1 produces, and it never drops content.
+ * short callouts/toggles a notes/document product produces, and it never drops content.
  */
 function wrapperInline(node: PMNode): { text: string; marks: NonNullable<BlockSpec['marks']> } {
   let text = '';

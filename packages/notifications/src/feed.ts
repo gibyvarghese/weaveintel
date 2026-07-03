@@ -16,7 +16,7 @@
  * delivery pipeline runs twice (it is "at-least-once" by design).
  *
  * Ports & adapters: the {@link NotificationFeedStore} PORT + an in-memory
- * reference adapter live here; geneWeave provides a SQL adapter over
+ * reference adapter live here; a consuming app provides a SQL adapter over
  * `notification_feed`. Both pass {@link notificationFeedStoreContract}.
  * {@link createInAppChannel} is a {@link NotificationChannel} that writes to the
  * store, so the in-app feed plugs into the SAME dispatcher fan-out as the
@@ -43,7 +43,7 @@ export interface FeedNotification {
   category: string;
   title: string;
   body?: string;
-  /** Opaque deep link (`geneweave://run/<id>`) — never contains tenant/principal ids. */
+  /** Opaque deep link (`app://run/<id>`) — never contains tenant/principal ids. */
   deepLink?: string;
   priority: 'low' | 'normal' | 'high';
   createdAt: number;

@@ -10,7 +10,7 @@ export { newUUIDv7 } from './uuid.js';
 
 // Run-event stream contract (Phase 0). Single source of truth for the run-event
 // wire envelope, the canonical event-kind taxonomy, and default stream tuning —
-// shared by the geneweave server executor and the @weaveintel/client reducer so
+// shared by the host application's server executor and the @weaveintel/client reducer so
 // producer and consumer never drift. The DB `run_stream_config` seeds from these.
 export {
   type RunEventEnvelope,
@@ -38,7 +38,7 @@ export {
 } from './run-events.js';
 
 // Canonical SSE byte→event decoder (Collaboration Phase 0 — de-duplicated from
-// client + a2a + geneweave-ui into this one browser-safe primitive).
+// client + a2a + the consuming app's UI into this one browser-safe primitive).
 export {
   parseSseStream,
   SseStallError,
@@ -48,7 +48,7 @@ export {
 
 // Canonical SSE WRITER — the emit half of the transport (Collaboration Phase 6).
 // One way to format resumable (`id:`/`retry:`) SSE frames + keepalives, shared by
-// the geneWeave run-stream route and the a2a server.
+// the host application's run-stream route and the a2a server.
 export {
   type SseSink,
   type SseFrame,
@@ -73,7 +73,7 @@ export {
 
 // Run-lifecycle substrate (Collaboration Phase 0 — relocated from
 // @weaveintel/collaboration). The PORTS (RunRegistry / RunJournal) + a reference
-// KV adapter; geneWeave's SQL tables are another adapter behind the same ports.
+// KV adapter; a host application's SQL tables are another adapter behind the same ports.
 export {
   type RunRegistry,
   type RunListFilter,
@@ -89,7 +89,7 @@ export {
   RunCursorTooOldError,
   RUN_JOURNAL_DEFAULTS,
 } from './run-journal.js';
-// Shared conformance suites — every adapter (KV here, SQL in geneWeave) runs these.
+// Shared conformance suites — every adapter (KV here, SQL in the host app) runs these.
 export {
   type ContractTestApi,
   runRegistryContract,

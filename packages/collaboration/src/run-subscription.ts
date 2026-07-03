@@ -14,13 +14,13 @@
  * walked away. Think of it like clicking "Watch" / "Notify me" on a long build.
  *
  * Ports & adapters (same pattern as Phase 0/1/2): the {@link SubscriptionManager}
- * PORT + an in-memory reference adapter live here; geneWeave provides a SQL
+ * PORT + an in-memory reference adapter live here; a consuming application provides a SQL
  * adapter over a `run_subscriptions` table so subscriptions survive a process
  * restart (the whole point — a notification you might owe someone must not live
  * only in RAM). Both adapters pass {@link subscriptionManagerContract}.
  *
  * Delivery itself is NOT this port's job. This port only records WHO wants to be
- * told and OVER WHICH CHANNELS. The host (geneWeave) drains a durable outbox on
+ * told and OVER WHICH CHANNELS. The host application drains a durable outbox on
  * terminal run events and hands each subscriber to `@weaveintel/notifications`.
  * Keeping "who is interested" (here) separate from "how we deliver" (notifications)
  * is what lets either side evolve without touching the other.

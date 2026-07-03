@@ -24,7 +24,7 @@
  * --- Boundary ---
  *
  * - Pure runtime contracts. **No DB types** in this package.
- * - Geneweave passes a fully-resolved `HandlerContext` per agent (model,
+ * - The host application passes a fully-resolved `HandlerContext` per agent (model,
  *   tools, system-prompt resolver). This package never reads SQLite.
  * - Handler kinds are **registered programmatically** at app boot, but
  *   activation per agent is **DB-driven** (one `live_agent_handler_bindings`
@@ -42,7 +42,7 @@ import type { LiveAgentCheckpointStore } from './checkpoint-store.js';
 
 /**
  * The DB row data needed to construct a handler instance for a single agent.
- * Geneweave maps `live_agent_handler_bindings` rows into this shape.
+ * The host application maps `live_agent_handler_bindings` rows into this shape.
  */
 export interface HandlerBinding {
   /** Stable id of the binding row (for logs/audit). */
@@ -71,7 +71,7 @@ export interface HandlerAgentInfo {
 /**
  * Per-agent execution context handed to the handler factory at resolve time.
  *
- * Geneweave is responsible for populating these slots from the DB / runtime:
+ * The host application is responsible for populating these slots from the DB / runtime:
  *   - `model`: resolved via routing, only required for agentic kinds.
  *   - `tools`: resolved via `live_agent_tool_bindings` (Phase 3).
  *   - `resolveSystemPrompt(key)`: looks up the prompt text behind a skill /
@@ -162,7 +162,7 @@ export class HandlerRegistry {
    * Register or replace a handler kind. Unlike `register()`, this does NOT
    * throw when the kind already exists — it silently replaces the existing
    * registration. Use this for app-layer overrides of built-in handler kinds
-   * (e.g. wrapping `agentic.computer-use` with CUA-model injection in geneweave).
+   * (e.g. wrapping `agentic.computer-use` with CUA-model injection in the host app).
    */
   registerOrReplace(reg: HandlerKindRegistration): void {
     this.map.set(reg.kind, reg);

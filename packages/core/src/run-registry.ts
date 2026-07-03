@@ -5,9 +5,9 @@
  * `@weaveintel/core` (the §5b verdict). A "run registry" tracks the *current
  * state* of every run — its status, owner, progress, last-seen event sequence —
  * so that state survives a process restart and is queryable from any client.
- * Its vocabulary (`RunHandle`, `RunStatus`) already lives in core, and geneWeave
- * already owns a SQL implementation, so the PORT + a reference KV adapter belong
- * here; geneWeave's `user_runs` table is just another adapter behind it.
+ * Its vocabulary (`RunHandle`, `RunStatus`) already lives in core, and a host
+ * application already owns a SQL implementation, so the PORT + a reference KV adapter belong
+ * here; the host app's `user_runs` table is just another adapter behind it.
  *
  * --- For someone new to this ---
  * If the {@link RunJournal} is the *list of everything that happened*, the
@@ -20,7 +20,7 @@
  * matches the calling context (previously it trusted the handle blindly).
  *
  * Two adapters conform to {@link RunRegistry}: {@link createKvRunRegistry} (here)
- * and geneWeave's `SqlRunRegistry`, both validated by {@link runRegistryContract}.
+ * and a host application's `SqlRunRegistry`, both validated by {@link runRegistryContract}.
  */
 import { weaveInMemoryPersistence } from './runtime.js';
 import type { RuntimeKvStore, WeaveRuntime } from './runtime.js';

@@ -17,10 +17,10 @@
  * "manage" power is a separate, higher tier above "edit" (the Notion model).
  *
  * Ports & adapters (same as Phase 0/1): the {@link SessionManager} PORT + an
- * in-memory reference adapter live here; geneWeave provides a SQL adapter over
+ * in-memory reference adapter live here; a consuming application provides a SQL adapter over
  * `shared_sessions` + `session_participants`. Both pass
  * {@link sessionManagerContract}. The actual invite-LINK tokens (random,
- * hashed-at-rest) are minted by the host (geneWeave) — this port models the
+ * hashed-at-rest) are minted by the host application — this port models the
  * durable membership, not the crypto.
  */
 

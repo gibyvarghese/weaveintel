@@ -2,11 +2,11 @@
  * Run event journal — the canonical append-only run-event log contract.
  *
  * Collaboration Phase 0: this used to live in `@weaveintel/collaboration` as a
- * second, parallel implementation of the run journal that geneWeave already had
+ * second, parallel implementation of the run journal that a host application already had
  * in SQL. The journal is *run-lifecycle substrate*, not a collaboration concern,
  * and its vocabulary (`RunEventEnvelope`, `RunEventCursor`) already lives here —
  * so the PORT (interface) + a reference KV adapter now live in `@weaveintel/core`,
- * and geneWeave's SQL tables are just another adapter behind the same interface.
+ * and the host app's SQL tables are just another adapter behind the same interface.
  *
  * --- For someone new to this ---
  * A "journal" here is an append-only list of everything that happened during a
@@ -19,7 +19,7 @@
  * Two implementations conform to the {@link RunJournal} port:
  *  - {@link createKvRunJournal} (here) — a key-value reference adapter, used by
  *    non-SQL hosts and as the fast in-memory test double.
- *  - geneWeave's `SqlRunJournal` — backed by the `user_run_events` table.
+ *  - a host application's `SqlRunJournal` — backed by the `user_run_events` table.
  * Both are validated by the same {@link runJournalContract} conformance suite.
  *
  * Standards followed (see the mid-2026 research): per-run contiguous sequence,
@@ -34,11 +34,11 @@ import type { RunEventEnvelope } from './run-events.js';
 import { RUN_STREAM_CONFIG_DEFAULTS } from './run-events.js';
 import type { RunEventCursor } from './runs.js';
 
-// ─── Defaults (ONE place — also seeds the geneWeave `run_stream_config` row) ────
+// ─── Defaults (ONE place — also seeds the host app's `run_stream_config` row) ────
 
 /**
  * Journal defaults, derived from {@link RUN_STREAM_CONFIG_DEFAULTS} so retention
- * and the per-run cap are defined exactly once. geneWeave's `run_stream_config`
+ * and the per-run cap are defined exactly once. The host app's `run_stream_config`
  * table (`journal_retention_hours` / `journal_max_events`) seeds from the same
  * source — there is no second hardcoded copy.
  */

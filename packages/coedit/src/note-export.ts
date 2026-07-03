@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * note-export.ts — multi-format note export (weaveNotes Phase 10, sharing/export/polish).
+ * note-export.ts — multi-format note export (sharing/export/polish).
  *
  * Turn a note's `doc_json` into a downloadable file in the format a person actually wants — to keep a
  * copy, hand it to a colleague, or open it in Word. This EXTENDS the serializers this package already
@@ -14,7 +14,7 @@
  *   • **JSON** (`.json`) — a LOSSLESS export bundle (`title` + `icon` + the exact `doc_json`), so a note
  *     can be re-imported with nothing lost — it is just `createNote` with the bundle's `doc_json`.
  *
- * Pure + dependency-light → fully unit-testable in Node. The geneWeave server reuses {@link exportNote}
+ * Pure + dependency-light → fully unit-testable in Node. The host application's server reuses {@link exportNote}
  * behind a download endpoint + the `export_note` AI tool.
  */
 import { pmToBlocks, type NormalBlock } from './prosemirror.js';
@@ -46,7 +46,7 @@ export interface ExportFormatSpec {
   mimeType: string;
 }
 
-/** The export formats weaveNotes offers (drives the UI menu + the server's allow-list). */
+/** The export formats a consuming app's notes feature offers (drives the UI menu + the server's allow-list). */
 export const EXPORT_FORMATS: readonly ExportFormatSpec[] = [
   { key: 'markdown', label: 'Markdown (.md)', ext: 'md', mimeType: 'text/markdown; charset=utf-8' },
   { key: 'html', label: 'Web page (.html)', ext: 'html', mimeType: 'text/html; charset=utf-8' },

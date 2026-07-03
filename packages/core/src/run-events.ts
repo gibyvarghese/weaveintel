@@ -7,9 +7,9 @@
  *   - the canonical event-kind taxonomy (`RUN_EVENT_KINDS`), and
  *   - the default stream-tuning constants (`RUN_STREAM_CONFIG_DEFAULTS`).
  *
- * The geneweave server executor and the `@weaveintel/client` browser reducer
+ * The host application's server executor and the `@weaveintel/client` browser reducer
  * each used to declare their own duplicate `RunEventEnvelope`; both now import
- * this so the producer and consumer can never drift. The geneweave DB
+ * this so the producer and consumer can never drift. The host app's DB
  * `run_stream_config` single-row table seeds from `RUN_STREAM_CONFIG_DEFAULTS`,
  * and clients fall back to it when no server-served config is present.
  */
@@ -67,7 +67,7 @@ export const RUN_EVENT_KINDS = [
 export type RunEventKind = (typeof RUN_EVENT_KINDS)[number];
 
 // ─── Phase 1 payload contracts ───────────────────────────────
-// Typed payloads for the parity kinds, shared by the geneweave emitter/bridge
+// Typed payloads for the parity kinds, shared by the host app's emitter/bridge
 // (producer) and the @weaveintel/client reducer (consumer).
 
 /** Token usage + cost + timing for a run (from the chat `done` frame). */
@@ -228,7 +228,7 @@ export function isKnownRunEventKind(kind: string): kind is RunEventKind {
 
 /**
  * Run/stream tuning shared by server (SSE keepalive, journal retention) and
- * client (reconnect backoff, stall timeout, UI throttle). The geneweave DB
+ * client (reconnect backoff, stall timeout, UI throttle). The host app's DB
  * `run_stream_config` row is the runtime source of truth; these are the seeded
  * defaults and the client-side fallback.
  */

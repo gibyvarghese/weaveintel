@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/coedit — BlockOp validation for the TRUSTED RELAY (weaveNotes Phase 2).
+ * @weaveintel/coedit — BlockOp validation for the TRUSTED RELAY.
  *
  * Phase 7 added {@link validateClientOps} for plain-text {@link RgaOp}s. A NOTE is
  * co-edited as {@link BlockOp}s (insert a char/block marker, delete, set a block

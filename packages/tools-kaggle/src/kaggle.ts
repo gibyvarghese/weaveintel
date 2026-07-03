@@ -1437,7 +1437,7 @@ export function createKaggleMCPServer(opts: KaggleMCPServerOptions = {}) {
 
   // ─── Phase K6 (deferred): discussion bot ─────────────────
   // Tool registered unconditionally so the MCP surface is consistent across
-  // builds, but the GeneWeave layer ships it disabled in tool_catalog and
+  // builds, but the host application layer ships it disabled in tool_catalog and
   // requires both (a) tenant kill-switch ON and (b) per-call human approval
   // before any execution. Risk: PRIVILEGED.
   server.addTool(

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 /**
  * Shared conformance test for any {@link CommentManager} adapter (Phase 4).
- * The in-memory reference adapter and geneWeave's SQL adapter must both pass it.
+ * The in-memory reference adapter and a consuming application's SQL adapter must both pass it.
  */
 import type { CommentManager, CommentAnchor } from './run-comment.js';
 import type { ContractTestApi } from './shared-session-contract.js';

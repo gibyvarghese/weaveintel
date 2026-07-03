@@ -6,7 +6,7 @@
  * as JSON text. Timestamps stored as INTEGER (ms epoch) except for the policy
  * row which uses no created_at/updated_at at this layer (host hosts may add).
  *
- * Drop-in replacement for the geneweave reference adapter when an app does
+ * Drop-in replacement for the reference-app adapter when an app does
  * not want to ship its own DB layer.
  */
 import Database from 'better-sqlite3';

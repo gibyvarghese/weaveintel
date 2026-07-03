@@ -33,7 +33,7 @@
  *    back; only the REQUESTER cancels (the host adds run-access checks on top).
  *
  * Ports & adapters (Phase 0–4 pattern): the {@link UnifiedHandoffManager} PORT +
- * an in-memory reference adapter live here; geneWeave provides a SQL adapter over
+ * an in-memory reference adapter live here; a host application provides a SQL adapter over
  * `session_handoffs` + `handoff_events`. Both pass {@link handoffManagerContract}.
  */
 

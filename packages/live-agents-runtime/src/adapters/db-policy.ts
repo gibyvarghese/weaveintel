@@ -3,14 +3,14 @@
  *
  * `weaveLiveAgentPolicy()` (in `@weaveintel/live-agents`) is the in-memory
  * constructor that takes already-built primitives. This file exposes the
- * runtime composition entry point for app-side consumers (geneweave).
+ * runtime composition entry point for app-side consumers (the host application).
  *
  * The factory is a thin assembler: it receives the four DB-backed adapters
  * (already implementing the `@weaveintel/tools` interfaces) and bundles
  * them into a `LiveAgentPolicy`. No DB types live in this package — apps
  * own the adapter constructors and inject the live instances here.
  *
- * Typical wiring in geneweave:
+ * Typical wiring in a consuming app:
  *
  *   ```ts
  *   import {
@@ -18,7 +18,7 @@
  *     DbToolApprovalGate,
  *     DbToolRateLimiter,
  *     DbToolAuditEmitter,
- *   } from './tool-*.js'; // existing geneweave adapters
+ *   } from './tool-*.js'; // existing host-app adapters
  *   import { weaveDbLiveAgentPolicy } from '@weaveintel/live-agents-runtime';
  *
  *   const policy = weaveDbLiveAgentPolicy({

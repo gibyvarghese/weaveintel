@@ -9,7 +9,7 @@
  *   - Issues a visitor badge if required (CrossScopeToken)
  *   - Writes in the visitor log (audit callback)
  *
- * Usage pattern in geneweave:
+ * Usage pattern in a consuming application:
  *
  *   const guard = new ScopeGuard(registry, { enforce: true, secret });
  *
@@ -42,7 +42,7 @@ export interface ScopeGuardOptions {
   tokenSecret?: string;
   /**
    * Optional callback invoked after every scope check.
-   * Used by geneweave to write to scope_access_log.
+   * Used by the host application to write to scope_access_log.
    */
   onCheck?: (event: ScopeCheckEvent) => void | Promise<void>;
 }

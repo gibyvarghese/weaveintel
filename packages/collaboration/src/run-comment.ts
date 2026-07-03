@@ -23,7 +23,7 @@
  * highlight can re-anchor fuzzily if the part text shifts.
  *
  * Ports & adapters (Phase 0–3 pattern): the {@link CommentManager} PORT + an
- * in-memory reference adapter live here; geneWeave provides a SQL adapter over
+ * in-memory reference adapter live here; a consuming application provides a SQL adapter over
  * `run_comments`. Both pass {@link commentManagerContract}. Markdown is rendered
  * to SAFE html by {@link renderCommentMarkdown} (server-side source of truth) so
  * no adapter can store an XSS payload.

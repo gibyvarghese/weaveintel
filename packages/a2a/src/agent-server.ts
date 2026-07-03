@@ -633,7 +633,7 @@ export function weaveAgentAsA2AServer(opts: AgentA2AServerOptions): A2AServer {
     },
 
     async start(_port: number): Promise<void> {
-      // HTTP serving handled by host app (geneWeave registers routes).
+      // HTTP serving handled by host app (the host application registers routes).
     },
 
     async stop(): Promise<void> {

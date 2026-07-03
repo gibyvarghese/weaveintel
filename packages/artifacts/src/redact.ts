@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/artifacts — content REDACTION for safe publishing (weaveNotes Phase 4).
+ * @weaveintel/artifacts — content REDACTION for safe publishing (for a notes/document product).
  *
  * Before a document is turned into a PUBLIC artifact (a shareable link anyone can
  * open), it should be scanned for things you almost never mean to publish — API
@@ -71,7 +71,7 @@ export function redactText(text: string, level: RedactionLevel = 'secrets'): Red
 
 // ─── Publish policy by sensitivity ───────────────────────────────────────────
 
-/** A document's sensitivity classification (matches the geneWeave note model). */
+/** A document's sensitivity classification (matches a typical note model). */
 export type PublishSensitivity = 'normal' | 'confidential' | 'restricted';
 
 export interface PublishPolicy {

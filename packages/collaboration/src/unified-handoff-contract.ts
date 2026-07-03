@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 /**
  * Shared conformance test for any {@link UnifiedHandoffManager} adapter (Phase 5).
- * The in-memory reference adapter and geneWeave's SQL adapter must both pass it.
+ * The in-memory reference adapter and a host application's SQL adapter must both pass it.
  */
 import type { UnifiedHandoffManager, RequestHandoffInput } from './unified-handoff.js';
 import type { ContractTestApi } from './shared-session-contract.js';

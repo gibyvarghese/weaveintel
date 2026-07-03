@@ -1,7 +1,7 @@
 /**
  * Structural reader interfaces for live-agent trace tools.
  *
- * The package never imports any DB type. Consumers (geneweave, custom apps,
+ * The package never imports any DB type. Consumers (a host application, custom apps,
  * tests) implement these slim shapes around their own persistence so the
  * trace tools remain reusable across runtimes (SQLite, Postgres, in-memory).
  *

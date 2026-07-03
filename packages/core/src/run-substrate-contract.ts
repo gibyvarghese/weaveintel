@@ -4,7 +4,7 @@
  * The mid-2026 ports-&-adapters research recommends writing the invariants ONCE
  * as an exported factory that every adapter runs against itself. That is exactly
  * what licenses the in-memory KV adapter as a fast test double AND guarantees the
- * geneWeave SQL adapter behaves identically — both must pass this same suite.
+ * host application's SQL adapter behaves identically — both must pass this same suite.
  *
  * To keep `@weaveintel/core` free of a `vitest` import in non-test source, the
  * factory takes the test primitives ({@link ContractTestApi}) as an argument;

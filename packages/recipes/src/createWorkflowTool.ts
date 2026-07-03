@@ -12,8 +12,8 @@
  * calling agent is not blocked. The agent can surface the `runId` to the user
  * and the workflow can be resumed externally via `engine.resumeRun(runId, ...)`.
  *
- * Risk level: defaults to `'moderate'` so it passes through geneWeave's six-
- * stage tool policy gate for governed workflows. Lower-risk wrappers (e.g. for
+ * Risk level: defaults to `'moderate'` so it passes through the host
+ * application's six-stage tool policy gate for governed workflows. Lower-risk wrappers (e.g. for
  * read-only query workflows) can override to `'low'`.
  */
 
@@ -39,7 +39,7 @@ export interface WorkflowToolOptions {
    */
   inputSchema?: Record<string, unknown>;
   /**
-   * Risk level for geneWeave's tool policy gate. Defaults to `'moderate'`.
+   * Risk level for the host application's tool policy gate. Defaults to `'moderate'`.
    * Use `'low'` for read-only or low-impact workflows.
    */
   riskLevel?: ToolRiskLevel;

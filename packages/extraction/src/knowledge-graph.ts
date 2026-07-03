@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/extraction — LLM-backed knowledge-graph extraction (weaveNotes Phase 5).
+ * @weaveintel/extraction — LLM-backed knowledge-graph extraction.
  *
  * The deterministic stages in this package catch *shapes* (emails, dates, tasks). To
  * build a real knowledge graph from a note we also want the *meaning*: the people,
@@ -9,7 +9,7 @@
  * That needs a language model, so this module is model-AGNOSTIC: you pass a `generate`
  * function (text-in → text-out) and we own the prompt + the strict parsing/sanitizing.
  * Keeping the model out of the package means it stays pure + testable (feed a fake
- * `generate`), and the host (geneWeave) wires in whichever LLM it uses.
+ * `generate`), and the host application wires in whichever LLM it uses.
  *
  * --- For someone new to this ---
  * An "entity" is a thing the text is about (a person, a company, a concept). A

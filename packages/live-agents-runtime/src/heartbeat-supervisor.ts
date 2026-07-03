@@ -104,7 +104,19 @@ export interface HeartbeatSupervisorOptions {
   refreshMs?: number;
   /** Number of parallel `heartbeat.tick()` workers. Default 4. */
   workers?: number;
+  /**
+   * Prefix for generated worker ids (`<prefix>-0`, `<prefix>-1`, …).
+   * Default `'weaveintel-live-worker'`; a consuming app should pass its own
+   * (e.g. `'acme-live-worker'`) so workers are recognisable in its telemetry.
+   */
   workerIdPrefix?: string;
+  /**
+   * The system principal (a `userId`) attributed to background tick work that
+   * no human initiated — used for audit/observability. Default
+   * `'human:weaveintel-system'`; pass your own (e.g. `'human:acme-system'`) so
+   * your audit log names your product, not the framework.
+   */
+  systemPrincipal?: string;
   /**
    * Lazy model factory invoked on demand by `agentic.react` handlers via the
    * shared `HandlerContext`. Returns `undefined` when no usable provider
@@ -218,7 +230,8 @@ export async function createHeartbeatSupervisor(
   const intervalMs = opts.intervalMs ?? 5_000;
   const refreshMs = opts.refreshMs ?? 30_000;
   const workerCount = Math.max(1, opts.workers ?? 4);
-  const workerIdPrefix = opts.workerIdPrefix ?? 'geneweave-live-worker';
+  const workerIdPrefix = opts.workerIdPrefix ?? 'weaveintel-live-worker';
+  const systemPrincipal = opts.systemPrincipal ?? 'human:weaveintel-system';
 
   // Resolve attention policy once (DB-driven when configured).
   const attentionPolicy: AttentionPolicy | undefined = opts.attentionPolicyKey
@@ -455,7 +468,7 @@ export async function createHeartbeatSupervisor(
     // Phase 5: propagate the runtime so the tick context inherits ambient
     // observability, secrets, and durable audit.
     const tickCtx = weaveContext({
-      userId: 'human:geneweave-system',
+      userId: systemPrincipal,
       ...(runtime !== undefined ? { runtime } : {}),
     });
     void weaveAudit(tickCtx, { action: 'live-agent.tick.start', outcome: 'success', resource: w.id });

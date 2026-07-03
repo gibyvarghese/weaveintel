@@ -47,7 +47,7 @@ export interface NotificationMessage {
   readonly body?: string;
   /**
    * App-defined URI clients use to navigate to the relevant screen.
-   * Framework treats this as opaque (e.g. `geneweave://run/<id>`).
+   * Framework treats this as opaque (e.g. `app://run/<id>`).
    */
   readonly deepLink?: string;
   /**

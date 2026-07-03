@@ -13,8 +13,8 @@
  * then issue lookups against the bidx column.
  *
  * Reusability invariant: this module only depends on `TenantKeyManager` and
- * `FieldPolicy` — no app-specific code. GeneWeave wires the user-table bidx,
- * but any app can add its own `BlindIndexSpec` list (e.g. orders.email,
+ * `FieldPolicy` — no app-specific code. A host application wires the user-table
+ * bidx, but any app can add its own `BlindIndexSpec` list (e.g. orders.email,
  * customers.phone).
  */
 

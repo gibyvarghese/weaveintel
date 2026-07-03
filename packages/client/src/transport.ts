@@ -137,7 +137,7 @@ export function sseTransport(opts: SseTransportOptions): EventTransport {
 
         life.onOpen?.();
 
-        // Single SSE byte→event decoder (shared with apps/geneweave-ui). The
+        // Single SSE byte→event decoder (shared with the reference UI app). The
         // generator owns the reader + buffering + stall timeout; we apply the
         // run-transport policy (early-stop on `onEvent` → true) by breaking the
         // loop, which cancels the reader via the generator's `return` path.

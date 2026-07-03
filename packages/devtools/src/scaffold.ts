@@ -257,7 +257,7 @@ console.log('MCP Server scaffold: {{PROJECT_NAME}}');
   },
 
   'full-stack': {
-    description: 'Full-stack application with geneWeave chatbot UI',
+    description: 'Full-stack AI app: agent runtime + streaming client + UI plumbing',
     files: [
       {
         path: 'package.json',
@@ -269,12 +269,16 @@ console.log('MCP Server scaffold: {{PROJECT_NAME}}');
       },
       {
         path: 'src/index.ts',
-        content: `// Full-stack scaffold based on geneWeave
+        content: `// Full-stack scaffold: the weaveintel umbrella wires the golden-path runtime,
+// @weaveintel/client streams runs to the browser, @weaveintel/ui-primitives
+// renders them. Build your product on top.
 console.log('Full-stack scaffold: {{PROJECT_NAME}}');
 `,
       },
     ],
-    dependencies: ['@weaveintel/core', '@weaveintel/agents', '@weaveintel/geneweave'],
+    // The umbrella (curated golden path) + the client transport + UI plumbing.
+    // All are real, published @weaveintel packages — no phantom dependency.
+    dependencies: ['@weaveintel/weaveintel', '@weaveintel/client', '@weaveintel/ui-primitives'],
     devDependencies: ['typescript'],
   },
 };

@@ -7,12 +7,12 @@
  * across the runtime package (provisioner + supervisor + run-bridge +
  * tool-binder + attention-factory + approval-handler).
  *
- * Why structural intersection (not import the geneweave adapter):
- *   - This package MUST NOT depend on `@weaveintel/geneweave` (or any app).
+ * Why structural intersection (not import the host-app adapter):
+ *   - This package MUST NOT depend on the host application package (or any app).
  *     Apps with very different DB schemas (Postgres, DynamoDB, in-memory
  *     fixtures for tests) need to satisfy the same contract by implementing
  *     a small set of methods.
- *   - Geneweave's `DatabaseAdapter` already implements every method below
+ *   - The host's `DatabaseAdapter` already implements every method below
  *     structurally, so passing it works without any wrapping.
  *
  * Path-specific requirements:
@@ -36,7 +36,7 @@ import type { AgentToolBindingDb } from '../tool-binder.js';
 
 /**
  * Aggregated DB facade. Implementations satisfy this interface
- * structurally — geneweave's `DatabaseAdapter` already does.
+ * structurally — the host's `DatabaseAdapter` already does.
  */
 export interface LiveAgentsDb
   extends ProvisionMeshDb,

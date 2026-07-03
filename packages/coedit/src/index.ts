@@ -10,7 +10,7 @@
  *   - {@link createAgentPeer} — the agent as a server-side co-editing replica.
  *   - {@link validateClientOps} — the trusted-relay op validator (anti-forgery + caps).
  *
- * The geneWeave app layers a SQL store + relay + live broadcast on top.
+ * A consuming application layers a SQL store + relay + live broadcast on top.
  */
 export {
   RgaDoc,
@@ -34,7 +34,7 @@ export {
   type AwarenessOptions,
 } from './awareness.js';
 
-// weaveNotes Phase 3 — live-presence helpers: stable per-peer cursor colours, the
+// Live-presence helpers: stable per-peer cursor colours, the
 // synthetic AI participant identity, and a strict sanitiser for incoming awareness.
 export {
   CURSOR_COLORS,
@@ -62,7 +62,7 @@ export {
   type OpValidationResult,
 } from './validation.js';
 
-// weaveNotes Phase 1 — the BLOCK-document CRDT (rich text / notes) on top of the
+// The BLOCK-document CRDT (rich text / notes) on top of the
 // same RGA. A flat sequence of char|block-marker elements + LWW block attrs +
 // Peritext-lite marks; converges identically. Plus ProseMirror ⇄ blocks
 // conversion + schema repair, Markdown/HTML serializers, and the agent block-peer.
@@ -89,7 +89,7 @@ export {
   blocksToHtml,
   safeCssColor,
 } from './block-markdown.js';
-// weaveNotes Phase 10 — multi-format note export (Markdown / HTML / Word / lossless JSON).
+// Multi-format note export (Markdown / HTML / Word / lossless JSON).
 export {
   type ExportableNote,
   type NoteExport,
@@ -116,9 +116,9 @@ export {
   type BlockAgentPeerOptions,
 } from './block-agent.js';
 
-// weaveNotes Phase 2 — the TRUSTED-RELAY block-op validator (anti-forgery + caps
+// The TRUSTED-RELAY block-op validator (anti-forgery + caps
 // for BlockOps) and `diffBlocks` (turn a whole edited document into convergent
-// block ops for the "diff-on-save" client path). These power geneWeave's notes
+// block ops for the "diff-on-save" client path). These power a consuming app's notes
 // co-editing relay + collaborative editor.
 export {
   validateClientBlockOps,

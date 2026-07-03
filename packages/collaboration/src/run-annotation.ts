@@ -22,7 +22,7 @@
  * separates HUMAN review from an LLM judge or eval code.
  *
  * Ports & adapters (Phase 0–3 pattern): the {@link AnnotationManager} PORT + an
- * in-memory reference adapter here; geneWeave provides a SQL adapter over
+ * in-memory reference adapter here; a consuming application provides a SQL adapter over
  * `run_annotations`. Both pass {@link annotationManagerContract}.
  */
 

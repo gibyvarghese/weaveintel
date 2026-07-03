@@ -3,7 +3,7 @@
  *
  * Pure-data facade that turns the three model_* columns on a
  * `live_agents` (or `live_agent_definitions`) row into a normalised spec
- * the geneweave bridge can hand to `@weaveintel/routing` (or use directly
+ * the host application's bridge can hand to `@weaveintel/routing` (or use directly
  * via the pinned id escape hatch).
  *
  * Resolution rules (per docs/live-agents/DB_DRIVEN_RUNTIME_PLAN.md §5b.4):
@@ -22,7 +22,7 @@
 
 /**
  * Minimal shape that both `LiveAgentRow` and `LiveAgentDefinitionRow`
- * (in geneweave's `db-types.ts`) satisfy. Plain field-shape interface —
+ * (in the host application's `db-types.ts`) satisfy. Plain field-shape interface —
  * NOT an index signature — so concrete row types are assignable.
  */
 export interface AgentModelFieldsRowLike {

@@ -1,7 +1,7 @@
 /**
  * Shared admin-schema primitives for DB-driven capability management UIs.
  *
- * Apps (including GeneWeave) can compose their admin tabs from these
+ * Consuming applications can compose their admin tabs from these
  * types/helpers so prompt/skill/tool/agent records stay model-discoverable
  * and consistently labeled across apps.
  */

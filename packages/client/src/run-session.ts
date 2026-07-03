@@ -12,7 +12,7 @@
  * `reject()` (HITL decisions), throttled notifications (smooth streaming) and a
  * tiny `getState`/`subscribe` store — the exact shape `useSyncExternalStore`
  * wants, so `@weaveintel/react-client`'s `useRun` is a thin wrapper and a vanilla
- * host (apps/geneweave-ui) can drive the same controller without a framework.
+ * host (the reference UI app) can drive the same controller without a framework.
  *
  * Browser-safe: no Node.js APIs. Timers are injectable for deterministic tests.
  */

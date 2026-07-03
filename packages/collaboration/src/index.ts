@@ -41,7 +41,7 @@ export {
 } from './handoff.js';
 
 // Phase 1 — Presence ("who else is here"): the PORT + in-memory reference
-// adapter (geneWeave provides the SQL adapter over `run_presence`). Both pass
+// adapter (a consuming application provides the SQL adapter over `run_presence`). Both pass
 // `presenceManagerContract`.
 export {
   type PresenceScope,
@@ -57,7 +57,7 @@ export {
 } from './presence-contract.js';
 
 // Phase 2 — Shared sessions + roles (multi-user access). The PORT + in-memory
-// reference adapter; geneWeave provides the SQL adapter over `shared_sessions` +
+// reference adapter; a consuming application provides the SQL adapter over `shared_sessions` +
 // `session_participants`. Both pass `sessionManagerContract`.
 export {
   type SessionRole,
@@ -75,7 +75,7 @@ export {
 } from './shared-session-contract.js';
 
 // Phase 3 — Durable run subscriptions ("notify me when this run finishes, even
-// if I close the tab"). The PORT + in-memory reference adapter; geneWeave
+// if I close the tab"). The PORT + in-memory reference adapter; a consuming application
 // provides the SQL adapter over `run_subscriptions`. Both pass
 // `subscriptionManagerContract`. Delivery is handled by `@weaveintel/notifications`
 // (this only records WHO is interested and over WHICH channels).
@@ -93,7 +93,7 @@ export {
 } from './run-subscription-contract.js';
 
 // Phase 4 — Collaborative run timeline: comments + annotations. The PORTS +
-// in-memory reference adapters; geneWeave provides SQL adapters over
+// in-memory reference adapters; a consuming application provides SQL adapters over
 // `run_comments` / `run_annotations`. Both pass their contracts. Comments anchor
 // to a STABLE part id; markdown renders to SAFE html via `renderCommentMarkdown`.
 export {
@@ -182,7 +182,7 @@ export {
 } from './run-annotation-contract.js';
 
 // Phase 5 — Unified handoff (user↔user, agent↔human, agent↔agent). The durable,
-// audited lifecycle PORT + in-memory reference adapter; geneWeave provides the
+// audited lifecycle PORT + in-memory reference adapter; a consuming application provides the
 // SQL adapter over `session_handoffs` + `handoff_events`. Both pass
 // `handoffManagerContract`. Supersedes the in-memory `createHandoffManager`
 // prototype above (kept for back-compat).

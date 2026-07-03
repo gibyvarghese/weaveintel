@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/coedit — live-presence helpers (weaveNotes Phase 3).
+ * @weaveintel/coedit — live-presence helpers.
  *
  * The {@link Awareness} class already carries the EPHEMERAL who-is-here-and-where state
  * (each peer's name, colour, status, cursor) following the Yjs awareness convention. Phase 3

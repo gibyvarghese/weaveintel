@@ -6,7 +6,7 @@
  *
  * The `onInterrupt` hook on `ToolCallingAgentOptions` accepts any function
  * matching `InterruptHandler`. `createHumanTaskInterruptHandler` wires the
- * hook to `@weaveintel/human-tasks` so geneWeave (or any other host) can
+ * hook to `@weaveintel/human-tasks` so a host application (or any other host) can
  * persist tasks to a DB and let a human click Approve in the UI before the
  * tool fires.
  *

@@ -173,7 +173,7 @@ export function isTextRenderablePromptVersion(version: PromptVersion): version i
 
 /**
  * Render a prompt version into a string using the shared template engine.
- * This keeps GeneWeave and other apps from hand-parsing prompt records.
+ * This keeps consuming applications from hand-parsing prompt records.
  */
 export function renderPromptVersion(version: PromptVersion, values: Record<string, unknown>): string {
   if (isTextRenderablePromptVersion(version)) {

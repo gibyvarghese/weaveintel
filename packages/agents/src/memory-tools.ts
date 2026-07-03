@@ -1,12 +1,12 @@
 /**
  * @weaveintel/agents — P4-1: Portable memory tool set factory
  *
- * `createMemoryToolSet(opts)` builds the same 10 memory tools that geneWeave
- * exposes, but via caller-supplied callbacks instead of a geneWeave DB layer.
+ * `createMemoryToolSet(opts)` builds the same 10 memory tools that a host
+ * application exposes, but via caller-supplied callbacks instead of a specific DB layer.
  * This lets any `weaveAgent` consumer wire in `@weaveintel/memory` (or any
- * other store) without importing geneWeave or the web app.
+ * other store) without importing a host application or the web app.
  *
- * The tool set mirrors geneWeave's:
+ * The tool set mirrors the reference set:
  *   memory_recall             — semantic + entity recall
  *   memory_search             — ranked search across stores
  *   memory_remember           — explicit save

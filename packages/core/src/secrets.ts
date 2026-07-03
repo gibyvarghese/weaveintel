@@ -6,7 +6,7 @@
  *   - `inMemorySecretResolver(map)`         seeds an in-memory map (tests, demos)
  *   - `chainSecretResolvers(...resolvers)`  first match wins
  *
- * Every adopter — including `apps/geneweave` and downstream apps — gets its
+ * Every adopter — the reference app and downstream apps alike — gets its
  * secrets through `runtime.secrets` rather than reading `process.env` ad-hoc.
  * That lets vault / cloud KMS / per-tenant overrides plug in later without
  * code changes at call sites.

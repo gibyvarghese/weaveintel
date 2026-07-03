@@ -3,7 +3,7 @@
  *
  * The resolver answers "what cost policy should this agent / mesh / workflow
  * use right now?" at runtime, without baking provider-specific DB shapes
- * into the package. Geneweave (and any other consumer) implements
+ * into the package. A host application (and any other consumer) implements
  * `CostPolicyResolver` over its own storage and passes the resolver into
  * runtime entry points like `weaveLiveMeshFromDb`.
  *

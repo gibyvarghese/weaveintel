@@ -9,7 +9,7 @@
  *   - The registry evaluates whether a crossing is allowed
  *
  * Instantiation:
- *   - One registry per application (singleton in geneweave)
+ *   - One registry per application (a singleton in the host application)
  *   - Populate from DB at startup via ScopeRegistry.fromRows()
  *   - Or populate programmatically with register*() methods
  *

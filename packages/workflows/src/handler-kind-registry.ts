@@ -6,7 +6,7 @@
  * registers) for admin UIs. This is the workflow analogue of the Tool
  * Platform's `BUILTIN_TOOLS` list synced into `tool_catalog`.
  *
- * The intent is that geneweave (or any other host) calls
+ * The intent is that the host application (or any other host) calls
  * `syncHandlerKindsToDb(db, registry)` at startup to upsert one row per
  * registered kind into a `workflow_handler_kinds` table, which then powers
  * the admin UI's "kind" picker without hardcoded enums.

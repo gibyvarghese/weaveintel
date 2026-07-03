@@ -80,7 +80,7 @@ export interface PromptRecordRenderResult {
 /**
  * A model-facing execution strategy that can transform rendered prompt content
  * before it is sent to an LLM. Strategies are data-driven and can be loaded
- * from DB records (GeneWeave) or in-memory registrations.
+ * from DB records (in a consuming application) or in-memory registrations.
  */
 export interface PromptExecutionStrategy {
   key: string;

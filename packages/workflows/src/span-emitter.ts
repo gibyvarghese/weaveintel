@@ -5,7 +5,7 @@
  *
  * Each step execution emits a `WorkflowSpan` with timing, handler kind,
  * retry count, and cost. Backends: in-memory (tests), console (dev), JSON
- * file (local durable), and DB (production — lives in geneweave).
+ * file (local durable), and DB (production — lives in the host application).
  */
 
 import { readFile, writeFile, mkdir, appendFile } from 'node:fs/promises';

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 /**
  * Shared conformance ("contract") test for any {@link PresenceManager} adapter
- * (Collaboration Phase 1). The in-memory reference adapter and geneWeave's SQL
+ * (Collaboration Phase 1). The in-memory reference adapter and a consuming application's SQL
  * adapter must both pass this same suite — proving they behave identically behind
  * the one presence port (the same ports-&-adapters pattern as Phase 0).
  *

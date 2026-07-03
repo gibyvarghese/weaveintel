@@ -49,7 +49,7 @@ export {
 } from './dispatcher.js';
 
 // In-app feed (Collaboration Phase 3) — the durable per-user inbox + a channel
-// that plugs into the dispatcher fan-out. geneWeave provides the SQL adapter.
+// that plugs into the dispatcher fan-out. A consuming app provides the SQL adapter.
 export {
   INAPP_CHANNEL_ID,
   type FeedNotification,

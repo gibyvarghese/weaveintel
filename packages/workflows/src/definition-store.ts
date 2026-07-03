@@ -3,7 +3,7 @@
  *
  * `WorkflowDefinitionStore` is the contract apps implement to back workflow
  * definitions with a real database. The package ships an `InMemory` adapter
- * for tests and short-lived processes; geneweave provides a SQLite-backed
+ * for tests and short-lived processes; the host application provides a SQLite-backed
  * adapter (`DbWorkflowDefinitionStore`).
  *
  * The engine calls into the store in two situations:

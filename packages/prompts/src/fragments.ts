@@ -21,7 +21,7 @@
  * Variables inside fragments are resolved from the same variable map as the
  * parent prompt, allowing fragments to be context-aware.
  *
- * DB STORAGE: GeneWeave stores fragments in the `prompt_fragments` table.
+ * DB STORAGE: A consuming app stores fragments in the `prompt_fragments` table.
  * Use FragmentRecordLike to parse DB rows into FragmentDefinition objects via
  * fragmentFromRecord().
  *
@@ -89,7 +89,7 @@ export interface FragmentVariable {
 // ─── DB record adapter ────────────────────────────────────────
 
 /**
- * Shape of a row from the `prompt_fragments` table in GeneWeave.
+ * Shape of a row from the `prompt_fragments` table in a consuming app.
  * `variables` column stores JSON-serialised FragmentVariable[].
  * `tags` column stores a JSON-serialised string[].
  */
@@ -108,7 +108,7 @@ export interface FragmentRecordLike {
 
 /**
  * Convert a `prompt_fragments` DB row into a typed FragmentDefinition.
- * Used by GeneWeave's DB adapter so apps don't parse raw JSON manually.
+ * Used by a consuming app's DB adapter so apps don't parse raw JSON manually.
  *
  * @param record - Raw DB row from the prompt_fragments table.
  */
@@ -146,7 +146,7 @@ export function fragmentFromRecord(record: FragmentRecordLike): FragmentDefiniti
 /**
  * Stores and retrieves fragment definitions by key.
  * Implementations may be in-memory (unit tests, package defaults) or
- * DB-backed (GeneWeave and other apps that manage fragments via admin CRUD).
+ * DB-backed (a consuming app and other apps that manage fragments via admin CRUD).
  */
 export interface FragmentRegistry {
   /**
@@ -169,7 +169,7 @@ export interface FragmentRegistry {
 
 /**
  * Default in-memory fragment registry.
- * GeneWeave overlays DB fragments on top of any defaults at startup.
+ * A consuming app overlays DB fragments on top of any defaults at startup.
  */
 export class InMemoryFragmentRegistry implements FragmentRegistry {
   private fragments = new Map<string, FragmentDefinition>();
@@ -294,6 +294,6 @@ export function extractFragmentKeys(template: string): string[] {
 /**
  * Singleton in-memory fragment registry.
  * Applications that want shared fragments across modules import this.
- * GeneWeave populates it from the `prompt_fragments` table at startup.
+ * A consuming app populates it from the `prompt_fragments` table at startup.
  */
 export const defaultFragmentRegistry = new InMemoryFragmentRegistry();
