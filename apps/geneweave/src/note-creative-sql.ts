@@ -24,10 +24,10 @@ import {
   normalizeLanguage, languageName, applyLanguagePreference,
   buildOpenverseUrl, buildWikimediaUrl, buildUnsplashUrl, buildPexelsUrl, buildPixabayUrl,
   parseOpenverse, parseWikimedia, parseUnsplash, parsePexels, parsePixabay,
-  makeFence, fenceUntrusted, spotlightPreamble,
   buildDiagramJudge, parseDiagramVerdict, diagramRegenFeedback, diagramAccept, VERIFY_EARLY_STOP_DELTA,
   buildImageVerify, parseImageVerdict, imageAccept, type DiagramVerdict, type ImageVerdict,
 } from '@weaveintel/notes';
+import { makeFence, fenceUntrusted, spotlightPreamble } from '@weaveintel/guardrails/spotlighting';
 import { newUUIDv7, weaveContext, hardenedFetch, type ModelRequest } from '@weaveintel/core';
 import { roleAtLeast } from '@weaveintel/collaboration';
 import { getOrCreateModel, type ChatEngineConfig } from './chat-runtime.js';

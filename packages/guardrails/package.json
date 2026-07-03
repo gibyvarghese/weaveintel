@@ -8,6 +8,11 @@
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./spotlighting": {
+      "import": "./dist/spotlighting.js",
+      "types": "./dist/spotlighting.d.ts",
+      "default": "./dist/spotlighting.js"
     }
   },
   "main": "./dist/index.js",

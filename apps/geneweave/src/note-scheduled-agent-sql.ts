@@ -20,9 +20,9 @@
 import {
   validateScheduledAgent, DEFAULT_SCHEDULED_AGENT, recipeInfo, cronNextRun,
   newRunBudget, chargeBudget, budgetExhausted, budgetRemaining, extractPlainText,
-  makeFence, fenceUntrusted, spotlightPreamble,
   type ScheduledAgentConfig, type ScheduleRecipe,
 } from '@weaveintel/notes';
+import { makeFence, fenceUntrusted, spotlightPreamble } from '@weaveintel/guardrails/spotlighting';
 import { newUUIDv7 } from '@weaveintel/core';
 import { agentCreateNote } from './note-ai-sql.js';
 import { createNoteSettingsService } from './note-settings-sql.js';

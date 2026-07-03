@@ -30,10 +30,8 @@ import {
   HIGHLIGHT_PALETTE,
   TEXT_COLOR_PALETTE,
   type ColorScheme,
-  makeFence,
-  fenceUntrusted,
-  spotlightPreamble,
 } from '@weaveintel/notes';
+import { makeFence, fenceUntrusted, spotlightPreamble } from '@weaveintel/guardrails/spotlighting';
 import { newUUIDv7 } from '@weaveintel/core';
 import { roleAtLeast } from '@weaveintel/collaboration';
 import { createNoteCoeditRepo, resolveNoteAccess, type NoteAccess } from './note-coedit-sql.js';
