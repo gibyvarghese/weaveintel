@@ -58,6 +58,35 @@ export function hasPersonaPermission(
   return permissions.some((permission) => matchPermission(permission, requestedPermission));
 }
 
+/**
+ * The permission a persona needs to SEE/USE each UI capability area. This is the source of truth for RBAC
+ * "surface parity": the client should HIDE a control a user can't use, not merely let the server 403 it
+ * (showing admin controls to a non-admin is confusing + leaks the existence of features). An area mapped to
+ * `null` is always visible (e.g. chat, notes). Extend this list as new areas appear.
+ */
+export const NAV_AREA_PERMISSION: Record<string, string | null> = {
+  home: null,
+  chat: null,
+  notes: null,
+  calendar: null,
+  design: null,
+  dashboard: 'dashboard:read',
+  connectors: 'credentials:write',
+  builder: 'admin:tenant:write',
+  admin: 'admin:tenant:write',
+};
+
+/**
+ * Can this persona access a UI capability area? Resolves the area to its required permission (see
+ * {@link NAV_AREA_PERMISSION}) and checks the persona's permissions. Unknown areas and `null`-permission
+ * areas are visible to everyone (fail-open for non-privileged surfaces; privileged areas must be listed).
+ */
+export function canAccessArea(policy: RbacPolicy, personaId: string, area: string): boolean {
+  const permission = Object.prototype.hasOwnProperty.call(NAV_AREA_PERMISSION, area) ? NAV_AREA_PERMISSION[area] : null;
+  if (!permission) return true;
+  return hasPersonaPermission(policy, personaId, permission);
+}
+
 export function extendIdentityWithPersona(
   identity: RuntimeIdentity,
   policy: RbacPolicy,

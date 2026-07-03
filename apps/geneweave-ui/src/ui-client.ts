@@ -14,6 +14,12 @@ import { STYLES } from './ui/styles.js';
 import { buildFeedbackControls, buildAiDisclosure, loadAiTransparency, loadChatFeedback } from './ui/answer-feedback.js';
 import { isCiteMode, sendCitedMessage, renderCitedAnswer, loadChatCitationsConfig } from './ui/chat-citations.js';
 import { buildVersionControls, loadAnswerVersionsConfig } from './ui/answer-versions.js';
+import { loadAccessibilityConfig, announceStreamStart, announceStreamDelta, announceStreamDone, announceStreamStopped } from './ui/stream-announce.js';
+import { captureFocus, restoreFocus, applyForceFocusRing } from './ui/focus.js';
+import { loadWorkspaceAccess } from './ui/workspace-access.js';
+import { t, loadI18n } from './ui/i18n.js';
+import { buildStarterCards, loadSuggestedPrompts } from './ui/suggested-prompts.js';
+import { captureScrollState, restoreScrollState } from './ui/scroll-preserve.js';
 import { 
   getUserAvatarUrl, 
   getAgentAvatarUrl,
@@ -137,6 +143,7 @@ import {
   renderSVVerdictView,
 } from './features/scientific-validation/ui/index.js';
 import { renderKaggleListView, renderKaggleFlowView } from './features/kaggle-competition/ui/index.js';
+import { noticeDialog, confirmDialog } from "./ui/dialog.js";
 
 
 // ============================================================================
@@ -298,6 +305,8 @@ async function runAssistantStream(chatId: string, content: string, attachments: 
     state.messages.push(assistantMsg);
     render();
     scrollMessages();
+    // H19 — one accessible live-region announcement that generation started (not a per-token transcript re-read).
+    announceStreamStart();
 
     let buf = '';
     let dataLines: string[] = [];
@@ -410,11 +419,14 @@ async function runAssistantStream(chatId: string, content: string, attachments: 
         }
       }
 
-      // Re-render ONLY the transcript per token (not the whole app). The Stop control + composer live in the
-      // input bar OUTSIDE `.messages`, so they stay stable/clickable as content grows (H16), and the streaming
-      // bubble still gets full markdown rendering. renderMessages self-preserves transcript scroll (follows
-      // the bottom only if the reader is already there — H14). Far cheaper than a full render() per token.
-      renderMessages();
+      // H18/H19 — patch ONLY the streaming bubble's text in place per token; do NOT rebuild the transcript.
+      // Rebuilding (`renderMessages`) re-adds every message node each token, which (a) makes the `role="log"`
+      // region re-announce the whole conversation to a screen reader (spam) and (b) churns layout so controls
+      // shift. Instead we mutate one text node; a dedicated live region announces the answer accessibly, and
+      // the composer (outside `.messages`) never moves. Full markdown render happens once, at completion.
+      patchStreamingBubble(assistantMsg.content);
+      announceStreamDelta(assistantMsg.content);
+      scrollMessages();
     }
 
     // Flush trailing event if stream ended without a trailing blank line.
@@ -459,7 +471,23 @@ async function runAssistantStream(chatId: string, content: string, attachments: 
     state.streaming = false;
     render();
     scrollMessages();
+    // H19 — announce the outcome accessibly, once: the finished answer, or the "stopped" notice.
+    if (assistantMsg) {
+      if (assistantMsg.stopped) announceStreamStopped(assistantMsg.content || '');
+      else if (assistantMsg.content && assistantMsg.processState === 'completed') announceStreamDone(assistantMsg.content);
+    }
   }
+}
+
+/**
+ * H18/H19 — update ONLY the streaming assistant bubble's text in place (no transcript rebuild). Renders plain
+ * text while streaming (final markdown/code render happens on completion, in renderMessages). Falls back to a
+ * one-off renderMessages() if the bubble hasn't been created yet.
+ */
+function patchStreamingBubble(text: string): void {
+  const el = document.querySelector('.messages [data-streaming-bubble]') as HTMLElement | null;
+  if (el) { el.textContent = text; return; }
+  renderMessages();
 }
 
 function renderProcessDetailView(value: any) {
@@ -1218,7 +1246,7 @@ async function showArtifactPreview(ref: ArtifactRef): Promise<void> {
         const d = await r.json() as { url?: string };
         if (d.url) showShareDialog(ref.name, d.url, null);
       } else {
-        alert(`Failed to create share link: ${await r.text()}`);
+        void noticeDialog({ message: `Failed to create share link: ${await r.text()}` });
       }
     } finally {
       shareBtn.disabled = false;
@@ -1250,7 +1278,7 @@ async function showArtifactPreview(ref: ArtifactRef): Promise<void> {
           showShareDialog(ref.name, shareUrl, d.embedCode);
         }
       } else {
-        alert(`Failed to get embed code: ${await r.text()}`);
+        void noticeDialog({ message: `Failed to get embed code: ${await r.text()}` });
       }
     } finally {
       embedBtn.disabled = false;
@@ -1465,10 +1493,14 @@ function renderMessages() {
   container.innerHTML = '';
   
   if (!state.messages.length) {
-    container.appendChild(h('div', {className:'empty-chat'},
-      h('div',null,'Start a conversation with geneWeave'),
-      h('div',null,'Choose a model above and type your message')
-    ));
+    const empty = h('div', {className:'empty-chat'},
+      h('div',null,t('chat.emptyTitle')),
+      h('div',null,t('chat.emptySubtitle'))
+    );
+    // m146: clickable conversation starters (curated + personalised). Picking one sends it straight away.
+    const cards = buildStarterCards((p) => { void sendMessage(p.prompt); });
+    if (cards) empty.appendChild(cards);
+    container.appendChild(empty);
     return;
   }
   
@@ -1514,7 +1546,14 @@ function renderMessages() {
     let bubbleEl: HTMLElement;
     let responseExportHtml = '';
     const citedCites = !isUser ? (Array.isArray(meta?.citations) ? meta!.citations : null) : null;
-    if (!isUser && (m as any).citing) {
+    if (isStreamingCurrent) {
+      // H18/H19 — while streaming, render a PLAIN-text bubble we can patch in place per token (no transcript
+      // rebuild, no per-token markdown). Marked so patchStreamingBubble() can find it. Final markdown render
+      // happens once the stream completes (this branch stops matching, the markdown branch below takes over).
+      bubbleEl = h('div', { className: 'bubble' });
+      bubbleEl.setAttribute('data-streaming-bubble', '1');
+      bubbleEl.textContent = m.content || '';
+    } else if (!isUser && (m as any).citing) {
       // m138 — a cited answer is being built (grounded, non-streaming).
       bubbleEl = h('div', { className: 'bubble' }, h('span', { className: 'meta' }, '❝ Searching your workspace…'));
     } else if (!isUser && (meta?.cited) && m.content) {
@@ -1775,6 +1814,12 @@ function renderHomeWorkspace() {
   const settingsBtn = h('button', {
     className: 'nav-btn' + (state.showSettings ? ' active' : ''),
     title: 'AI Settings',
+    // H12 — announce this as a popup menu button + its open/closed state; keep a stable focus key so Esc/
+    // outside-click can return focus here after the re-render (see the Esc handler in initialize()).
+    'aria-haspopup': 'true',
+    'aria-expanded': state.showSettings ? 'true' : 'false',
+    'aria-label': 'AI settings',
+    'data-focus-key': 'chat-settings-trigger',
     style: 'font-size:12px;padding:7px 10px;line-height:1;',
     onClick: async (e: Event) => {
       e.stopPropagation();
@@ -2062,17 +2107,27 @@ function render() {
   const previousSidebarScrollTop = Math.max(domScroll, state.sidebarScrollTop || 0);
   state.sidebarScrollTop = previousSidebarScrollTop;
   const thisRenderVersion = ++renderVersion;
-  
+  // H13 — capture keyboard focus (+ text caret) BEFORE the full-DOM rebuild wipes it, so a keyboard/
+  // screen-reader user isn't dumped to the top of the page after every action. Restored below.
+  const savedFocus = captureFocus();
+  // H14 — snapshot every [data-scroll-key] scroll container (notes list, admin tables, dashboard) before the
+  // wipe, so they don't jump to the top on re-render. Restored in the double-rAF below.
+  if (state.user) captureScrollState(root); // only the app branch has scroll containers + a restore pass
+
   if (!state.user) {
     root.innerHTML = '';
     root.appendChild(renderAuth());
+    restoreFocus(savedFocus, root);
   } else {
     root.innerHTML = '';
     root.appendChild(renderApp());
+    restoreFocus(savedFocus, root);
     // Double-rAF: first frame inserts DOM, second frame has computed layout
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         if (thisRenderVersion !== renderVersion) return;
+        // H14 — restore every generic [data-scroll-key] container (notes list, admin tables, dashboard).
+        restoreScrollState(root);
         // Restore the chat transcript scroll: pin to the bottom only if the user was already there
         // (so a streaming response keeps following), otherwise restore their exact position (so scrolling
         // up to read history is never yanked back down). Round 3 / H14 — same pattern as the sidebar.
@@ -2154,7 +2209,9 @@ export function initialize() {
     // Light-dismiss the global-state overlays (profile / notifications / settings) on Esc, and return
     // focus to whichever trigger opened them (WCAG 2.4.3 focus order / 2.1.2 no keyboard trap).
     if (state.showProfile || state.showNotifications || state.showSettings) {
-      const returnTo = state.showProfile ? document.querySelector<HTMLElement>('.profile-avatar') : null;
+      // H12 — return focus to the trigger that opened the overlay (profile avatar or the AI-settings button).
+      const returnSel = state.showProfile ? '.profile-avatar' : state.showSettings ? '[data-focus-key="chat-settings-trigger"]' : null;
+      const returnTo = returnSel ? document.querySelector<HTMLElement>(returnSel) : null;
       state.showProfile = false; state.showNotifications = false; state.showSettings = false;
       render();
       returnTo?.focus();
@@ -2198,6 +2255,15 @@ export function initialize() {
         await loadChatCitationsConfig();
         // m139: load the answer-versions config (whether answers offer Regenerate + a version pager).
         await loadAnswerVersionsConfig();
+        // m140: load accessibility defaults (screen-reader announce mode + reduced motion).
+        await loadAccessibilityConfig();
+        // m143: load which UI areas this user may see (RBAC surface parity) before the first render.
+        await loadWorkspaceAccess();
+        // m145: load the interface-language message pack for this reader (their saved language, else the
+        // workspace default) before the first render, so the UI renders already-translated (no flash).
+        await loadI18n();
+        // m146: load the empty-chat conversation starters (curated + personalised) so they're ready to show.
+        await loadSuggestedPrompts();
         // weaveNotes Phase 8 (desktop): wire the global quick-capture shortcut (⌘/Ctrl+Shift+K, or the
         // Tauri OS-global hotkey). Capturing jumps into the new note. Wired once per session.
         try {
@@ -2275,3 +2341,5 @@ export function initialize() {
 (globalThis as any).doLogout = doLogout;
 (globalThis as any).initialize = initialize;
 (globalThis as any).state = state;
+(globalThis as any).loadI18n = loadI18n;
+(globalThis as any).loadSuggestedPrompts = loadSuggestedPrompts;

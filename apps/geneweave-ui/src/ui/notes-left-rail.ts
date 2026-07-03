@@ -11,6 +11,7 @@
  * "+ Insert" menu, keeping the rail as calm as the design.
  */
 import { h } from './dom.js';
+import { loadingPlaceholder } from './skeleton.js';
 import type { NoteListItem } from './state.js';
 import { wovenMarkSvg, wordmarkHtml } from './notes-brand.js';
 
@@ -30,6 +31,8 @@ export interface LeftRailOpts {
   onRerender?: () => void;
   /** Create a new sub-note nested under the given note (turns a note into a notebook folder). */
   onNewSubNote?: (parentId: string) => void;
+  /** Collapse the notebooks rail (gives the note the full canvas width). */
+  onToggleCollapse?: () => void;
 }
 
 const DOC_ICON = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 4h12l4 4v12H4z"/><path d="M8 9h6M8 13h8M8 17h5"/></svg>';
@@ -107,10 +110,16 @@ export function renderLeftRail(opts: LeftRailOpts): HTMLElement {
   }) as HTMLInputElement;
 
   return h('div', { className: 'gw-leftrail' },
-    // brand (click → back to the rest of geneWeave)
-    h('button', { className: 'gw-brand', title: 'Back to geneWeave', onClick: opts.onHome },
-      h('span', { className: 'gw-brand-mark', innerHTML: wovenMarkSvg(24, 'duo') }),
-      h('span', { className: 'gw-brand-word', innerHTML: wordmarkHtml() }),
+    // brand (click → back to the rest of geneWeave) + a collapse control (« → hides the rail)
+    h('div', { className: 'gw-leftrail-head' },
+      h('button', { className: 'gw-brand', title: 'Back to geneWeave', onClick: opts.onHome },
+        h('span', { className: 'gw-brand-mark', innerHTML: wovenMarkSvg(24, 'duo') }),
+        h('span', { className: 'gw-brand-word', innerHTML: wordmarkHtml() }),
+      ),
+      opts.onToggleCollapse
+        ? h('button', { className: 'gw-rail-collapse', type: 'button', title: 'Collapse sidebar', 'aria-label': 'Collapse sidebar',
+            onClick: (e: Event) => { e.stopPropagation(); opts.onToggleCollapse!(); } }, '«')
+        : null,
     ),
     // search
     h('div', { className: 'gw-search' },
@@ -120,8 +129,8 @@ export function renderLeftRail(opts: LeftRailOpts): HTMLElement {
     ),
     // tree
     (() => {
-      const tree = h('div', { className: 'gw-tree gw-scroll' });
-      if (opts.loading) tree.appendChild(h('div', { className: 'gw-tree-loading' }, 'Loading…'));
+      const tree = h('div', { className: 'gw-tree gw-scroll', 'data-scroll-key': 'notes-list' });
+      if (opts.loading) tree.appendChild(loadingPlaceholder('list', 'Loading your notes…'));
       if (favs.length > 0) {
         tree.appendChild(h('div', { className: 'gw-tree-label-row' }, 'FAVOURITES'));
         // Favourites are shown flat (a shortcut list), regardless of where they sit in the tree.

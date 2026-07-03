@@ -9406,6 +9406,93 @@ export class SQLiteAdapter implements DatabaseAdapter {
     return this.d.prepare('SELECT * FROM tenant_answer_versions ORDER BY tenant_id ASC').all() as import('./db-types/adapter-me.js').TenantAnswerVersionsRow[];
   }
 
+  // m140 — per-tenant accessibility defaults.
+  async getTenantAccessibility(tenantId: string): Promise<import('./db-types/adapter-me.js').TenantAccessibilityRow | null> {
+    return (this.d.prepare('SELECT * FROM tenant_accessibility WHERE tenant_id = ?').get(tenantId) as import('./db-types/adapter-me.js').TenantAccessibilityRow | undefined) ?? null;
+  }
+  async upsertTenantAccessibility(row: import('./db-types/adapter-me.js').TenantAccessibilityRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO tenant_accessibility (tenant_id, announce_mode, reduced_motion, always_show_focus, confirm_destructive, show_skeletons)
+       VALUES (@tenant_id, @announce_mode, @reduced_motion, @always_show_focus, @confirm_destructive, @show_skeletons)
+       ON CONFLICT(tenant_id) DO UPDATE SET announce_mode=excluded.announce_mode, reduced_motion=excluded.reduced_motion, always_show_focus=excluded.always_show_focus, confirm_destructive=excluded.confirm_destructive, show_skeletons=excluded.show_skeletons, updated_at=datetime('now')`,
+    ).run(row);
+  }
+  async listTenantAccessibility(): Promise<import('./db-types/adapter-me.js').TenantAccessibilityRow[]> {
+    return this.d.prepare('SELECT * FROM tenant_accessibility ORDER BY tenant_id ASC').all() as import('./db-types/adapter-me.js').TenantAccessibilityRow[];
+  }
+
+  // m143 — per-tenant role-access policy.
+  async getTenantRoleAccess(tenantId: string): Promise<import('./db-types/adapter-me.js').TenantRoleAccessRow | null> {
+    return (this.d.prepare('SELECT * FROM tenant_role_access WHERE tenant_id = ?').get(tenantId) as import('./db-types/adapter-me.js').TenantRoleAccessRow | undefined) ?? null;
+  }
+  async upsertTenantRoleAccess(row: import('./db-types/adapter-me.js').TenantRoleAccessRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO tenant_role_access (tenant_id, member_dashboard, member_connectors, member_design)
+       VALUES (@tenant_id, @member_dashboard, @member_connectors, @member_design)
+       ON CONFLICT(tenant_id) DO UPDATE SET member_dashboard=excluded.member_dashboard, member_connectors=excluded.member_connectors, member_design=excluded.member_design, updated_at=datetime('now')`,
+    ).run(row);
+  }
+  async listTenantRoleAccess(): Promise<import('./db-types/adapter-me.js').TenantRoleAccessRow[]> {
+    return this.d.prepare('SELECT * FROM tenant_role_access ORDER BY tenant_id ASC').all() as import('./db-types/adapter-me.js').TenantRoleAccessRow[];
+  }
+  // m145 — per-tenant i18n policy + AI-generated locale packs.
+  async getTenantLocales(tenantId: string): Promise<import('./db-types/adapter-me.js').TenantLocalesRow | null> {
+    return (this.d.prepare('SELECT * FROM tenant_locales WHERE tenant_id = ?').get(tenantId) as import('./db-types/adapter-me.js').TenantLocalesRow | undefined) ?? null;
+  }
+  async upsertTenantLocales(row: import('./db-types/adapter-me.js').TenantLocalesRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO tenant_locales (tenant_id, default_locale, enabled_locales, assistant_localized)
+       VALUES (@tenant_id, @default_locale, @enabled_locales, @assistant_localized)
+       ON CONFLICT(tenant_id) DO UPDATE SET default_locale=excluded.default_locale, enabled_locales=excluded.enabled_locales, assistant_localized=excluded.assistant_localized, updated_at=datetime('now')`,
+    ).run({ tenant_id: row.tenant_id, default_locale: row.default_locale, enabled_locales: row.enabled_locales, assistant_localized: row.assistant_localized });
+  }
+  async listTenantLocales(): Promise<import('./db-types/adapter-me.js').TenantLocalesRow[]> {
+    return this.d.prepare('SELECT * FROM tenant_locales ORDER BY tenant_id ASC').all() as import('./db-types/adapter-me.js').TenantLocalesRow[];
+  }
+  async getTenantUiTranslation(tenantId: string, locale: string): Promise<import('./db-types/adapter-me.js').TenantUiTranslationRow | null> {
+    return (this.d.prepare('SELECT * FROM tenant_ui_translations WHERE tenant_id = ? AND locale = ?').get(tenantId, locale) as import('./db-types/adapter-me.js').TenantUiTranslationRow | undefined) ?? null;
+  }
+  async listTenantUiTranslations(tenantId: string): Promise<import('./db-types/adapter-me.js').TenantUiTranslationRow[]> {
+    return this.d.prepare('SELECT * FROM tenant_ui_translations WHERE tenant_id = ? ORDER BY locale ASC').all(tenantId) as import('./db-types/adapter-me.js').TenantUiTranslationRow[];
+  }
+  async upsertTenantUiTranslation(row: import('./db-types/adapter-me.js').TenantUiTranslationRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO tenant_ui_translations (tenant_id, locale, messages_json, source, key_count)
+       VALUES (@tenant_id, @locale, @messages_json, @source, @key_count)
+       ON CONFLICT(tenant_id, locale) DO UPDATE SET messages_json=excluded.messages_json, source=excluded.source, key_count=excluded.key_count, updated_at=datetime('now')`,
+    ).run({ tenant_id: row.tenant_id, locale: row.locale, messages_json: row.messages_json, source: row.source, key_count: row.key_count });
+  }
+  // m146 — suggested/starter prompts: per-tenant policy + per-user AI cache + click log.
+  async getTenantSuggestedPrompts(tenantId: string): Promise<import('./db-types/adapter-me.js').TenantSuggestedPromptsRow | null> {
+    return (this.d.prepare('SELECT * FROM tenant_suggested_prompts WHERE tenant_id = ?').get(tenantId) as import('./db-types/adapter-me.js').TenantSuggestedPromptsRow | undefined) ?? null;
+  }
+  async upsertTenantSuggestedPrompts(row: import('./db-types/adapter-me.js').TenantSuggestedPromptsRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO tenant_suggested_prompts (tenant_id, enabled, use_recent_notes, use_recent_chats, use_ai, max_curated, max_personalized)
+       VALUES (@tenant_id, @enabled, @use_recent_notes, @use_recent_chats, @use_ai, @max_curated, @max_personalized)
+       ON CONFLICT(tenant_id) DO UPDATE SET enabled=excluded.enabled, use_recent_notes=excluded.use_recent_notes, use_recent_chats=excluded.use_recent_chats, use_ai=excluded.use_ai, max_curated=excluded.max_curated, max_personalized=excluded.max_personalized, updated_at=datetime('now')`,
+    ).run({ tenant_id: row.tenant_id, enabled: row.enabled, use_recent_notes: row.use_recent_notes, use_recent_chats: row.use_recent_chats, use_ai: row.use_ai, max_curated: row.max_curated, max_personalized: row.max_personalized });
+  }
+  async listTenantSuggestedPrompts(): Promise<import('./db-types/adapter-me.js').TenantSuggestedPromptsRow[]> {
+    return this.d.prepare('SELECT * FROM tenant_suggested_prompts ORDER BY tenant_id ASC').all() as import('./db-types/adapter-me.js').TenantSuggestedPromptsRow[];
+  }
+  async getUserPromptSuggestions(userId: string): Promise<import('./db-types/adapter-me.js').UserPromptSuggestionsRow | null> {
+    return (this.d.prepare('SELECT * FROM user_prompt_suggestions WHERE user_id = ?').get(userId) as import('./db-types/adapter-me.js').UserPromptSuggestionsRow | undefined) ?? null;
+  }
+  async upsertUserPromptSuggestions(row: import('./db-types/adapter-me.js').UserPromptSuggestionsRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO user_prompt_suggestions (user_id, tenant_id, prompts_json, generated_at)
+       VALUES (@user_id, @tenant_id, @prompts_json, datetime('now'))
+       ON CONFLICT(user_id) DO UPDATE SET tenant_id=excluded.tenant_id, prompts_json=excluded.prompts_json, generated_at=datetime('now')`,
+    ).run({ user_id: row.user_id, tenant_id: row.tenant_id, prompts_json: row.prompts_json });
+  }
+  async insertPromptSuggestionEvent(row: import('./db-types/adapter-me.js').PromptSuggestionEventRow): Promise<void> {
+    this.d.prepare(
+      `INSERT OR IGNORE INTO prompt_suggestion_events (id, user_id, tenant_id, prompt_id, title, source)
+       VALUES (@id, @user_id, @tenant_id, @prompt_id, @title, @source)`,
+    ).run({ id: row.id, user_id: row.user_id, tenant_id: row.tenant_id, prompt_id: row.prompt_id, title: row.title, source: row.source });
+  }
+
   // weaveNotes Phase 5 (m134) — background-memory extraction state.
   async getNoteMemoryState(noteId: string, userId: string): Promise<import('./db-types/adapter-me.js').NoteMemoryStateRow | null> {
     return (this.d.prepare('SELECT * FROM note_memory_state WHERE note_id = ? AND user_id = ?').get(noteId, userId) ?? null) as import('./db-types/adapter-me.js').NoteMemoryStateRow | null;

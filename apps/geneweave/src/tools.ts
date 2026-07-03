@@ -806,6 +806,8 @@ export interface ToolRegistryOptions {
   currentUserId?: string;
   /** Tenant of the current user (weaveNotes Phase 3.1) — stamped on notes the agent creates. */
   currentTenantId?: string | null;
+  /** Persona of the current user (m143) — gates privacy in list_workspace_members (emails for admins only). */
+  currentPersona?: string | null;
   currentChatId?: string;
   /** Run id (set on the /api/me/runs path) so emitted artifacts are run-scoped. */
   currentRunId?: string;
@@ -999,6 +1001,24 @@ export interface ToolRegistryOptions {
    * quotes dropped). When set, the `cite_sources` tool is available. Owner-scoped.
    */
   citeSources?: (args: { userId: string; tenantId?: string | null; question: string; limit?: number }) => Promise<{ ok: boolean; error?: string; answer: string; grounded: boolean; citations: Array<{ n: number; sourceId: string; sourceKind: string; sourceTitle: string; quote: string }>; sources: Array<{ n: number; id: string; kind: string; title: string }> }>;
+  /**
+   * Workspace roles (m143): a read-only, tenant-scoped list of the people in the user's workspace + their
+   * roles, so the assistant can answer "who's on my team / who are the admins?". Emails are only included when
+   * the caller is an admin. When set, the `list_workspace_members` tool is available.
+   */
+  listWorkspaceMembers?: (args: { userId: string; tenantId?: string | null; persona?: string | null }) => Promise<{ ok: boolean; total: number; admins: number; members: Array<{ name: string; role: string; email?: string; isYou: boolean }> }>;
+  /**
+   * Internationalisation (m145): translate the whole app UI into a new language (an AI locale pack), reusing
+   * the notes faithful-translation engine. When set, the `translate_ui` tool is available. Tenant-scoped —
+   * it only ever localises the caller's own workspace.
+   */
+  translateUi?: (args: { targetLanguage: string; tenantId?: string | null; userId?: string }) => Promise<{ ok: boolean; error?: string; locale?: string; language?: string; translated?: number; total?: number; warnings?: string[] }>;
+  /**
+   * Suggested/starter prompts (m146): generate fresh personalised conversation starters from the user's own
+   * recent notes + chats and cache them for the empty chat. When set, the `suggest_prompts` tool is available.
+   * Owner-scoped.
+   */
+  suggestPrompts?: (args: { userId: string; tenantId?: string | null; count?: number }) => Promise<{ ok: boolean; error?: string; count: number; prompts: Array<{ title: string; prompt: string; category: string }> }>;
   /**
    * weaveNotes Phase 5: semantic note search. When set, the `find_related_notes` tool is
    * available so the agent can find the user's notes most relevant to a query (knowledge-
@@ -2258,6 +2278,61 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
         tags: ['notes', 'knowledge', 'citations'],
       }),
     } : {}),
+    // Workspace roles (m143): list_workspace_members tool — available when listWorkspaceMembers callback is set.
+    ...(opts?.listWorkspaceMembers && opts.currentUserId ? {
+      list_workspace_members: weaveTool({
+        name: 'list_workspace_members',
+        description: 'List the people in the user\'s workspace and the role each holds (Admin / Member), so you can answer "who is on my team?", "who are the admins here?", or "how many people are in this workspace?". Read-only + privacy-aware: names + roles for everyone, and email addresses only when the person asking is an admin. Only ever sees the caller\'s own workspace.',
+        parameters: { type: 'object', properties: {} },
+        execute: async () => {
+          if (!opts.listWorkspaceMembers || !opts.currentUserId) return { content: 'Workspace member info is unavailable in this context.', isError: true };
+          const r = await opts.listWorkspaceMembers({ userId: opts.currentUserId, tenantId: opts.currentTenantId ?? null, persona: opts.currentPersona ?? null });
+          return JSON.stringify({ ok: true, total: r.total, admins: r.admins, members: r.members });
+        },
+        tags: ['workspace', 'team'],
+      }),
+    } : {}),
+    // Internationalisation (m145): translate_ui tool — available when translateUi callback is set.
+    ...(opts?.translateUi ? {
+      translate_ui: weaveTool({
+        name: 'translate_ui',
+        description: 'Translate the geneWeave INTERFACE (menus, buttons, empty-state messages) into another language so the whole workspace can use the app in that language. Use when the user asks to "translate the app to French", "add German to the app", or "make the interface available in Japanese". Pass the target language as a name ("French", "日本語") or ISO code ("fr", "ja"). It translates the built-in English labels faithfully, keeps product names + placeholders intact, verifies the result, and saves the workspace language pack; afterwards members can pick that language in Account → Language. This localises the UI, NOT a note — for translating a note use translate_note. Only affects the caller\'s own workspace.',
+        parameters: {
+          type: 'object',
+          properties: {
+            targetLanguage: { type: 'string', description: 'Target language — a name ("French", "German", "日本語") or ISO 639-1 code ("fr", "de", "ja").' },
+          },
+          required: ['targetLanguage'],
+        },
+        execute: async (args: { targetLanguage: string }) => {
+          if (!opts.translateUi) return { content: 'UI translation is unavailable in this context.', isError: true };
+          const r = await opts.translateUi({ targetLanguage: args.targetLanguage, tenantId: opts.currentTenantId ?? null, ...(opts.currentUserId ? { userId: opts.currentUserId } : {}) });
+          if (!r.ok) return { content: `translate_ui failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, language: r.language, locale: r.locale, translated: r.translated, total: r.total, warnings: r.warnings ?? [] });
+        },
+        tags: ['i18n', 'localization', 'translate'],
+      }),
+    } : {}),
+    // Suggested/starter prompts (m146): suggest_prompts tool — available when suggestPrompts callback is set.
+    ...(opts?.suggestPrompts && opts.currentUserId ? {
+      suggest_prompts: weaveTool({
+        name: 'suggest_prompts',
+        description: 'Come up with a few good things the user could ask next — short "conversation starters" personalised to what they have recently been doing (drawn from their OWN recent notes and chats). Use this when the user says "what can you help with?", "give me some ideas", "suggest some prompts", or "I\'m not sure what to ask", or to freshen the starters on their home screen. Returns a short list of starter prompts and also saves them so they appear on the empty chat screen. It only ever reads the caller\'s own recent activity.',
+        parameters: {
+          type: 'object',
+          properties: {
+            count: { type: 'number', description: 'How many starters to generate (1–6; default 3).' },
+          },
+        },
+        execute: async (args: { count?: number }) => {
+          if (!opts.suggestPrompts || !opts.currentUserId) return { content: 'Suggested prompts are unavailable in this context.', isError: true };
+          const r = await opts.suggestPrompts({ userId: opts.currentUserId, tenantId: opts.currentTenantId ?? null, ...(typeof args.count === 'number' ? { count: args.count } : {}) });
+          if (!r.ok) return { content: `suggest_prompts failed: ${r.error ?? 'unknown error'}`, isError: true };
+          return JSON.stringify({ ok: true, count: r.count, prompts: r.prompts });
+        },
+        tags: ['suggestions', 'starters', 'onboarding'],
+      }),
+    } : {}),
     // weaveNotes Phase 10: export-note tool — available when noteExport callback is set.
     ...(opts?.noteExport && opts.currentUserId ? {
       export_note: weaveTool({
@@ -2486,7 +2561,7 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
     // (generate_image is intentionally NOT here — it costs money and stays opt-in.)
     'create_diagram', 'draw_ink', 'recolor_ink', 'create_illustration', 'create_visual', 'find_image',
     'make_flashcards', 'translate_note', 'manage_scheduled_agent', 'apply_highlight', 'apply_text_color', 'colorize_semantic',
-    'review_answer_feedback', 'cite_sources',
+    'review_answer_feedback', 'cite_sources', 'list_workspace_members', 'translate_ui', 'suggest_prompts',
   ] as const) {
     const t = scopedTools[noteTool];
     if (t && !registeredFromSelection.has(noteTool) && canUseTool(actorPersona, noteTool)) registry.register(t);

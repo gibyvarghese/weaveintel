@@ -1,5 +1,7 @@
 // API client for backend communication
 import { state } from './state.js';
+import { confirmDialog } from "./dialog.js";
+import { reportLoadError, dismiss as dismissLoadError } from './load-error.js';
 
 // Client gets ADMIN_SCHEMA from window globals (set by server in HTML)
 function getAdminSchema(): any {
@@ -167,9 +169,11 @@ export async function loadChats() {
         ? messagesData.messages.map(normalizeServerMessage)
         : [];
     }
+    dismissLoadError('your chats');
     triggerRender();
   } catch (e) {
     console.error('Failed to load chats', e);
+    reportLoadError('your chats', e, () => { void loadChats(); }); // H15 — visible + recoverable, not silent
   }
 }
 
@@ -185,9 +189,11 @@ export async function selectChat(id: string) {
     state.messages = Array.isArray(data.messages)
       ? data.messages.map(normalizeServerMessage)
       : [];
+    dismissLoadError('this conversation');
     triggerRender();
   } catch (e) {
     console.error('Failed to load chat', e);
+    reportLoadError('this conversation', e, () => { void selectChat(id); });
   }
 }
 
@@ -217,7 +223,7 @@ export async function createChat() {
 }
 
 export async function deleteChat(id: string) {
-  if (!confirm('Delete this chat?')) return;
+  if (!(await confirmDialog({ message: 'Delete this chat? This cannot be undone.', danger: true, confirmLabel: 'Delete chat' }))) return;
   try {
     await api.del(`/chats/${id}`);
     state.chats = state.chats.filter((c: any) => c.id !== id);
@@ -240,9 +246,11 @@ export async function loadModels() {
     if (!state.selectedModel && data.defaultModel) {
       state.selectedModel = data.defaultModel;
     }
+    dismissLoadError('the model list');
     triggerRender();
   } catch (e) {
     console.error('Failed to load models', e);
+    reportLoadError('the model list', e, () => { void loadModels(); });
   }
 }
 
@@ -265,9 +273,11 @@ export async function loadTools() {
     const r = await api.get('/tools');
     const data = await r.json();
     state.tools = data.tools || [];
+    dismissLoadError('the tool list');
     triggerRender();
   } catch (e) {
     console.error('Failed to load tools', e);
+    reportLoadError('the tool list', e, () => { void loadTools(); });
   }
 }
 

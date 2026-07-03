@@ -71,6 +71,9 @@ import { createTenantAppearanceService } from './tenant-appearance-sql.js';
 import { createAccountService } from './account-sql.js';
 import { createAnswerFeedbackService } from './answer-feedback-sql.js';
 import { createChatCitationsService } from './chat-citations-sql.js';
+import { createWorkspaceAccessService } from './workspace-access-sql.js';
+import { createTranslateUiTool } from './i18n-sql.js';
+import { createSuggestPromptsTool } from './suggested-prompts-sql.js';
 import { createNoteWorkspaceService } from './note-workspace-sql.js';
 import { createNoteSettingsService } from './note-settings-sql.js';
 import {
@@ -440,6 +443,18 @@ export class ChatEngine {
       // the user's own workspace, so the assistant can back a claim with a real, checkable source.
       citeSources: (a: { userId: string; tenantId?: string | null; question: string; limit?: number }) =>
         createChatCitationsService(db, { aiGenerate: createModelTextGenerator(config) }).agentCiteSources(a),
+      // Workspace roles (m143): wire the `list_workspace_members` tool — a read-only, tenant-scoped team
+      // read-out so the assistant can answer "who's on my team / who are the admins?".
+      listWorkspaceMembers: (a: { userId: string; tenantId?: string | null; persona?: string | null }) =>
+        createWorkspaceAccessService(db).agentListMembers(a),
+      // Internationalisation (m145): wire the `translate_ui` tool — translate the whole app UI into a new
+      // language (an AI locale pack), reusing the notes faithful-translation engine.
+      translateUi: (a: { targetLanguage: string; tenantId?: string | null; userId?: string }) =>
+        createTranslateUiTool(db, createModelTextGenerator(config)).translateUi(a),
+      // Suggested/starter prompts (m146): wire the `suggest_prompts` tool — generate personalised conversation
+      // starters from the user's own recent notes + chats and cache them for the empty chat.
+      suggestPrompts: (a: { userId: string; tenantId?: string | null; count?: number }) =>
+        createSuggestPromptsTool(db, createModelTextGenerator(config)).suggestPrompts(a),
       // weaveNotes Phase 5: wire the `find_related_notes` tool (semantic note search).
       notesSearch: (a: { userId: string; tenantId?: string | null; query: string; limit?: number }) =>
         createNoteGraphService(db).searchNotes({ userId: a.userId, tenantId: a.tenantId ?? null }, a.query, a.limit ?? 5),
@@ -1240,6 +1255,7 @@ export class ChatEngine {
       defaultTimezone: settings.timezone,
       currentUserId: userId,
       ...(tenantId != null ? { currentTenantId: tenantId } : {}),
+      ...(userPersona ? { currentPersona: userPersona } : {}),
       currentChatId: chatId,
       // Phase 3: run-scope artifacts produced via /api/me/runs (the executor
       // stamps ctx.metadata.runId) so `artifacts.run_id` is populated.

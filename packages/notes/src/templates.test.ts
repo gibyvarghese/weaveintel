@@ -16,10 +16,12 @@ describe('templates — the system template set', () => {
     expect(SYSTEM_TEMPLATES.length).toBeGreaterThanOrEqual(10);
     const keys = SYSTEM_TEMPLATES.map((t) => t.key);
     expect(new Set(keys).size).toBe(keys.length); // unique
-    for (const must of ['blank', 'cornell', 'meeting-minutes', 'study-sheet', 'active-recall', 'zettelkasten']) {
+    for (const must of ['blank', 'cornell', 'meeting-minutes', 'study-sheet', 'active-recall', 'zettelkasten',
+      'solution-architecture', 'design-doc', 'customer-journey', 'prd']) {
       expect(keys).toContain(must);
     }
-    expect(templateCategories()).toEqual(['Blank', 'Study', 'Meetings', 'Planning', 'Thinking']);
+    // The categories appear in the gallery's reading order; only categories that have templates are returned.
+    expect(templateCategories()).toEqual(['Blank', 'Engineering', 'Product', 'Design', 'Planning', 'Meetings', 'Knowledge', 'Thinking', 'Study', 'Personal']);
   });
 
   it('every template has a title, icon, description + a valid doc', () => {

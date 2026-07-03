@@ -51,6 +51,7 @@ import {
   buildWorkingMemoryContext,
 } from './chat-memory-utils.js';
 import { triggerConsolidationForUser } from './memory-consolidation.js';
+import { createI18nService } from './i18n-sql.js';
 
 type StreamMessageDeps = {
   config: ChatEngineConfig;
@@ -715,7 +716,16 @@ export async function streamMessageImpl(
     buildEpisodicContext(deps.db, userId, 6),
     buildWorkingMemoryContext(deps.db, userId),
   ]);
+  // Internationalisation (m145): if the workspace turned on assistant localisation, ask the model to reply in
+  // the reader's interface language. No-op otherwise (a skill already matches the language the user writes in).
+  let streamLocaleInstruction = '';
+  try {
+    const prefs = await deps.db.getUserPreferences(userId) as { language?: string } | null;
+    streamLocaleInstruction = await createI18nService(deps.db).assistantLocaleInstruction(tenantId, prefs?.language ?? null);
+  } catch { /* i18n is best-effort; never block a reply */ }
+
   const streamContextParts: string[] = [];
+  if (streamLocaleInstruction) streamContextParts.push(streamLocaleInstruction);
   if (streamSkillPrompt) streamContextParts.push(streamSkillPrompt);
   if (streamProceduralInstructions) streamContextParts.push(streamProceduralInstructions);
   if (streamWorkingMemoryContext) streamContextParts.push(streamWorkingMemoryContext);

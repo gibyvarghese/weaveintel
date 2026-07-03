@@ -14,6 +14,7 @@
  * the nav + collection, and the wiring to the admin layer.
  */
 import { h } from './dom.js';
+import { loadingPlaceholder } from './skeleton.js';
 import { state } from './state.js';
 import { wovenMarkSvg, wordmarkHtml } from './notes-brand.js';
 import { getAdminSchema, adminSaveRow, adminDeleteRow, clearAdminEditorState } from './admin-ui.js';
@@ -161,7 +162,7 @@ function renderNav(render: () => void): HTMLElement {
   return h('nav', { className: 'bld-nav' },
     h('button', { className: 'bld-brand', title: 'Back to geneWeave', onClick: () => { state.view = 'chat'; render(); } },
       h('span', { innerHTML: wovenMarkSvg(26, 'duo') }), h('span', { className: 'bld-brand-word', innerHTML: wordmarkHtml() })),
-    h('div', { className: 'bld-nav-body gw-scroll' },
+    h('div', { className: 'bld-nav-body gw-scroll', 'data-scroll-key': 'builder-nav' },
       ...groups.map((g, i) => group(g.label, g.key ?? g.label, g.tabs, i === 0)),
       orphans.length ? group('More', '__more', orphans, false) : null,
     ),
@@ -193,8 +194,8 @@ function renderCollection(render: () => void): HTMLElement {
       ),
       h('div', { className: 'bld-coll-cols' }, h('span', { className: 'bld-col-name' }, 'NAME'), h('span', { className: 'bld-col-status' }, 'STATUS')),
     ),
-    h('div', { className: 'bld-coll-list gw-scroll' },
-      _loading ? h('div', { className: 'bld-coll-empty' }, 'Loading…') : null,
+    h('div', { className: 'bld-coll-list gw-scroll', 'data-scroll-key': 'builder-list' },
+      _loading ? loadingPlaceholder('list', 'Loading…') : null,
       ...rows.map((row) => {
         const id = rowId(row, schema);
         const on = rowEnabled(row);
@@ -229,7 +230,7 @@ function renderEditorPane(opts: BuilderOptions, render: () => void): HTMLElement
   const name = String(form['name'] ?? form['label'] ?? form['title'] ?? form['key'] ?? schema.singular ?? 'Record');
   const eyebrow = `${(schema.groupLabel ?? 'ASSISTANT SETUP')} / ${(schema.plural ?? (schema.singular ? schema.singular + 's' : tab)).toUpperCase()}`;
 
-  const body = h('div', { className: 'bld-editor-scroll gw-scroll' },
+  const body = h('div', { className: 'bld-editor-scroll gw-scroll', 'data-scroll-key': 'builder-editor' },
     renderBuilderFields(schema, { get: (k) => (state.adminForm as Row)?.[k], set: (k, v) => { state.adminForm = { ...(state.adminForm as Row), [k]: v }; render(); } }),
     schema.readOnly ? null : h('div', { className: 'bld-form bld-danger-wrap' },
       h('div', { className: 'bld-danger' },

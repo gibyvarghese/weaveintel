@@ -163,7 +163,7 @@ export function wireSelectionCard(opts: { container: HTMLElement; noteId: string
       ),
       h('div', { className: 'notes-aicard-colors' },
         h('span', { className: 'notes-aicard-colorlabel' }, 'Highlight'),
-        ...SWATCHES.map((s) => h('button', { className: 'notes-aicard-swatch', title: `Highlight ${s.key}`, style: `background:${s.color}`, onMouseDown: (e: MouseEvent) => { e.preventDefault(); highlight(s.color)(); } })),
+        ...SWATCHES.map((s) => h('button', { className: 'notes-aicard-swatch', title: `Highlight ${s.key}`, style: { background: s.color }, onMouseDown: (e: MouseEvent) => { e.preventDefault(); highlight(s.color)(); } })),
         h('span', { className: 'notes-aicard-sep' }),
         h('span', { className: 'notes-aicard-colorlabel' }, 'Colour-code'),
         schemeSel,

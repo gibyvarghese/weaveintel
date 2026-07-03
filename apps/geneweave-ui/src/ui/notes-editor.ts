@@ -19,6 +19,8 @@
  * within the same page lifetime reuse the same bundle.
  */
 
+import { promptDialog } from './dialog.js';
+
 // ── Bundle cache ──────────────────────────────────────────────────────────────
 
 type TiptapExtension = { configure?: (opts: Record<string, unknown>) => unknown; [k: string]: unknown };
@@ -152,7 +154,7 @@ const SLASH_COMMANDS = [
   { label: 'Callout — warning', icon: '⚠️', action: (editor: TiptapEditor) => { editor.chain().focus()['setCallout']?.({ tone: 'warning' }).run(); } },
   { label: 'Toggle list', icon: '▸', action: (editor: TiptapEditor) => { editor.chain().focus()['setToggle']?.({ summary: 'Details' }).run(); } },
   { label: 'Table', icon: '▦', action: (editor: TiptapEditor) => { editor.chain().focus()['insertTable']?.({ rows: 3, cols: 3, withHeaderRow: true }).run(); } },
-  { label: 'Image embed', icon: '🖼', action: (editor: TiptapEditor) => { const src = window.prompt('Image URL (https:// or data:image)'); if (src) editor.chain().focus()['setImage']?.({ src, alt: '' }).run(); } },
+  { label: 'Image embed', icon: '🖼', action: (editor: TiptapEditor) => { void (async () => { const src = await promptDialog({ title: 'Embed an image', message: 'Paste an image URL (https:// or data:image).', placeholder: 'https://…', required: true, confirmLabel: 'Embed' }); if (src) editor.chain().focus()['setImage']?.({ src, alt: '' }).run(); })(); } },
   { label: 'Sticker ✨', icon: '✨', action: (editor: TiptapEditor) => { editor.chain().focus()['setSticker']?.({ emoji: '✨' }).run(); } },
   { label: 'Washi divider', icon: '🎀', action: (editor: TiptapEditor) => { editor.chain().focus()['setWashiDivider']?.({ pattern: 'tape' }).run(); } },
   // weaveNotes Phase 4 creative blocks.

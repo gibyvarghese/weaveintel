@@ -14,6 +14,7 @@
 import { h } from './dom.js';
 import { api } from './api.js';
 import { wovenMarkSvg } from './notes-brand.js';
+import { noticeDialog, confirmDialog, promptDialog } from "./dialog.js";
 
 export interface NoteAiPanel {
   /** Re-fetch + re-render the pending suggestions list. */
@@ -49,7 +50,7 @@ export function wireNoteAi(opts: { noteId: string; toolbarEl: HTMLElement; panel
       const body: Record<string, unknown> = {};
       if (instruction) body['instruction'] = instruction;
       const res = await api.post(`/api/me/notes/${noteId}/ai/${action}`, body);
-      if (!res.ok) { const e = await res.json().catch(() => ({})) as { error?: string }; alert(`AI ${action} failed: ${e.error ?? res.status}`); return; }
+      if (!res.ok) { const e = await res.json().catch(() => ({})) as { error?: string }; void noticeDialog({ message: `AI ${action} failed: ${e.error ?? res.status}` }); return; }
       await refresh(); // the new suggestion shows in the panel for review
     } finally { setBusy(false); }
   }
@@ -59,7 +60,13 @@ export function wireNoteAi(opts: { noteId: string; toolbarEl: HTMLElement; panel
   // configured mode for 'restructure' (direct / agent / supervisor — set in the Builder); the result
   // arrives as one track-changes suggestion to review.
   async function restructure(): Promise<void> {
-    const outline = window.prompt('Reorganise this note. Optionally give a section order (one heading per line), or leave blank to let the AI choose the clearest structure:');
+    const outline = await promptDialog({
+      title: 'Reorganise this note',
+      message: 'Optionally give a section order (one heading per line), or leave blank to let the AI choose the clearest structure.',
+      placeholder: 'e.g.\nOverview\nKey decisions\nAction items',
+      multiline: true,
+      confirmLabel: 'Reorganise',
+    });
     if (outline === null) return; // cancelled (blank string = AI chooses)
     setBusy(true);
     statusEl.textContent = 'The notes assistant is reorganising…';
@@ -68,18 +75,25 @@ export function wireNoteAi(opts: { noteId: string; toolbarEl: HTMLElement; panel
       if (outline.trim()) body['outline'] = outline.trim();
       const res = await api.post(`/api/me/notes/${noteId}/ai/restructure`, body);
       const data = await res.json().catch(() => ({})) as { ok?: boolean; error?: string };
-      if (!res.ok || data.ok === false) { alert(`Restructure failed: ${data.error ?? 'the assistant did not produce a change'}`); return; }
+      if (!res.ok || data.ok === false) { void noticeDialog({ message: `Restructure failed: ${data.error ?? 'the assistant did not produce a change'}` }); return; }
       await refresh(); // the reorganised note shows as a suggestion to review
     } finally { setBusy(false); }
   }
 
   async function insertBlock(): Promise<void> {
-    const prompt = window.prompt('Describe the AI block to insert (it remembers this prompt so you can refresh it later):');
+    const prompt = await promptDialog({
+      title: 'Insert an AI block',
+      message: 'Describe what to write. The block remembers this prompt, so you can Refresh it later to regenerate.',
+      placeholder: 'e.g. A three-sentence summary of the key risks',
+      multiline: true,
+      required: true,
+      confirmLabel: 'Insert',
+    });
     if (!prompt) return;
     setBusy(true);
     try {
       const res = await api.post(`/api/me/notes/${noteId}/ai/insert-block`, { prompt, citation: 'note:self' });
-      if (res.ok) onApplied(); else alert('Could not insert AI block.');
+      if (res.ok) onApplied(); else void noticeDialog({ message: 'Could not insert AI block.' });
     } finally { setBusy(false); }
   }
 
@@ -88,7 +102,7 @@ export function wireNoteAi(opts: { noteId: string; toolbarEl: HTMLElement; panel
     try {
       const res = await api.post(`/api/me/notes/${noteId}/suggestions/${id}/${decision}`, {});
       if (res.ok) { if (decision === 'accept') onApplied(); await refresh(); }
-      else alert(`Could not ${decision} the suggestion.`);
+      else void noticeDialog({ message: `Could not ${decision} the suggestion.` });
     } finally { setBusy(false); }
   }
 
@@ -107,7 +121,7 @@ export function wireNoteAi(opts: { noteId: string; toolbarEl: HTMLElement; panel
       h('button', { className: 'notes-ai-btn notes-ai-continue', title: 'Continue writing', onClick: () => void runAction('continue') }, 'Continue'),
       h('button', { className: 'notes-ai-btn notes-ai-rewrite', title: 'Rewrite the note', onClick: () => void runAction('rewrite') }, 'Rewrite'),
       h('button', { className: 'notes-ai-btn notes-ai-summarize', title: 'Summarize the note', onClick: () => void runAction('summarize') }, 'Summarize'),
-      h('button', { className: 'notes-ai-btn notes-ai-ask', title: 'Ask the AI a question about this note', onClick: () => { const q = window.prompt('Ask the AI about this note:'); if (q) void runAction('ask', q); } }, 'Ask AI'),
+      h('button', { className: 'notes-ai-btn notes-ai-ask', title: 'Ask the AI a question about this note', onClick: () => { void (async () => { const q = await promptDialog({ title: 'Ask AI about this note', placeholder: 'e.g. What are the open action items?', required: true, confirmLabel: 'Ask' }); if (q) void runAction('ask', q); })(); } }, 'Ask AI'),
       h('button', { className: 'notes-ai-btn notes-ai-restructure', title: 'Reorganise the whole note — reorder sections, fix the structure', onClick: () => void restructure() }, '⇅ Restructure'),
       h('button', { className: 'notes-ai-btn notes-ai-insert', title: 'Insert a refreshable AI block', onClick: () => void insertBlock() }, '＋ AI block'),
       statusEl,

@@ -30,6 +30,7 @@
     { "path": "../../packages/routing" },
     { "path": "../../packages/cache" },
     { "path": "../../packages/identity" },
+    { "path": "../../packages/i18n" },
     { "path": "../../packages/memory" },
     { "path": "../../packages/mcp-statsnz" },
     { "path": "../../packages/mcp-server" },

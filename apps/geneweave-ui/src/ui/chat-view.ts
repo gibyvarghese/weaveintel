@@ -7,6 +7,7 @@ import {
   removePendingAttachment,
 } from './utils.js';
 import { buildCiteToggle } from './chat-citations.js';
+import { t } from './i18n.js';
 import {
   initVoiceSession,
   endVoiceSession,
@@ -308,7 +309,7 @@ export function renderChatView(options: {
     view.appendChild(banner);
   }
 
-  const textarea = h('textarea', { placeholder: 'Type a message...', rows: '1', 'aria-label': 'Message input', 'aria-multiline': 'true' }) as HTMLTextAreaElement;
+  const textarea = h('textarea', { placeholder: t('chat.placeholder'), rows: '1', 'aria-label': 'Message input', 'aria-multiline': 'true', 'data-focus-key': 'composer' }) as HTMLTextAreaElement;
   textarea.addEventListener('keydown', (e: KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -322,7 +323,10 @@ export function renderChatView(options: {
     textarea.style.height = Math.min(textarea.scrollHeight, 160) + 'px';
   });
 
-  const messageContainer = h('div', { className: 'messages', role: 'log', 'aria-live': 'polite', 'aria-label': 'Conversation messages', 'aria-relevant': 'additions' });
+  // H19 — the transcript is a `log` for structure, but it does NOT announce live: rebuilding it (or a
+  // per-token streaming patch) would make a screen reader re-read the conversation. A dedicated visually-hidden
+  // `role="status"` region (see ui/stream-announce.ts) announces the streaming answer accessibly instead.
+  const messageContainer = h('div', { className: 'messages', role: 'log', 'aria-live': 'off', 'aria-label': 'Conversation messages' });
   // Track the transcript scroll so a full re-render (and streaming) can RESTORE it — and so we only
   // auto-follow to the bottom when the user is already there (never yank them down mid-read). Round 3 / H14.
   messageContainer.addEventListener('scroll', () => {

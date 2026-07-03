@@ -138,6 +138,25 @@ export {
   summarizeMessageFeedback,
 } from './message-feedback.js';
 export {
+  type PromptSource,
+  type PromptCategory,
+  type SuggestedPrompt,
+  type RecentNoteSignal,
+  type RecentChatSignal,
+  type SuggestionInput,
+  TITLE_MAX as SUGGESTED_PROMPT_TITLE_MAX,
+  PROMPT_MAX as SUGGESTED_PROMPT_MAX,
+  CURATED_PROMPTS,
+  sanitizePromptText,
+  normalizeKey as normalizePromptKey,
+  buildNoteCandidates,
+  buildChatCandidates,
+  dedupePrompts,
+  selectSuggestions,
+  buildSuggestPromptsPrompt,
+  parseSuggestedPromptsReply,
+} from './suggested-prompts.js';
+export {
   type AnswerVariant,
   type VariantStack,
   DEFAULT_MAX_VARIANTS,
@@ -147,6 +166,17 @@ export {
   activeVariant,
   variantLabel,
 } from './answer-variants.js';
+export {
+  type AnnounceMode,
+  type AnnounceInput,
+  type AnnounceResult,
+  DEFAULT_ANNOUNCE_MIN_INTERVAL_MS,
+  GENERATING_MESSAGE,
+  STOPPED_MESSAGE,
+  computeAppendedText,
+  lastSentenceBoundary,
+  nextStreamAnnouncement,
+} from './stream-announce.js';
 export {
   annotationManagerContract,
 } from './run-annotation-contract.js';

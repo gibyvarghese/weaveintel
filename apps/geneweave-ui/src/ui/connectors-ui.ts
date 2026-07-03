@@ -1,4 +1,5 @@
 import { api, loadConnectors, loadCredentials, loadSSOProviders, loadOAuthAccounts, loadPasswordProviders } from './api.js';
+import { noticeDialog, confirmDialog, promptDialog } from "./dialog.js";
 import { h } from './dom.js';
 import { state } from './state.js';
 
@@ -19,7 +20,7 @@ function getConnectorStatus(def: any) {
 async function startOAuthFlow(def: any, connectorId: string, onComplete: () => void) {
   const qs = new URLSearchParams({ connector_id: connectorId || '' });
   if (def.needsDomain) {
-    const domain = window.prompt('Enter ServiceNow domain (without .service-now.com):', '');
+    const domain = await promptDialog({ title: 'ServiceNow domain', message: 'Enter your ServiceNow domain (without .service-now.com).', placeholder: 'mycompany', required: true, confirmLabel: 'Continue' });
     if (!domain) return;
     qs.set('domain', domain);
   }
@@ -27,13 +28,13 @@ async function startOAuthFlow(def: any, connectorId: string, onComplete: () => v
   const response = await api.get(`/connectors/${def.id}/authorize?${qs.toString()}`);
   const data = await response.json();
   if (!response.ok || !data.url) {
-    alert(data?.error || 'Could not get authorization URL');
+    void noticeDialog({ message: data?.error || 'Could not get authorization URL' });
     return;
   }
 
   const popup = window.open(data.url, `oauth-${def.id}`, 'width=600,height=700,scrollbars=yes');
   if (!popup) {
-    alert('Popup blocked. Please allow popups for this site.');
+    void noticeDialog({ message: 'Popup blocked. Please allow popups for this site.' });
     return;
   }
 
@@ -42,7 +43,7 @@ async function startOAuthFlow(def: any, connectorId: string, onComplete: () => v
     if (!event.data || (event.data.type !== 'oauth-success' && event.data.type !== 'oauth-error')) return;
     window.removeEventListener('message', onMessage);
     if (event.data.type === 'oauth-error') {
-      alert(`OAuth error: ${event.data.error || 'Unknown error'}`);
+      void noticeDialog({ message: `OAuth error: ${event.data.error || 'Unknown error'}` });
     }
     onComplete();
   }
@@ -81,7 +82,7 @@ async function connectorTest(def: any) {
   if (!existing?.id) return;
   const response = await api.post(`/connectors/${existing.id}/test`, { table: def.category === 'social' ? 'social' : 'enterprise' });
   const data = await response.json();
-  alert(data?.ok ? `Connection verified: ${data.message || 'OK'}` : `Connection test failed: ${data?.message || data?.error || 'Unknown error'}`);
+  void noticeDialog({ message: data?.ok ? `Connection verified: ${data.message || 'OK'}` : `Connection test failed: ${data?.message || data?.error || 'Unknown error'}` });
 }
 
 function startAddCredential(render: () => void) {
@@ -107,7 +108,7 @@ function startEditCredential(credential: any, render: () => void) {
 async function saveCredential(render: () => void) {
   const form = state.credentialForm || {};
   if (!form.siteName || !form.siteUrlPattern || !form.authMethod) {
-    alert('Site Name, URL Pattern, and Auth Method are required.');
+    void noticeDialog({ message: 'Site Name, URL Pattern, and Auth Method are required.' });
     return;
   }
 
@@ -121,7 +122,7 @@ async function saveCredential(render: () => void) {
     try {
       config['cookies'] = JSON.parse(form.cookiesJson || '[]');
     } catch {
-      alert('Invalid cookies JSON.');
+      void noticeDialog({ message: 'Invalid cookies JSON.' });
       return;
     }
   }
@@ -149,7 +150,7 @@ async function saveCredential(render: () => void) {
 }
 
 async function deleteCredential(id: string, render: () => void) {
-  if (!confirm('Delete this credential?')) return;
+  if (!(await confirmDialog({ message: 'Delete this credential?', danger: true }))) return;
   await api.del(`/credentials/${id}`);
   await loadCredentials();
   render();

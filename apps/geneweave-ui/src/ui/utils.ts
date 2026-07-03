@@ -1,6 +1,7 @@
 // Common utility functions for UI
 import { state, toYMD } from './state.js';
 import { api } from './api.js';
+import { noticeDialog } from './dialog.js';
 
 /* Theme Management */
 export function normalizeTheme(val: any): 'light' | 'dark' {
@@ -245,7 +246,7 @@ export async function toggleAudioRecording() {
     (globalThis as any).SpeechRecognition || (globalThis as any).webkitSpeechRecognition;
   if (!SpeechRecognitionCtor) {
     console.error('Speech recognition is not supported in this browser.');
-    alert('Voice input is not supported in this browser. Try Chrome or Edge.');
+    void noticeDialog({ title: 'Voice input unavailable', message: 'Voice input is not supported in this browser. Try Chrome or Edge.' });
     return;
   }
 

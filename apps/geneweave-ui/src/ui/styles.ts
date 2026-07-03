@@ -410,18 +410,78 @@ input{font-family:inherit;outline:none}
 .ver-nav[disabled]{opacity:.4;cursor:default}
 .ver-count{font-size:11px;font-weight:500;color:var(--fg2);min-width:26px;text-align:center}
 .ver-regen.busy{opacity:.7;cursor:default}
+/* m140 / H19 — visually-hidden live region for accessible streaming announcements (screen-reader only). */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+/* m140 / reduced motion — workspace default or the reader's OS setting damps stream/typing animations. */
+html[data-reduced-motion] *,html[data-reduced-motion] *::before,html[data-reduced-motion] *::after{animation-duration:0.001ms !important;animation-iteration-count:1 !important;transition-duration:0.001ms !important;scroll-behavior:auto !important}
+/* m141 / H13 — a clear, consistent focus ring on EVERY interactive control when reached by keyboard, so a
+   keyboard/screen-reader user can always see where they are (incl. the div-as-button controls fixed in R4). */
+a:focus-visible,button:focus-visible,[role="button"]:focus-visible,[tabindex]:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible{outline:2px solid color-mix(in oklab,var(--accent) 78%, white);outline-offset:2px;border-radius:6px}
+/* "Always show focus outlines" workspace default — force the ring even for mouse users who :focus a control. */
+html[data-force-focus-ring] a:focus,html[data-force-focus-ring] button:focus,html[data-force-focus-ring] [role="button"]:focus,html[data-force-focus-ring] [tabindex]:focus,html[data-force-focus-ring] input:focus,html[data-force-focus-ring] textarea:focus,html[data-force-focus-ring] select:focus{outline:2px solid color-mix(in oklab,var(--accent) 78%, white) !important;outline-offset:2px}
+/* m144 / Round 8 — loading skeletons (placeholder shapes while a slow view loads → no blank flash / CLS). */
+.skel{display:flex;flex-direction:column;gap:10px;padding:8px 2px}
+.skel-row{display:flex;align-items:center;gap:10px}
+.skel-dot{width:26px;height:26px;border-radius:8px;flex-shrink:0;background:var(--bg3)}
+.skel-lines{flex:1;display:flex;flex-direction:column;gap:6px;min-width:0}
+.skel-line{height:10px;border-radius:6px;background:linear-gradient(90deg,var(--bg3) 25%,var(--bg4) 37%,var(--bg3) 63%);background-size:400% 100%;animation:skel-shimmer 1.4s ease infinite}
+.skel-line.skel-big{height:34px;border-radius:10px;margin:8px 0}
+.skel-line.w30{width:30%}.skel-line.w40{width:40%}.skel-line.w50{width:50%}.skel-line.w60{width:60%}.skel-line.w70{width:70%}.skel-line.w80{width:80%}
+.skel-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;padding:8px 2px}
+.skel-card{border:1px solid var(--bg4);border-radius:12px;padding:16px;background:var(--bg2)}
+.skel-fallback{padding:14px;color:var(--fg3);font-size:13px}
+@keyframes skel-shimmer{0%{background-position:100% 0}100%{background-position:0 0}}
+/* m142 / Round 5 — accessible confirm/notice dialog (replaces native alert()/confirm()). */
+.gw-dialog-overlay{position:fixed;inset:0;z-index:10050;background:rgba(20,32,27,.34);display:flex;align-items:center;justify-content:center;padding:20px}
+.gw-dialog{background:var(--bg);border:1px solid var(--bg4);border-radius:16px;box-shadow:0 18px 50px rgba(0,0,0,.22);width:440px;max-width:92vw;padding:22px 22px 18px}
+.gw-dialog-title{font-family:var(--font);font-weight:700;font-size:16px;color:var(--fg);margin-bottom:8px}
+.gw-dialog-msg{font-size:14px;line-height:1.6;color:var(--fg2);margin-bottom:18px;white-space:pre-wrap}
+.gw-dialog-input{display:block;width:100%;box-sizing:border-box;font-family:var(--font);font-size:14px;color:var(--fg);background:var(--bg2);border:1px solid var(--bg4);border-radius:10px;padding:10px 12px;margin-bottom:18px;resize:vertical}
+.gw-dialog-input::placeholder{color:var(--fg3)}
+.gw-dialog-input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--mint-wash)}
+.gw-dialog-btn:disabled{opacity:.5;cursor:not-allowed}
+.gw-dialog-actions{display:flex;justify-content:flex-end;gap:10px}
+.gw-dialog-btn{font-size:14px;font-weight:600;padding:9px 16px;border-radius:10px;cursor:pointer;font-family:var(--font);border:1px solid var(--bg4);background:var(--bg3);color:var(--fg2)}
+.gw-dialog-btn:hover{border-color:var(--fg3);color:var(--fg)}
+.gw-dialog-btn.primary{background:var(--solid);color:var(--solid-contrast);border-color:var(--solid)}
+.gw-dialog-btn.primary:hover{background:var(--solid-hover)}
+.gw-dialog-btn.danger{background:var(--danger);color:#fff;border-color:var(--danger)}
+.gw-dialog-btn.danger:hover{background:var(--coral)}
+/* m142 / H15 — recoverable data-load error banner (replaces silent catch). */
+.load-error-host{position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:10040;display:none;flex-direction:column;gap:8px;width:min(560px,92vw)}
+.load-error{display:flex;align-items:center;gap:10px;background:#FEF3F2;border:1px solid #FDA29B;border-radius:12px;padding:10px 12px;box-shadow:0 8px 24px rgba(0,0,0,.12)}
+[data-theme="dark"] .load-error{background:#3A1B1B;border-color:#7A3A34}
+.load-error-icon{color:var(--danger)}
+.load-error-text{flex:1;font-size:13px;color:var(--fg1)}
+.load-error-retry{font-size:12px;font-weight:600;padding:5px 12px;border-radius:8px;border:1px solid var(--danger);background:transparent;color:var(--danger);cursor:pointer;font-family:var(--font)}
+.load-error-retry:hover{background:var(--danger);color:#fff}
+.load-error-x{border:none;background:none;font-size:18px;line-height:1;color:var(--fg3);cursor:pointer}
 .empty-chat{flex:1;display:flex;align-items:center;justify-content:center;color:var(--fg3);font-size:15px;flex-direction:column;gap:8px}
 .empty-chat .logo{font-size:48px;margin-bottom:8px}
+/* m146 — suggested / starter prompt cards on the empty chat */
+.suggested-prompts{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;width:100%;max-width:640px;margin-top:18px}
+.prompt-card{display:flex;align-items:flex-start;gap:10px;text-align:left;padding:12px 14px;border:1px solid var(--bg4);border-radius:var(--radius);background:var(--bg2);color:var(--fg);cursor:pointer;font:inherit;transition:border-color .15s ease,background .15s ease,transform .06s ease}
+.prompt-card:hover{border-color:var(--accent);background:var(--bg1)}
+.prompt-card:active{transform:translateY(1px)}
+.prompt-card:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.prompt-card.personalized{border-color:var(--mint-border);background:var(--mint-wash)}
+.prompt-card.personalized:hover{border-color:var(--accent);background:var(--mint)}
+.prompt-card-icon{font-size:18px;line-height:1.2;flex:0 0 auto}
+.prompt-card-body{display:flex;flex-direction:column;gap:3px;min-width:0}
+.prompt-card-title{font-size:13.5px;font-weight:600;color:var(--fg);line-height:1.3}
+.prompt-card-tag{font-size:10.5px;font-weight:600;letter-spacing:.02em;text-transform:uppercase;color:var(--mint-deep);align-self:flex-start}
+@media (prefers-reduced-motion: reduce){.prompt-card{transition:none}}
 
 /* ── Input bar ──────────────────────────────── */
 .input-bar{padding:20px 32px;border-top:1px solid var(--bg4);display:flex;gap:12px;align-items:flex-end;background:var(--bg2)}
 .input-bar textarea{flex:1;padding:14px 16px;border-radius:var(--radius-lg);border:1px solid var(--bg4);background:var(--bg2);color:var(--fg);font-size:14px;resize:none;min-height:48px;max-height:160px;line-height:1.5;font-family:var(--font);transition:border-color .18s ease}
 .input-bar textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(37,99,235,.1)}
-.input-bar .send-btn{padding:12px 24px;border-radius:999px;background:var(--solid);color:var(--solid-contrast);font-weight:600;font-size:14px;height:48px;transition:background .18s ease}
+/* H18 — fixed footprint (height + min-width) so Send↔Stop swap and streaming growth cause ZERO layout shift. */
+.input-bar .send-btn{padding:12px 24px;border-radius:999px;background:var(--solid);color:var(--solid-contrast);font-weight:600;font-size:14px;height:48px;min-width:104px;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:7px;transition:background .18s ease}
 .input-bar .send-btn:hover{background:var(--solid-hover)}
 .input-bar .send-btn:disabled{opacity:.4;cursor:not-allowed}
 /* Stop-generating control (Round 3): same footprint as Send so the layout doesn't shift when it swaps. */
-.input-bar .send-btn.stop-btn{background:var(--danger);color:#fff;display:inline-flex;align-items:center;gap:7px}
+.input-bar .send-btn.stop-btn{background:var(--danger);color:#fff}
 .input-bar .send-btn.stop-btn:hover{background:var(--coral)}
 .input-bar .model-sel{padding:10px 12px;border-radius:var(--radius);border:1px solid var(--bg4);background:var(--bg2);color:var(--fg2);font-size:13px;height:48px}
 .routing-badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:var(--radius);border:1px solid var(--bg4);background:var(--bg2);color:var(--fg2);font-family:var(--font);font-size:13px;font-weight:500;cursor:help;white-space:nowrap;box-sizing:border-box;line-height:1.4}
@@ -1195,6 +1255,12 @@ input{font-family:inherit;outline:none}
 .gw-shell{display:grid;grid-template-columns:248px minmax(0,1fr) 300px;height:100%;overflow:hidden;background:var(--canvas)}
 /* 2-column shell: notebooks rail + canvas; the assistant floats over the canvas (bottom-right) */
 .gw-shell-2col{grid-template-columns:248px minmax(0,1fr);position:relative}
+/* Rail collapsed → the canvas takes the whole width; a floating tab re-opens the rail. */
+.gw-shell-2col.rail-collapsed{grid-template-columns:minmax(0,1fr)}
+.gw-rail-expand{position:absolute;top:11px;left:14px;z-index:60;width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--hairline);border-radius:9px;background:var(--surface);color:var(--fg2);font-size:15px;cursor:pointer;box-shadow:0 2px 8px rgba(20,32,27,.06)}
+.gw-rail-expand:hover{background:var(--bg3);color:var(--fg)}
+/* When collapsed, shift the note top-bar's content right so it clears the floating expand tab. */
+.gw-shell-2col.rail-collapsed .gw-topbar{padding-left:56px}
 /* floating assistant dock */
 .gw-assistant-dock{position:absolute;right:26px;bottom:26px;z-index:45}
 .gw-assistant-bubble{width:60px;height:60px;border-radius:50%;background:var(--surface);border:1px solid var(--mint-deep);box-shadow:0 10px 30px rgba(20,32,27,.18);cursor:pointer;display:flex;align-items:center;justify-content:center;position:relative;animation:gw-bubble-pulse 3.4s ease-in-out infinite}
@@ -1215,8 +1281,11 @@ input{font-family:inherit;outline:none}
 .app-fullbleed .gw-notes,.app-fullbleed .notes-full-view{height:100vh}
 /* — left notebooks rail (design handoff) — */
 .gw-leftrail{background:var(--surface);border-right:1px solid var(--hairline);overflow:hidden;display:flex;flex-direction:column;min-width:0;padding:16px 12px}
-.gw-brand{display:flex;align-items:center;gap:10px;padding:6px 8px 16px;background:none;border:none;cursor:pointer;width:100%}
+.gw-leftrail-head{display:flex;align-items:center;gap:6px}
+.gw-brand{display:flex;align-items:center;gap:10px;padding:6px 8px 16px;background:none;border:none;cursor:pointer;flex:1;min-width:0}
 .gw-brand:hover{opacity:.85}
+.gw-rail-collapse{flex:none;margin-bottom:10px;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--bg4);border-radius:7px;background:var(--bg3);color:var(--fg2);font-size:13px;cursor:pointer}
+.gw-rail-collapse:hover{background:var(--bg);color:var(--fg)}
 .gw-brand-mark{display:inline-flex}
 .gw-brand-word{font-family:var(--font-display);font-size:15px;font-weight:700;letter-spacing:-0.02em}
 .gw-search{display:flex;align-items:center;gap:8px;background:var(--canvas);border:1px solid var(--hairline);border-radius:10px;padding:8px 11px;margin-bottom:18px}
@@ -1309,12 +1378,16 @@ input{font-family:inherit;outline:none}
 .gw-menu-cards{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:2px}
 .gw-menu-card{display:flex;align-items:center;gap:9px;text-align:left;padding:9px 10px;border-radius:11px;border:1px solid var(--mint-deep);background:var(--mint-wash);cursor:pointer}
 .gw-menu-card:hover{background:var(--mint)}
-.gw-menu-card-ic{width:28px;height:28px;border-radius:8px;background:var(--surface);display:inline-flex;align-items:center;justify-content:center;flex:none;font-size:14px}
+.gw-menu-card-ic{width:28px;height:28px;border-radius:8px;background:var(--surface);display:inline-flex;align-items:center;justify-content:center;flex:none;font-size:14px;color:var(--accent2)}
+.gw-menu-card-ic svg{width:17px;height:17px;display:block}
 .gw-menu-card-tx{min-width:0;line-height:1.2;display:flex;flex-direction:column}
 .gw-menu-card-label{font-size:12.5px;font-weight:600;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .gw-menu-card-sub{font-size:10.5px;color:var(--fg2);white-space:nowrap}
 .gw-menu-rich .gw-menu-item{display:flex;align-items:center;gap:11px}
-.gw-menu-item-ic{width:22px;display:inline-flex;justify-content:center;flex:none}
+.gw-menu-item-ic{width:22px;display:inline-flex;align-items:center;justify-content:center;flex:none;color:var(--fg3)}
+.gw-menu-item-ic svg{width:16px;height:16px;display:block}
+.gw-menu-item:hover .gw-menu-item-ic{color:var(--accent2)}
+.gw-menu-item.danger .gw-menu-item-ic{color:var(--danger-zone-fg)}
 .gw-modal-overlay{position:fixed;inset:0;z-index:100;background:rgba(20,32,27,.28);display:flex;align-items:flex-start;justify-content:center;padding-top:12vh}
 .gw-modal{background:var(--surface);border:1px solid var(--hairline);border-radius:16px;box-shadow:var(--shadow-pop);width:520px;max-width:90vw;padding:16px}
 .gw-modal-head{display:flex;align-items:center;justify-content:space-between;font-family:var(--font-display);font-weight:700;font-size:15px;margin-bottom:10px}
@@ -1362,8 +1435,13 @@ input{font-family:inherit;outline:none}
 .gw-color-menu{display:flex;gap:8px;padding:10px;min-width:auto}
 .gw-color-swatch{width:22px;height:22px;border-radius:50%;border:1px solid var(--hairline);cursor:pointer;padding:0}
 .gw-color-swatch:hover{transform:scale(1.1)}
-.gw-hl{width:18px;height:18px;border-radius:50%;cursor:pointer;flex:none;box-shadow:inset 0 0 0 1px rgba(20,32,27,.10)}
+.gw-hl{width:18px;height:18px;border-radius:50%;cursor:pointer;flex:none;padding:0;border:none;box-shadow:inset 0 0 0 1px rgba(20,32,27,.10)}
 .gw-hl.active{box-shadow:0 0 0 2px var(--surface),0 0 0 3px var(--accent)}
+/* each highlighter swatch shows its own colour (design tokens) */
+.gw-hl-amber{background:var(--hl-amber)}
+.gw-hl-pink{background:var(--hl-pink)}
+.gw-hl-teal{background:var(--hl-teal)}
+.gw-hl-blue{background:var(--hl-blue)}
 /* columns 1/2/3 segmented control (design's board layout) — pushed to the right of the tool strip */
 .gw-cols-seg{display:flex;align-items:center;gap:2px;background:var(--bg3);border-radius:8px;padding:2px;margin-left:auto}
 .gw-cols-btn{width:28px;height:26px;display:inline-flex;align-items:center;justify-content:center;border:none;background:transparent;color:var(--fg3);border-radius:6px;cursor:pointer;padding:0}
@@ -1376,11 +1454,15 @@ input{font-family:inherit;outline:none}
 .gw-canvas[data-cols="3"] .notes-editor-mount [contenteditable]{column-count:3;column-gap:28px}
 .gw-canvas[data-cols="2"] .notes-editor-mount [contenteditable] > *,
 .gw-canvas[data-cols="3"] .notes-editor-mount [contenteditable] > *{break-inside:avoid}
-.gw-canvas[data-cols="2"] .gw-page,.gw-canvas[data-cols="3"] .gw-page{max-width:920px}
+.gw-canvas[data-cols="2"] .gw-page{max-width:min(1360px,100%)}
+.gw-canvas[data-cols="3"] .gw-page{max-width:min(1680px,100%)}
 .gw-ask-mark{display:inline-flex}
 /* — the page — */
-.gw-page-scroll{flex:1;overflow-y:auto;padding:48px 28px 120px}
-.gw-page{max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:18px;position:relative}
+.gw-page-scroll{flex:1;overflow-y:auto;padding:48px 40px 120px}
+/* The note's reading column. 720px is the classic "ideal measure" (~66 chars) but wastes most of a wide
+   screen; we use a more generous 960px so notes fill more real estate while staying readable, and let the
+   2/3-column control fill the screen fully. width:100% keeps it filling on smaller/collapsed-rail layouts. */
+.gw-page{max-width:min(960px,100%);width:100%;margin:0 auto;display:flex;flex-direction:column;gap:18px;position:relative}
 .gw-page-title{display:flex;align-items:center;gap:12px}
 .gw-page-title .notes-editor-icon{font-size:30px;cursor:pointer;line-height:1}
 .gw-page-title .notes-title-input{flex:1;font-family:var(--font-display);font-size:34px;font-weight:800;letter-spacing:-0.025em;line-height:1.15;color:var(--ink);border:none;background:transparent;outline:none;padding:0}
@@ -1764,19 +1846,37 @@ input{font-family:inherit;outline:none}
 .note-fav-btn.active{color:#f59e0b;opacity:1}
 .note-sens-badge{font-size:10px;padding:1px 5px;border-radius:4px;background:#fef3c7;color:#92400e;font-weight:600}
 /* Templates gallery */
-.notes-templates{display:flex;flex-direction:column;padding:16px}
-.notes-templates-header{display:flex;align-items:center;gap:12px;margin-bottom:16px}
-.notes-templates-title{font-size:15px;font-weight:600;color:var(--fg1)}
-.notes-template-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px}
-.notes-template-card{display:flex;flex-direction:column;align-items:center;gap:8px;padding:20px 16px;border:1px solid var(--bg4);border-radius:12px;cursor:pointer;background:var(--bg2);transition:border-color .15s,box-shadow .15s}
-.notes-template-card:hover{border-color:var(--accent);box-shadow:0 2px 12px rgba(0,0,0,.08)}
-.notes-template-icon{font-size:28px}
-.notes-template-title{font-size:12px;font-weight:600;color:var(--fg1);text-align:center}
-/* weaveNotes Phase 6 — gallery categories + descriptions */
-.notes-templates-sub{font-size:12px;color:var(--fg3);margin-left:auto}
-.notes-templates-cats{display:flex;flex-direction:column;gap:22px}
-.notes-template-cat-label{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--fg3);margin-bottom:10px}
-.notes-template-desc{font-size:11px;color:var(--fg3);text-align:center;line-height:1.4}
+/* Template gallery — the whole panel scrolls inside the (overflow:hidden) canvas; header + search stay pinned */
+.notes-templates{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;background:var(--surface)}
+.notes-templates-header{position:sticky;top:0;z-index:5;background:var(--surface);border-bottom:1px solid var(--hairline);padding:18px 24px 14px;display:flex;flex-direction:column;gap:13px}
+.notes-templates-headrow{display:flex;align-items:flex-start;gap:14px}
+.notes-templates-titlewrap{display:flex;flex-direction:column;gap:2px;min-width:0}
+.notes-templates-title{font-size:18px;font-weight:700;color:var(--fg)}
+.notes-templates-sub{font-size:12.5px;color:var(--fg3);line-height:1.4}
+.notes-templates-searchbox{position:relative;display:flex;align-items:center;max-width:440px;width:100%}
+.notes-templates-search{width:100%;box-sizing:border-box;padding:9px 30px 9px 34px;border:1px solid var(--bg4);border-radius:10px;font:inherit;font-size:13.5px;background:var(--bg2);color:var(--fg)}
+.notes-templates-search::placeholder{color:var(--fg3)}
+.notes-templates-search:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--mint-wash)}
+.notes-templates-search-ic{position:absolute;left:11px;display:inline-flex;color:var(--fg3);pointer-events:none}
+.notes-templates-search-ic svg{width:15px;height:15px}
+.notes-templates-search-clear{position:absolute;right:8px;width:20px;height:20px;border:none;background:var(--bg3);color:var(--fg2);border-radius:50%;cursor:pointer;font-size:14px;line-height:1;display:flex;align-items:center;justify-content:center}
+.notes-templates-search-clear:hover{background:var(--bg4);color:var(--fg)}
+.notes-templates-cats{display:flex;flex-direction:column;gap:26px;padding:20px 24px 48px}
+.notes-template-cat{}
+.notes-template-cat-label{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--fg3);margin-bottom:12px}
+.notes-template-cat-count{font-size:10.5px;font-weight:600;color:var(--fg3);background:var(--bg3);border-radius:999px;padding:1px 7px;letter-spacing:0}
+.notes-template-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px}
+.notes-template-card{display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:15px 15px 16px;border:1px solid var(--bg4);border-radius:14px;cursor:pointer;background:var(--bg2);text-align:left;font:inherit;transition:border-color .15s,box-shadow .15s,transform .06s}
+.notes-template-card:hover{border-color:var(--accent);box-shadow:0 4px 16px rgba(20,32,27,.08)}
+.notes-template-card:active{transform:translateY(1px)}
+.notes-template-card:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.notes-template-icon{width:38px;height:38px;border-radius:10px;background:var(--mint-wash);border:1px solid var(--mint-border);color:var(--accent2);display:inline-flex;align-items:center;justify-content:center;flex:none}
+.notes-template-icon svg{width:20px;height:20px}
+.notes-template-title{font-size:13px;font-weight:600;color:var(--fg);line-height:1.3}
+.notes-template-desc{font-size:11.5px;color:var(--fg3);text-align:left;line-height:1.45}
+.notes-templates-noresult{padding:48px 24px;text-align:center}
+.notes-templates-noresult-title{font-size:14px;font-weight:600;color:var(--fg2)}
+.notes-templates-noresult-sub{font-size:12.5px;color:var(--fg3);margin-top:4px}
 /* weaveNotes Phase 6 — archived / trash view */
 .notes-archive-list{display:flex;flex-direction:column;gap:8px}
 .notes-archive-row{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--bg4);border-radius:10px;background:var(--bg2)}
@@ -2316,6 +2416,9 @@ input{font-family:inherit;outline:none}
 .acct-search-ic{display:flex;color:var(--fg3)}
 .acct-member-av{width:34px;height:34px;border-radius:50%;flex:none;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:#fff;background:var(--solid)}
 .acct-role-chip{font-size:13px;color:var(--fg2);display:inline-flex;align-items:center;gap:6px;background:var(--canvas);border:1px solid var(--hairline);border-radius:8px;padding:6px 11px}
+/* m143 — admin-editable member role dropdown in the People view. */
+.acct-role-select{font-size:13px;color:var(--fg1);background:var(--canvas);border:1px solid var(--hairline);border-radius:8px;padding:6px 10px;font-family:var(--font);cursor:pointer}
+.acct-role-select:hover{border-color:var(--fg3)}
 /* admin */
 .acct-admin-card{background:var(--surface);border:1px solid var(--hairline);border-radius:14px;padding:17px;display:flex;flex-direction:column;gap:9px}
 .acct-admin-ic{width:32px;height:32px;border-radius:9px;background:var(--mint);color:var(--accent2);display:flex;align-items:center;justify-content:center;flex:none}

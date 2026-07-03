@@ -811,6 +811,51 @@ export const PLATFORM_CAPABILITY_ADMIN_TABS: Record<string, AdminTabDef> = {
       { key: 'max_variants', label: 'How many versions to keep per answer (2–10; oldest pruned first)', type: 'number', save: 'int', default: 5 },
     ],
   },
+  'accessibility': {
+    singular: 'Accessibility', apiPath: 'admin/accessibility', listKey: 'tenants',
+    cols: ['tenant_id', 'announce_mode', 'reduced_motion', 'always_show_focus'],
+    fields: [
+      { key: 'tenant_id', label: 'Tenant ID', readonly: false },
+      { key: 'announce_mode', label: 'How screen readers hear a streaming answer', options: ['summary', 'live', 'off'], default: 'summary' },
+      { key: 'reduced_motion', label: 'Damp animations for everyone (on top of each person’s own “reduce motion”)', type: 'checkbox', save: 'bool', default: false },
+      { key: 'always_show_focus', label: 'Always show the keyboard focus outline (even for mouse users)', type: 'checkbox', save: 'bool', default: false },
+      { key: 'confirm_destructive', label: 'Ask “are you sure?” before destructive actions (delete/revoke)', type: 'checkbox', save: 'bool', default: true },
+      { key: 'show_skeletons', label: 'Show loading placeholders (skeletons) while a slow view loads', type: 'checkbox', save: 'bool', default: true },
+    ],
+  },
+  'workspace-roles': {
+    singular: 'Workspace roles', apiPath: 'admin/workspace-roles', listKey: 'tenants',
+    cols: ['tenant_id', 'member_dashboard', 'member_connectors', 'member_design'],
+    fields: [
+      { key: 'tenant_id', label: 'Tenant ID', readonly: false },
+      { key: 'member_dashboard', label: 'Standard members can see the Dashboard', type: 'checkbox', save: 'bool', default: true },
+      { key: 'member_connectors', label: 'Standard members can see the Connectors area', type: 'checkbox', save: 'bool', default: false },
+      { key: 'member_design', label: 'Standard members can see the Design studio', type: 'checkbox', save: 'bool', default: true },
+    ],
+  },
+  'i18n': {
+    singular: 'Languages', apiPath: 'admin/i18n', listKey: 'tenants',
+    cols: ['tenant_id', 'default_locale', 'enabled_locales', 'assistant_localized'],
+    fields: [
+      { key: 'tenant_id', label: 'Tenant ID', readonly: false },
+      { key: 'default_locale', label: 'Default language for the workspace (BCP-47 code, e.g. “en”, “es”, “fr”)', placeholder: 'en' },
+      { key: 'enabled_locales', label: 'Languages members may pick (JSON list of codes, e.g. ["en","es","fr"])', textarea: true, save: 'json' },
+      { key: 'assistant_localized', label: 'Assistant replies in each person’s chosen language (off = it matches the language they write in)', type: 'checkbox', save: 'bool', default: false },
+    ],
+  },
+  'suggested-prompts': {
+    singular: 'Suggested Prompts', apiPath: 'admin/suggested-prompts', listKey: 'tenants',
+    cols: ['tenant_id', 'enabled', 'use_recent_notes', 'use_recent_chats', 'use_ai'],
+    fields: [
+      { key: 'tenant_id', label: 'Tenant ID', readonly: false },
+      { key: 'enabled', label: 'Show conversation starters on the empty chat', type: 'checkbox', save: 'bool', default: true },
+      { key: 'use_recent_notes', label: 'Personalise starters from the reader’s recent notes', type: 'checkbox', save: 'bool', default: true },
+      { key: 'use_recent_chats', label: 'Personalise starters from the reader’s recent chats', type: 'checkbox', save: 'bool', default: true },
+      { key: 'use_ai', label: 'Allow AI-generated starters (assistant can freshen them)', type: 'checkbox', save: 'bool', default: true },
+      { key: 'max_curated', label: 'How many curated (default) starters to show (0–8)', type: 'number', save: 'int', default: 4 },
+      { key: 'max_personalized', label: 'How many personalised starters to show (0–8)', type: 'number', save: 'int', default: 3 },
+    ],
+  },
   'tenant-configs': {
     singular: 'Tenant Config', apiPath: 'admin/tenant-configs', listKey: 'tenant-configs',
     cols: ['name', 'tenant_id', 'scope', 'enabled'],

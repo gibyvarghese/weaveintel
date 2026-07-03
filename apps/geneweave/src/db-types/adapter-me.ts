@@ -413,6 +413,76 @@ export interface TenantAnswerVersionsRow {
   updated_at: string;
 }
 
+/** m140/m141 — per-tenant accessibility defaults (streaming announcements + reduced motion + focus ring). */
+export interface TenantAccessibilityRow {
+  tenant_id: string;
+  announce_mode: string;   // 'summary' | 'live' | 'off'
+  reduced_motion: number;
+  always_show_focus: number; // m141 — force focus outlines visible even for mouse users
+  confirm_destructive: number; // m142 — require the "are you sure?" dialog on destructive actions
+  show_skeletons: number;      // m144 — show loading-skeleton placeholders on slow views
+  updated_at: string;
+}
+
+/** m143 — per-tenant policy for which OPTIONAL areas a standard member (tenant_user) can see. */
+export interface TenantRoleAccessRow {
+  tenant_id: string;
+  member_dashboard: number;
+  member_connectors: number;
+  member_design: number;
+  updated_at: string;
+}
+
+/** m145 — per-tenant i18n policy: default UI language + which languages members may pick + assistant localisation. */
+export interface TenantLocalesRow {
+  tenant_id: string;
+  default_locale: string;
+  enabled_locales: string;   // JSON array of BCP-47 codes
+  assistant_localized: number;
+  updated_at: string;
+}
+
+/** m145 — an AI-generated (or hand-edited) locale pack: translated UI messages for one language in one workspace. */
+export interface TenantUiTranslationRow {
+  tenant_id: string;
+  locale: string;
+  messages_json: string;     // JSON object { key: translated string }
+  source: string;            // 'ai' | 'manual'
+  key_count: number;
+  updated_at: string;
+}
+
+/** m146 — per-tenant policy for suggested/starter prompts on the empty chat. */
+export interface TenantSuggestedPromptsRow {
+  tenant_id: string;
+  enabled: number;
+  use_recent_notes: number;
+  use_recent_chats: number;
+  use_ai: number;
+  max_curated: number;
+  max_personalized: number;
+  updated_at: string;
+}
+
+/** m146 — a per-user cache of the last AI-generated starter prompts (so the empty chat is instant). */
+export interface UserPromptSuggestionsRow {
+  user_id: string;
+  tenant_id: string | null;
+  prompts_json: string;
+  generated_at: string;
+}
+
+/** m146 — an append-only click on a suggested starter (which one was picked). */
+export interface PromptSuggestionEventRow {
+  id: string;
+  user_id: string;
+  tenant_id: string | null;
+  prompt_id: string;
+  title: string | null;
+  source: string | null;
+  created_at: string;
+}
+
 /** weaveNotes Phase 5 (m134) — background-memory extraction state per note (content version + memory ids). */
 export interface NoteMemoryStateRow {
   note_id: string;
@@ -862,6 +932,28 @@ export interface IMeStore {
   getTenantAnswerVersions(tenantId: string): Promise<TenantAnswerVersionsRow | null>;
   upsertTenantAnswerVersions(row: TenantAnswerVersionsRow): Promise<void>;
   listTenantAnswerVersions(): Promise<TenantAnswerVersionsRow[]>;
+  // m140 — per-tenant accessibility defaults (streaming announcements + reduced motion).
+  getTenantAccessibility(tenantId: string): Promise<TenantAccessibilityRow | null>;
+  upsertTenantAccessibility(row: TenantAccessibilityRow): Promise<void>;
+  listTenantAccessibility(): Promise<TenantAccessibilityRow[]>;
+  // m143 — per-tenant role-access policy (member-visible optional areas).
+  getTenantRoleAccess(tenantId: string): Promise<TenantRoleAccessRow | null>;
+  upsertTenantRoleAccess(row: TenantRoleAccessRow): Promise<void>;
+  listTenantRoleAccess(): Promise<TenantRoleAccessRow[]>;
+  // m145 — per-tenant i18n policy + AI-generated locale packs.
+  getTenantLocales(tenantId: string): Promise<TenantLocalesRow | null>;
+  upsertTenantLocales(row: TenantLocalesRow): Promise<void>;
+  listTenantLocales(): Promise<TenantLocalesRow[]>;
+  getTenantUiTranslation(tenantId: string, locale: string): Promise<TenantUiTranslationRow | null>;
+  listTenantUiTranslations(tenantId: string): Promise<TenantUiTranslationRow[]>;
+  upsertTenantUiTranslation(row: TenantUiTranslationRow): Promise<void>;
+  // m146 — suggested/starter prompts: per-tenant policy + per-user AI cache + click log.
+  getTenantSuggestedPrompts(tenantId: string): Promise<TenantSuggestedPromptsRow | null>;
+  upsertTenantSuggestedPrompts(row: TenantSuggestedPromptsRow): Promise<void>;
+  listTenantSuggestedPrompts(): Promise<TenantSuggestedPromptsRow[]>;
+  getUserPromptSuggestions(userId: string): Promise<UserPromptSuggestionsRow | null>;
+  upsertUserPromptSuggestions(row: UserPromptSuggestionsRow): Promise<void>;
+  insertPromptSuggestionEvent(row: PromptSuggestionEventRow): Promise<void>;
   // weaveNotes Phase 5 (m134) — background-memory extraction state.
   getNoteMemoryState(noteId: string, userId: string): Promise<NoteMemoryStateRow | null>;
   upsertNoteMemoryState(row: NoteMemoryStateRow): Promise<void>;

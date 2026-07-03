@@ -93,12 +93,16 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
     { key: 'compliance-rules', label: 'Compliance' },
     { key: 'tenant-governance', label: 'Tenant Governance' },
     { key: 'tenant-encryption-policies', label: 'Tenant Encryption' },
+    { key: 'workspace-roles', label: 'Workspace Roles' },
   ]},
   { label: 'Appearance & AI', icon: '\uD83C\uDFA8', tabs: [
     { key: 'tenant-appearance', label: 'Appearance & branding' },
     { key: 'ai-transparency', label: 'AI transparency' },
     { key: 'chat-citations', label: 'Answer citations' },
     { key: 'answer-versions', label: 'Answer versions' },
+    { key: 'accessibility', label: 'Accessibility' },
+    { key: 'i18n', label: 'Languages' },
+    { key: 'suggested-prompts', label: 'Suggested Prompts' },
   ]},
   { label: 'A2A Protocol', icon: '\uD83E\uDD16\uD83E\uDD1D', tabs: [
     { key: 'a2a-skills', label: 'A2A Skills' },

@@ -22,8 +22,12 @@ import { registerTenantArtifactSettingsRoutes } from './admin/api/tenant-artifac
 import { registerTenantGovernanceRoutes } from './admin/api/tenant-governance.js';
 import { registerTenantAppearanceRoutes } from './admin/api/tenant-appearance.js';
 import { registerAiTransparencyRoutes } from './admin/api/ai-transparency.js';
+import { registerI18nRoutes } from './admin/api/i18n.js';
+import { registerSuggestedPromptsRoutes } from './admin/api/suggested-prompts.js';
 import { registerChatCitationsRoutes } from './admin/api/chat-citations.js';
 import { registerAnswerVersionsRoutes } from './admin/api/answer-versions.js';
+import { registerAccessibilityRoutes } from './admin/api/accessibility.js';
+import { registerWorkspaceRolesRoutes } from './admin/api/workspace-roles.js';
 import type { RouterLike } from './admin/api/types.js';
 
 export interface AdminRouteExtras {
@@ -80,4 +84,12 @@ export function registerAdminRoutes(
   registerChatCitationsRoutes(router, db, { json, readBody, requireDetailedDescription: () => null });
   // m139: Per-tenant regenerate/answer-versions config (enabled / how many versions to keep)
   registerAnswerVersionsRoutes(router, db, { json, readBody, requireDetailedDescription: () => null });
+  // m140: Per-tenant accessibility defaults (streaming announce mode + reduced motion)
+  registerAccessibilityRoutes(router, db, { json, readBody, requireDetailedDescription: () => null });
+  // m143: Per-tenant workspace-role access policy (which optional areas members see)
+  registerWorkspaceRolesRoutes(router, db, { json, readBody, requireDetailedDescription: () => null });
+  // m145: Per-tenant internationalisation policy (default language / enabled languages / assistant localisation)
+  registerI18nRoutes(router, db, { json, readBody, requireDetailedDescription: () => null });
+  // m146: Per-tenant suggested/starter prompts policy (enabled / personalisation sources / counts)
+  registerSuggestedPromptsRoutes(router, db, { json, readBody, requireDetailedDescription: () => null });
 }

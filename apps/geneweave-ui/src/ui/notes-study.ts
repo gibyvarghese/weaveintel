@@ -16,6 +16,7 @@
  */
 import { h } from './dom.js';
 import { api } from './api.js';
+import { noticeDialog, confirmDialog } from "./dialog.js";
 
 type Rating = 'again' | 'hard' | 'good' | 'easy';
 interface CardView { id: string; front: string; back: string; intervalDays: number; repetitions: number; preview?: Record<Rating, number> }
@@ -50,7 +51,7 @@ export function renderStudyView(noteId: string, noteTitle: string, onBack: () =>
     if (busy) return; busy = true; paint();
     try {
       const res = await api.post(`/api/me/notes/${noteId}/flashcards`, { count: 12 });
-      if (!res.ok) { const e = await res.json().catch(() => ({})) as { error?: string }; alert(`Could not make flashcards: ${e.error ?? res.status}`); }
+      if (!res.ok) { const e = await res.json().catch(() => ({})) as { error?: string }; void noticeDialog({ message: `Could not make flashcards: ${e.error ?? res.status}` }); }
     } finally { busy = false; await load(); }
   }
 

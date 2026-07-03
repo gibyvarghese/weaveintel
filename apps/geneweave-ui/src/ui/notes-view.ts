@@ -41,9 +41,11 @@ import { saveNotesSnapshot, cacheNote, offlineNotes, offlineNote, setLastNoteId,
 import { openQuickCaptureModal } from './notes-quick-capture.js';
 import { wireNoteHistory, wireNoteComments, wireNoteSynced, renderWorkspaceAsk, highlightQuoteInEditor, type SimplePanel } from './notes-workspace-ui.js';
 import { renderEditorCanvas, type OverflowItem, type MenuEntry } from './notes-editor-canvas.js';
+import { icon, templateIcon } from './icons.js';
 import { renderRightRail } from './notes-right-rail.js';
 import { renderLeftRail } from './notes-left-rail.js';
 import { wovenMarkSvg } from './notes-brand.js';
+import { noticeDialog, confirmDialog, promptDialog } from "./dialog.js";
 
 /** The live co-editing session for the currently-open note (Phase 2). */
 let _activeCoedit: NoteCoeditSession | null = null;
@@ -258,11 +260,12 @@ function destroyActiveEditor(): void {
 
 // ── Templates gallery ─────────────────────────────────────────────────────────
 
-// The design's gallery groups templates by purpose, in this reading order (spec §7).
-const TEMPLATE_CATEGORY_ORDER = ['Blank', 'Study', 'Meetings', 'Planning', 'Thinking'] as const;
+// The gallery groups templates by purpose, in this reading order (matches @weaveintel/notes templateCategories).
+const TEMPLATE_CATEGORY_ORDER = ['Blank', 'Engineering', 'Product', 'Design', 'Planning', 'Meetings', 'Knowledge', 'Thinking', 'Study', 'Personal'] as const;
 
 function renderTemplatesGallery(render: () => void): HTMLElement {
   const templates: NoteListItem[] = state.noteTemplates ?? [];
+  const query = String(state.templateSearch ?? '').trim().toLowerCase();
 
   const startFrom = async (tmpl: NoteListItem): Promise<void> => {
     const note = await createNote({ key: tmpl.key ?? tmpl.template_key, id: tmpl.id });
@@ -274,16 +277,23 @@ function renderTemplatesGallery(render: () => void): HTMLElement {
     }
   };
 
+  // Filter by the search box: match the title, description, or category (so "arch", "meeting", "design" work).
+  const matches = (t: NoteListItem): boolean => {
+    if (!query) return true;
+    return [t.title, t.description, t.category].some((f) => String(f ?? '').toLowerCase().includes(query));
+  };
+  const shown = templates.filter(matches);
+
   const card = (tmpl: NoteListItem): HTMLElement =>
-    h('div', { className: 'notes-template-card', title: tmpl.description || tmpl.title, onClick: () => void startFrom(tmpl) },
-      h('div', { className: 'notes-template-icon' }, tmpl.icon ?? '📄'),
-      h('div', { className: 'notes-template-title' }, tmpl.title),
-      tmpl.description ? h('div', { className: 'notes-template-desc' }, tmpl.description) : null,
+    h('button', { className: 'notes-template-card', type: 'button', title: tmpl.description || tmpl.title, onClick: () => void startFrom(tmpl) },
+      h('span', { className: 'notes-template-icon', innerHTML: templateIcon(tmpl.key ?? tmpl.template_key, tmpl.category) }),
+      h('span', { className: 'notes-template-title' }, tmpl.title),
+      tmpl.description ? h('span', { className: 'notes-template-desc' }, tmpl.description) : null,
     );
 
-  // Group by category, in the design's order; unknown categories fall to the end.
+  // Group by category, in the reading order; unknown categories fall to the end.
   const groups = new Map<string, NoteListItem[]>();
-  for (const t of templates) {
+  for (const t of shown) {
     const cat = t.category || 'Blank';
     (groups.get(cat) ?? (groups.set(cat, []), groups.get(cat)!)).push(t);
   }
@@ -292,22 +302,43 @@ function renderTemplatesGallery(render: () => void): HTMLElement {
     ...[...groups.keys()].filter((c) => !TEMPLATE_CATEGORY_ORDER.includes(c as typeof TEMPLATE_CATEGORY_ORDER[number])),
   ];
 
-  return h('div', { className: 'notes-templates' },
+  const searchInput = h('div', { className: 'notes-templates-searchbox' },
+    h('span', { className: 'notes-templates-search-ic', innerHTML: icon('search') }),
+    h('input', {
+      className: 'notes-templates-search', type: 'text', placeholder: 'Search templates…',
+      value: String(state.templateSearch ?? ''), 'aria-label': 'Search templates', 'data-focus-key': 'template-search',
+      onInput: (e: Event) => { state.templateSearch = (e.target as HTMLInputElement).value; render(); },
+    }),
+    query ? h('button', { className: 'notes-templates-search-clear', title: 'Clear', onClick: () => { state.templateSearch = ''; render(); } }, '×') : null,
+  );
+
+  // The whole gallery scrolls (the canvas itself is overflow:hidden), and keeps its scroll position across
+  // re-renders (data-scroll-key). The header + search stay pinned at the top.
+  return h('div', { className: 'notes-templates', 'data-scroll-key': 'templates-gallery' },
     h('div', { className: 'notes-templates-header' },
-      h('button', { className: 'notes-back-btn', onClick: () => { state.notesView = 'list'; render(); } }, '← Notes'),
-      h('div', { className: 'notes-templates-title' }, 'Templates'),
-      h('div', { className: 'notes-templates-sub' }, 'Start a note from a ready-made layout.'),
+      h('div', { className: 'notes-templates-headrow' },
+        h('button', { className: 'notes-back-btn', onClick: () => { state.notesView = 'list'; render(); } }, '← Notes'),
+        h('div', { className: 'notes-templates-titlewrap' },
+          h('div', { className: 'notes-templates-title' }, 'Templates'),
+          h('div', { className: 'notes-templates-sub' }, 'Start a note from a ready-made layout — from a solution architecture doc to a daily journal.'),
+        ),
+      ),
+      searchInput,
     ),
     templates.length === 0
       ? h('div', { className: 'notes-empty' }, 'No templates available')
-      : h('div', { className: 'notes-templates-cats' },
-          ...orderedCats.map((cat) =>
-            h('section', { className: 'notes-template-cat' },
-              h('div', { className: 'notes-template-cat-label' }, cat),
-              h('div', { className: 'notes-template-grid' }, ...(groups.get(cat) ?? []).map(card)),
-            )
+      : shown.length === 0
+        ? h('div', { className: 'notes-templates-noresult' },
+            h('div', { className: 'notes-templates-noresult-title' }, `No templates match “${state.templateSearch}”`),
+            h('div', { className: 'notes-templates-noresult-sub' }, 'Try a different word — e.g. “meeting”, “design”, or “plan”.'))
+        : h('div', { className: 'notes-templates-cats' },
+            ...orderedCats.map((cat) =>
+              h('section', { className: 'notes-template-cat' },
+                h('div', { className: 'notes-template-cat-label' }, cat, h('span', { className: 'notes-template-cat-count' }, String((groups.get(cat) ?? []).length))),
+                h('div', { className: 'notes-template-grid' }, ...(groups.get(cat) ?? []).map(card)),
+              )
+            ),
           ),
-        ),
   );
 }
 
@@ -324,7 +355,7 @@ function renderArchiveView(render: () => void): HTMLElement {
           if (await restoreNote(note.id)) { await loadArchivedNotes(); await loadNotesList(); render(); }
         } }, '↩ Restore'),
       h('button', { className: 'notes-archive-delete', title: 'Delete permanently', onClick: async () => {
-          if (!confirm('Permanently delete this note? This cannot be undone.')) return;
+          if (!(await confirmDialog({ message: 'Permanently delete this note? This cannot be undone.', danger: true }))) return;
           if (await deleteNote(note.id)) { await loadArchivedNotes(); render(); }
         } }, '🗑 Delete forever'),
     );
@@ -387,7 +418,7 @@ function openExportMenu(note: NoteDoc): void {
     ...EXPORT_OPTIONS.map((opt) =>
       h('button', { className: 'gw-export-opt', 'data-format': opt.key, onClick: async () => {
           const ok = await downloadNoteExport(note.id, opt.key);
-          if (!ok) alert('Could not export this note.');
+          if (!ok) void noticeDialog({ message: 'Could not export this note.' });
           else document.querySelector('.gw-modal-overlay')?.remove();
         } },
         h('span', { className: 'gw-export-opt-label' }, opt.label),
@@ -401,25 +432,26 @@ function openExportMenu(note: NoteDoc): void {
 function buildInsertMenu(render: () => void): MenuEntry[] {
   const openNote = async (id: string): Promise<void> => { await loadNote(id); state.notesView = 'editor'; render(); };
   return [
-    // The design's rich Insert popover: a "CAPTURE" card grid, then a plain "WORKSPACE" list.
-    { section: '✦ CAPTURE' },
-    { card: true, icon: '📝', label: 'New note', sub: 'Blank page', title: 'Create a blank note', onClick: async () => { const n = await createNote(); if (n) { state.notesItems = [n as NoteListItem, ...(state.notesItems as NoteListItem[])]; await openNote(n.id); } } },
-    { card: true, icon: '⚡', label: 'Quick capture', sub: '⌘⇧K', title: 'Jot a quick note (⌘/Ctrl+Shift+K)', onClick: () => { openQuickCaptureModal((id) => { void openNote(id); }); } },
-    { card: true, icon: '⊞', label: 'From template', sub: 'Structured', title: 'Start from a template', onClick: async () => { await loadNoteTemplates(); state.notesView = 'templates'; render(); } },
-    { card: true, icon: '🎙', label: 'Record meeting', sub: 'Voice → note', title: 'Record → transcribe → a structured note with clickable transcript citations', onClick: () => {
+    // The design's rich Insert popover: a "CAPTURE" card grid, then a plain "WORKSPACE" list. Icons are the
+    // app's branded line-drawn set (ui/icons.ts — the same one the left nav uses), not emoji.
+    { section: 'CAPTURE' },
+    { card: true, icon: icon('file-plus'), label: 'New note', sub: 'Blank page', title: 'Create a blank note', onClick: async () => { const n = await createNote(); if (n) { state.notesItems = [n as NoteListItem, ...(state.notesItems as NoteListItem[])]; await openNote(n.id); } } },
+    { card: true, icon: icon('zap'), label: 'Quick capture', sub: '⌘⇧K', title: 'Jot a quick note (⌘/Ctrl+Shift+K)', onClick: () => { openQuickCaptureModal((id) => { void openNote(id); }); } },
+    { card: true, icon: icon('template'), label: 'From template', sub: 'Structured', title: 'Start from a template', onClick: async () => { await loadNoteTemplates(); state.notesView = 'templates'; render(); } },
+    { card: true, icon: icon('mic'), label: 'Record meeting', sub: 'Voice → note', title: 'Record → transcribe → a structured note with clickable transcript citations', onClick: () => {
         openCenterModal('Record a meeting', renderMeetingRecorder((id) => { void loadNotesList().then(() => openNote(id)); }));
       } },
-    { card: true, icon: '🌐', label: 'Clip a web page', sub: 'From a URL', title: 'Clip a public page into a note', onClick: async () => {
-        const url = prompt('Paste a public web page URL to clip into a note:'); if (!url) return;
+    { card: true, icon: icon('globe'), label: 'Clip a web page', sub: 'From a URL', title: 'Clip a public page into a note', onClick: async () => {
+        const url = await promptDialog({ title: 'Clip a web page', message: 'Paste a public web page URL to clip into a note.', placeholder: 'https://example.com/article', required: true, confirmLabel: 'Clip' }); if (!url) return;
         const res = await api.post('/api/me/notes/capture/web', { url }).catch(() => null);
         const data = res && res.ok ? await res.json().catch(() => ({})) as { noteId?: string } : null;
-        if (data?.noteId) { await loadNotesList(); await openNote(data.noteId); } else { alert('Could not clip that page.'); }
+        if (data?.noteId) { await loadNotesList(); await openNote(data.noteId); } else { void noticeDialog({ message: 'Could not clip that page.' }); }
       } },
-    { card: true, icon: '🧠', label: 'Your memory', sub: 'Second brain', title: 'See + search everything the app remembers about you from your notes (your "second brain")', onClick: () => {
+    { card: true, icon: icon('brain'), label: 'Your memory', sub: 'Second brain', title: 'See + search everything the app remembers about you from your notes (your "second brain")', onClick: () => {
         openCenterModal('Your memory', renderMemoryPanel((id) => { void openNote(id); }));
       } },
     { section: 'WORKSPACE' },
-    { icon: '✦', label: 'Ask your workspace', title: 'Search your notes + chats with citations', onClick: () => {
+    { icon: icon('sparkles'), label: 'Ask your workspace', title: 'Search your notes + chats with citations', onClick: () => {
         openCenterModal('Ask your workspace', renderWorkspaceAsk((id, quote) => {
           void (async () => {
             await openNote(id);
@@ -428,17 +460,17 @@ function buildInsertMenu(render: () => void): MenuEntry[] {
           })();
         }));
       } },
-    { icon: '🗃', label: 'Databases', title: 'Tables with AI auto-fill', onClick: () => { state.currentDatabaseId = null; state.notesView = 'databases'; render(); } },
-    { icon: '📇', label: 'Study (flashcards)', title: 'Make + review flashcards from this note (spaced repetition)', onClick: () => { teardownCoedit(); state.notesView = 'study'; render(); } },
-    { icon: '🌍', label: 'Translate', title: 'Translate this note into another language (saved as a new note)', onClick: () => {
+    { icon: icon('database'), label: 'Databases', title: 'Tables with AI auto-fill', onClick: () => { state.currentDatabaseId = null; state.notesView = 'databases'; render(); } },
+    { icon: icon('layers'), label: 'Study (flashcards)', title: 'Make + review flashcards from this note (spaced repetition)', onClick: () => { teardownCoedit(); state.notesView = 'study'; render(); } },
+    { icon: icon('languages'), label: 'Translate', title: 'Translate this note into another language (saved as a new note)', onClick: () => {
         const id = state.currentNoteId as string | null;
-        if (!id) { alert('Open a note first, then translate it.'); return; }
+        if (!id) { void noticeDialog({ message: 'Open a note first, then translate it.' }); return; }
         openCenterModal('Translate note', renderTranslateCard(id, (newId) => { void openNote(newId); }));
       } },
-    { icon: '📥', label: 'Archived notes', title: 'View + restore archived notes', onClick: async () => { await loadArchivedNotes(); state.notesView = 'archive'; render(); } },
-    { icon: '🛡️', label: 'Workspace governance', title: 'See your workspace’s enterprise trust posture (read-only)', onClick: () => { openCenterModal('Workspace governance', renderGovernanceCard()); } },
-    { icon: '⏰', label: 'Scheduled agents', title: 'Set up recurring AI tasks over your notes (e.g. a daily digest)', onClick: () => { openCenterModal('Scheduled agents', renderScheduledAgentsPanel((id) => { void openNote(id); })); } },
-    { icon: '🔌', label: 'Connect (MCP)', title: 'Let an outside AI app (Claude, ChatGPT) use your notes via MCP', onClick: () => { openCenterModal('Connect an external app (MCP)', renderMcpPanel()); } },
+    { icon: icon('archive'), label: 'Archived notes', title: 'View + restore archived notes', onClick: async () => { await loadArchivedNotes(); state.notesView = 'archive'; render(); } },
+    { icon: icon('shield'), label: 'Workspace governance', title: 'See your workspace’s enterprise trust posture (read-only)', onClick: () => { openCenterModal('Workspace governance', renderGovernanceCard()); } },
+    { icon: icon('clock'), label: 'Scheduled agents', title: 'Set up recurring AI tasks over your notes (e.g. a daily digest)', onClick: () => { openCenterModal('Scheduled agents', renderScheduledAgentsPanel((id) => { void openNote(id); })); } },
+    { icon: icon('plug'), label: 'Connect (MCP)', title: 'Let an outside AI app (Claude, ChatGPT) use your notes via MCP', onClick: () => { openCenterModal('Connect an external app (MCP)', renderMcpPanel()); } },
   ];
 }
 
@@ -542,9 +574,9 @@ function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLEle
     className: 'notes-share-btn', title: 'Share this note for co-editing',
     onClick: async () => {
       const link = await createNoteShareLink(note.id, 'collaborator');
-      if (!link) { alert('Could not create a share link.'); return; }
+      if (!link) { void noticeDialog({ message: 'Could not create a share link.' }); return; }
       try { await navigator.clipboard.writeText(link.url); } catch { /* clipboard may be blocked */ }
-      prompt('Share this co-editing link (copied to clipboard):', link.url);
+      void noticeDialog({ title: 'Share for co-editing', message: `Link copied to clipboard:\n\n${link.url}` });
     },
   }, '🔗 Share') as HTMLElement;
 
@@ -557,10 +589,10 @@ function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLEle
       try {
         const res = await api.post(`/api/me/notes/${note.id}/emit-artifact`, { format: 'markdown', share: true });
         const data = await res.json().catch(() => ({})) as { ok?: boolean; shareUrl?: string; error?: string; redactions?: number };
-        if (!res.ok || !data.ok) { alert(`Could not publish: ${data.error ?? res.status}`); return; }
+        if (!res.ok || !data.ok) { void noticeDialog({ message: `Could not publish: ${data.error ?? res.status}` }); return; }
         const redactionNote = data.redactions ? `\n\n(${data.redactions} sensitive item(s) were redacted before publishing.)` : '';
         if (data.shareUrl) { try { await navigator.clipboard.writeText(data.shareUrl); } catch { /* blocked */ } }
-        prompt(`Published! Public link (copied to clipboard):${redactionNote}`, data.shareUrl ?? '(no link)');
+        void noticeDialog({ title: 'Published', message: `Public link (copied to clipboard):\n\n${data.shareUrl ?? '(no link)'}${redactionNote}` });
       } finally { publishBtn.removeAttribute('disabled'); }
     },
   }, '📤 Publish') as HTMLElement;
@@ -569,7 +601,7 @@ function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLEle
     className: 'notes-editor-icon',
     title: 'Set icon',
     onClick: async () => {
-      const newIcon = prompt('Enter emoji for note icon (e.g. 📝):', note.icon ?? '📄');
+      const newIcon = await promptDialog({ title: 'Set note icon', message: 'Enter an emoji for this note (e.g. 📝). Leave blank to reset.', defaultValue: note.icon ?? '📄', confirmLabel: 'Set icon' });
       if (newIcon !== null) {
         await api.put(`/api/me/notes/${note.id}`, { icon: newIcon });
         note.icon = newIcon;
@@ -580,38 +612,38 @@ function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLEle
 
   // — the secondary actions live in the centre top-bar overflow (⋯) menu —
   const overflow: OverflowItem[] = [
-    { label: isFav ? '★ Unfavourite' : '☆ Favourite', title: 'Favourite', onClick: async () => { await api.put(`/api/me/notes/${note.id}`, { favorite: isFav ? 0 : 1 }); note.favorite = isFav ? 0 : 1; render(); } },
-    { label: '📜 Version history', title: 'Save points + restore', onClick: () => togglePanel(historyPanel, () => void _activeHistory?.refresh()) },
-    { label: '💬 Comments', title: 'Discussion threads on this note', onClick: () => togglePanel(commentsPanel, () => void _activeComments?.refresh()) },
-    { label: '🔁 Synced blocks', title: 'Mirror content from another note', onClick: () => togglePanel(syncedPanel, () => void _activeSynced?.refresh()) },
-    { label: '🔗 Share', title: 'Share for co-editing', onClick: async () => {
+    { icon: icon('star'), label: isFav ? 'Unfavourite' : 'Favourite', title: 'Favourite', onClick: async () => { await api.put(`/api/me/notes/${note.id}`, { favorite: isFav ? 0 : 1 }); note.favorite = isFav ? 0 : 1; render(); } },
+    { icon: icon('history'), label: 'Version history', title: 'Save points + restore', onClick: () => togglePanel(historyPanel, () => void _activeHistory?.refresh()) },
+    { icon: icon('message'), label: 'Comments', title: 'Discussion threads on this note', onClick: () => togglePanel(commentsPanel, () => void _activeComments?.refresh()) },
+    { icon: icon('sync'), label: 'Synced blocks', title: 'Mirror content from another note', onClick: () => togglePanel(syncedPanel, () => void _activeSynced?.refresh()) },
+    { icon: icon('share'), label: 'Share', title: 'Share for co-editing', onClick: async () => {
         const link = await createNoteShareLink(note.id, 'collaborator');
-        if (!link) { alert('Could not create a share link.'); return; }
+        if (!link) { void noticeDialog({ message: 'Could not create a share link.' }); return; }
         try { await navigator.clipboard.writeText(link.url); } catch { /* clipboard may be blocked */ }
-        prompt('Share this co-editing link (copied to clipboard):', link.url);
+        void noticeDialog({ title: 'Share for co-editing', message: `Link copied to clipboard:\n\n${link.url}` });
       } },
-    { label: '📤 Publish', title: 'Publish as a shareable document', onClick: async () => {
+    { icon: icon('upload'), label: 'Publish', title: 'Publish as a shareable document', onClick: async () => {
         const res = await api.post(`/api/me/notes/${note.id}/emit-artifact`, { format: 'markdown', share: true });
         const data = await res.json().catch(() => ({})) as { ok?: boolean; shareUrl?: string; error?: string; redactions?: number };
-        if (!res.ok || !data.ok) { alert(`Could not publish: ${data.error ?? res.status}`); return; }
+        if (!res.ok || !data.ok) { void noticeDialog({ message: `Could not publish: ${data.error ?? res.status}` }); return; }
         const redactionNote = data.redactions ? `\n\n(${data.redactions} sensitive item(s) were redacted before publishing.)` : '';
         if (data.shareUrl) { try { await navigator.clipboard.writeText(data.shareUrl); } catch { /* blocked */ } }
-        prompt(`Published! Public link (copied to clipboard):${redactionNote}`, data.shareUrl ?? '(no link)');
+        void noticeDialog({ title: 'Published', message: `Public link (copied to clipboard):\n\n${data.shareUrl ?? '(no link)'}${redactionNote}` });
       } },
-    { label: '⬇ Export', title: 'Download as Markdown / HTML / Word / JSON', onClick: () => openExportMenu(note) },
-    { label: '⊡ Extract to-dos', title: 'Extract to-dos as tasks', onClick: async () => {
+    { icon: icon('download'), label: 'Export', title: 'Download as Markdown / HTML / Word / JSON', onClick: () => openExportMenu(note) },
+    { icon: icon('check-square'), label: 'Extract to-dos', title: 'Extract to-dos as tasks', onClick: async () => {
         const result = await extractNote(note.id);
         if (result) { const count = result.extractedTasks.length; extractResult = count > 0 ? `${count} task${count === 1 ? '' : 's'} created` : 'No new to-dos found'; render(); }
       } },
-    { label: '📥 Archive note', title: 'Move to the archive (recoverable)', onClick: async () => {
+    { icon: icon('archive'), label: 'Archive note', title: 'Move to the archive (recoverable)', onClick: async () => {
         destroyActiveEditor();
         if (await archiveNote(note.id)) {
           state.currentNoteId = null; state.currentNote = null; state.notesView = 'list';
           await loadNotesList(); render();
         }
       } },
-    { label: '🗑 Delete note', title: 'Delete note', danger: true, onClick: async () => {
-        if (!confirm('Delete this note? This cannot be undone.')) return;
+    { icon: icon('trash'), label: 'Delete note', title: 'Delete note', danger: true, onClick: async () => {
+        if (!(await confirmDialog({ message: 'Delete this note? This cannot be undone.', danger: true }))) return;
         destroyActiveEditor();
         await deleteNote(note.id);
         state.currentNoteId = null; state.currentNote = null; state.notesView = 'list';
@@ -673,11 +705,14 @@ function renderEditorPanel(note: NoteDoc, render: () => void): { center: HTMLEle
       run: (cmd: string, arg?: unknown) => fmt(cmd, arg),
       textColor: (c: string) => fmt('setTextColor', c),
       link: () => {
-        const url = window.prompt('Link URL (https://…)')?.trim();
-        if (url === undefined) return;
-        if (url === '') { fmt('unsetLink'); return; }
-        const href = /^(https?:|mailto:|\/)/i.test(url) ? url : `https://${url}`;
-        fmt('setLink', { href });
+        void (async () => {
+          const raw = await promptDialog({ title: 'Add a link', message: 'Enter a URL. Leave blank to remove the link.', placeholder: 'https://…', confirmLabel: 'Apply' });
+          if (raw === null) return; // cancelled
+          const url = raw.trim();
+          if (url === '') { fmt('unsetLink'); return; }
+          const href = /^(https?:|mailto:|\/)/i.test(url) ? url : `https://${url}`;
+          fmt('setLink', { href });
+        })();
       },
     },
     insert: buildInsertMenu(render),
@@ -831,7 +866,10 @@ export function renderNotesView(render: () => void): HTMLElement {
 
   const rightRail = composed ? composed.rail : renderEmptyAssistantRail();
 
-  const leftRail = renderLeftRail({
+  // The notebooks rail can be collapsed to give the note the full canvas width (matches the main app's
+  // sidebar collapse). When collapsed we drop the rail from the grid and show a floating expand button.
+  const railCollapsed = (state as { notesRailCollapsed?: boolean }).notesRailCollapsed === true;
+  const leftRail = railCollapsed ? null : renderLeftRail({
     notes: (state.notesItems as NoteListItem[]) ?? [],
     loading: state.notesLoading as boolean,
     currentNoteId: state.currentNoteId as string | null,
@@ -851,11 +889,19 @@ export function renderNotesView(render: () => void): HTMLElement {
       const n = await createNote({ parentNoteId: parentId });
       if (n) { await loadNotesList(); await loadNote(n.id); state.notesView = 'editor'; render(); }
     },
+    onToggleCollapse: () => { (state as { notesRailCollapsed?: boolean }).notesRailCollapsed = true; render(); },
   });
+  // Floating "expand" tab shown when the rail is collapsed.
+  const railExpander = railCollapsed
+    ? h('button', { className: 'gw-rail-expand', type: 'button', title: 'Show notebooks', 'aria-label': 'Show notebooks',
+        onClick: () => { (state as { notesRailCollapsed?: boolean }).notesRailCollapsed = false; render(); } }, '»')
+    : null;
 
   // The Assistant is a FLOATING dock (design), not a persistent column: a pulsing bubble bottom-right that
-  // expands to a rounded pop-up panel holding the rail (Assistant / Outline / Links + composer).
-  const assistant = renderFloatingAssistant(rightRail, render);
+  // expands to a rounded pop-up panel holding the rail (Assistant / Outline / Links + composer). It's about
+  // the OPEN NOTE, so it only appears in the editor — on the gallery / list / archive it would just float over
+  // the content (and cover template cards), so we hide it there.
+  const assistant = composed ? renderFloatingAssistant(rightRail, render) : null;
 
   // weaveNotes Phase 8 (desktop): an offline banner when the list/note came from the local cache.
   const offline = (state as { notesOffline?: boolean }).notesOffline === true;
@@ -863,8 +909,8 @@ export function renderNotesView(render: () => void): HTMLElement {
     offline ? h('div', { className: 'gw-notes-offline', title: 'Showing your locally cached notes' },
       '✈︎ Offline — showing your cached notes. Changes will sync when you reconnect.') : null,
     // 2-column shell (notebooks rail + canvas); the assistant floats over the canvas bottom-right.
-    h('div', { className: `gw-shell gw-shell-2col${_assistantOpen ? ' assistant-open' : ''}` },
-      leftRail, centre, assistant,
+    h('div', { className: `gw-shell gw-shell-2col${railCollapsed ? ' rail-collapsed' : ''}${assistant && _assistantOpen ? ' assistant-open' : ''}` },
+      leftRail, centre, assistant, railExpander,
       // Backdrop for the mobile rail drawer — tap to close (CSS-hidden ≥900px).
       h('div', { className: 'gw-notes-backdrop', 'aria-hidden': 'true', onClick: (e: Event) => {
         (e.currentTarget as HTMLElement).closest('.gw-shell')?.classList.remove('rail-open');

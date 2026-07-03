@@ -13,6 +13,7 @@
 import { h } from './dom.js';
 import { state } from './state.js';
 import { api } from './api.js';
+import { promptDialog } from './dialog.js';
 
 interface PropertyDef { key: string; name: string; type: string; options?: string[] }
 interface ViewRow { id: string; fields: Record<string, unknown>; rollups: Record<string, unknown>; citations: Record<string, Array<{ label: string; url?: string }>> }
@@ -55,7 +56,7 @@ async function renderList(container: HTMLElement, render: () => void): Promise<v
 }
 
 async function createDatabase(render: () => void): Promise<void> {
-  const name = window.prompt('Name your database:'); if (!name) return;
+  const name = await promptDialog({ title: 'New database', message: 'Name your database.', placeholder: 'e.g. Projects', required: true, confirmLabel: 'Create' }); if (!name) return;
   // Seed a simple schema: a Name (text) and a Summary (text, AI-fillable) column.
   const columns = [{ key: 'name', name: 'Name', type: 'text' }, { key: 'summary', name: 'Summary', type: 'text' }];
   const res = await api.post('/api/me/note-databases', { name, view_type: 'table', columns });
@@ -77,7 +78,7 @@ async function renderDatabase(container: HTMLElement, dbId: string, render: () =
     await renderDatabase(container, dbId, render); // reload with filled values
   };
   const addRow = async (): Promise<void> => {
-    const name = window.prompt('Row name:'); if (name == null) return;
+    const name = await promptDialog({ title: 'Add a row', message: 'Give the new row a name.', placeholder: 'Row name', confirmLabel: 'Add' }); if (name == null) return;
     await api.post(`/api/me/note-databases/${dbId}/rows`, { fields: { name } });
     await renderDatabase(container, dbId, render);
   };

@@ -17,6 +17,7 @@
  */
 import { h } from './dom.js';
 import { api } from './api.js';
+import { confirmDialog } from "./dialog.js";
 
 export interface SimplePanel { refresh(): Promise<void>; close(): void }
 
@@ -62,7 +63,7 @@ export function wireNoteHistory(opts: { noteId: string; panelEl: HTMLElement; on
                 className: 'notes-ws-restore',
                 title: 'Restore this version (your current draft is saved first)',
                 onClick: async () => {
-                  if (!confirm('Restore this version? Your current content is saved to history first.')) return;
+                  if (!(await confirmDialog({ message: 'Restore this version? Your current content is saved to history first.', confirmLabel: 'Restore' }))) return;
                   const res = await api.post(`/api/me/notes/${noteId}/versions/${v.id}/restore`, {}).catch(() => null);
                   if (res && res.ok) { onRestored(); await refresh(); }
                 },

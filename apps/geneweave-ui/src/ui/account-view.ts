@@ -11,6 +11,8 @@
 import { h } from './dom.js';
 import { state } from './state.js';
 import { api } from './api.js';
+import { noticeDialog } from './dialog.js';
+import { loadI18n, availableLocales } from './i18n.js';
 
 // Inline line-icons (from "GeneWeave Account.dc.html"). Returns a <span> carrying the SVG so it inherits
 // currentColor from its parent — no external icon dependency.
@@ -202,8 +204,13 @@ function renderPrefs(render: () => void): HTMLElement {
       themeCard('pro', 'Pro', 'Clean & focused', h('div', { className: 'acct-theme-swatch pro' }, h('span', { className: 'acct-theme-bar dark' }))),
       themeCard('creative', 'Creative', 'Warm & playful', h('div', { className: 'acct-theme-swatch creative' }, h('span', { className: 'acct-theme-bar gold' })))));
 
+  // m145 — the language list = the built-in choices PLUS any language an admin added with AI (from the i18n
+  // catalog), and picking one re-labels the whole app LIVE (loadI18n → render) before you even hit Save.
+  const baseLangs: [string, string][] = [['en-US', 'English (US)'], ['en-GB', 'English (UK)'], ['es', 'Español'], ['fr', 'Français'], ['de', 'Deutsch'], ['pt', 'Português'], ['hi', 'हिन्दी'], ['ja', '日本語'], ['zh', '中文']];
+  const haveCodes = new Set(baseLangs.map(([c]) => c.split('-')[0]));
+  for (const loc of availableLocales().locales) { if (!haveCodes.has(loc.code)) { baseLangs.push([loc.code, loc.name]); haveCodes.add(loc.code); } }
   const rows = h('div', { className: 'acct-card acct-rowlist' },
-    selectRow('Language', 'Interface language', pr.language, [['en-US', 'English (US)'], ['en-GB', 'English (UK)'], ['es', 'Español'], ['fr', 'Français'], ['de', 'Deutsch'], ['pt', 'Português'], ['hi', 'हिन्दी'], ['ja', '日本語'], ['zh', '中文']], (v) => { set('language', v); render(); }),
+    selectRow('Language', 'Interface language', pr.language, baseLangs, (v) => { set('language', v); void loadI18n(v).then(() => render()); }),
     selectRow('Date format', 'How dates are shown', pr.date_format, [['D MMM YYYY', '12 Jan 2027'], ['MMM D, YYYY', 'Jan 12, 2027'], ['YYYY-MM-DD', '2027-01-12'], ['DD/MM/YYYY', '12/01/2027'], ['MM/DD/YYYY', '01/12/2027']], (v) => { set('date_format', v); render(); }),
     selectRow('Start of week', 'First day in calendars', pr.week_start, [['monday', 'Monday'], ['sunday', 'Sunday'], ['saturday', 'Saturday']], (v) => { set('week_start', v); render(); }));
   // Timezone free-text (very long enum otherwise).
@@ -246,11 +253,31 @@ function renderMembers(render: () => void): HTMLElement {
   const rows = h('div', { className: 'acct-card acct-rowlist' });
   (data.people as any[]).forEach((m, i) => {
     const nm = m.name || m.email;
+    // m143 — an admin can change another member's role inline (self + platform admins stay read-only).
+    const editable = data.canManage && !m.is_you && m.persona !== 'platform_admin';
+    const roleEl = editable
+      ? (() => {
+          const sel = h('select', { className: 'acct-role-select', 'aria-label': `Role for ${nm}`,
+            onChange: async (e: Event) => {
+              const persona = (e.target as HTMLSelectElement).value;
+              const res = await api.post(`/api/me/account/people/${encodeURIComponent(m.id)}/role`, { persona });
+              if (res && (res as Response).ok) { m.persona = persona; render(); }
+              else { const b = await (res as Response)?.json?.().catch(() => ({})) as { error?: string }; void noticeDialog({ title: 'Couldn’t change role', message: b?.error || 'Please try again.' }); render(); }
+            },
+          }) as HTMLSelectElement;
+          for (const [val, label] of [['tenant_admin', 'Admin'], ['tenant_user', 'Member']] as const) {
+            const opt = h('option', { value: val }, label) as HTMLOptionElement;
+            if ((m.persona === 'tenant_admin' && val === 'tenant_admin') || (m.persona !== 'tenant_admin' && val === 'tenant_user')) opt.selected = true;
+            sel.appendChild(opt);
+          }
+          return sel;
+        })()
+      : h('span', { className: 'acct-role-chip' }, roleLabel(m.persona));
     rows.appendChild(h('div', { className: 'acct-row' + (i === data.people.length - 1 ? ' last' : '') },
       h('span', { className: 'acct-member-av' }, initials(nm)),
-      h('div', { style: 'flex:1;min-width:0;' }, h('div', { className: 'acct-row-title' }, nm), h('div', { className: 'acct-row-sub' }, m.email)),
+      h('div', { style: 'flex:1;min-width:0;' }, h('div', { className: 'acct-row-title' }, nm), h('div', { className: 'acct-row-sub' }, m.email || '')),
       m.is_you ? pill('You', 'muted') : pill('Active', 'ok'),
-      h('span', { className: 'acct-role-chip' }, roleLabel(m.persona))));
+      roleEl));
   });
   return h('div', { style: 'display:flex;flex-direction:column;gap:16px;' }, head, rows);
 }

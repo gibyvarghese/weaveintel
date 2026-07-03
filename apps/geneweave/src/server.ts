@@ -73,6 +73,10 @@ import {
   registerMeFeedbackRoutes,
   registerMeCitationsRoutes,
   registerMeVersionsRoutes,
+  registerMeI18nRoutes,
+  registerMeSuggestedPromptsRoutes,
+  registerMeAccessibilityRoutes,
+  registerMeWorkspaceRoutes,
   registerMeNotesRoutes,
   registerMeComplianceRoutes,
   registerVoiceRoutes,
@@ -295,6 +299,14 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   registerMeCitationsRoutes(router, db, { aiGenerate: createModelTextGenerator(chatEngine.modelConfig) });
   // m139: regenerate an answer, keeping version history — needs an LLM to produce the alternative.
   registerMeVersionsRoutes(router, db, { aiGenerate: createModelTextGenerator(chatEngine.modelConfig) });
+  // m140: per-tenant accessibility defaults (streaming announcements + reduced motion) for the client.
+  registerMeAccessibilityRoutes(router, db);
+  // m143: workspace roles — which UI areas this user sees (surface parity) + member role management.
+  registerMeWorkspaceRoutes(router, db);
+  // m145: internationalisation — the effective UI message pack for the reader's language.
+  registerMeI18nRoutes(router, db);
+  // m146: suggested/starter prompts — the empty-chat conversation starters (curated + personalised).
+  registerMeSuggestedPromptsRoutes(router, db);
   // weaveNotes Phase 3: give the notes routes an LLM generator (built from the chat
   // engine's resolved providers + default model) so the AI co-author actions work.
   // weaveNotes Phase 4: pass the share-token secret + public base url so a note can be

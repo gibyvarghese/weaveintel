@@ -14,6 +14,14 @@
  */
 import { h } from './dom.js';
 import { wovenMarkSvg } from './notes-brand.js';
+import { isSvgMarkup } from './icons.js';
+
+/** Render a menu icon: line-drawn SVG markup (the branded icon set) as innerHTML, or a plain glyph as text. */
+function menuIcon(glyph: string, className: string): HTMLElement {
+  return isSvgMarkup(glyph)
+    ? h('span', { className, innerHTML: glyph }) as HTMLElement
+    : h('span', { className }, glyph) as HTMLElement;
+}
 
 export interface OverflowItem { label: string; title: string; onClick: () => void; danger?: boolean; active?: boolean; icon?: string; sub?: string; card?: boolean }
 /** A mono section header inside a menu (e.g. the design's "✦ CAPTURE" / "BLOCKS" labels). */
@@ -72,7 +80,7 @@ function dropdown(trigger: HTMLElement, entries: MenuEntry[], align: 'left' | 'r
     if (it.card) {
       if (!cardGrid) { cardGrid = h('div', { className: 'gw-menu-cards' }); menu.appendChild(cardGrid); }
       cardGrid.appendChild(h('button', { className: 'gw-menu-card', title: it.title, onClick: () => { close(); it.onClick(); } },
-        h('span', { className: 'gw-menu-card-ic' }, it.icon ?? '•'),
+        menuIcon(it.icon ?? '•', 'gw-menu-card-ic'),
         h('span', { className: 'gw-menu-card-tx' },
           h('span', { className: 'gw-menu-card-label' }, it.label),
           it.sub ? h('span', { className: 'gw-menu-card-sub' }, it.sub) : null)));
@@ -81,7 +89,7 @@ function dropdown(trigger: HTMLElement, entries: MenuEntry[], align: 'left' | 'r
       menu.appendChild(h('button', {
         className: `gw-menu-item${it.danger ? ' danger' : ''}${it.active ? ' active' : ''}`, title: it.title,
         onClick: () => { close(); it.onClick(); },
-      }, it.icon ? h('span', { className: 'gw-menu-item-ic' }, it.icon) : null, h('span', {}, it.label)));
+      }, it.icon ? menuIcon(it.icon, 'gw-menu-item-ic') : null, h('span', {}, it.label)));
     }
   }
   menu.style.display = 'none';
@@ -102,10 +110,10 @@ function dropdown(trigger: HTMLElement, entries: MenuEntry[], align: 'left' | 'r
 // Display uses the theme token (so dark/light stays consistent); the command gets the
 // real hex (the Highlight mark refuses non-literal colours like a CSS var, for safety).
 const HIGHLIGHTERS = [
-  { css: 'var(--hl-amber)', hex: '#FAC775' },
-  { css: 'var(--hl-pink)', hex: '#F4C0D1' },
-  { css: 'var(--hl-teal)', hex: '#9FE1CB' },
-  { css: 'var(--hl-blue)', hex: '#B5D4F4' },
+  { key: 'amber', hex: '#FAC775' },
+  { key: 'pink', hex: '#F4C0D1' },
+  { key: 'teal', hex: '#9FE1CB' },
+  { key: 'blue', hex: '#B5D4F4' },
 ];
 
 // Formatting buttons run on MOUSEDOWN with preventDefault so the editor never loses its text selection
@@ -217,7 +225,7 @@ export function renderEditorCanvas(opts: EditorCanvasOpts): HTMLElement {
   // Text-colour dropdown.
   const colorBtn = h('button', { className: 'gw-tool', title: 'Text colour', innerHTML: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16"/><path d="m6 16 6-12 6 12"/><path d="M8.5 12h7"/></svg>' });
   const colorMenu = h('div', { className: 'gw-menu gw-menu-left gw-color-menu' },
-    ...TEXT_COLORS.map((c) => h('button', { className: 'gw-color-swatch', title: c, style: `background:${c}`, onMouseDown: pressAction(() => { colorMenu.style.display = 'none'; opts.format.textColor?.(c); }) }))) as HTMLElement;
+    ...TEXT_COLORS.map((c) => h('button', { className: 'gw-color-swatch', title: c, style: { background: c }, onMouseDown: pressAction(() => { colorMenu.style.display = 'none'; opts.format.textColor?.(c); }) }))) as HTMLElement;
   colorMenu.style.display = 'none';
   colorBtn.addEventListener('click', () => { colorMenu.style.display = colorMenu.style.display === 'none' ? '' : 'none'; });
   const colorGroup = h('div', { className: 'gw-menu-anchor' }, colorBtn, colorMenu);
@@ -239,10 +247,11 @@ export function renderEditorCanvas(opts: EditorCanvasOpts): HTMLElement {
       iconTool('<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg>', 'Link', () => opts.format.link?.()),
       colorGroup,
     ),
-    // highlighters
+    // highlighters — colour comes from a stylesheet class (.gw-hl-<key>) sourced from the design tokens, so
+    // each swatch reliably shows its own colour (an inline style string didn't stick on these nodes).
     h('div', { className: 'gw-tool-group gw-highlighters' },
-      ...HIGHLIGHTERS.map((c, i) => h('span', {
-        className: `gw-hl${i === 0 ? ' active' : ''}`, title: 'Highlight', style: `background:${c.css}`,
+      ...HIGHLIGHTERS.map((c, i) => h('button', {
+        type: 'button', className: `gw-hl gw-hl-${c.key}${i === 0 ? ' active' : ''}`, title: `Highlight ${c.key}`,
         onMouseDown: pressAction(() => opts.format.highlight(c.hex)),
       })),
     ),
@@ -251,10 +260,10 @@ export function renderEditorCanvas(opts: EditorCanvasOpts): HTMLElement {
       iconTool('<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13"/><circle cx="3.5" cy="6" r="1.3" fill="currentColor" stroke="none"/><circle cx="3.5" cy="12" r="1.3" fill="currentColor" stroke="none"/><circle cx="3.5" cy="18" r="1.3" fill="currentColor" stroke="none"/></svg>', 'Bulleted list', () => run('toggleBulletList')),
       iconTool('<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="7" rx="1.5"/><path d="m4.5 7.5 1.5 1.5 2.5-3"/><path d="M14 6h7M14 12h7M14 18h7M3 16h7"/></svg>', 'To-do list', () => run('toggleTaskList')),
     ),
-    // ink tools
+    // ink tools — the pen drops an editable drawing (ink canvas) into the note at the cursor.
     h('div', { className: 'gw-tool-group' },
-      h('span', { className: 'gw-tool', title: 'Pen', innerHTML: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18z"/></svg>' }),
-      ...(opts.creative ? [h('span', { className: 'gw-tool gw-tool-sticker', title: 'Sticker', onClick: () => opts.format.sticker?.() }, '✨')] : []),
+      iconTool('<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18z"/></svg>', 'Insert a drawing (ink canvas)', () => run('setInkCanvas', { strokes: [], author: 'user' })),
+      ...(opts.creative ? [h('button', { type: 'button', className: 'gw-tool gw-tool-sticker', title: 'Sticker', onMouseDown: pressAction(() => opts.format.sticker?.()) }, '✨')] : []),
     ),
     // columns: one / two / three (the design's board layout control) — pushed to the right.
     h('div', { className: 'gw-cols-seg' },
