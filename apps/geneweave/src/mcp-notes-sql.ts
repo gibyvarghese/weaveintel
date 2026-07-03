@@ -16,7 +16,8 @@
  *     and it has no external-send tool, so the "lethal trifecta" stays broken. Tokens are stored
  *     hashed; every write is recorded in the note activity log.
  */
-import { handleMcpMessage, mcpText, MCP_PROTOCOL_VERSION, extractPlainText, type McpTool, type McpToolResult } from '@weaveintel/notes';
+import { extractPlainText } from '@weaveintel/notes';
+import { handleMcpMessage, mcpText, MCP_PROTOCOL_VERSION, type McpTool, type McpToolResult } from '@weaveintel/mcp-server';
 import { BlockDoc, pmToBlocks, blocksToMarkdown } from '@weaveintel/coedit';
 import { newUUIDv7 } from '@weaveintel/core';
 import { createHash, randomBytes } from 'node:crypto';

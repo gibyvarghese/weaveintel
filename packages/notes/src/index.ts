@@ -351,10 +351,6 @@ export {
   validateFlashcards,
 } from './study.js';
 
-// MCP server protocol core (Phase 3): expose the note vault to external agents over JSON-RPC.
-export type { McpTool, McpToolResult, McpServerInfo, McpHandlers, JsonRpcMessage } from './mcp.js';
-export { MCP_PROTOCOL_VERSION, mcpText, handleMcpMessage } from './mcp.js';
-
 // SCHEDULED WORKSPACE AGENTS (Phase 3): recurring multi-step note tasks, budget-bounded + HITL.
 export type { ScheduleRecipe, ScheduleTriggerType, ScheduleScope, ScheduledAgentConfig, RecipeInfo, RunBudget } from './scheduled-agent.js';
 export {

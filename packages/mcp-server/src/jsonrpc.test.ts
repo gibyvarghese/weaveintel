@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { describe, it, expect } from 'vitest';
-import { handleMcpMessage, mcpText, MCP_PROTOCOL_VERSION, type McpHandlers, type McpTool } from './mcp.js';
+import { handleMcpMessage, mcpText, MCP_PROTOCOL_VERSION, type McpHandlers, type McpTool } from './jsonrpc.js';
 
 const TOOLS: McpTool[] = [
   { name: 'search_notes', description: 'Search', inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } },

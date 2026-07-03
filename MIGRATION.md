@@ -201,7 +201,7 @@ rewiring every consumer, and leaving the suite green.
 |---|---|---|---|
 | 2a | `prompt-safety.ts` (spotlighting) | `guardrails` (+ `/spotlighting` subpath) | ✅ done |
 | 2b | `translate.ts` | `prompts` | ✅ done |
-| 2c | `mcp.ts` (transport-free JSON-RPC core) | `mcp-server` | ⏳ |
+| 2c | `mcp.ts` (transport-free JSON-RPC core) | `mcp-server` | ✅ done |
 | 2d | `scheduled-agent.ts` | `triggers` | ⏳ |
 | 2e | `rag.ts` (+ rag-citations) | `retrieval` (reconcile RRF `hybrid.ts` + `citations.ts`) | ⏳ |
 | 2f | product modules (agency, notes-config, creative, colorize, meeting, study, diagram, ink, svg, visual-verify, image-search, capture, desktop, suggestions, templates, governance) | `apps/geneweave` (+ `-ui`) | ⏳ |
@@ -234,6 +234,16 @@ suite into `packages/prompts/src/`, re-headed the module for prompts, de-branded
 exported from the prompts barrel. Rewired the 2 real app consumers (`i18n-sql.ts`,
 `note-translate-sql.ts` — both import translate-only blocks) `@weaveintel/notes` → `@weaveintel/prompts`;
 removed the notes barrel block. Gate: **267/267 tasks, exit 0** (translate.test now runs in prompts).
+
+### 2c — `mcp.ts` → `@weaveintel/mcp-server` (`jsonrpc.ts`) ✅
+
+The transport-free JSON-RPC 2.0 core (`handleMcpMessage` handling `initialize`/`tools/list`/
+`tools/call`/…) is the MCP wire protocol — it belongs with the framework's one MCP implementation, not
+in notes. Confirmed mcp-server had **no competing dispatch** (clean fold-in, not a merge). `git mv`'d
+`mcp.ts` + its 10-test suite to `mcp-server/src/jsonrpc.ts`, re-headed + de-branded, exported from the
+barrel (pairs with the batteries-included `weaveMCPServer`). Rewired the one consumer
+(`mcp-notes-sql.ts`) — split its import so `extractPlainText` stays from notes and the MCP symbols come
+from `@weaveintel/mcp-server`. Gate: **267/267 tasks, exit 0**.
 
 ---
 

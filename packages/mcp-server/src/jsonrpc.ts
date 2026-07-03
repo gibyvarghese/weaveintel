@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/notes — MCP (Model Context Protocol) protocol core (weaveNotes Phase 3).
+ * @weaveintel/mcp-server — MCP (Model Context Protocol) transport-free JSON-RPC core.
  *
  * MCP is the open standard (originated by Anthropic) that lets an external AI app — Claude Desktop,
  * ChatGPT, Cursor — connect to a server and call its TOOLS. This module is the pure, transport-free
- * heart of a weaveNotes MCP server: it speaks the JSON-RPC 2.0 wire protocol (`initialize`,
- * `tools/list`, `tools/call`, `notifications/initialized`) so the app can expose a user's note vault
- * (search / read / list / create / append) over a single Streamable-HTTP endpoint.
+ * heart of an MCP server: it speaks the JSON-RPC 2.0 wire protocol (`initialize`, `tools/list`,
+ * `tools/call`, `notifications/initialized`) so a consuming app can expose a set of tools over any
+ * transport (e.g. a single Streamable-HTTP endpoint) it chooses.
  *
  * It is deliberately tool-only (the most portable MCP primitive) and stateless — each call carries
  * its own bearer auth, resolved by the app to a user; this module never sees credentials. The app
  * supplies a `listTools()` + an async `callTool(name, args)`; everything else (the handshake, error
- * shapes, the content envelope) lives here. Pure + zero-dependency.
+ * shapes, the content envelope) lives here. Pure + zero-dependency. Pair it with `weaveMCPServer`
+ * (this package) for a batteries-included transport, or drive it directly from your own handler.
  */
 
 /** The MCP protocol revision we advertise (latest stable as of 2026). */
