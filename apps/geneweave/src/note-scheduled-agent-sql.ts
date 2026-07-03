@@ -17,11 +17,12 @@
  * the agent has NO way to send data off-platform — it only creates a new note in the same workspace —
  * so the "lethal trifecta" (private data + untrusted content + exfiltration) is structurally broken.
  */
+import { extractPlainText } from '@weaveintel/notes';
+import { cronNextRun, newRunBudget, chargeBudget, budgetExhausted, budgetRemaining } from '@weaveintel/triggers';
 import {
-  validateScheduledAgent, DEFAULT_SCHEDULED_AGENT, recipeInfo, cronNextRun,
-  newRunBudget, chargeBudget, budgetExhausted, budgetRemaining, extractPlainText,
+  validateScheduledAgent, DEFAULT_SCHEDULED_AGENT, recipeInfo,
   type ScheduledAgentConfig, type ScheduleRecipe,
-} from '@weaveintel/notes';
+} from './scheduled-agent-config.js';
 import { makeFence, fenceUntrusted, spotlightPreamble } from '@weaveintel/guardrails/spotlighting';
 import { newUUIDv7 } from '@weaveintel/core';
 import { agentCreateNote } from './note-ai-sql.js';

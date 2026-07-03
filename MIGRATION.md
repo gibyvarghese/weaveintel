@@ -202,7 +202,7 @@ rewiring every consumer, and leaving the suite green.
 | 2a | `prompt-safety.ts` (spotlighting) | `guardrails` (+ `/spotlighting` subpath) | ✅ done |
 | 2b | `translate.ts` | `prompts` | ✅ done |
 | 2c | `mcp.ts` (transport-free JSON-RPC core) | `mcp-server` | ✅ done |
-| 2d | `scheduled-agent.ts` | `triggers` | ⏳ |
+| 2d | `scheduled-agent.ts` (split: cron+budget→triggers, recipes→app) | `triggers` + app | ✅ done |
 | 2e | `rag.ts` (+ rag-citations) | `retrieval` (reconcile RRF `hybrid.ts` + `citations.ts`) | ⏳ |
 | 2f | product modules (agency, notes-config, creative, colorize, meeting, study, diagram, ink, svg, visual-verify, image-search, capture, desktop, suggestions, templates, governance) | `apps/geneweave` (+ `-ui`) | ⏳ |
 | 2g | slim `index.ts`, genericize `provenance.ts`, drop the notes deferral from the no-app-brand allowlist | — | ⏳ |
@@ -244,6 +244,23 @@ in notes. Confirmed mcp-server had **no competing dispatch** (clean fold-in, not
 barrel (pairs with the batteries-included `weaveMCPServer`). Rewired the one consumer
 (`mcp-notes-sql.ts`) — split its import so `extractPlainText` stays from notes and the MCP symbols come
 from `@weaveintel/mcp-server`. Gate: **267/267 tasks, exit 0**.
+
+### 2d — `scheduled-agent.ts` → split (`triggers` + app) ✅
+
+Not a clean move — the module mixed **generic** primitives with **note-product** recipes. Rather than
+make slim-notes depend on `triggers` (which drags in aws-sdk/mongodb/pg/redis), split it fully:
+- **generic → `@weaveintel/triggers`:** the timezone-aware 5-field cron evaluator became
+  `cron-schedule.ts` (`isValidCron`/`isValidTimezone`/`cronMatches`/`cronNextRun`) — this replaces
+  triggers' crude internal `parseCronToMs` interval hack with a *correct* evaluator; and the run budget
+  became `run-budget.ts` (`newRunBudget`/`chargeBudget`/`budgetExhausted`/`budgetRemaining`, signature
+  genericized off `ScheduledAgentConfig`). **Research-grounded:** the day-of-month/day-of-week
+  OR-vs-intersection rule matches the Vixie/POSIX standard (validated against the crontab spec).
+- **product → app:** the recipe catalog + `ScheduledAgentConfig` + validator moved to
+  `apps/geneweave/src/scheduled-agent-config.ts` (imports the cron/budget primitives from triggers).
+- `scheduled-agent.{ts,test.ts}` deleted from notes; the one consumer (`note-scheduled-agent-sql.ts`)
+  rewired three ways (extractPlainText←notes, cron/budget←triggers, config←local). Tests split by
+  concern (cron+budget → triggers, config → app). Gate: **267/267 tasks, exit 0** (triggers +10 tests,
+  app scheduled-agent-config +5).
 
 ---
 

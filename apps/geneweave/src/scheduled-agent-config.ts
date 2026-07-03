@@ -1,19 +1,17 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/notes — SCHEDULED / TRIGGERED WORKSPACE AGENTS (weaveNotes Phase 3).
+ * geneWeave (weaveNotes) — SCHEDULED / TRIGGERED WORKSPACE AGENTS: the product config + recipes.
  *
  * A scheduled agent is a recurring, multi-step AI task over your OWN notes — "every weekday at 8am,
  * summarise the notes I touched yesterday into a digest", "weekly, suggest wiki-links between related
- * notes", "flag notes I haven't opened in 60 days". The 2026 norm (Notion AI agents, OpenAI scheduled
- * tasks, LangGraph/Claude HITL) is: run unattended, but for anything that WRITES, stage the result as
- * a reviewable suggestion the human approves — never silently overwrite — and run inside a hard BUDGET
- * (max steps + max tokens) so an autonomous loop can't run away.
+ * notes", "flag notes I haven't opened in 60 days". It runs unattended, but anything that WRITES is
+ * staged as a reviewable suggestion the human approves (never a silent overwrite), inside a hard BUDGET.
  *
- * This module is the pure core: the typed config + validator, the built-in task RECIPES, the run
- * BUDGET model, and a small timezone-aware CRON evaluator (next-run + match). The heavy lifting — the
- * actual LLM steps, reading the user's notes, and staging suggestions — lives in the app, reusing the
- * existing weaveNotes editor agent + the track-changes suggestion system. Pure + zero-dependency.
+ * This module owns the weaveNotes-specific pieces: the typed config, the note task RECIPES, and the
+ * validator. The GENERIC primitives it builds on — the cron schedule evaluator and the run budget —
+ * live in the framework (`@weaveintel/triggers`) and are reused here.
  */
+import { isValidCron, isValidTimezone } from '@weaveintel/triggers';
 
 /** The built-in task recipes (each a useful, bounded multi-step note task). `custom` = free-form prompt. */
 export type ScheduleRecipe = 'daily_digest' | 'link_suggester' | 'action_items' | 'stale_flagger' | 'custom';
@@ -105,102 +103,4 @@ export function validateScheduledAgent(partial: Partial<Record<keyof ScheduledAg
     },
     warnings,
   };
-}
-
-// ─── Run budget (anti-runaway) ──────────────────────────────────────────────
-
-export interface RunBudget { tokenBudget: number; maxSteps: number; tokensUsed: number; steps: number }
-export function newRunBudget(cfg: Pick<ScheduledAgentConfig, 'tokenBudget' | 'maxSteps'>): RunBudget { return { tokenBudget: cfg.tokenBudget, maxSteps: cfg.maxSteps, tokensUsed: 0, steps: 0 }; }
-/** Charge a step's token use; returns the budget for chaining. */
-export function chargeBudget(b: RunBudget, tokens: number): RunBudget { b.tokensUsed += Math.max(0, Math.trunc(tokens) || 0); b.steps += 1; return b; }
-/** Has the run hit its token or step ceiling? (Check BEFORE doing the next step.) */
-export function budgetExhausted(b: RunBudget): boolean { return b.tokensUsed >= b.tokenBudget || b.steps >= b.maxSteps; }
-/** Remaining token headroom (never negative). */
-export function budgetRemaining(b: RunBudget): number { return Math.max(0, b.tokenBudget - b.tokensUsed); }
-
-// ─── Minimal timezone-aware CRON (5-field) ──────────────────────────────────
-// Supports: '*', lists 'a,b', ranges 'a-b', steps '*/n' and 'a-b/n', and 3-letter month/day names.
-// Evaluated against WALL-CLOCK time in the agent's IANA timezone (via Intl, so DST is handled).
-
-const DOW_NAMES: Record<string, number> = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
-const MON_NAMES: Record<string, number> = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
-
-function parseField(field: string, min: number, max: number, names: Record<string, number> = {}): Set<number> | null {
-  const out = new Set<number>();
-  for (const partRaw of field.split(',')) {
-    const part = partRaw.trim().toLowerCase();
-    if (!part) return null;
-    let step = 1; let range = part;
-    const slash = part.split('/');
-    if (slash.length === 2) { step = parseInt(slash[1]!, 10); range = slash[0]!; if (!Number.isInteger(step) || step < 1) return null; }
-    let lo = min, hi = max;
-    if (range === '*') { /* full range */ }
-    else if (range.includes('-')) {
-      const [a, b] = range.split('-');
-      lo = names[a!] ?? parseInt(a!, 10); hi = names[b!] ?? parseInt(b!, 10);
-    } else {
-      lo = hi = names[range] ?? parseInt(range, 10);
-    }
-    if (!Number.isInteger(lo) || !Number.isInteger(hi) || lo < min || hi > max || lo > hi) return null;
-    for (let v = lo; v <= hi; v += step) out.add(v);
-  }
-  return out.size ? out : null;
-}
-
-interface CronSpec { minute: Set<number>; hour: Set<number>; dom: Set<number>; month: Set<number>; dow: Set<number> }
-function parseCron(cron: string): CronSpec | null {
-  const f = cron.trim().split(/\s+/);
-  if (f.length !== 5) return null;
-  const minute = parseField(f[0]!, 0, 59);
-  const hour = parseField(f[1]!, 0, 23);
-  const dom = parseField(f[2]!, 1, 31);
-  const month = parseField(f[3]!, 1, 12, MON_NAMES);
-  const dow = parseField(f[4]!, 0, 7, DOW_NAMES); // allow 7=Sunday
-  if (!minute || !hour || !dom || !month || !dow) return null;
-  if (dow.has(7)) dow.add(0);
-  return { minute, hour, dom, month, dow };
-}
-
-/** Is a cron string parseable? */
-export function isValidCron(cron: string): boolean { return parseCron(cron) !== null; }
-
-/** Is a string a usable IANA timezone? */
-export function isValidTimezone(tz: unknown): boolean {
-  if (typeof tz !== 'string' || !tz) return false;
-  try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); return true; } catch { return false; }
-}
-
-/** The wall-clock fields (minute/hour/day/month/dow) of an instant, read in a timezone. */
-function wallClock(ms: number, timezone: string): { minute: number; hour: number; dom: number; month: number; dow: number } {
-  const parts = new Intl.DateTimeFormat('en-US', { timeZone: timezone, hour12: false, minute: '2-digit', hour: '2-digit', day: '2-digit', month: '2-digit', weekday: 'short' }).formatToParts(new Date(ms));
-  const get = (t: string): string => parts.find((p) => p.type === t)?.value ?? '0';
-  const hour = parseInt(get('hour'), 10) % 24; // Intl may render 24 for midnight
-  return { minute: parseInt(get('minute'), 10), hour, dom: parseInt(get('day'), 10), month: parseInt(get('month'), 10), dow: DOW_NAMES[get('weekday').toLowerCase()] ?? 0 };
-}
-
-/** Does the instant `ms` match the cron, read in `timezone`? (Standard Vixie cron OR-semantics on dom/dow.) */
-export function cronMatches(cron: string, ms: number, timezone = 'UTC'): boolean {
-  const spec = parseCron(cron); if (!spec) return false;
-  const w = wallClock(ms, timezone);
-  // Vixie cron: when BOTH dom and dow are restricted, match if EITHER matches; else AND.
-  const domRestricted = !(spec.dom.size === 31); const dowRestricted = !(spec.dow.size >= 7);
-  const dayOk = domRestricted && dowRestricted ? (spec.dom.has(w.dom) || spec.dow.has(w.dow)) : (spec.dom.has(w.dom) && spec.dow.has(w.dow));
-  return spec.minute.has(w.minute) && spec.hour.has(w.hour) && spec.month.has(w.month) && dayOk;
-}
-
-/**
- * The next instant (epoch-ms, aligned to the minute) at or after `fromMs` that matches the cron in
- * `timezone`. Returns null if nothing matches within ~13 months (e.g. an impossible Feb-31). Strictly
- * after `fromMs` minute (so a just-fired job doesn't immediately re-fire).
- */
-export function cronNextRun(cron: string, fromMs: number, timezone = 'UTC'): number | null {
-  if (!isValidCron(cron)) return null;
-  // Start at the next whole minute after fromMs.
-  let t = Math.ceil((fromMs + 1) / 60000) * 60000;
-  const limit = fromMs + 400 * 24 * 60 * 60 * 1000;
-  while (t <= limit) {
-    if (cronMatches(cron, t, timezone)) return t;
-    t += 60000;
-  }
-  return null;
 }
