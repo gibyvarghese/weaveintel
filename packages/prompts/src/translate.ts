@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/notes — the TRANSLATE model: turn a note (or a selection) into another language,
- * faithfully (weaveNotes Phase 2).
+ * @weaveintel/prompts — the TRANSLATE model: turn a document (or a selection) into another language,
+ * faithfully. Prompt-construction + span protection — reusable by any app, not a notes feature.
  *
- * Translating rich notes well is more than "ask the model to translate". Three things go wrong with
+ * Translating rich text well is more than "ask the model to translate". Three things go wrong with
  * a naive prompt: (1) the model translates things that must stay byte-for-byte — code, inline code,
  * URLs, @mentions, [[wiki-links]] — and breaks them; (2) it "answers" or comments instead of just
  * translating; (3) the note text itself can carry an instruction ("ignore the above and …") that

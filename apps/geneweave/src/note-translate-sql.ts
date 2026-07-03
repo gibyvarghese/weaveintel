@@ -21,7 +21,7 @@ import {
   resolveLanguage, protectNonTranslatable, restoreProtected,
   buildTranslatePrompt, parseTranslation, verifyTranslation,
   TARGET_LANGUAGES, type Formality,
-} from '@weaveintel/notes';
+} from '@weaveintel/prompts';
 import { BlockDoc, markdownToBlocks, blocksToProseMirror } from '@weaveintel/coedit';
 import { newUUIDv7 } from '@weaveintel/core';
 import { roleAtLeast } from '@weaveintel/collaboration';

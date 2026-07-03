@@ -394,19 +394,6 @@ export {
   governanceScore,
 } from './governance.js';
 
-// TRANSLATE model (Phase 2): faithful, structure-preserving, injection-defended note translation.
-export type { TargetLanguage, Formality, TranslateOptions, ProtectResult, TranslateVerification } from './translate.js';
-export {
-  TARGET_LANGUAGES,
-  resolveLanguage,
-  protectNonTranslatable,
-  restoreProtected,
-  countSentinels,
-  buildTranslatePrompt,
-  parseTranslation,
-  verifyTranslation,
-} from './translate.js';
-
 // Free-to-use IMAGE SEARCH (pure helpers; the app does the hardened fetch + storage).
 export type { ImageProvider, LicenseId, ImageResult } from './image-search.js';
 export {

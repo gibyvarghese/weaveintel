@@ -200,7 +200,7 @@ rewiring every consumer, and leaving the suite green.
 | Sub-step | Move | Destination | Status |
 |---|---|---|---|
 | 2a | `prompt-safety.ts` (spotlighting) | `guardrails` (+ `/spotlighting` subpath) | ✅ done |
-| 2b | `translate.ts` | `prompts` | ⏳ next |
+| 2b | `translate.ts` | `prompts` | ✅ done |
 | 2c | `mcp.ts` (transport-free JSON-RPC core) | `mcp-server` | ⏳ |
 | 2d | `scheduled-agent.ts` | `triggers` | ⏳ |
 | 2e | `rag.ts` (+ rag-citations) | `retrieval` (reconcile RRF `hybrid.ts` + `citations.ts`) | ⏳ |
@@ -224,6 +224,16 @@ Gate: guardrails 314 tests (+8 spotlighting), notes 339, app typecheck 62/62, `c
 PASS. Full suite: 266/267 tasks — the lone failure is a **network-flaky `arxiv_search` test** in
 scientific-validation that passes in isolation (pre-existing external-API flakiness, unrelated to this
 move; noted alongside the Phase 0 flakes).
+
+### 2b — `translate.ts` → `@weaveintel/prompts` ✅
+
+Faithful, structure-preserving translation is prompt-construction + span protection (mask
+code/URLs/@mentions/[[wiki-links]] so the model can't mangle them, spotlight against injection, verify
+the round-trip) — reusable by any app, not a notes feature. `git mv`'d `translate.ts` + its 18-test
+suite into `packages/prompts/src/`, re-headed the module for prompts, de-branded the one comment, and
+exported from the prompts barrel. Rewired the 2 real app consumers (`i18n-sql.ts`,
+`note-translate-sql.ts` — both import translate-only blocks) `@weaveintel/notes` → `@weaveintel/prompts`;
+removed the notes barrel block. Gate: **267/267 tasks, exit 0** (translate.test now runs in prompts).
 
 ---
 

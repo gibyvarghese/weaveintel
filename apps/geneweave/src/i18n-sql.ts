@@ -21,7 +21,7 @@ import {
   resolveLanguage, protectNonTranslatable, restoreProtected,
   buildTranslatePrompt, parseTranslation, verifyTranslation,
   TARGET_LANGUAGES,
-} from '@weaveintel/notes';
+} from '@weaveintel/prompts';
 import { resolveLocaleChain } from '@weaveintel/i18n';
 import { EN_MESSAGES, BUILTIN_MESSAGES, BASE_LOCALE, type Catalog } from './ui-i18n-catalog.js';
 import type { DatabaseAdapter } from './db.js';
