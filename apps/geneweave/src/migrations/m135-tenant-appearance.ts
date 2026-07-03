@@ -6,7 +6,7 @@ import { safeExec } from './helpers.js';
  *
  * A workspace (tenant) can re-brand geneWeave: its display name, a logo, a brand accent colour, corner
  * style, fonts, default colour-scheme (system/light/dark) and Pro/Creative default. The brand is applied
- * as CSS custom properties at runtime and is **accessibility-enforced** by @geneweave/tokens — a brand
+ * as CSS custom properties at runtime and is **accessibility-enforced** by @weaveintel/tokens — a brand
  * colour that fails WCAG-AA on a theme's background is dropped and that theme falls back to the accessible
  * default, so a tenant can never ship an inaccessible re-brand. Stored per tenant; edited in the Builder
  * (Appearance surface); the assistant can also apply it via the set_workspace_appearance tool.

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { describe, it, expect } from 'vitest';
-import { contrastRatio, meetsAA } from '@geneweave/tokens';
+import { contrastRatio, meetsAA } from '@weaveintel/tokens';
 import {
   HIGHLIGHT_PALETTE, TEXT_COLOR_PALETTE, COLOR_SCHEMES, READING_INK,
   isColorScheme, schemeLabels, schemeColor, assignTopicColors, locatePhrase,
@@ -9,7 +9,7 @@ import {
 const WHITE = '#FFFFFF';  // Pro page surface
 const PAPER = '#FBF8F1';  // Creative page surface
 
-describe('colorize — the palette is provably WCAG-AA (the @geneweave/tokens contrast maths)', () => {
+describe('colorize — the palette is provably WCAG-AA (the @weaveintel/tokens contrast maths)', () => {
   it('reading ink stays AA on EVERY highlight background', () => {
     for (const { label, color } of HIGHLIGHT_PALETTE) {
       const ratio = contrastRatio(READING_INK, color);

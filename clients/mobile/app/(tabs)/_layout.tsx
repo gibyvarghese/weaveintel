@@ -4,7 +4,7 @@
  * Six tabs: Chat, Chats, Actions, Calendar, Notes, Profile.
  * The Actions tab shows a live badge count (pending approvals + tasks due today).
  * Calendar (WC5) and Notes (WC10) are the new agenda + notes surfaces.
- * The tab bar is themed from `@geneweave/tokens` via {@link useTheme}.
+ * The tab bar is themed from `@weaveintel/tokens` via {@link useTheme}.
  */
 import { Tabs } from 'expo-router';
 import { useTheme } from '../../src/native/providers';

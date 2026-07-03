@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { themes } from '@geneweave/tokens';
+import { themes } from '@weaveintel/tokens';
 import { resolveThemeName, resolveAppTheme } from './tenant-theme.js';
 
 describe('resolveThemeName', () => {

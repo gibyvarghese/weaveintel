@@ -42,7 +42,7 @@
     "@tiptap/extension-underline": "^2.11.5",
     "@tiptap/pm": "^2.11.5",
     "@tiptap/starter-kit": "^2.11.5",
-    "@geneweave/tokens": "*",
+    "@weaveintel/tokens": "*",
     "@weaveintel/ui-primitives": "*",
     "esbuild": "^0.25.0"
   },

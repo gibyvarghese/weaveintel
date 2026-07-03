@@ -120,7 +120,7 @@ export type Catalog = z.infer<typeof CatalogSchema>;
 // Tenant theme — GET /api/me/theme
 // Per-tenant design tokens (colors / font families / corner radii). Lenient by
 // design: the brand token names are open maps, and a missing/cleared theme is
-// `null`. WCAG-AA enforcement happens client-side in @geneweave/tokens.
+// `null`. WCAG-AA enforcement happens client-side in @weaveintel/tokens.
 // ---------------------------------------------------------------------------
 
 export const TenantThemeTokensSchema = z

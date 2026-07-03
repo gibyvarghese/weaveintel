@@ -9,7 +9,7 @@
  */
 import type { ReactNode } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import type { TenantThemeOverride } from '@geneweave/tokens';
+import type { TenantThemeOverride } from '@weaveintel/tokens';
 import { QueryProvider } from './query-provider';
 import { AuthProvider } from './auth-provider';
 import { TenantThemeGate } from './tenant-theme-gate';

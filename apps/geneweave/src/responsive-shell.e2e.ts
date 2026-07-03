@@ -5,7 +5,7 @@
  *   • Mobile (390): the nav is an off-canvas DRAWER (hidden); a hamburger opens it over a backdrop;
  *     Escape / backdrop-tap closes it. 44px hit target.
  *   • Tablet (834): single-column content, drawer nav.
- *   • The `--gw-*` design tokens (from @geneweave/tokens) are applied to :root.
+ *   • The `--gw-*` design tokens (from @weaveintel/tokens) are applied to :root.
  * Run: npm run test:e2e -- responsive-shell  (no LLM required).
  */
 import { test, expect, type Page } from '@playwright/test';
@@ -32,7 +32,7 @@ test('Responsive shell — nav is a side panel on desktop and a drawer on mobile
 
   // Design-token SSOT is applied to :root.
   const accent = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--gw-color-accent').trim());
-  expect(accent.toLowerCase()).toBe('#0e9a6e'); // emerald from @geneweave/tokens
+  expect(accent.toLowerCase()).toBe('#0e9a6e'); // emerald from @weaveintel/tokens
 
   // DESKTOP: nav is a persistent side panel; hamburger hidden.
   await expect(page.locator('.workspace-nav')).toBeVisible();

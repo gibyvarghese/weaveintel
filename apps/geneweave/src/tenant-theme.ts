@@ -11,7 +11,7 @@
  *
  * The server only STORES and SERVES the override. WCAG-AA enforcement and the
  * graceful degrade-to-base-theme behaviour live client-side in
- * `@geneweave/tokens` (`applyTenantTheme`), already unit-tested. Keeping the
+ * `@weaveintel/tokens` (`applyTenantTheme`), already unit-tested. Keeping the
  * accessibility gate on the client means every consumer (mobile, future web)
  * shares one implementation and a misconfigured brand can never ship an
  * inaccessible UI — the server stays framework-agnostic and never imports a
@@ -31,7 +31,7 @@ const logger = createLogger('tenant-theme');
 
 /**
  * The brandable token subset a tenant may override. Structurally identical to
- * the client's `TenantThemeOverride` (`@geneweave/tokens`) but expressed with
+ * the client's `TenantThemeOverride` (`@weaveintel/tokens`) but expressed with
  * open string/number maps so the server stays decoupled from the client token
  * names. Only colors, font families, and corner radii are overridable; the
  * spacing grid, elevation, and motion tokens are fixed for layout correctness.

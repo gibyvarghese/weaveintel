@@ -5,16 +5,16 @@
  * A tenant admin re-brands the workspace: display name, logo, default colour-scheme (system/light/dark),
  * Pro/Creative default, corner style, density, and an optional brand accent colour. The result is served
  * as CSS custom properties + flags the web client applies at runtime, so the whole app re-brands with NO
- * flash. Accessibility is enforced by @geneweave/tokens: a brand accent that fails WCAG-AA on a theme's
+ * flash. Accessibility is enforced by @weaveintel/tokens: a brand accent that fails WCAG-AA on a theme's
  * background is dropped (that theme keeps the accessible default) — a tenant can never ship an
  * inaccessible re-brand. The AI-agency colours (mint/emerald as AI presence) are NEVER re-branded; only
  * the primary-action accent + neutral shell chrome respond to the brand.
  *
- * Reuses `@geneweave/tokens` (tenantThemeVars + the AA audit) — the single source of truth shared with
+ * Reuses `@weaveintel/tokens` (tenantThemeVars + the AA audit) — the single source of truth shared with
  * the native app. Owner = the tenant; edited in the Builder Appearance surface; the assistant can also
  * apply it via the set_workspace_appearance tool.
  */
-import { tenantThemeVars, type TenantThemeOverride } from '@geneweave/tokens';
+import { tenantThemeVars, type TenantThemeOverride } from '@weaveintel/tokens';
 import type { DatabaseAdapter } from './db-types/adapter.js';
 import type { TenantAppearanceRow } from './db-types/adapter-me.js';
 

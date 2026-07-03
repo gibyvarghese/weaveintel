@@ -1,7 +1,7 @@
 // CSS styles for geneWeave UI
 // This is embedded in the HTML as a <style> tag
 //
-// geneWeave design tokens are generated from @geneweave/tokens (the single source of truth shared with
+// geneWeave design tokens are generated from @weaveintel/tokens (the single source of truth shared with
 // the native app) into TOKENS_CSS at BUILD time (scripts/gen-tokens-css.mjs) — a plain string, so this
 // browser-served module never bare-imports the workspace package. TOKENS_CSS defines `--gw-*` (colours/
 // space/radii/fonts/type + breakpoints) for light, dark, and the Creative variant, plus legacy
@@ -2304,7 +2304,7 @@ html[data-force-focus-ring] a:focus,html[data-force-focus-ring] button:focus,htm
 /* ── geneWeave responsive adaptive shell (web · tablet · mobile) ───────────────────────
    Rails are persistent side panels on desktop and become off-canvas DRAWERS below tablet
    (slide over, close on backdrop-tap / Esc), so the whole app stays navigable on a phone.
-   Breakpoints come from @geneweave/tokens: tablet 900, desktop 1200. */
+   Breakpoints come from @weaveintel/tokens: tablet 900, desktop 1200. */
 .gw-hamburger{display:none;align-items:center;justify-content:center;width:40px;height:40px;border-radius:10px;border:1px solid var(--bg4);background:var(--bg2);color:var(--fg);cursor:pointer;flex:none}
 .nav-backdrop{display:none;position:fixed;inset:0;background:rgba(20,32,27,.32);z-index:150;opacity:0;pointer-events:none;transition:opacity .2s ease}
 @media(max-width:899.98px){

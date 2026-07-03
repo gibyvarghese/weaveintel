@@ -1,5 +1,5 @@
 /**
- * @geneweave/tokens — geneWeave mobile brand design system.
+ * @weaveintel/tokens — geneWeave mobile brand design system.
  *
  * Framework-agnostic, zero runtime dependencies (no React import, no DB, no
  * fetch). Exports the full brand system as typed constants:

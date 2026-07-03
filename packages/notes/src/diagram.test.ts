@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 import { describe, it, expect } from 'vitest';
-import { contrastRatio, meetsAA } from '@geneweave/tokens';
+import { contrastRatio, meetsAA } from '@weaveintel/tokens';
 import { validateDiagramScene, layoutDiagram, diagramToSvg } from './diagram.js';
 import { READING_INK } from './colorize.js';
 

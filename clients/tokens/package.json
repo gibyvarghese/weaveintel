@@ -1,5 +1,5 @@
 {
-  "name": "@geneweave/tokens",
+  "name": "@weaveintel/tokens",
   "version": "0.0.1",
   "description": "geneWeave mobile brand design tokens — colors, typography, spacing, radii, elevation, motion (framework-agnostic, zero runtime deps).",
   "type": "module",

@@ -18,7 +18,7 @@ import { useRouter } from 'expo-router';
 import { useAuth } from '../../src/native/providers/auth-provider';
 import { useTheme } from '../../src/native/providers/theme-provider';
 import { Icon } from '../../src/native/ui/icon';
-import type { Theme } from '@geneweave/tokens';
+import type { Theme } from '@weaveintel/tokens';
 import { useNotes } from '../../src/native/notes/use-notes';
 import { noteSyncStatus, type LocalNote } from '../../src/lib';
 import { blocksPlainText, docToBlocks } from '@weaveintel/notes';
