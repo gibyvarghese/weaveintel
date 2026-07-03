@@ -22,7 +22,8 @@
  */
 import { cosineSimilarity } from '@weaveintel/cache';
 import { newUUIDv7, weaveContext } from '@weaveintel/core';
-import { buildCitedContext, reciprocalRankFusion, snippetAround, extractPlainText, buildCitedAnswerPrompt, parseCitedAnswer, verifyCitations, buildQueryExpansionPrompt, parseExpandedQueries, type RagHit, type CitedSource, type CitableSource, type Citation, type Note } from '@weaveintel/notes';
+import { extractPlainText, type Note } from '@weaveintel/notes';
+import { buildCitedContext, reciprocalRankFusion, snippetAround, buildCitedAnswerPrompt, parseCitedAnswer, verifyCitations, buildQueryExpansionPrompt, parseExpandedQueries, type RagHit, type CitedSource, type CitableSource, type Citation } from '@weaveintel/retrieval';
 import { createHash } from 'node:crypto';
 import { getActiveGuardrailEmbeddingModel } from './guardrail-judge.js';
 import { createNoteSettingsService } from './note-settings-sql.js';

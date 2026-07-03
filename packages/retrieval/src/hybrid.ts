@@ -64,7 +64,9 @@ export function weaveHybridRetriever(config: HybridRetrieverConfig): Retriever &
       }
       keywordResults.sort((a, b) => b.score - a.score);
 
-      // Merge scores with reciprocal rank fusion
+      // Merge scores with reciprocal rank fusion. This is a WEIGHTED 2-list variant
+      // (vector vs keyword, tuned by `vectorWeight`). For the general, unweighted
+      // N-list RRF as a standalone helper, see `reciprocalRankFusion` in `./rag.js`.
       const scoreMap = new Map<string, { score: number; content: string; metadata: Record<string, unknown> }>();
 
       vectorResults.forEach((r, i) => {

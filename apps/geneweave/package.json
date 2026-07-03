@@ -27,7 +27,6 @@
     "sv:cost-gate": "npx tsx src/features/scientific-validation/evals/cost-gate.ts"
   },
   "dependencies": {
-    "@weaveintel/tokens": "*",
     "@weaveintel/a2a": "*",
     "@weaveintel/agents": "*",
     "@weaveintel/cache": "*",
@@ -64,11 +63,13 @@
     "@weaveintel/reliability": "*",
     "@weaveintel/replay": "*",
     "@weaveintel/resilience": "*",
+    "@weaveintel/retrieval": "*",
     "@weaveintel/routing": "*",
     "@weaveintel/sandbox": "*",
     "@weaveintel/scope": "*",
     "@weaveintel/skills": "*",
     "@weaveintel/tenancy": "*",
+    "@weaveintel/tokens": "*",
     "@weaveintel/tools": "*",
     "@weaveintel/tools-browser": "*",
     "@weaveintel/tools-enterprise": "*",

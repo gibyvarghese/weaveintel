@@ -13,7 +13,7 @@
  *     citation, so the grounding survives a reload and the agent/audit can see exactly what was cited.
  */
 import { newUUIDv7 } from './lib/uuid.js';
-import { answerCitationCoverage, enforceCitationStrictness, type Citation, type CitedSource } from '@weaveintel/notes';
+import { answerCitationCoverage, enforceCitationStrictness, type Citation, type CitedSource } from '@weaveintel/retrieval';
 import { createNoteWorkspaceService } from './note-workspace-sql.js';
 import type { DatabaseAdapter } from './db.js';
 import type { MessageCitationRow, TenantChatCitationsRow } from './db-types/adapter-me.js';

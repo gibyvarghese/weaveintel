@@ -203,7 +203,7 @@ rewiring every consumer, and leaving the suite green.
 | 2b | `translate.ts` | `prompts` | ✅ done |
 | 2c | `mcp.ts` (transport-free JSON-RPC core) | `mcp-server` | ✅ done |
 | 2d | `scheduled-agent.ts` (split: cron+budget→triggers, recipes→app) | `triggers` + app | ✅ done |
-| 2e | `rag.ts` (+ rag-citations) | `retrieval` (reconcile RRF `hybrid.ts` + `citations.ts`) | ⏳ |
+| 2e | `rag.ts` (+ rag-citations) | `retrieval` (reconcile RRF `hybrid.ts` + `citations.ts`) | ✅ done |
 | 2f | product modules (agency, notes-config, creative, colorize, meeting, study, diagram, ink, svg, visual-verify, image-search, capture, desktop, suggestions, templates, governance) | `apps/geneweave` (+ `-ui`) | ⏳ |
 | 2g | slim `index.ts`, genericize `provenance.ts`, drop the notes deferral from the no-app-brand allowlist | — | ⏳ |
 
@@ -261,6 +261,26 @@ make slim-notes depend on `triggers` (which drags in aws-sdk/mongodb/pg/redis), 
   rewired three ways (extractPlainText←notes, cron/budget←triggers, config←local). Tests split by
   concern (cron+budget → triggers, config → app). Gate: **267/267 tasks, exit 0** (triggers +10 tests,
   app scheduled-agent-config +5).
+
+### 2e — `rag.ts` (+ rag-citations) → `@weaveintel/retrieval` ✅
+
+RAG (retrieval-augmented generation) belongs with the retrieval package, not notes. Reconciliation
+findings: retrieval's `weaveCitationExtractor` + its `Citation`/`CitationResult` types had **no real
+consumers** (dead-wired), while rag's citation suite (character-verified quotes: `locateQuote`,
+`verifyCitations`, `buildCitedAnswerPrompt`, `answerCitationCoverage`, …) is the rich, used one. So:
+- **`Citation` name collision** resolved by renaming retrieval's unused chunk-citation model
+  `Citation` → `ExtractedCitation`; rag's verified-quote `Citation` becomes the package's canonical one.
+- **RRF:** rag's standalone `reciprocalRankFusion` (general, unweighted, N-list) is now the canonical
+  exported helper; `hybrid.ts` keeps its internal *weighted 2-list* variant (vector vs keyword) with a
+  cross-reference comment. One exported RRF; no lost behaviour.
+- **No collision** with retrieval's `query-rewriter.ts`/`chunker.ts` (different concerns), and **no
+  notes-internal module used rag** — so notes gains no dependency and stays slim (retrieval is
+  core-only, light).
+- `git mv`'d `rag.ts` + both test files (40 tests) into retrieval; de-branded the header. Rewired the 2
+  app consumers (`chat-citations-sql.ts` all-rag → retrieval; `note-workspace-sql.ts` split:
+  extractPlainText+Note←notes, rag←retrieval) and added `@weaveintel/retrieval` to the app manifest.
+
+Gate: **267/267 tasks, exit 0**; `check:api-boundaries` PASS; `check:no-app-brand` PASS.
 
 ---
 

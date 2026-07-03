@@ -130,30 +130,6 @@ export {
   dailyNoteTitle,
 } from './capture.js';
 
-// weaveNotes Phase 8 — workspace RAG helpers (snippets, rank fusion, cited context).
-export {
-  type RagHit,
-  type CitedSource,
-  snippetAround,
-  reciprocalRankFusion,
-  buildCitedContext,
-  parseCitedIds,
-  type CitableSource,
-  type RawCitation,
-  type Citation,
-  locateQuote,
-  buildCitedAnswerPrompt,
-  parseCitedAnswer,
-  verifyCitations,
-  type AnswerCitationCoverage,
-  answerCitationCoverage,
-  enforceCitationStrictness,
-  type ExpandedQueries,
-  MAX_QUERY_VARIANTS,
-  buildQueryExpansionPrompt,
-  parseExpandedQueries,
-} from './rag.js';
-
 // weaveNotes Phase 0 — foundation: the "colour encodes agency" contract.
 export {
   type Author,

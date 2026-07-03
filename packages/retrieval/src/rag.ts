@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/notes — WORKSPACE RAG helpers (weaveNotes Phase 8).
+ * @weaveintel/retrieval — RAG helpers: cited answers with character-verified quotes.
  *
  * "RAG" (retrieval-augmented generation) means: before the AI answers, FETCH the most
  * relevant pieces of your own content, hand them to the model as context, and have it
  * answer FROM those pieces — citing each one. That turns "the AI guessed" into "the AI
- * summarized what YOUR notes and past chats actually say, with links you can click to
- * check." This module is the pure, reusable core of that: it does NOT do any embedding,
- * database, or network work (the app does), so it is trivially testable.
+ * summarized what YOUR content actually says, with links you can click to check." This
+ * module is the pure, reusable core of that: it does NOT do any embedding, database, or
+ * network work (the consuming app does), so it is trivially testable. It pairs with this
+ * package's retriever/chunker; `reciprocalRankFusion` here is the standalone, general
+ * N-list RRF (the hybrid retriever uses a weighted 2-list variant internally).
  *
  * Three jobs:
  *   1. `snippetAround` — pull a short, readable excerpt from a long document, centred on
