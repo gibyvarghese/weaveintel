@@ -11,7 +11,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform } from 'react-native';
-import type { GeneweaveClient, NotesCapabilities } from '@geneweave/api-client';
+import type { GeneweaveClient, NotesCapabilities } from '@weaveintel/api-client';
 import {
   createInMemoryNotesStore, createNoteOffline, editNoteOffline, deleteNoteOffline,
   syncNotes, pendingCount as libPendingCount,

@@ -11,7 +11,7 @@
  */
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import type { MeUser } from '@geneweave/api-client';
+import type { MeUser } from '@weaveintel/api-client';
 import { useAuth } from '../providers/auth-provider';
 import {
   avatarInitials,

@@ -7,7 +7,7 @@
  * through the central {@link Icon}; colors come from {@link useTheme}.
  */
 import { Pressable, Text, View } from 'react-native';
-import type { Reminder } from '@geneweave/api-client';
+import type { Reminder } from '@weaveintel/api-client';
 import {
   formatDueLabel,
   reminderConversationId,

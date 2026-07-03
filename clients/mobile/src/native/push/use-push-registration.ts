@@ -18,7 +18,7 @@
  */
 import { useCallback, useRef, useState } from 'react';
 import { Platform } from 'react-native';
-import type { GeneweaveClient } from '@geneweave/api-client';
+import type { GeneweaveClient } from '@weaveintel/api-client';
 import {
   requestNotificationPermission,
   getDevicePushToken,

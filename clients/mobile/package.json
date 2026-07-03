@@ -17,7 +17,7 @@
     "@expo-google-fonts/dm-mono": "^0.2.3",
     "@expo-google-fonts/fraunces": "^0.2.3",
     "@expo-google-fonts/plus-jakarta-sans": "^0.2.3",
-    "@geneweave/api-client": "^0.0.1",
+    "@weaveintel/api-client": "^0.0.1",
     "@weaveintel/tokens": "^0.0.1",
     "@weaveintel/notes": "^0.0.1",
     "@react-native-community/netinfo": "^11.4.1",

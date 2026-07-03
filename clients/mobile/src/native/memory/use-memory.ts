@@ -16,7 +16,7 @@
  */
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ManagedByOrgError, type CreatedMemory } from '@geneweave/api-client';
+import { ManagedByOrgError, type CreatedMemory } from '@weaveintel/api-client';
 import { useAuth } from '../providers/auth-provider';
 import {
   addAuthoredMemory,

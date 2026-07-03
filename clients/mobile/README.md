@@ -131,5 +131,5 @@ These are validated on a simulator/device after the Expo install (not in CI):
 The app consumes the workspace TypeScript packages:
 
 - `@weaveintel/tokens` — brand design tokens (M1)
-- `@geneweave/api-client` — typed `/api/me` client (M2)
+- `@weaveintel/api-client` — typed `/api/me` client (M2)
 - `@weaveintel/notes` — the shared cross-platform note-document + ink model (Phase 7)

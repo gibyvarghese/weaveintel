@@ -8,7 +8,7 @@
  * can cause failures when the quota is exhausted.
  */
 import * as SecureStore from 'expo-secure-store';
-import type { KeyValueStore } from '@geneweave/api-client';
+import type { KeyValueStore } from '@weaveintel/api-client';
 
 function safeKey(key: string): string {
   return key.replace(/[^A-Za-z0-9.-]/g, (c) => `_${c.charCodeAt(0).toString(16)}_`);

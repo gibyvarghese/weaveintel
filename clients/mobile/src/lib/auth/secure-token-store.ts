@@ -9,7 +9,7 @@
  * validated host and tenant across launches. No React / RN / expo imports.
  */
 
-import { namespacedTokenStore, type KeyValueStore, type TokenStore } from '@geneweave/api-client';
+import { namespacedTokenStore, type KeyValueStore, type TokenStore } from '@weaveintel/api-client';
 
 const HOST_KEY = '@geneweave/config:host';
 const TENANT_KEY = '@geneweave/config:tenant';

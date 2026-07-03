@@ -11,7 +11,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, Text, View } from 'react-native';
 import { goBack } from '../src/native/navigation/go-back';
-import type { MemoryItem } from '@geneweave/api-client';
+import type { MemoryItem } from '@weaveintel/api-client';
 import {
   CLEAR_ALL_CONFIRM_PHRASE,
   defaultMemoryKind,

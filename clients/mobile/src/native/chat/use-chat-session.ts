@@ -14,7 +14,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
-import type { Catalog } from '@geneweave/api-client';
+import type { Catalog } from '@weaveintel/api-client';
 import { createChatSession, messagesToEntries, type ChatSession, type ChatSessionState } from '../../lib';
 import { useClient } from '../providers/auth-provider';
 

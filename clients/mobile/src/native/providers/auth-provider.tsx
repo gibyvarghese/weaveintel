@@ -10,7 +10,7 @@
  */
 import { createContext, useContext, useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
-import type { GeneweaveClient } from '@geneweave/api-client';
+import type { GeneweaveClient } from '@weaveintel/api-client';
 import { createAppAuth, type AppAuth } from '../composition-root';
 import type { AuthController, AuthState } from '../../lib';
 

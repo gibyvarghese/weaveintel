@@ -13,7 +13,7 @@
  * response) is reported as unreachable — never propagated.
  */
 
-import { MemoryTokenStore, AuthExpiredError, type GeneweaveClient, type TokenStore } from '@geneweave/api-client';
+import { MemoryTokenStore, AuthExpiredError, type GeneweaveClient, type TokenStore } from '@weaveintel/api-client';
 import type { HostProbe } from './host.js';
 
 /** Builds a {@link HostProbe} from a client factory (e.g. `createGeneweaveClient`). */

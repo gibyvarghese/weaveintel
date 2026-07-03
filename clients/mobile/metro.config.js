@@ -1,6 +1,6 @@
 // Metro config for the geneWeave mobile app inside the npm-workspaces monorepo.
 // Metro must (1) watch the workspace root so symlinked workspace packages
-// (@weaveintel/tokens, @geneweave/api-client and their deps) are seen, and
+// (@weaveintel/tokens, @weaveintel/api-client and their deps) are seen, and
 // (2) resolve modules from both the package-local and the hoisted root
 // node_modules. See https://docs.expo.dev/guides/monorepos/.
 const { getDefaultConfig } = require('expo/metro-config');

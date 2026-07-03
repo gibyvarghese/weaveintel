@@ -11,7 +11,7 @@
 import { useCallback, useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import type { Conversation } from '@geneweave/api-client';
+import type { Conversation } from '@weaveintel/api-client';
 import { useTheme } from '../../src/native/providers/theme-provider';
 import { useConversations } from '../../src/native/chat/use-conversations';
 import { ConversationList } from '../../src/native/ui/conversations/conversation-list';

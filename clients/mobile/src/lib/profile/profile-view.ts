@@ -9,7 +9,7 @@
  * label derivation are unit-tested in Node.
  */
 
-import type { MeUser } from '@geneweave/api-client';
+import type { MeUser } from '@weaveintel/api-client';
 
 /**
  * Personas that may administer the tenant on the web console. A persona is

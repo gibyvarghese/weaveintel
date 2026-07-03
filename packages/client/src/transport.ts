@@ -7,7 +7,7 @@
  * Phase 0: `sseTransport` is now the single, rich SSE reader for the platform.
  * It exposes a lifecycle seam (`onOpen` / `onClose` / `onError`), a stall
  * timeout, and a permanent-vs-transient close signal so `run-client.attach()`
- * can actually reconnect, and so `@geneweave/api-client` can delegate to it
+ * can actually reconnect, and so `@weaveintel/api-client` can delegate to it
  * instead of hand-rolling its own reader.
  */
 // no-raw-fetch: allow (reason: browser-safe client SDK transport — uses the browser

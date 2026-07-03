@@ -13,7 +13,7 @@
  * helpers.
  */
 
-import type { NotificationPreferences } from '@geneweave/api-client';
+import type { NotificationPreferences } from '@weaveintel/api-client';
 
 // ---------------------------------------------------------------------------
 // Categories

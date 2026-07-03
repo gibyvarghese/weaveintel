@@ -4,7 +4,7 @@ import {
   HostConfigSchema,
 } from './index.js';
 
-describe('@geneweave/api-client barrel', () => {
+describe('@weaveintel/api-client barrel', () => {
   it('exports a stable schema version', () => {
     expect(API_CLIENT_SCHEMA_VERSION).toBe(1);
   });

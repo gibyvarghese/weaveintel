@@ -9,7 +9,7 @@
  * through the central {@link Icon}; colors come from {@link useTheme}.
  */
 import { ActivityIndicator, Pressable, RefreshControl, SectionList, Text, TextInput, View } from 'react-native';
-import type { Conversation } from '@geneweave/api-client';
+import type { Conversation } from '@weaveintel/api-client';
 import type { ConversationChip, ConversationSection } from '../../../lib';
 import { useTheme } from '../../providers/theme-provider';
 import { Icon } from '../icon';

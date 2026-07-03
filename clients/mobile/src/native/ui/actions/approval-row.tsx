@@ -8,7 +8,7 @@
  * {@link Icon}; colors come from {@link useTheme}.
  */
 import { Pressable, Text, View } from 'react-native';
-import type { Task } from '@geneweave/api-client';
+import type { Task } from '@weaveintel/api-client';
 import { taskConversationId } from '../../../lib';
 import { useTheme } from '../../providers/theme-provider';
 import { Icon } from '../icon';

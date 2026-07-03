@@ -21,7 +21,7 @@
  * approve / complete simply removes the row.
  */
 
-import type { Reminder, Task } from '@geneweave/api-client';
+import type { Reminder, Task } from '@weaveintel/api-client';
 
 // ---------------------------------------------------------------------------
 // Task status helpers

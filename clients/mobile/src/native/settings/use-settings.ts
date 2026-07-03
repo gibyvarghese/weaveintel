@@ -11,7 +11,7 @@
  */
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { NotificationPreferences } from '@geneweave/api-client';
+import type { NotificationPreferences } from '@weaveintel/api-client';
 import { useAuth } from '../providers/auth-provider';
 import {
   defaultNotificationPreferences,

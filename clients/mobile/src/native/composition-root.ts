@@ -18,7 +18,7 @@
  * call `client.removeDevice(token)` as a best-effort deregistration step without
  * pulling expo-notifications into the pure auth layer.
  */
-import { createGeneweaveClient, type GeneweaveClient } from '@geneweave/api-client';
+import { createGeneweaveClient, type GeneweaveClient } from '@weaveintel/api-client';
 import {
   createAuthController,
   createAuthStore,

@@ -1,5 +1,5 @@
 {
-  "name": "@geneweave/api-client",
+  "name": "@weaveintel/api-client",
   "version": "0.0.1",
   "description": "geneWeave typed API client — bearer-token /api/me surface over @weaveintel/client (runs, catalog, tasks, reminders, memories, devices, notifications, conversations). No React Native imports.",
   "type": "module",

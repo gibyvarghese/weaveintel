@@ -1,5 +1,5 @@
 /**
- * @geneweave/api-client — typed client for the geneWeave /api/me surface.
+ * @weaveintel/api-client — typed client for the geneWeave /api/me surface.
  *
  * Wraps an injectable transport with bearer-token + CSRF injection from a
  * pluggable {@link TokenStore}, and exposes zod-validated typed methods for the
