@@ -19,7 +19,7 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@weaveintel/client": "*"
+    "@weaveintel/client": "^0.0.1"
   },
   "peerDependencies": {
     "react": "^18.0.0 || ^19.0.0"
@@ -35,6 +35,8 @@
     "access": "public"
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*"
   ]
 }

@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@weaveintel/core": "*"
+    "@weaveintel/core": "^0.0.1"
   },
   "devDependencies": {
     "typescript": "^5.7.0",
@@ -30,6 +30,8 @@
     "access": "public"
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*"
   ]
 }

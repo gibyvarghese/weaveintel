@@ -19,15 +19,15 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@weaveintel/core": "*",
-    "@weaveintel/models": "*",
-    "@weaveintel/evals": "*",
-    "@weaveintel/prompts": "*",
-    "@weaveintel/human-tasks": "*",
-    "@weaveintel/a2a": "*",
-    "@weaveintel/graph": "*",
-    "@weaveintel/cost-governor": "*",
-    "@weaveintel/compliance": "*"
+    "@weaveintel/core": "^0.0.1",
+    "@weaveintel/models": "^0.0.1",
+    "@weaveintel/evals": "^0.0.1",
+    "@weaveintel/prompts": "^0.0.1",
+    "@weaveintel/human-tasks": "^0.0.1",
+    "@weaveintel/a2a": "^0.0.1",
+    "@weaveintel/graph": "^0.0.1",
+    "@weaveintel/cost-governor": "^0.0.1",
+    "@weaveintel/compliance": "^0.0.1"
   },
   "devDependencies": {
     "typescript": "^5.7.0",
@@ -37,6 +37,8 @@
     "access": "public"
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*"
   ]
 }

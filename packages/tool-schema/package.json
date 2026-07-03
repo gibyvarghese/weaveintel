@@ -31,7 +31,7 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@weaveintel/core": "*"
+    "@weaveintel/core": "^0.0.1"
   },
   "devDependencies": {
     "typescript": "^5.7.0",
@@ -41,6 +41,8 @@
     "access": "public"
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*"
   ]
 }

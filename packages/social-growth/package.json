@@ -19,8 +19,8 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@weaveintel/core": "*",
-    "@weaveintel/workflows": "*"
+    "@weaveintel/core": "^0.0.1",
+    "@weaveintel/workflows": "^0.0.1"
   },
   "devDependencies": {
     "typescript": "^5.7.0",
@@ -30,6 +30,8 @@
     "access": "public"
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*"
   ]
 }

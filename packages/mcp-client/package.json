@@ -20,10 +20,10 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@weaveintel/core": "*"
+    "@weaveintel/core": "^0.0.1"
   },
   "devDependencies": {
-    "@weaveintel/mcp-server": "*",
+    "@weaveintel/mcp-server": "^0.0.1",
     "typescript": "^5.7.0",
     "vitest": "^3.2.6"
   },
@@ -31,6 +31,8 @@
     "access": "public"
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*"
   ]
 }

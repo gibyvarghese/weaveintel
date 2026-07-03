@@ -16,9 +16,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@weaveintel/core": "*",
-    "@weaveintel/resilience": "*",
-    "@weaveintel/tools": "*"
+    "@weaveintel/core": "^0.0.1",
+    "@weaveintel/resilience": "^0.0.1",
+    "@weaveintel/tools": "^0.0.1"
   },
   "devDependencies": {
     "vitest": "^3.2.6"
@@ -27,6 +27,8 @@
     "access": "public"
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*"
   ]
 }

@@ -18,12 +18,14 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@weaveintel/reliability": "*"
+    "@weaveintel/reliability": "^0.0.1"
   },
   "publishConfig": {
     "access": "public"
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*"
   ]
 }

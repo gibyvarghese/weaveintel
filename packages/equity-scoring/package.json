@@ -19,10 +19,10 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@weaveintel/core": "*",
-    "@weaveintel/tools-marketdata": "*",
-    "@weaveintel/tools-news": "*",
-    "@weaveintel/tools-altdata": "*"
+    "@weaveintel/core": "^0.0.1",
+    "@weaveintel/tools-marketdata": "^0.1.0",
+    "@weaveintel/tools-news": "^0.1.0",
+    "@weaveintel/tools-altdata": "^0.1.0"
   },
   "devDependencies": {
     "typescript": "^5.7.0",
@@ -33,6 +33,8 @@
     "access": "public"
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*"
   ]
 }

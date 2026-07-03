@@ -44,7 +44,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@weaveintel/core": "*"
+    "@weaveintel/core": "^0.0.1"
   },
   "peerDependencies": {
     "@aws-sdk/client-dynamodb": "^3.810.0",
@@ -90,6 +90,8 @@
     "access": "public"
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*"
   ]
 }

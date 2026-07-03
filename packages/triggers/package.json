@@ -20,7 +20,7 @@
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.810.0",
     "@aws-sdk/lib-dynamodb": "^3.810.0",
-    "@weaveintel/core": "*",
+    "@weaveintel/core": "^0.0.1",
     "better-sqlite3": "^11.10.0",
     "mongodb": "^6.16.0",
     "pg": "^8.13.1",
@@ -36,6 +36,8 @@
     "access": "public"
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*"
   ]
 }
