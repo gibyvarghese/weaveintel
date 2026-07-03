@@ -20,7 +20,7 @@ import {
   type CreateHttpTransportOptions,
   type GeneweaveTransport,
   type StreamHandlers,
-} from '@geneweave/api-client';
+} from '@weaveintel/api-client';
 import { createSseFrameParser } from '../../lib';
 
 function joinUrl(host: string, path: string): string {

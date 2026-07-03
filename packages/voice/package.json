@@ -18,12 +18,20 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@weaveintel/core": "*",
+    "@weaveintel/core": "^0.0.1",
     "ws": "^8.0.0"
   },
   "devDependencies": {
     "@types/ws": "^8.0.0",
     "typescript": "^5.0.0",
     "vitest": "^3.2.6"
-  }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*"
+  ]
 }

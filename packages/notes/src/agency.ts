@@ -11,7 +11,7 @@
  * This module is the SINGLE SOURCE OF TRUTH for that contract, as plain data + pure helpers
  * (no DOM, no framework), so web, desktop, and mobile all render authorship identically and
  * can never drift. The exact hex values come from the geneWeave design system (spec §10.2);
- * `@geneweave/tokens` exposes the same palette as runtime theme tokens.
+ * `@weaveintel/tokens` exposes the same palette as runtime theme tokens.
  *
  * --- For someone new to this ---
  * Think of a shared document where two people write in different coloured pens. Here one
@@ -95,7 +95,7 @@ export function isAiSignalColor(hex: string): boolean {
  * The accessible, brand-aligned palette the AI may choose from when colour-coding content
  * (spec §4.4 "colour based on its knowledge"). Returns label→hex pairs that are all legible
  * on a light surface; the app should still validate any AI-chosen pair against the WCAG math
- * in `@geneweave/tokens`. Reserved AI-signal colours (emerald/mint) are intentionally excluded
+ * in `@weaveintel/tokens`. Reserved AI-signal colours (emerald/mint) are intentionally excluded
  * so the AI never colours USER content in the colour that means "this is the AI".
  */
 export function aiContentPalette(): Array<{ label: string; hex: string }> {

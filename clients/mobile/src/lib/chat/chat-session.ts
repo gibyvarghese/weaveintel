@@ -27,7 +27,7 @@ import {
   type RunEventEnvelope,
   type RunViewModel,
   type RunStatus,
-} from '@geneweave/api-client';
+} from '@weaveintel/api-client';
 
 // ---------------------------------------------------------------------------
 // Constants

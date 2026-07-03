@@ -9,7 +9,7 @@
  */
 import { useEffect, useState } from 'react';
 import { Modal, Pressable, Text, TextInput, View } from 'react-native';
-import type { Conversation } from '@geneweave/api-client';
+import type { Conversation } from '@weaveintel/api-client';
 import type { ConversationFlagPatch } from '../../../lib';
 import { useTheme } from '../../providers/theme-provider';
 import { Icon, type IconName, type IconTone } from '../icon';

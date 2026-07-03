@@ -5,7 +5,7 @@
  * fake run client that lets the test drive SSE envelopes by hand.
  */
 import { describe, it, expect, vi } from 'vitest';
-import type { RunEventEnvelope, RunStatus, RunViewModel } from '@geneweave/api-client';
+import type { RunEventEnvelope, RunStatus, RunViewModel } from '@weaveintel/api-client';
 import {
   createChatSession,
   type ChatRunClient,

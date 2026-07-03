@@ -8,7 +8,7 @@
  * All colors come from {@link useTheme}, so per-tenant themes re-skin the row.
  */
 import { Pressable, Text, View } from 'react-native';
-import type { Conversation } from '@geneweave/api-client';
+import type { Conversation } from '@weaveintel/api-client';
 import { formatRelativeTimestamp, isActiveRunStatus } from '../../../lib';
 import { useTheme } from '../../providers/theme-provider';
 import { Icon } from '../icon';

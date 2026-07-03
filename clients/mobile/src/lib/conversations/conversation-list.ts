@@ -14,7 +14,7 @@
  *   recent  — everything else
  */
 
-import type { Conversation } from '@geneweave/api-client';
+import type { Conversation } from '@weaveintel/api-client';
 
 export type ConversationSectionId = 'running' | 'pinned' | 'recent';
 

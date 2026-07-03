@@ -10,7 +10,7 @@
  * principal may use — nothing is hardcoded here.
  */
 import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
-import type { Catalog } from '@geneweave/api-client';
+import type { Catalog } from '@weaveintel/api-client';
 import { useTheme } from '../../providers/theme-provider';
 import { Icon } from '../icon';
 

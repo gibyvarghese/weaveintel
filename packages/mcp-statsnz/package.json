@@ -12,16 +12,23 @@
       "default": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*"
+  ],
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@weaveintel/core": "*",
-    "@weaveintel/mcp-server": "*",
-    "@weaveintel/tools-http": "*"
+    "@weaveintel/core": "^0.0.1",
+    "@weaveintel/mcp-server": "^0.0.1",
+    "@weaveintel/tools-http": "^0.1.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  }
 }

@@ -13,7 +13,9 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*"
   ],
   "scripts": {
     "build": "tsc -b",
@@ -24,5 +26,8 @@
   "license": "MIT",
   "devDependencies": {
     "vitest": "^3.2.6"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

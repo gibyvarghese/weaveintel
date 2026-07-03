@@ -27,7 +27,7 @@
     "sv:cost-gate": "npx tsx src/features/scientific-validation/evals/cost-gate.ts"
   },
   "dependencies": {
-    "@geneweave/tokens": "*",
+    "@weaveintel/tokens": "*",
     "@weaveintel/a2a": "*",
     "@weaveintel/agents": "*",
     "@weaveintel/cache": "*",

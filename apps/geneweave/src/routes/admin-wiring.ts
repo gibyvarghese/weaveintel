@@ -746,7 +746,7 @@ export function registerAdminWiringRoutes(
   // PUT /api/admin/tenant-theme/:tenantId  — set/clear tenant theme
   // Body shape: a TenantThemeTokens object ({ colors?, typography?, radii? }).
   // An empty body / {} clears the override. The server validates + stores the
-  // tokens; WCAG-AA enforcement happens client-side in @geneweave/tokens.
+  // tokens; WCAG-AA enforcement happens client-side in @weaveintel/tokens.
 
   router.get('/api/admin/tenant-theme', async (_req, res, _params, auth) => {
     if (!auth) { json(res, 401, { error: 'Authentication required' }); return; }

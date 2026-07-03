@@ -152,4 +152,4 @@ function makeStyles(theme: Theme) {
 }
 
 // Local Theme alias (avoids importing the type name into the component scope twice).
-type Theme = import('@geneweave/tokens').Theme;
+type Theme = import('@weaveintel/tokens').Theme;

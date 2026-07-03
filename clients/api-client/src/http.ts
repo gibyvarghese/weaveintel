@@ -1,5 +1,5 @@
 /**
- * http.ts — the transport seam for @geneweave/api-client.
+ * http.ts — the transport seam for @weaveintel/api-client.
  *
  * {@link GeneweaveTransport} is a small, injectable interface: a `request`
  * method that returns the raw `{ status, body }` (so typed methods can branch

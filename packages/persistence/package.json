@@ -13,7 +13,9 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*"
   ],
   "scripts": {
     "build": "tsc -b",
@@ -23,10 +25,13 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@weaveintel/core": "*",
-    "@weaveintel/memory": "*"
+    "@weaveintel/core": "^0.0.1",
+    "@weaveintel/memory": "^0.0.1"
   },
   "devDependencies": {
     "vitest": "^3.2.6"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

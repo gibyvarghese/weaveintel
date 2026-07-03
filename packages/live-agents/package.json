@@ -12,7 +12,11 @@
       "default": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*"
+  ],
   "scripts": {
     "build": "tsc -b",
     "test": "vitest run",
@@ -22,14 +26,14 @@
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.810.0",
     "@aws-sdk/lib-dynamodb": "^3.810.0",
-    "@weaveintel/agents": "*",
-    "@weaveintel/core": "*",
-    "@weaveintel/observability": "*",
-    "@weaveintel/replay": "*",
-    "@weaveintel/memory": "*",
-    "@weaveintel/mcp-client": "*",
-    "@weaveintel/identity": "*",
-    "@weaveintel/tools": "*",
+    "@weaveintel/agents": "^0.0.1",
+    "@weaveintel/core": "^0.0.1",
+    "@weaveintel/observability": "^0.0.1",
+    "@weaveintel/replay": "^0.0.1",
+    "@weaveintel/memory": "^0.0.1",
+    "@weaveintel/mcp-client": "^0.0.1",
+    "@weaveintel/identity": "^0.0.1",
+    "@weaveintel/tools": "^0.0.1",
     "better-sqlite3": "^11.10.0",
     "mongodb": "^6.16.0",
     "pg": "^8.13.1",
@@ -38,5 +42,8 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  }
 }

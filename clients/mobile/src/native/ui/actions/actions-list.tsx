@@ -8,7 +8,7 @@
  * lifts interaction to the screen. Icons go through the central {@link Icon}.
  */
 import { ActivityIndicator, FlatList, RefreshControl, Text, View } from 'react-native';
-import type { Reminder, Task } from '@geneweave/api-client';
+import type { Reminder, Task } from '@weaveintel/api-client';
 import type { ActionSegment, SnoozeChoice } from '../../../lib';
 import { useTheme } from '../../providers/theme-provider';
 import { Icon } from '../icon';

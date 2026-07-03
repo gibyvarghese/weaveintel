@@ -127,7 +127,7 @@ export function themeCss(opts: ThemeCssOptions = {}): string {
   const darkVars = toCssVariables(themes.dark);
 
   const parts = [
-    '/* geneWeave design tokens — generated from @geneweave/tokens (single source of truth). Do not edit by hand. */',
+    '/* geneWeave design tokens — generated from @weaveintel/tokens (single source of truth). Do not edit by hand. */',
     block(root, lightVars),
     block(`${root}[data-theme="dark"], [data-theme="dark"]`, darkVars),
     block('[data-variant="creative"]', {

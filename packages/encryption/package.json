@@ -44,7 +44,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@weaveintel/core": "*"
+    "@weaveintel/core": "^0.0.1"
   },
   "peerDependencies": {
     "@aws-sdk/client-dynamodb": "^3.810.0",
@@ -55,12 +55,24 @@
     "redis": "^4.7.0"
   },
   "peerDependenciesMeta": {
-    "@aws-sdk/client-dynamodb": { "optional": true },
-    "@aws-sdk/lib-dynamodb": { "optional": true },
-    "better-sqlite3": { "optional": true },
-    "mongodb": { "optional": true },
-    "pg": { "optional": true },
-    "redis": { "optional": true }
+    "@aws-sdk/client-dynamodb": {
+      "optional": true
+    },
+    "@aws-sdk/lib-dynamodb": {
+      "optional": true
+    },
+    "better-sqlite3": {
+      "optional": true
+    },
+    "mongodb": {
+      "optional": true
+    },
+    "pg": {
+      "optional": true
+    },
+    "redis": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@aws-sdk/client-dynamodb": "^3.810.0",
@@ -73,5 +85,13 @@
     "redis": "^4.7.0",
     "typescript": "^5.7.0",
     "vitest": "^3.2.6"
-  }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*"
+  ]
 }

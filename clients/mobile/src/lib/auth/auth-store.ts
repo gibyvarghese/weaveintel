@@ -6,7 +6,7 @@
  * the store free of React means the whole auth brain is unit-testable in Node.
  */
 
-import type { MeUser } from '@geneweave/api-client';
+import type { MeUser } from '@weaveintel/api-client';
 
 /**
  * The auth lifecycle as a discriminated union. Screens render purely from

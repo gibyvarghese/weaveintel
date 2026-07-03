@@ -12,17 +12,24 @@
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "files": ["dist"],
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*"
+  ],
   "scripts": {
     "build": "tsc -b",
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@weaveintel/core": "*"
+    "@weaveintel/core": "^0.0.1"
   },
   "devDependencies": {
     "typescript": "^5.3.3",
     "vitest": "^3.2.6",
-    "@weaveintel/persistence": "*"
+    "@weaveintel/persistence": "^0.0.1"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

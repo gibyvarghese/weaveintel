@@ -1,7 +1,7 @@
 {
   "name": "@weaveintel/evals",
   "version": "0.0.1",
-  "description": "Evaluation runner \u2014 assertions, scoring, suites",
+  "description": "Evaluation runner — assertions, scoring, suites",
   "type": "module",
   "exports": {
     ".": {
@@ -19,10 +19,18 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@weaveintel/core": "*"
+    "@weaveintel/core": "^0.0.1"
   },
   "devDependencies": {
     "typescript": "^5.7.0",
     "vitest": "^3.2.6"
-  }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*"
+  ]
 }

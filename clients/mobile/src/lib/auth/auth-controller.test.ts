@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import type { GeneweaveClient, MeUser, TokenStore, KeyValueStore } from '@geneweave/api-client';
-import { AuthExpiredError } from '@geneweave/api-client';
+import type { GeneweaveClient, MeUser, TokenStore, KeyValueStore } from '@weaveintel/api-client';
+import { AuthExpiredError } from '@weaveintel/api-client';
 import { createAuthStore } from './auth-store.js';
 import { createAuthController, type BiometricAuthenticator } from './auth-controller.js';
 import { createTenantTokenStore } from './secure-token-store.js';

@@ -12,7 +12,7 @@
  *
  * Pure data + pure functions (no DOM, no LLM, zero runtime deps). The accessibility guarantee
  * is enforced by `colorize.test.ts`, which checks every palette colour against the real WCAG
- * contrast maths in `@geneweave/tokens` — so "pre-validated WCAG-AA palette" is a tested fact,
+ * contrast maths in `@weaveintel/tokens` — so "pre-validated WCAG-AA palette" is a tested fact,
  * not a promise.
  *
  * --- For someone new to this ---

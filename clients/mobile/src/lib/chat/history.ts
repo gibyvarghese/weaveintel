@@ -12,7 +12,7 @@
  * historical turns; only the latest in-flight run (if any) attaches live.
  */
 
-import { emptyRunViewModel, type ConversationMessage, type RunViewModel } from '@geneweave/api-client';
+import { emptyRunViewModel, type ConversationMessage, type RunViewModel } from '@weaveintel/api-client';
 import type { ChatEntry } from './chat-session.js';
 
 /** A completed run view model that only carries final text (no widgets/tools). */

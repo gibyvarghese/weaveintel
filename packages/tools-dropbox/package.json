@@ -2,11 +2,39 @@
   "name": "@weaveintel/tools-dropbox",
   "version": "0.1.0",
   "type": "module",
-  "exports": { ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "scripts": { "build": "tsc -b", "test": "vitest run", "typecheck": "tsc --noEmit", "clean": "rm -rf dist *.tsbuildinfo" },
-  "dependencies": { "@weaveintel/core": "*", "@weaveintel/mcp-server": "*", "@weaveintel/tools": "*" },
-  "devDependencies": { "@weaveintel/testing": "*", "typescript": "^5.7.0", "vitest": "^3.2.6" },
-  "license": "MIT"
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@weaveintel/core": "^0.0.1",
+    "@weaveintel/mcp-server": "^0.0.1",
+    "@weaveintel/tools": "^0.0.1",
+    "@weaveintel/mcp-client": "^0.0.1"
+  },
+  "devDependencies": {
+    "@weaveintel/testing": "^0.0.1",
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.6"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*"
+  ]
 }

@@ -19,13 +19,21 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@weaveintel/core": "*",
-    "@weaveintel/durability": "*",
-    "@weaveintel/resilience": "*"
+    "@weaveintel/core": "^0.0.1",
+    "@weaveintel/durability": "^0.0.1",
+    "@weaveintel/resilience": "^0.0.1"
   },
   "devDependencies": {
     "typescript": "^5.7.0",
     "vitest": "^3.2.6"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*"
+  ]
 }

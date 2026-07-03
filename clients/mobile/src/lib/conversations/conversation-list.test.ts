@@ -2,7 +2,7 @@
  * conversation-list.test.ts — pure unit tests for the Chats tab logic (M6).
  */
 import { describe, it, expect } from 'vitest';
-import type { Conversation } from '@geneweave/api-client';
+import type { Conversation } from '@weaveintel/api-client';
 import {
   isActiveRunStatus,
   filterConversations,

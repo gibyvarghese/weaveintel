@@ -9,6 +9,26 @@ weaveIntel gives you composable, vendor-neutral building blocks for everything f
 
 ---
 
+## Editions & licensing
+
+weaveIntel is **open core**:
+
+- **The library** — everything under [`packages/`](packages/) (the `@weaveintel/*` modules) plus the shared
+  [`@geneweave/tokens`](clients/tokens/) — is **MIT-licensed** and **published to npm**. Use it in your own
+  projects: `npm install @weaveintel/core` (and any other module you need). This is the actively-developed,
+  reusable core.
+- **The apps** — [`apps/geneweave`](apps/geneweave/) (the geneWeave server) and
+  [`apps/geneweave-ui`](apps/geneweave-ui/) (its web client) — are the **open-source community edition** of the
+  geneWeave product, MIT-licensed, so you can **self-host today's geneWeave**. They consume the library above.
+
+Everything in this repository is MIT (see [LICENSE](LICENSE)). Ongoing **commercial development of the geneWeave
+apps happens separately**; the community edition here remains free to use and self-host.
+
+> **Building on the library?** Depend on the published `@weaveintel/*` packages from npm — not on paths inside
+> this repo. Library changes are made here, published, and then consumed downstream by version.
+
+---
+
 ## Table of Contents
 
 - [Why weaveIntel](#why-weaveintel)

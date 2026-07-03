@@ -11,7 +11,7 @@ import {
   lightColors,
 } from './index.js';
 
-describe('@geneweave/tokens barrel', () => {
+describe('@weaveintel/tokens barrel', () => {
   it('exports a stable schema version', () => {
     expect(TOKENS_SCHEMA_VERSION).toBe(1);
   });

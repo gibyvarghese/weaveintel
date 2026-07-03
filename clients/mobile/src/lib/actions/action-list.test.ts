@@ -2,7 +2,7 @@
  * action-list.test.ts — pure unit tests for the Actions tab logic (M7).
  */
 import { describe, it, expect } from 'vitest';
-import type { Reminder, Task } from '@geneweave/api-client';
+import type { Reminder, Task } from '@weaveintel/api-client';
 import {
   isOpenTask,
   isApproval,
