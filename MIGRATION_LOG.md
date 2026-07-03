@@ -93,3 +93,54 @@ Branch strategy: work happens on `repo-split`; snapshot preserved on branch `pre
   and serves `HTTP 200`** (`server ready {models: mock/mock-model}`) — entirely from built library packages
   (`dist`, no `src`). Committed state uses `^version` (the local tarball overrides are not committed).
 - CI: a single `ci.yml` (install/build/test); the 10 monorepo deploy workflows were removed.
+
+---
+
+## Phase 4 — Public repo (open-core) ✅
+
+Per the chosen model, apps are **NOT removed** — they stay as the community edition.
+- README: added an **"Editions & licensing"** section (library = MIT + on npm; apps = MIT community edition;
+  commercial development is separate; build on the published packages, not repo paths).
+- Library still builds green in isolation: `turbo build --filter='./packages/*'` → **88 successful**.
+- Tagged **`community-v1`** (the community-edition snapshot). All work is on branch `repo-split`.
+
+## Phase 5 — Final verification ✅
+
+**Private repo — boundary checks (committed state), all as required:**
+- `@weaveintel/*` `workspace:*` = **0**; `file:`/`link:` = **0**; `../packages` in app src = **0**;
+  tsconfig refs into `../../packages` = **0**; internal deps pinned to `^version` = **68**.
+- `node_modules/@weaveintel/*` ships **`dist` only, no `src`** (core/notes/artifacts checked).
+- Clean-room proof (Phase 3): `npm install` (739 pkgs) + `npm run build` (2/2) + **geneWeave boots `HTTP 200`**
+  from built library packages, mock provider.
+
+**Public repo — reverse checks:**
+- `packages/*` importing an app = **0** (library never depends on an app).
+- Apps still present (**3** app dirs) — open-core community edition preserved.
+- Publish-ready packages = **87/87**.
+
+---
+
+## Summary & follow-ups
+
+**Published (dry-run) library closure:** 66 `@weaveintel/*` + `@geneweave/tokens` packages, all at `0.0.1`
+(a few `0.1.0`). Verified installable/typecheckable/publishable; tarballs in scratchpad.
+
+**Apps migrated to the private repo:** `apps/geneweave` (primary) + `apps/geneweave-ui`, consuming the library
+strictly as `^version` npm deps.
+
+**Key finding fixed:** 14 undeclared "phantom" dependencies of geneWeave (see Phase 3) are now declared +
+published — without this the app would not resolve them outside the monorepo.
+
+**Follow-ups before the real (non-DRY_RUN) run:**
+1. Decide a coordinated initial library version (e.g. bump all to `0.1.0`/`1.0.0`) + wire Changesets.
+2. `npm publish --access public` the 66-package closure from this repo (needs `@weaveintel`/`@geneweave` scope
+   publish rights); then `gh repo create gibyvarghese/geneweave --private` and push the prepared private repo.
+3. Merge `repo-split` → `main` in the public repo (open PR "Split: open-core — library on npm + community
+   apps"); do not force-push.
+4. Optionally add `clients/desktop` + `clients/mobile` to the private repo the same way (kept out of this
+   DRY_RUN to keep the proof tight); `live-agents-demo` stays public.
+5. Confirm `@weaveintel`/`@geneweave` npm scopes exist and are owned before publishing.
+
+**Nothing was pushed or published** (DRY_RUN=true). Snapshot safe on `pre-split-snapshot` + tag
+`pre-split-2026-07-03`. The private repo lives locally at `/private/tmp/split-private-work` with a bare
+stand-in remote.
