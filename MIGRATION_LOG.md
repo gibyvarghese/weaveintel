@@ -39,3 +39,22 @@ Branch strategy: work happens on `repo-split`; snapshot preserved on branch `pre
 **Snapshot:** branch `pre-split-snapshot` + tag `pre-split-2026-07-03` created on HEAD. Work branch `repo-split` created.
 
 **Phase 0 verdict:** feasible and low-risk. The clean boundary means the strict-npm-boundary model works without refactoring. Remaining work is mechanical: add two package.json fields to ~87/70 packages, build, pack, verify, then fork + rewrite the apps.
+
+---
+
+## Phase 1 — Make the library publishable + (dry-run) publish ✅
+
+**Publish-readiness fixes (committed):** added `publishConfig.access: "public"` to **all 87** packages and `files: ["dist"]` to the **70** that lacked it. No structural changes needed (main/types/build/exports were already correct).
+
+**Build:** `turbo build --filter='./packages/*'` → 88 tasks successful; **all 87 packages have `dist/`**.
+
+**Pack + verify (the proof the packages work as real node modules):**
+- Packed the **59-package geneWeave closure** to tarballs (kept for Phase 3 in scratchpad `tarballs/`).
+- Installed **all 59 tarballs into a clean throwaway project** (`/private/tmp/split-verify`) → 256 packages resolved, exit 0.
+- Ships **`dist/` only, no `src/`** (verified for core/notes/i18n) — `files:["dist"]` works.
+- **Runtime** smoke test of real public APIs (`@weaveintel/i18n` `createTranslator`/`resolveLocaleChain`, `@weaveintel/collaboration` `selectSuggestions`/`CURATED_PROMPTS`) → OK.
+- **Type-check** (`tsc --noEmit`) of a consumer `.ts` against the installed `.d.ts` → 0 errors.
+
+**Publish (DRY_RUN=true):** `npm publish --dry-run --access public` for every closure package → **59/59 OK, 0 failures**. Versions currently `0.0.1` (a few `0.1.0`). Full list recorded in scratchpad `publish-dryrun.txt`.
+
+> ⚠️ Follow-up for the real (non-dry-run) publish: decide a coordinated initial version (e.g. bump the whole set to `0.1.0` or `1.0.0`) so the private app's `^` ranges are consistent, and wire Changesets for ongoing releases. Not blocking in dry-run.
