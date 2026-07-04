@@ -24,7 +24,7 @@ jobs:
         run: npm run build
 
       - name: Type check
-        run: npx tsc -b apps/geneweave --pretty false
+        run: npm run typecheck
 
       - name: Public API Boundary Check
         run: npm run check:api-boundaries
@@ -33,7 +33,11 @@ jobs:
         run: npm run check:no-app-brand
 
       - name: Unit + Integration tests
-        run: npm run test
+        # Run one package's suite at a time: the GitHub runner has ~2 cores, and
+        # fanning out ~10 package test suites in parallel starves the heavy STRESS
+        # tests (9M-object builds, 2000-note fan-outs) past their timeouts. Serial
+        # package execution gives each suite the whole runner and removes the flake.
+        run: npx turbo test --concurrency=1
         env:
           JWT_SECRET: ci-test-secret
 

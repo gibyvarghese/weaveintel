@@ -12,10 +12,5 @@
     "strict": false,
     "noPropertyAccessFromIndexSignature": false,
     "skipLibCheck": true
-  },
-  "references": [
-    {
-      "path": "apps/geneweave"
-    }
-  ]
+  }
 }
