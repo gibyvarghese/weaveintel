@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/react-client
+ * @weaveintel/client/react
  *
  * Ergonomic React hooks over `@weaveintel/client`. `useRun` wraps the
  * framework-agnostic `createRunSession` controller with `useSyncExternalStore`
@@ -23,7 +23,7 @@ import {
   type RunSessionOptions,
   type RunSessionState,
   type RunSessionStartInput,
-} from '@weaveintel/client';
+} from '../index.js';
 
 export type {
   RunSession,
@@ -31,7 +31,7 @@ export type {
   RunSessionState,
   RunSessionStatus,
   RunSessionStartInput,
-} from '@weaveintel/client';
+} from '../index.js';
 
 /** The value returned by {@link useRun}: the live state plus stable actions. */
 export interface UseRun extends RunSessionState {

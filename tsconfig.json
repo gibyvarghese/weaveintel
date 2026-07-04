@@ -233,9 +233,6 @@
       "path": "packages/client"
     },
     {
-      "path": "packages/react-client"
-    },
-    {
       "path": "packages/weaveintel"
     },
     {

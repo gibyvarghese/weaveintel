@@ -11,7 +11,7 @@
  * with `stop()` (cancel), `regenerate()` (re-run the last input), `approve()` /
  * `reject()` (HITL decisions), throttled notifications (smooth streaming) and a
  * tiny `getState`/`subscribe` store — the exact shape `useSyncExternalStore`
- * wants, so `@weaveintel/react-client`'s `useRun` is a thin wrapper and a vanilla
+ * wants, so `@weaveintel/client/react`'s `useRun` is a thin wrapper and a vanilla
  * host (the reference UI app) can drive the same controller without a framework.
  *
  * Browser-safe: no Node.js APIs. Timers are injectable for deterministic tests.

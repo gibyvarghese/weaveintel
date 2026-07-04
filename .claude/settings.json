@@ -170,7 +170,9 @@
       "Bash(node scripts/check-no-app-brand.mjs)",
       "Bash(node -e \"const p=require\\('./packages/guardrails/package.json'\\);console.log\\('deps:',JSON.stringify\\(p.dependencies||{}\\)\\);console.log\\('files:',JSON.stringify\\(p.files\\)\\)\")",
       "Bash(perl -0pi -e 's/\\\\\\): ConcurrencyLimiter \\\\{/\\): DurableConcurrencyLimiter {/g; s/getStatus\\\\\\(\\\\\\): ConcurrencyStatus \\\\{/getStatus\\(\\): DurableConcurrencyStatus {/g' packages/resilience/src/durable-concurrency.ts)",
-      "Bash(perl -pi -e \"s{\\\\@weaveintel/durability}{\\\\@weaveintel/resilience}g\" apps/geneweave/src/docs-html.ts)"
+      "Bash(perl -pi -e \"s{\\\\@weaveintel/durability}{\\\\@weaveintel/resilience}g\" apps/geneweave/src/docs-html.ts)",
+      "Bash(node -e \"const p=require\\('./packages/react-client/package.json'\\);console.log\\('deps',JSON.stringify\\(p.dependencies\\)\\);console.log\\('peer',JSON.stringify\\(p.peerDependencies\\)\\);console.log\\('devDeps',JSON.stringify\\(p.devDependencies\\)\\)\")",
+      "Bash(perl -pi -e \"s{from '\\\\@weaveintel/client'}{from '../index.js'}g\" packages/client/src/react/index.ts)"
     ]
   }
 }

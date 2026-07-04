@@ -79,7 +79,7 @@ export {
   emptyRunViewModel,
   // Phase 5 — UX primitives: the framework-agnostic run-session controller and
   // the single SSE parser, surfaced so hosts (mobile, web-React via
-  // @weaveintel/react-client) configure them without importing @weaveintel/client.
+  // @weaveintel/client/react) configure them without importing @weaveintel/client.
   createRunSession,
   RUN_SESSION_SCHEMA_VERSION,
   RunResumeExpiredError,

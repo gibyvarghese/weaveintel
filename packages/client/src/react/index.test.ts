@@ -1,5 +1,5 @@
 /**
- * Smoke tests — @weaveintel/react-client public surface.
+ * Smoke tests — @weaveintel/client/react public surface.
  *
  * NOTE: the monorepo has no React DOM renderer / @testing-library, so the hook
  * itself cannot be mounted here. `useRun` is a thin (~20-line) binding over
@@ -11,7 +11,7 @@
 import { describe, it, expect } from 'vitest';
 import { useRun } from './index.js';
 
-describe('@weaveintel/react-client surface', () => {
+describe('@weaveintel/client/react surface', () => {
   it('exports useRun as a hook function', () => {
     expect(typeof useRun).toBe('function');
     // React hooks are named so the linter / devtools can identify them.
