@@ -2,12 +2,6 @@
   "files": [],
   "references": [
     {
-      "path": "apps/geneweave"
-    },
-    {
-      "path": "apps/geneweave-ui"
-    },
-    {
       "path": "apps/live-agents-demo"
     },
     {

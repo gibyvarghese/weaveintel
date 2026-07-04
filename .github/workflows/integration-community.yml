@@ -1,0 +1,59 @@
+# Cross-repo integration: does the framework still satisfy the geneWeave community app?
+#
+# The geneWeave app now lives in its own repo (gibyvarghese/geneweave-community) and consumes the
+# framework as published @weaveintel/* npm packages. This job checks out that repo, installs the
+# framework from the registry, and runs the app's build + typecheck + unit tests — the coverage the
+# monorepo used to get from the in-repo app, now as a true cross-repo check.
+#
+# It runs the RELEASED packages, so it can't validate an unpublished change in this repo; it answers
+# "the framework on npm right now builds + tests the real app end to end." Run nightly, after a
+# Release, or on demand. (To validate current source pre-publish, publish the workspace to a local
+# registry — e.g. verdaccio — and install the app against that.)
+
+name: Integration — community app
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * *' # nightly, 06:00 UTC
+  workflow_run:
+    workflows: ['Release']
+    types: [completed]
+
+concurrency:
+  group: integration-community-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  community-app:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the geneWeave community app
+        uses: actions/checkout@v4
+        with:
+          repository: gibyvarghese/geneweave-community
+          ref: main
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install (pulls @weaveintel/* from the npm registry)
+        run: npm install --no-audit --no-fund
+
+      - name: Prove the framework is resolved from the registry (not vendored)
+        run: |
+          test ! -d packages || (echo "unexpected packages/ dir in the app repo" && exit 1)
+          node -e "const p=require('@weaveintel/core/package.json'); console.log('@weaveintel/core resolved from registry @', p.version)"
+
+      - name: Build
+        run: npx turbo build
+
+      - name: Type check
+        run: npx turbo typecheck
+
+      - name: Unit + integration tests
+        working-directory: apps/geneweave
+        run: npx vitest run
+        env:
+          JWT_SECRET: ci-test-secret

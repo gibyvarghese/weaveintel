@@ -56,15 +56,15 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
-      # Hard gate: server runtime only. --omit=dev excludes test-tool vulns
-      # (vitest, vite). Mobile build-chain (Expo) is audited separately below
-      # as informational — those packages are upstream-unfixed build tools, not
-      # server runtime, and must not block server deploys.
-      - name: Audit server workspace (fail on high/critical)
+      # Hard gate: framework runtime deps only. --omit=dev excludes test-tool
+      # vulns (vitest, vite). Mobile build-chain (Expo) is audited separately
+      # below as informational — those packages are upstream-unfixed build
+      # tools, not runtime, and must not block releases.
+      - name: Audit framework (fail on high/critical)
         run: |
-          npm audit --workspace=apps/geneweave --omit=dev --audit-level=high \
-            --json | tee audit-server.json
-          npm audit --workspace=apps/geneweave --omit=dev --audit-level=high
+          npm audit --omit=dev --audit-level=high \
+            --json | tee audit-framework.json
+          npm audit --omit=dev --audit-level=high
 
       # Informational: mobile build-chain (Expo packages have upstream unfixed
       # highs in @xmldom/xmldom, cacache, tar etc). Report only — do not block.
@@ -81,7 +81,7 @@ jobs:
         with:
           name: npm-audit-results
           path: |
-            audit-server.json
+            audit-framework.json
             audit-mobile.json
           retention-days: 14
 
@@ -178,18 +178,3 @@ jobs:
             exit 1
           fi
           echo "✅ All package entry points have SPDX headers"
-
-      - name: Check SPDX headers on key app files
-        run: |
-          MISSING=$(grep -rL 'SPDX-License-Identifier' \
-            apps/geneweave/src/server.ts \
-            apps/geneweave/src/server-core.ts \
-            apps/geneweave/src/auth.ts \
-            apps/geneweave/src/ui-server.ts \
-            2>/dev/null || true)
-          if [ -n "$MISSING" ]; then
-            echo "❌ Key app files missing SPDX-License-Identifier header:"
-            echo "$MISSING"
-            exit 1
-          fi
-          echo "✅ Key app files have SPDX headers"
