@@ -5560,12 +5560,12 @@ ${section('replay-record', 'Recording a Run for Replay', `
 <p>Every workflow run automatically records step outputs when a checkpoint store and run repository are configured. No extra wiring is needed — runs are replayable by default when persistence is on.</p>
 
 ${code('typescript', `import { DefaultWorkflowEngine } from '@weaveintel/workflows';
-import { SqliteWorkflowRunRepository, SqliteCheckpointStore } from '@weaveintel/workflows';
+import { weaveSqliteWorkflowRunRepository, weaveSqliteCheckpointStore } from '@weaveintel/workflows';
 
 // Configure durable stores — this enables replay automatically
 const engine = new DefaultWorkflowEngine({
-  runRepository:   new SqliteWorkflowRunRepository('./workflows.db'),
-  checkpointStore: new SqliteCheckpointStore('./workflows.db'),
+  runRepository:   weaveSqliteWorkflowRunRepository({ databasePath: './workflows.db' }),
+  checkpointStore: weaveSqliteCheckpointStore({ databasePath: './workflows.db' }),
   resolverRegistry: myResolvers,
 });
 
@@ -5618,17 +5618,17 @@ ${exlinks([
 ])}
 
 ${section('trace-tools-setup', 'Setup', `
-${code('typescript', `import { createLiveAgentTraceToolRegistry } from '@weaveintel/live-agents/trace-tools';
+${code('typescript', `import { createLiveTraceTools } from '@weaveintel/live-agents/trace-tools';
 import { weaveAgent } from '@weaveintel/agents';
 import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
 import { weaveContext } from '@weaveintel/core';
 
-// Create a registry of live-agent trace tools
-// These tools read from the live-agents state store and contract ledger
-const traceTools = createLiveAgentTraceToolRegistry({
-  store:  liveAgentStateStore,    // the same StateStore the mesh uses
-  ledger: contractLedger,         // optional — enables contract queries
-  db:     geneWeaveDb,            // optional — enables run event queries
+// Create the live-agent trace tools. They are scoped to a single runId and
+// read from event/step/cost readers you provide.
+const traceTools = createLiveTraceTools({
+  runId:       'mesh-run-123',    // the ONLY run these tools may read
+  eventReader: liveRunEventReader, // required
+  stepReader:  liveRunStepReader,  // optional
 });
 
 // Attach to a supervisor agent that monitors the mesh
@@ -5681,50 +5681,43 @@ ${featureCards([
 ])}
 
 ${section('oauth-setup', 'Setup & Flow', `
-${code('typescript', `import { createOAuthFlow, createDurableOAuthStateStore } from '@weaveintel/identity/oauth';
-import { weaveRuntime } from '@weaveintel/core';
-import { weaveSqlitePersistence } from '@weaveintel/persistence';
+${code('typescript', `import { OAuthClient, createOAuthProvider, InMemoryOAuthStateStore } from '@weaveintel/identity/oauth';
+import { randomUUID } from 'node:crypto';
 
-const runtime = weaveRuntime({
-  persistence: weaveSqlitePersistence({ path: './oauth.db' }),
-});
+// Configure a provider (clientId, clientSecret, redirectUri)
+const google = createOAuthProvider(
+  'google',
+  process.env['GOOGLE_CLIENT_ID']!,
+  process.env['GOOGLE_CLIENT_SECRET']!,
+  'https://myapp.example.com/oauth/callback',
+);
 
-// Durable state store — flow state survives restarts
-const stateStore = createDurableOAuthStateStore({ runtime, namespace: 'oauth-flow' });
-
-// Configure an OAuth flow for Google Calendar
-const googleFlow = createOAuthFlow({
-  provider:     'google',
-  clientId:     process.env['GOOGLE_CLIENT_ID']!,
-  clientSecret: process.env['GOOGLE_CLIENT_SECRET']!,
-  redirectUri:  'https://myapp.example.com/oauth/callback',
-  scopes:       ['https://www.googleapis.com/auth/calendar.readonly'],
-  stateStore,
-});
+// The client holds the state store (swap in a durable one for production)
+const oauth = new OAuthClient(new InMemoryOAuthStateStore());
 
 // Step 1: Generate the authorization URL (redirect user here)
-const { url, state } = await googleFlow.authorize({ userId: 'alice', tenantId: 'acme' });
-// Redirect the user to: url
+const state = randomUUID();
+const { authUrl, codeVerifier } = await oauth.generateAuthorizationUrl(google, state);
+// Redirect the user to: authUrl (persist codeVerifier + state for the callback)
 
 // Step 2: Handle the callback (after user grants permission)
 app.get('/oauth/callback', async (req, res) => {
   const { code, state } = req.query as { code: string; state: string };
-  const tokens = await googleFlow.exchange({ code, state });
-  // tokens.accessToken, tokens.refreshToken, tokens.expiresAt
-  await tokenStore.save({ userId: 'alice', provider: 'google', ...tokens });
+  const { token } = await oauth.exchangeCodeForToken(google, code, state);
+  // token.access_token, token.refresh_token, token.expires_in
+  await tokenStore.save({ userId: 'alice', provider: 'google', token });
   res.redirect('/app');
 });
 
-// Step 3: Use the token in a tool call (auto-refreshed)
-const validToken = await googleFlow.getValidToken({ userId: 'alice', tenantId: 'acme', tokenStore });
-const events     = await gcal.listEvents(validToken.accessToken);`, ['@weaveintel/identity/oauth', '@weaveintel/core', '@weaveintel/persistence'])}
+// Step 3: Read the user's profile with the token
+const profile = await oauth.getUserProfile(google, savedToken);`, ['@weaveintel/identity/oauth'])}
 `)}
 
 ${section('oauth-tool', 'OAuth as an Agent Tool', `
-${code('typescript', `import { createOAuthFlow, createDurableOAuthStateStore } from '@weaveintel/identity/oauth';
-import { weaveTool, weaveToolRegistry } from '@weaveintel/core';
+${code('typescript', `import { weaveTool, weaveToolRegistry } from '@weaveintel/core';
 import { weaveAgent } from '@weaveintel/agents';
 
+// googleFlow here is your app's OAuth helper around OAuthClient (see Setup above).
 const tools = weaveToolRegistry();
 
 // Tool that checks if the user has granted Google Calendar access
