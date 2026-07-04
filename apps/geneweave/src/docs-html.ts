@@ -1438,49 +1438,44 @@ ${section('retrieval-chunking', 'Chunking', `
 ${code('typescript', `import { weaveChunker } from '@weaveintel/retrieval';
 
 const chunker = weaveChunker({
-  strategy: 'recursive',    // 'fixed' | 'recursive' | 'semantic' | 'markdown' | 'code'
-  chunkSize: 512,           // Target tokens per chunk
-  chunkOverlap: 64,         // Token overlap between adjacent chunks
-  minChunkSize: 100,        // Discard chunks smaller than this
-  splitOn: ['\\n\\n', '\\n', '.', ' '], // Priority-ordered split characters
-  tokenizer: 'cl100k_base', // Tiktoken encoding (or 'simple' for char-based)
+  strategy: 'token_aware',   // 'fixed_size' | 'token_aware' | 'semantic_boundary' | 'heading_aware' | 'code_aware' | ...
+  chunkSize: 512,            // Target tokens per chunk
+  chunkOverlap: 64,          // Token overlap between adjacent chunks
+  maxChunks: 1000,           // Cap total chunks per document
 });
 
-const chunks = await chunker.chunk(documentText, {
-  metadata: { source: 'policy-v2.pdf', page: 1 },
-});
+// chunk() is synchronous and returns DocumentChunk[]
+const chunks = chunker.chunk(documentText);
 
-// chunks[i] = { id, content, metadata, tokenCount, chunkIndex, totalChunks }
+// chunks[i] = { id, documentId, content, index, metadata, source }
 console.log(\`Split into \${chunks.length} chunks\`);`)}
 
-${callout('tip', '💡', 'Strategy guide.', '<code>recursive</code> is best for prose. <code>markdown</code> preserves headers as chunk boundaries. <code>code</code> splits on function/class boundaries. <code>semantic</code> uses an embedding model to find natural meaning boundaries (higher quality, slower).')}
+${callout('tip', '💡', 'Strategy guide.', '<code>token_aware</code> is best for prose. <code>heading_aware</code> preserves headers as chunk boundaries. <code>code_aware</code> splits on function/class boundaries. <code>semantic_boundary</code> uses an embedding model to find natural meaning boundaries (higher quality, slower).')}
 `)}
 
 ${section('retrieval-embedding', 'Embedding Pipeline', `
 ${code('typescript', `import { weaveEmbeddingPipeline } from '@weaveintel/retrieval';
+import { weaveContext } from '@weaveintel/core';
 
 const pipeline = weaveEmbeddingPipeline({
-  embeddingModel:   weaveOpenAIModel('text-embedding-3-small'),
-  vectorStore,                      // Any VectorStore implementation
-  chunkingOptions:  { strategy: 'recursive', chunkSize: 512 },
-  batchSize:        100,            // Embed 100 chunks per API call
-  dimensions:       1536,           // text-embedding-3-small output size
-  normalize:        true,           // L2-normalize vectors
-  onProgress:       (indexed, total) => console.log(\`\${indexed}/\${total}\`),
+  embeddingModel: weaveOpenAIModel('text-embedding-3-small'),
+  vectorStore,                                            // Any VectorStore implementation
+  chunkerConfig:  { strategy: 'token_aware', chunkSize: 512 },
+  batchSize:      100,                                    // Embed 100 chunks per API call
 });
 
-// Index a single document
-await pipeline.index({
+const ctx = weaveContext();
+
+// Chunk + embed + index a whole document in one call
+const chunks = await pipeline.ingestDocument(ctx, {
   id: 'policy-v2',
   content: documentText,
   metadata: { source: 'policy-v2.pdf', department: 'legal', version: '2024-Q4' },
 });
+console.log(\`Indexed \${chunks.length} chunks\`);
 
-// Index a directory of files
-await pipeline.indexBatch(documents, { upsert: true });
-
-// Delete a document and its chunks
-await pipeline.delete('policy-v2');`)}
+// Or index pre-chunked content directly
+await pipeline.index(ctx, chunks);`)}
 `)}
 
 ${section('retrieval-hybrid', 'Hybrid Search — Dense + BM25 + RRF', `
@@ -1488,79 +1483,74 @@ ${section('retrieval-hybrid', 'Hybrid Search — Dense + BM25 + RRF', `
 
 ${code('typescript', `import {
   weaveHybridRetriever,
-  weaveBM25Index,
   weaveQueryRewriter,
   weaveCitationExtractor,
 } from '@weaveintel/retrieval';
+import { weaveContext } from '@weaveintel/core';
 
-// Build a BM25 keyword index from the same chunks you embedded
-const bm25 = await weaveBM25Index({
-  store: sqliteStore,            // persist index to SQLite
-  language: 'english',          // stemming + stop-words
-  k1: 1.5, b: 0.75,             // BM25 tuning params
-});
-await bm25.index(chunks);       // index all document chunks
+// Hybrid retriever — dense (vector) + keyword scoring, fused internally.
+// The keyword side is driven by an in-memory corpus of the same content you embedded.
+const corpus = new Map<string, { content: string; metadata: Record<string, unknown> }>();
+for (const c of chunks) corpus.set(c.id, { content: c.content, metadata: c.metadata });
 
-// Hybrid retriever — dense + keyword, fused with RRF
 const retriever = weaveHybridRetriever({
-  denseRetriever:   vectorStore,   // dense semantic search (any VectorStore)
-  keywordRetriever: bm25,          // BM25 keyword search
-  fusionMethod:     'rrf',         // 'rrf' | 'weighted' | 'max'
-  weights:          { dense: 0.7, keyword: 0.3 },
-  topK:             20,            // candidates before reranking
-  reranker: {
-    model: weaveAnthropicModel('claude-haiku-4-5-20251001'),
-    topN:  5,                      // rerank 20 → return top 5
-  },
-  filter: { department: 'legal' },
+  embeddingModel: weaveOpenAIModel('text-embedding-3-small'),
+  vectorStore,                       // dense semantic search (any VectorStore)
+  vectorWeight: 0.7,                 // 70% vector / 30% keyword
+  defaultTopK:  20,
+  corpus,
 });
 
-// Query rewriting — expand/decompose the question before retrieval
+// Query rewriting — expand the question into several variants before retrieval
 const rewriter = weaveQueryRewriter({
-  model:    weaveAnthropicModel('claude-haiku-4-5-20251001'),
-  strategy: 'decompose',    // 'expand' | 'decompose' | 'hypothetical-document'
+  model:       weaveAnthropicModel('claude-haiku-4-5-20251001'),
+  maxRewrites: 3,
 });
-const { queries } = await rewriter.rewrite('return policy for damaged goods');
+
+const ctx = weaveContext();
+const queries = await rewriter.rewrite(ctx, { query: 'return policy for damaged goods' });
 // queries = ['what is the return policy for damaged goods',
 //            'how do I get a refund for a defective product']
 
-// Search with all rewritten queries and merge results
-const results = await retriever.retrieve(queries, { minScore: 0.35 });
+// Retrieve for the best rewritten query
+const result = await retriever.retrieve(ctx, {
+  query: queries[0] ?? 'return policy for damaged goods',
+  minScore: 0.35,
+  filter: { department: 'legal' },
+});
 
-// Extract citations from the generated answer
+// Turn the retrieved chunks into structured citations
 const extractor = weaveCitationExtractor();
-const citations = extractor.extract(results, generatedAnswer);
-// citations = [{ chunkId, source, pageNumber, span: [start, end] }, ...]`, ['@weaveintel/retrieval'])}
+const citations = extractor.extract(result);`, ['@weaveintel/retrieval', '@weaveintel/core'])}
 
-<h4>Query rewriting strategies</h4>
-${typeTable([
-  ['expand', 'Generates synonyms and related terms. Best for broad coverage when the user query is ambiguous.'],
-  ['decompose', 'Splits a complex multi-part question into focused sub-queries. Best for compound research questions.'],
-  ['hypothetical-document', 'Generates a hypothetical ideal answer, then retrieves documents similar to that answer (HyDE). Best for retrieval from highly technical corpora.'],
-])}
+<h4>Query rewriting</h4>
+<p>The rewriter asks the model for several improved variants of the query (up to <code>maxRewrites</code>), one per line. Run retrieval on the variants and fuse the results to widen recall — a lay question can then match a clinically-worded passage.</p>
 `)}
 
 ${section('retrieval-e2e', 'End-to-End: RAG Agent', `
-${code('typescript', `import { weaveEmbeddingPipeline, weaveHybridRetriever, weaveBM25Index } from '@weaveintel/retrieval';
+${code('typescript', `import { weaveEmbeddingPipeline, weaveHybridRetriever } from '@weaveintel/retrieval';
 import { weaveAgent } from '@weaveintel/agents';
-import { weaveAnthropicModel, weaveOpenAIModel } from '@weaveintel/provider-anthropic';
+import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
+import { weaveOpenAIModel } from '@weaveintel/provider-openai';
 import { weaveTool, weaveToolRegistry, weaveContext } from '@weaveintel/core';
 
-// 1. Index documents once
+const bootstrapCtx = weaveContext();
+
+// 1. Chunk + embed + index documents once
 const embedPipeline = weaveEmbeddingPipeline({
   embeddingModel: weaveOpenAIModel('text-embedding-3-small'),
   vectorStore, batchSize: 100,
 });
-await embedPipeline.indexBatch(myDocuments, { upsert: true });
+const corpus = new Map<string, { content: string; metadata: Record<string, unknown> }>();
+for (const doc of myDocuments) {
+  const chunks = await embedPipeline.ingestDocument(bootstrapCtx, doc);
+  for (const c of chunks) corpus.set(c.id, { content: c.content, metadata: c.metadata });
+}
 
-const bm25 = await weaveBM25Index({ store: sqliteStore });
-await bm25.index(chunks);
-
-// 2. Build hybrid retriever
+// 2. Build hybrid retriever (dense + keyword)
 const retriever = weaveHybridRetriever({
-  denseRetriever: vectorStore, keywordRetriever: bm25,
-  fusionMethod: 'rrf', topK: 10,
-  reranker: { model: weaveAnthropicModel('claude-haiku-4-5-20251001'), topN: 4 },
+  embeddingModel: weaveOpenAIModel('text-embedding-3-small'),
+  vectorStore, vectorWeight: 0.7, defaultTopK: 10, corpus,
 });
 
 // 3. Create a retrieval tool the agent calls
@@ -1572,12 +1562,11 @@ const searchKbTool = weaveTool({
     properties: { query: { type: 'string', description: 'Specific search query.' } },
   },
   riskLevel: 'read-only',
-  execute: async ({ query }) => {
-    const results = await retriever.retrieve([query as string]);
-    return JSON.stringify(results.map(r => ({
-      content: r.content,
-      source:  r.metadata.source,
-      score:   r.score.toFixed(3),
+  execute: async ({ query }, ctx) => {
+    const result = await retriever.retrieve(ctx, { query: query as string, topK: 4 });
+    return JSON.stringify(result.chunks.map(c => ({
+      content: c.content,
+      source:  c.metadata['source'],
     })));
   },
 });
