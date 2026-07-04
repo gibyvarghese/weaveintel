@@ -1,5 +1,5 @@
 /**
- * @weaveintel/scope — scope-registry.ts
+ * @weaveintel/identity/scope — scope-registry.ts
  *
  * ScopeRegistry — the central store for scope definitions and cross-scope policies.
  *

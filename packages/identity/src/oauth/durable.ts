@@ -1,5 +1,5 @@
 /**
- * @weaveintel/oauth — durable OAuth flow-state store.
+ * @weaveintel/identity/oauth — durable OAuth flow-state store.
  *
  * `InMemoryOAuthStateStore` (in `oauth.ts`) loses every pending
  * authorization-code exchange on restart — users see "invalid state".

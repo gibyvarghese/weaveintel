@@ -1,7 +1,7 @@
 /**
  * Migration m75 — Agentic Scope Isolation
  *
- * Introduces the database layer for the @weaveintel/scope package.
+ * Introduces the database layer for the @weaveintel/identity/scope package.
  * Scope isolation prevents agents from crossing functional domain boundaries
  * (e.g. analytics → kaggle) without explicit A2A authorization.
  *

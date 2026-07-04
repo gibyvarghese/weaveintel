@@ -36,7 +36,7 @@ import { matchRunControlPath, isAllowedWsOrigin, handleRunControlConnection, MAX
 import { createChatPipelineMeRunAgent } from './me-run-agent.js';
 import { type TriggerDispatcherHandle } from './admin/api/triggers.js';
 import { type LoadedGatewayConfig } from './mcp-gateway.js';
-import { type OAuthProviderName } from '@weaveintel/oauth';
+import { type OAuthProviderName } from '@weaveintel/identity/oauth';
 import { createHealthChecker, createIdempotencyStore } from '@weaveintel/resilience';
 import {
   Router,

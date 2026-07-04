@@ -189,8 +189,8 @@ ${code('text', `Applications (geneweave, your app)
                     @weaveintel/extraction · @weaveintel/memory · @weaveintel/collab
                     @weaveintel/testing/evals · @weaveintel/guardrails · @weaveintel/resilience
   └─ Integration    @weaveintel/providers · @weaveintel/mcp-client · @weaveintel/mcp-server
-                    @weaveintel/tools-* · @weaveintel/sandbox · @weaveintel/oauth
-  └─ Platform       @weaveintel/security · @weaveintel/tenancy · @weaveintel/guardrails/compliance
+                    @weaveintel/tools-* · @weaveintel/sandbox · @weaveintel/identity/oauth
+  └─ Platform       @weaveintel/security · @weaveintel/identity/tenancy · @weaveintel/guardrails/compliance
                     @weaveintel/encryption · @weaveintel/resilience · @weaveintel/persistence
   └─ Contracts      @weaveintel/core  (zero runtime dependencies)`)}
 ${callout('info', '🔌', 'Where "run plumbing" lives (Collaboration Phase 0).', 'A <strong>run registry</strong> (what runs exist + their status) and a <strong>run journal</strong> (the numbered, append-only log of everything a run did, so a dropped connection can resume from "event 41") are now single <em>interfaces</em> in <code>@weaveintel/core</code>. geneWeave stores them in SQL; a key-value adapter ships in core — same interface, swappable storage, no duplicate code. The one Server-Sent-Events stream parser lives there too. New to this? Think of an interface as a power socket: anything that fits the socket (SQL, key-value) works, and nothing that plugs in needs to know what is behind the wall.')}
@@ -4234,7 +4234,7 @@ const user = await db.query(
 function sTenancy(): string {
   return `
 <div class="pkg-hdr">
-  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/tenancy</span></div>
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/identity/tenancy</span></div>
   <h1 class="pkg-title">Tenancy</h1>
   <p class="pkg-desc">Multi-tenant isolation for agents, models, and capabilities. Each tenant gets independent context propagation, budget enforcement, capability bindings, and optionally field-level encryption. Tenancy is ambient — set <code>tenantId</code> on the <code>ExecutionContext</code> and every subsystem picks it up.</p>
 </div>
@@ -4278,7 +4278,7 @@ const result = await agent.run(ctx, { messages });`, ['@weaveintel/core', '@weav
 `)}
 
 ${section('ten-budget', 'Per-Tenant Budget Enforcement', `
-${code('typescript', `import { createDurableBudgetEnforcer } from '@weaveintel/tenancy';
+${code('typescript', `import { createDurableBudgetEnforcer } from '@weaveintel/identity/tenancy';
 import { weaveRuntime } from '@weaveintel/core';
 import { weaveSqlitePersistence } from '@weaveintel/persistence';
 
@@ -4305,7 +4305,7 @@ await enforcer.record(0.0042);   // $0.0042 for this call
 
 // Get current usage summary
 const summary = await enforcer.summary();
-console.log(\`\${summary.tenantId}: $\${summary.spentUsd.toFixed(4)} / $\${summary.budgetUsd.toFixed(2)} (\${Math.round(summary.fractionUsed * 100)}%)\`);`, ['@weaveintel/tenancy', '@weaveintel/core', '@weaveintel/persistence'])}
+console.log(\`\${summary.tenantId}: $\${summary.spentUsd.toFixed(4)} / $\${summary.budgetUsd.toFixed(2)} (\${Math.round(summary.fractionUsed * 100)}%)\`);`, ['@weaveintel/identity/tenancy', '@weaveintel/core', '@weaveintel/persistence'])}
 
 ${params([
   ['runtime', 'WeaveRuntime', 'required', 'Runtime with a persistence slot. Spend is stored under <code>namespace:tenantId:*</code> keys.'],
@@ -5781,7 +5781,7 @@ ${section('trace-tools-list', 'Available Tools', `
 function sOAuth(): string {
   return `
 <div class="pkg-hdr">
-  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/oauth</span></div>
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/identity/oauth</span></div>
   <h1 class="pkg-title">OAuth</h1>
   <p class="pkg-desc">OAuth 2.0 Authorization Code flow for agent tools that need per-user credentials — Google Calendar, Gmail, Dropbox, OneDrive, Slack, and any OAuth 2.0 provider. Flow state is durable (survives restarts via <code>runtime.persistence.kv</code>) and PKCE is applied by default.</p>
 </div>
@@ -5794,7 +5794,7 @@ ${featureCards([
 ])}
 
 ${section('oauth-setup', 'Setup & Flow', `
-${code('typescript', `import { createOAuthFlow, createDurableOAuthStateStore } from '@weaveintel/oauth';
+${code('typescript', `import { createOAuthFlow, createDurableOAuthStateStore } from '@weaveintel/identity/oauth';
 import { weaveRuntime } from '@weaveintel/core';
 import { weaveSqlitePersistence } from '@weaveintel/persistence';
 
@@ -5830,11 +5830,11 @@ app.get('/oauth/callback', async (req, res) => {
 
 // Step 3: Use the token in a tool call (auto-refreshed)
 const validToken = await googleFlow.getValidToken({ userId: 'alice', tenantId: 'acme', tokenStore });
-const events     = await gcal.listEvents(validToken.accessToken);`, ['@weaveintel/oauth', '@weaveintel/core', '@weaveintel/persistence'])}
+const events     = await gcal.listEvents(validToken.accessToken);`, ['@weaveintel/identity/oauth', '@weaveintel/core', '@weaveintel/persistence'])}
 `)}
 
 ${section('oauth-tool', 'OAuth as an Agent Tool', `
-${code('typescript', `import { createOAuthFlow, createDurableOAuthStateStore } from '@weaveintel/oauth';
+${code('typescript', `import { createOAuthFlow, createDurableOAuthStateStore } from '@weaveintel/identity/oauth';
 import { weaveTool, weaveToolRegistry } from '@weaveintel/core';
 import { weaveAgent } from '@weaveintel/agents';
 
@@ -5867,7 +5867,7 @@ tools.register(weaveTool({
   },
 }));
 
-const agent = weaveAgent({ model, tools, maxSteps: 4 });`, ['@weaveintel/oauth', '@weaveintel/core', '@weaveintel/agents'])}
+const agent = weaveAgent({ model, tools, maxSteps: 4 });`, ['@weaveintel/identity/oauth', '@weaveintel/core', '@weaveintel/agents'])}
 `)}`;
 }
 

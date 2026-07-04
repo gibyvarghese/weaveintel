@@ -1,5 +1,5 @@
 /**
- * @weaveintel/scope — scope-guard.ts
+ * @weaveintel/identity/scope — scope-guard.ts
  *
  * ScopeGuard — the enforcement layer that sits at every scope boundary.
  *

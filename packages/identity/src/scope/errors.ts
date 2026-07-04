@@ -1,5 +1,5 @@
 /**
- * @weaveintel/scope — errors.ts
+ * @weaveintel/identity/scope — errors.ts
  *
  * Custom error classes for the scope isolation system.
  */

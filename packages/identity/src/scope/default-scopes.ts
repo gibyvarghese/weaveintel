@@ -1,5 +1,5 @@
 /**
- * @weaveintel/scope — default-scopes.ts
+ * @weaveintel/identity/scope — default-scopes.ts
  *
  * Built-in scope definitions and cross-scope policies for weaveIntel.
  *

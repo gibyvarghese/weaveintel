@@ -58,7 +58,7 @@ import {
   WebhookOutTargetAdapter,
   type TriggerDispatcher,
 } from '@weaveintel/triggers';
-import { OAuthClient, createDurableOAuthStateStore } from '@weaveintel/oauth';
+import { OAuthClient, createDurableOAuthStateStore } from '@weaveintel/identity/oauth';
 import { setOAuthClient } from './server-core.js';
 import { createDbTriggerStore } from './triggers/db-trigger-store.js';
 import { createWorkflowTargetAdapter, createContractTargetAdapter } from './triggers/target-adapters.js';

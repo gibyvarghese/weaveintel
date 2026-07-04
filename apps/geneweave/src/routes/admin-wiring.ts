@@ -26,7 +26,7 @@ import { DbToolAuditEmitter } from '../tool-audit-emitter.js';
 import { createMCPGateway, DEFAULT_EXPOSED_ALLOCATION_CLASSES, type LoadedGatewayConfig } from '../mcp-gateway.js';
 import { encryptCredential, decryptCredential } from '../vault.js';
 import { setBrowserAuthProvider, type SSOPassThroughAuth } from '@weaveintel/tools-browser';
-import { OAuthClient, createOAuthProvider, type OAuthProviderName } from '@weaveintel/oauth';
+import { OAuthClient, createOAuthProvider, type OAuthProviderName } from '@weaveintel/identity/oauth';
 import { getAllProviders, getProvider, checkAllProviders, type ExternalCredential } from '../password-providers.js';
 import { getAvailableTools, BUILTIN_TOOLS } from '../tools.js';
 import {

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createGeneWeave, type GeneWeaveApp } from './index.js';
 import { oauthClient } from './server-core.js';
-import { createDurableOAuthStateStore } from '@weaveintel/oauth';
+import { createDurableOAuthStateStore } from '@weaveintel/identity/oauth';
 import { createDurableTriggerRateLimiter } from '@weaveintel/triggers';
 
 async function bootApp(dbPath: string): Promise<GeneWeaveApp> {

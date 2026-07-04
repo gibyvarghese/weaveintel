@@ -23,9 +23,9 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { SQLiteAdapter } from './db-sqlite.js';
 import { ChatScopeGuard } from './chat-scope-guard.js';
-import { createRootScopeContext, deriveScopeContext } from '@weaveintel/scope';
-import { issueCrossScopeToken } from '@weaveintel/scope';
-import type { ScopeContext } from '@weaveintel/scope';
+import { createRootScopeContext, deriveScopeContext } from '@weaveintel/identity/scope';
+import { issueCrossScopeToken } from '@weaveintel/identity/scope';
+import type { ScopeContext } from '@weaveintel/identity/scope';
 import type { SkillMatch } from '@weaveintel/skills';
 
 const SECRET = 'test-scope-secret-do-not-use-in-production';

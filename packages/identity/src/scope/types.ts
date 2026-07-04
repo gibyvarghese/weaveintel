@@ -1,5 +1,5 @@
 /**
- * @weaveintel/scope — types.ts
+ * @weaveintel/identity/scope — types.ts
  *
  * Core interfaces for the Agentic Scope Isolation system.
  *

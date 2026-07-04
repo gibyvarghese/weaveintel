@@ -1,5 +1,5 @@
 /**
- * @weaveintel/oauth — OAuth 2.0 provider integration
+ * @weaveintel/identity/oauth — OAuth 2.0 provider integration
  *
  * Generic OAuth 2.0 authorization code flow with support for:
  *   • Google, GitHub, Microsoft, Apple, Facebook

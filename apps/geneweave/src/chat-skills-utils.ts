@@ -14,7 +14,7 @@ import {
 } from '@weaveintel/skills';
 import type { DatabaseAdapter } from './db.js';
 import type { ChatScopeGuard } from './chat-scope-guard.js';
-import type { ScopeContext } from '@weaveintel/scope';
+import type { ScopeContext } from '@weaveintel/identity/scope';
 
 // ── Private helper ──────────────────────────────────────────
 

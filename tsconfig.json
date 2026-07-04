@@ -23,9 +23,6 @@
       "path": "packages/retrieval"
     },
     {
-      "path": "packages/oauth"
-    },
-    {
       "path": "packages/observability"
     },
     {
@@ -173,9 +170,6 @@
       "path": "packages/encryption"
     },
     {
-      "path": "packages/tenancy"
-    },
-    {
       "path": "packages/sandbox"
     },
     {
@@ -234,9 +228,6 @@
     },
     {
       "path": "packages/i18n"
-    },
-    {
-      "path": "packages/scope"
     },
     {
       "path": "packages/voice"

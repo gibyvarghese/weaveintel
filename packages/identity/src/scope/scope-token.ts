@@ -1,5 +1,5 @@
 /**
- * @weaveintel/scope — scope-token.ts
+ * @weaveintel/identity/scope — scope-token.ts
  *
  * Issue and validate CrossScopeTokens — the authorization tickets that
  * agents must present when crossing a scope boundary via A2A.

@@ -8,6 +8,21 @@
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./oauth": {
+      "import": "./dist/oauth/index.js",
+      "types": "./dist/oauth/index.d.ts",
+      "default": "./dist/oauth/index.js"
+    },
+    "./tenancy": {
+      "import": "./dist/tenancy/index.js",
+      "types": "./dist/tenancy/index.d.ts",
+      "default": "./dist/tenancy/index.js"
+    },
+    "./scope": {
+      "import": "./dist/scope/index.js",
+      "types": "./dist/scope/index.d.ts",
+      "default": "./dist/scope/index.js"
     }
   },
   "main": "./dist/index.js",
@@ -17,7 +32,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@weaveintel/core": "^0.0.1"
+    "@weaveintel/core": "^0.0.1",
+    "@weaveintel/persistence": "^0.0.1"
   },
   "devDependencies": {
     "vitest": "^3.2.6"

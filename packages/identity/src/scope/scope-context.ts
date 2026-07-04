@@ -1,5 +1,5 @@
 /**
- * @weaveintel/scope — scope-context.ts
+ * @weaveintel/identity/scope — scope-context.ts
  *
  * Factory functions for creating and managing ScopeContext objects.
  *

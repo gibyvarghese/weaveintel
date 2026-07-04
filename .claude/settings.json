@@ -189,7 +189,8 @@
       "Bash(node -e 'const fs=require\\(\"fs\"\\);const f=\"packages/memory/tsconfig.json\";const t=JSON.parse\\(fs.readFileSync\\(f,\"utf8\"\\)\\);if\\(Array.isArray\\(t.references\\)\\){t.references=t.references.filter\\(r=>!/\\\\/graph$/.test\\(r.path\\)\\);fs.writeFileSync\\(f,JSON.stringify\\(t,null,2\\)+\"\\\\n\"\\);console.log\\(\"memory tsconfig -graph ref\"\\);}')",
       "Bash(node -e \"console.log\\('geneweave deps memory?', !!require\\('./apps/geneweave/package.json'\\).dependencies['@weaveintel/memory']\\)\")",
       "Bash(grep -nB1 \"@weaveintel/redaction\\\\|@weaveintel/compliance\" packages/core/src/runtime.ts)",
-      "Bash(node -e \"const d=require\\('./packages/core/package.json'\\).dependencies||{};console.log\\('redaction',!!d['@weaveintel/redaction'],'compliance',!!d['@weaveintel/compliance'],'allDeps:',JSON.stringify\\(d\\)\\)\")"
+      "Bash(node -e \"const d=require\\('./packages/core/package.json'\\).dependencies||{};console.log\\('redaction',!!d['@weaveintel/redaction'],'compliance',!!d['@weaveintel/compliance'],'allDeps:',JSON.stringify\\(d\\)\\)\")",
+      "Bash(perl -pi -e \"s{from '\\\\@weaveintel/scope'}{from '../index.js'}g\" packages/identity/src/scope/__tests__/*.test.ts)"
     ]
   }
 }

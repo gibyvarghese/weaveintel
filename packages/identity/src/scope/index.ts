@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/scope — public API
+ * @weaveintel/identity/scope — public API
  *
  * Agentic Scope Isolation for multi-agent AI systems.
  *
@@ -10,7 +10,7 @@
  *     ScopeRegistry, ScopeGuard, ScopeViolationError,
  *     createRootScopeContext, deriveScopeContext,
  *     WEAVEINTEL_DEFAULT_SCOPES, WEAVEINTEL_DEFAULT_POLICIES,
- *   } from '@weaveintel/scope';
+ *   } from './index.js';
  *
  *   // 1. Bootstrap once at startup
  *   const registry = new ScopeRegistry();

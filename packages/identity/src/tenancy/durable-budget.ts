@@ -1,5 +1,5 @@
 /**
- * @weaveintel/tenancy — durable budget enforcer.
+ * @weaveintel/identity/tenancy — durable budget enforcer.
  *
  * The in-memory `createBudgetEnforcer()` resets every tenant's usage
  * counters on restart (every tenant gets a free month after a deploy).

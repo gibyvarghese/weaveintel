@@ -15,7 +15,7 @@
       "path": "../../packages/core"
     },
     {
-      "path": "../../packages/oauth"
+      "path": "../../packages/identity"
     },
     {
       "path": "../../packages/agents"
@@ -45,9 +45,6 @@
       "path": "../../packages/encryption"
     },
     {
-      "path": "../../packages/scope"
-    },
-    {
       "path": "../../packages/human-tasks"
     },
     {
@@ -70,9 +67,6 @@
     },
     {
       "path": "../../packages/cache"
-    },
-    {
-      "path": "../../packages/identity"
     },
     {
       "path": "../../packages/i18n"
