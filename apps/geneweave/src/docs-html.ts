@@ -4231,31 +4231,31 @@ const runtime = weaveRuntime({
   persistence: weaveSqlitePersistence({ path: './budgets.db' }),
 });
 
-// One enforcer per tenant (or create on demand per request)
-const enforcer = createDurableBudgetEnforcer({
-  runtime,
-  tenantId:         'acme',
-  monthlyBudgetUsd: 50.00,
-  namespace:        'tenant-budget',   // KV prefix
+// One enforcer per deployment (manages the KV store for all tenants)
+const enforcer = createDurableBudgetEnforcer({ runtime, namespace: 'tenant-budget' });
+
+// Define the tenant's daily + monthly caps once
+await enforcer.setBudget({
+  tenantId: 'acme',
+  daily:    { maxTokens: 1_000_000,  maxCostUsd: 100.00 },
+  monthly:  { maxTokens: 30_000_000, maxCostUsd: 50.00 },
 });
 
 // Check before a model call
-const check = await enforcer.check();
+const check = await enforcer.checkBudget('acme');
 if (!check.allowed) {
-  return { error: \`Monthly budget exceeded. Spent: $\${check.spentUsd.toFixed(2)} / $\${check.budgetUsd.toFixed(2)}\` };
+  return { error: \`Budget exceeded: \${check.reason}\` };
 }
 
-// Record spend after a model call (in USD)
-await enforcer.record(0.0042);   // $0.0042 for this call
+// Record spend after a model call: (tenantId, tokens, costUsd, steps)
+await enforcer.recordUsage('acme', 1500, 0.0042, 1);
 
-// Get current usage summary
-const summary = await enforcer.summary();
-console.log(\`\${summary.tenantId}: $\${summary.spentUsd.toFixed(4)} / $\${summary.budgetUsd.toFixed(2)} (\${Math.round(summary.fractionUsed * 100)}%)\`);`, ['@weaveintel/identity/tenancy', '@weaveintel/core', '@weaveintel/persistence'])}
+// Get current usage for a period
+const usage = await enforcer.getUsage('acme', 'monthly');
+if (usage) console.log(\`acme (monthly): $\${usage.costUsd.toFixed(4)} across \${usage.tokens} tokens\`);`, ['@weaveintel/identity/tenancy', '@weaveintel/core', '@weaveintel/persistence'])}
 
 ${params([
-  ['runtime', 'WeaveRuntime', 'required', 'Runtime with a persistence slot. Spend is stored under <code>namespace:tenantId:*</code> keys.'],
-  ['tenantId', 'string', 'required', 'Tenant identifier. Matches <code>ExecutionContext.tenantId</code>.'],
-  ['monthlyBudgetUsd', 'number', 'required', 'Monthly spend cap in USD. Stored in microUSD internally to avoid float drift.'],
+  ['runtime', 'WeaveRuntime', 'optional', 'Runtime with a persistence slot. Spend is stored under <code>namespace:tenantId:*</code> keys.'],
   ['namespace', 'string', 'optional', 'KV key prefix. Default: <code>"tenant-budget"</code>.'],
 ])}
 `)}
@@ -4263,26 +4263,20 @@ ${params([
 ${section('ten-caps', 'Capability Bindings', `
 <p>Capability policy bindings determine which tools, models, and prompts each tenant (and each agent or mesh within a tenant) can access. Resolved at runtime with precedence: agent=100 > mesh=50 > workflow=10 > tenant=5 > package_default.</p>
 
-${code('typescript', `import { resolveCapabilityBinding } from '@weaveintel/core/capability-packs';
+${code('typescript', `import { resolveCapabilityBinding } from '@weaveintel/core';
 
-// Resolve the effective tool policy for this agent+tenant combination
-const policy = await resolveCapabilityBinding({
-  db,
-  bindingKind:  'agent',
-  policyKind:   'tool_policy',
-  agentId:      'agent-analyst',
-  tenantId:     'acme',
-});
-// policy.allowedTools, policy.blockedTools, policy.maxCallsPerMin
+// Load the tenant/agent's bindings from your DB, then resolve by precedence.
+// resolveCapabilityBinding is a pure function: (bindings, bindingKind, bindingRef, policyKind)
+const bindings = await db.listCapabilityBindings('acme');
 
-// Check whether the tenant has a feature flag / pack installed
-const hasPremiumSearch = await resolveCapabilityBinding({
-  db,
-  bindingKind: 'tenant',
-  policyKind:  'capability_pack',
-  tenantId:    'acme',
-  packKey:     'premium.search',
-});`, ['@weaveintel/core/capability-packs'])}
+const toolBinding = resolveCapabilityBinding(bindings, 'agent', 'agent-analyst', 'tool_policy');
+if (toolBinding) {
+  console.log(toolBinding.policyRef);   // → look up the referenced tool_policy row
+}
+
+// Check whether a tenant-level capability pack is bound
+const packBinding = resolveCapabilityBinding(bindings, 'tenant', 'acme', 'capability_pack');
+const hasPremiumSearch = packBinding?.policyRef === 'premium.search';`, ['@weaveintel/core'])}
 `)}`;
 }
 
@@ -4335,16 +4329,16 @@ const response = await model.generate({
   messages: [{ role: 'user', content: redacted }],
 });
 
-// Restore originals in the response (reversible mode)
-const restored = await redactor.restore!(ctx, response.content, detections);`, ['@weaveintel/guardrails/redaction', '@weaveintel/core'])}
+// Restore originals in the response (reversible mode).
+// detections is a readonly array — spread into a mutable copy for restore().
+const restored = await redactor.restore!(ctx, response.content, [...detections]);`, ['@weaveintel/guardrails/redaction', '@weaveintel/core'])}
 `)}
 
 ${section('red-model-middleware', 'Model Middleware (Recommended)', `
 <p>Wrap the model with a redaction middleware so every <code>model.generate()</code> call transparently redacts + de-redacts without any call-site changes.</p>
 
-${code('typescript', `import { weaveRedactor, createRedactingModel } from '@weaveintel/guardrails/redaction';
+${code('typescript', `import { weaveRedactor } from '@weaveintel/guardrails/redaction';
 import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
-import { weaveAgent } from '@weaveintel/agents';
 import { weaveContext } from '@weaveintel/core';
 
 const redactor = weaveRedactor({
@@ -4355,24 +4349,18 @@ const redactor = weaveRedactor({
   reversible: true,
 });
 
-// Wraps the model — redacts before generate(), de-redacts after
-const safeModel = createRedactingModel(
-  weaveAnthropicModel('claude-sonnet-4-6'),
-  redactor,
-);
+const model = weaveAnthropicModel('claude-sonnet-4-6');
+const ctx   = weaveContext({ userId: 'alice' });
 
-// The agent uses the safe model — PII never reaches Anthropic's servers
-const agent = weaveAgent({
-  model:        safeModel,
-  systemPrompt: 'Help users with their account inquiries.',
-  tools,
-});
+// Redact → generate → restore, so PII never reaches Anthropic's servers.
+async function safeGenerate(userText: string): Promise<string> {
+  const { redacted, detections } = await redactor.redact(ctx, userText);
+  const response = await model.generate(ctx, { messages: [{ role: 'user', content: redacted }] });
+  // The model sees "[PHONE_1]"; restore de-redacts it back in the response.
+  return redactor.restore!(ctx, response.content, [...detections]);
+}
 
-const ctx    = weaveContext({ userId: 'alice' });
-const result = await agent.run(ctx, {
-  messages: [{ role: 'user', content: 'My phone is 555-867-5309. Can you update my profile?' }],
-});
-// The model sees "[PHONE_1]" — the response with "[PHONE_1]" is de-redacted back to "555-867-5309"`, ['@weaveintel/guardrails/redaction', '@weaveintel/provider-anthropic', '@weaveintel/agents', '@weaveintel/core'])}
+const answer = await safeGenerate('My phone is 555-867-5309. Can you update my profile?');`, ['@weaveintel/guardrails/redaction', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
 `)}
 
 ${section('red-audit', 'Auto-Redaction on Audit Writes', `
@@ -4455,23 +4443,22 @@ ${code('typescript', `import { createDurableConsentManager } from '@weaveintel/g
 
 const consent = createDurableConsentManager({ runtime });
 
-// Record user consent
-await consent.grant({
-  subjectId: 'user-alice',
-  purpose:   'marketing-emails',
-  version:   'v2025-01',
-  grantedAt: new Date().toISOString(),
-  expiresAt: new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString(),
-});
+// Record user consent — grant(subjectId, purpose, source, expiresAt?)
+await consent.grant(
+  'user-alice',
+  'marketing-emails',
+  'signup-form',
+  Date.now() + 365 * 24 * 3600 * 1000,
+);
 
-// Check consent before sending
-const allowed = await consent.check({ subjectId: 'user-alice', purpose: 'marketing-emails' });
-if (!allowed.granted) {
-  console.log('No consent for marketing emails:', allowed.reason);
+// Check consent before sending — isGranted returns a boolean
+const allowed = await consent.isGranted('user-alice', 'marketing-emails');
+if (!allowed) {
+  console.log('No consent for marketing emails');
 }
 
 // Revoke consent
-await consent.revoke({ subjectId: 'user-alice', purpose: 'marketing-emails' });`, ['@weaveintel/guardrails/compliance'])}
+await consent.revoke('user-alice', 'marketing-emails');`, ['@weaveintel/guardrails/compliance'])}
 `)}
 
 ${section('comp-gdpr', 'GDPR Deletion (Right to Erasure)', `
@@ -4481,26 +4468,22 @@ import { createDurableLegalHoldManager } from '@weaveintel/guardrails/compliance
 const deletion = createDurableDeletionManager({ runtime });
 const holds    = createDurableLegalHoldManager({ runtime });
 
-// Step 1: Receive a deletion request
-const req = await deletion.request({
-  subjectId:   'user-alice',
-  requestedAt: new Date().toISOString(),
-  requestedBy: 'alice@example.com',
-  reason:      'gdpr-erasure',
-});
+// Step 1: Create a deletion request — create(subjectId, requestedBy, reason, dataCategories)
+const req = await deletion.create(
+  'user-alice',
+  'gdpr-officer',
+  'GDPR Article 17 erasure request',
+  ['profile', 'messages'],
+);
 
-// Step 2: Check for active legal holds before executing
-const holdStatus = await holds.check({ subjectId: 'user-alice' });
-if (holdStatus.held) {
-  console.log('Deletion deferred — active legal hold:', holdStatus.holdId);
+// Step 2: Check for active legal holds before executing — isHeld returns a boolean
+const held = await holds.isHeld('user-alice', 'profile');
+if (held) {
+  console.log('Deletion deferred — active legal hold');
 } else {
-  // Step 3: Execute deletion and record completion
+  // Step 3: Execute deletion and mark the request complete
   await yourDb.deleteUserData('user-alice');
-  await deletion.complete({
-    requestId:   req.id,
-    completedAt: new Date().toISOString(),
-    deletedAt:   new Date().toISOString(),
-  });
+  await deletion.complete(req.id);
 }`, ['@weaveintel/guardrails/compliance'])}
 `)}`;
 }
