@@ -11,3 +11,23 @@ export { TaskList } from '@tiptap/extension-task-list';
 export { TaskItem } from '@tiptap/extension-task-item';
 export { Link } from '@tiptap/extension-link';
 export { Underline } from '@tiptap/extension-underline';
+// Real tables (planner / Cornell / charting layouts).
+export { Table } from '@tiptap/extension-table';
+export { TableRow } from '@tiptap/extension-table-row';
+export { TableHeader } from '@tiptap/extension-table-header';
+export { TableCell } from '@tiptap/extension-table-cell';
+
+// weaveNotes Phase 1 — hand-rolled creative marks + nodes (no extra installs). Names
+// match the @weaveintel/collab round-trip so creative content survives co-editing.
+export {
+  Highlight,
+  TextColor,
+  Callout,
+  Toggle,
+  ImageBlock,
+  Sticker,
+  WashiDivider,
+  // weaveNotes Phase 4 — native ink + diagram nodes (render via the @weaveintel/notes SVG renderers).
+  DiagramNode,
+  InkCanvasNode,
+} from './notes-creative-extensions.js';

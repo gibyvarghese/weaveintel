@@ -116,8 +116,8 @@ async function main() {
       { modelId: 'claude-sonnet-4-6',         providerId: 'anthropic', capabilities: ['summarization', 'analysis', 'reasoning'] },
     ],
     costs: [
-      { modelId: 'claude-haiku-4-5-20251001', providerId: 'anthropic', inputPerMToken: 0.80, outputPerMToken: 4.00 },
-      { modelId: 'claude-sonnet-4-6',         providerId: 'anthropic', inputPerMToken: 3.00, outputPerMToken: 15.00 },
+      { modelId: 'claude-haiku-4-5-20251001', providerId: 'anthropic', inputCostPer1M: 0.80, outputCostPer1M: 4.00 },
+      { modelId: 'claude-sonnet-4-6',         providerId: 'anthropic', inputCostPer1M: 3.00, outputCostPer1M: 15.00 },
     ],
     qualities: [
       { modelId: 'claude-haiku-4-5-20251001', providerId: 'anthropic', qualityScore: 0.65 },
@@ -154,8 +154,8 @@ async function main() {
 
   _resetEndpointRegistry();
   getOrCreateEndpointState(`anthropic:${selectedModelId}`, {
-    rateLimit:   { capacity: 20, refillRate: 10 },
-    circuit:     { threshold: 5, cooldownMs: 10_000 },
+    rateLimit:   { capacity: 20, refillPerSec: 10 },
+    circuit:     { failureThreshold: 5, cooldownMs: 10_000 },
     concurrency: { maxConcurrent: 5 },
   });
 
@@ -176,12 +176,12 @@ async function main() {
       );
     },
     {
-      endpointId: `anthropic:${selectedModelId}`,
+      endpoint: `anthropic:${selectedModelId}`,
       retry: {
-        maxAttempts:    3,
-        initialDelayMs: 1000,
-        maxDelayMs:     10_000,
-        jitterFactor:   0.3,
+        maxAttempts:  3,
+        baseDelayMs:  1000,
+        maxDelayMs:   10_000,
+        jitter:       true,
       },
     },
   );
@@ -207,7 +207,7 @@ async function main() {
   const pricing = PRICING[selectedModelId]!;
 
   const costUsd = computeUsd(
-    { inputTokens: response.usage.promptTokens, outputTokens: response.usage.completionTokens },
+    { modelId: selectedModelId, inputTokens: response.usage.promptTokens, outputTokens: response.usage.completionTokens },
     { inputPerMillion: pricing.inputPerMillion, outputPerMillion: pricing.outputPerMillion },
   );
 

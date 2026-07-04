@@ -114,6 +114,7 @@ function RootNavigator() {
       <Stack.Screen name="(auth)" />
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="memory" />
+      <Stack.Screen name="note/[id]" />
       <Stack.Screen name="settings" />
       <Stack.Screen name="widget-gallery" options={{ presentation: 'modal' }} />
     </Stack>

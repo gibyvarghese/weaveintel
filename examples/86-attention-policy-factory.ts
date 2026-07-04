@@ -44,7 +44,8 @@ import {
   resolveAgentAttentionPolicy,
   type AgentAttentionFieldsRow,
 } from '../apps/geneweave/src/live-agents/agent-attention-resolver.js';
-import type { AttentionContext, ExecutionContext } from '@weaveintel/live-agents';
+import type { AttentionContext } from '@weaveintel/live-agents';
+import type { ExecutionContext } from '@weaveintel/core';
 
 // ---------------------------------------------------------------------------
 // Minimal execution context stub (enough to satisfy the interface)

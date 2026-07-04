@@ -1,7 +1,7 @@
 /**
  * 38 — Kaggle MCP server (Phase K1, read-only)
  *
- * Demonstrates the @weaveintel/tools-kaggle Phase K1 deliverables end-to-end:
+ * Demonstrates the ../apps/geneweave/src/kaggle/index.js Phase K1 deliverables end-to-end:
  *   1. Boots `createKaggleMCPServer` with the deterministic fixture adapter.
  *   2. Connects an in-process MCP client through the fake transport.
  *   3. Lists the 13 read-only Kaggle MCP tools.
@@ -34,7 +34,7 @@ import {
   createKaggleMCPServer,
   fixtureKaggleAdapter,
   liveKaggleAdapter,
-} from '@weaveintel/tools-kaggle';
+} from '../apps/geneweave/src/kaggle/index.js';
 
 async function main() {
   console.log('── Phase K1: Kaggle MCP server (read-only) ──\n');

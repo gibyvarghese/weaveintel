@@ -16,7 +16,7 @@
  * original from its kind and prepends the corrected row to user-authored.
  */
 
-import type { CreatedMemory, MemoryItem, Memories } from '@geneweave/api-client';
+import type { CreatedMemory, MemoryItem, Memories } from '@weaveintel/api-client';
 
 /** The three memory kinds the server groups by. */
 export type MemoryKind = 'user-authored' | 'semantic' | 'entity';

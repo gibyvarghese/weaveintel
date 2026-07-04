@@ -1,4 +1,5 @@
 import { api } from './api.js';
+import { noticeDialog, confirmDialog, promptDialog } from "./dialog.js";
 import { h } from './dom.js';
 import { state } from './state.js';
 import { normalizeAdminPath } from './prompt-wizard-utils.js';
@@ -96,7 +97,7 @@ async function startKaggleCompetitionRun(
 ): Promise<void> {
   const competitionRef = (row?.competition_ref || '').trim();
   if (!competitionRef) {
-    alert('competition_ref is required to start a live agent run.');
+    void noticeDialog({ message: 'competition_ref is required to start a live agent run.' });
     return;
   }
   try {
@@ -107,20 +108,20 @@ async function startKaggleCompetitionRun(
     });
     if (!resp.ok) {
       const text = await resp.text().catch(() => '');
-      alert(`Failed to start run (HTTP ${resp.status}): ${text || resp.statusText}`);
+      void noticeDialog({ message: `Failed to start run (HTTP ${resp.status}): ${text || resp.statusText}` });
       return;
     }
     const body = await resp.json().catch(() => ({} as any));
     const runId = body?.id ? String(body.id) : '';
     if (trigger) showCopiedToast(trigger);
-    if (runId && confirm(`Live run started.\n\nRun ID: ${runId}\n\nOpen the Kaggle Runs admin tab to track progress?`)) {
+    if (runId && await confirmDialog({ title: 'Live run started', message: `Run ID: ${runId}. Open the Kaggle Runs admin tab to track progress?`, confirmLabel: 'Open', cancelLabel: 'Not now' })) {
       state.adminTab = 'kaggle-competition-runs';
       state.adminListSearch = runId;
       // Trigger a re-render via hash navigation
       window.location.hash = '#admin/kaggle-competition-runs';
     }
   } catch (err) {
-    alert(`Failed to start run: ${err instanceof Error ? err.message : String(err)}`);
+    void noticeDialog({ message: `Failed to start run: ${err instanceof Error ? err.message : String(err)}` });
   }
 }
 
@@ -131,17 +132,17 @@ async function startKaggleCompetitionRun(
     const check = await fetch(`/api/admin/artifacts/${artifactId}/live-config`);
     if (check.ok) {
       // Already live — offer to remove
-      if (!confirm('This artifact is already configured as Live.\n\nRemove the live configuration (make it static)?')) return;
+      if (!(await confirmDialog({ message: 'This artifact is already configured as Live. Remove the live configuration (make it static)?', danger: true, confirmLabel: 'Make static' }))) return;
       const del = await fetch(`/api/admin/artifacts/${artifactId}/live-config`, { method: 'DELETE' });
-      if (del.ok) { alert('Live configuration removed. The artifact is now static.'); }
-      else { alert(`Failed to remove live config: ${await del.text()}`); }
+      if (del.ok) { void noticeDialog({ message: 'Live configuration removed. The artifact is now static.' }); }
+      else { void noticeDialog({ message: `Failed to remove live config: ${await del.text()}` }); }
       return;
     }
-    // Not live — prompt for config
-    const intervalStr = prompt('Auto-refresh interval in seconds (0 = manual only):', '60');
+    // Not live — ask for config via in-app dialogs.
+    const intervalStr = await promptDialog({ title: 'Make artifact live', message: 'Auto-refresh interval in seconds (0 = manual only).', defaultValue: '60', confirmLabel: 'Next' });
     if (intervalStr === null) return; // cancelled
     const interval = parseInt(intervalStr, 10) || 0;
-    const ttlStr = prompt('Cache TTL in seconds (skip refresh if refreshed within this window):', '30');
+    const ttlStr = await promptDialog({ title: 'Cache TTL', message: 'Cache TTL in seconds (skip refresh if refreshed within this window).', defaultValue: '30', confirmLabel: 'Make live' });
     if (ttlStr === null) return;
     const ttl = parseInt(ttlStr, 10) || 30;
     const res = await fetch(`/api/admin/artifacts/${artifactId}/live-config`, {
@@ -150,9 +151,9 @@ async function startKaggleCompetitionRun(
       body: JSON.stringify({ refreshIntervalSeconds: interval, cacheTtlSeconds: ttl }),
     });
     if (res.ok) {
-      alert(`Artifact is now Live!\n\nAuto-refresh: ${interval > 0 ? interval + 's' : 'manual only'}\nCache TTL: ${ttl}s\n\nUse the render-live endpoint to see the refresh toolbar.`);
+      void noticeDialog({ message: `Artifact is now Live!\n\nAuto-refresh: ${interval > 0 ? interval + 's' : 'manual only'}\nCache TTL: ${ttl}s\n\nUse the render-live endpoint to see the refresh toolbar.` });
     } else {
-      alert(`Failed to configure live artifact: ${await res.text()}`);
+      void noticeDialog({ message: `Failed to configure live artifact: ${await res.text()}` });
     }
   }
 
@@ -172,25 +173,23 @@ async function startKaggleCompetitionRun(
       headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf },
       body: JSON.stringify({}),
     });
-    if (!r.ok) { alert(`Failed to create share link: ${await r.text()}`); return; }
+    if (!r.ok) { void noticeDialog({ message: `Failed to create share link: ${await r.text()}` }); return; }
     const d = await r.json() as { url?: string };
     if (d.url) {
       const url = d.url;
-      prompt('Share link (copy it):', url);
       if (navigator.clipboard) navigator.clipboard.writeText(url).catch(() => {});
+      void noticeDialog({ title: 'Share link', message: `Link copied to clipboard:\n\n${url}` });
     }
   }
 
   async function getArtifactEmbedCode(artifactId: string | undefined): Promise<void> {
     if (!artifactId) return;
     const r = await fetch(`/api/artifacts/${artifactId}/embed-code`);
-    if (!r.ok) { alert(`Failed to get embed code: ${await r.text()}`); return; }
+    if (!r.ok) { void noticeDialog({ message: `Failed to get embed code: ${await r.text()}` }); return; }
     const d = await r.json() as { embedCode?: string };
     if (d.embedCode) {
-      const copied = prompt('Embed code (copy the iframe):', d.embedCode);
-      if (copied !== null && navigator.clipboard) {
-        navigator.clipboard.writeText(d.embedCode).catch(() => {});
-      }
+      if (navigator.clipboard) navigator.clipboard.writeText(d.embedCode).catch(() => {});
+      void noticeDialog({ title: 'Embed code', message: `Copied to clipboard — paste this iframe into your page:\n\n${d.embedCode}` });
     }
   }
 
@@ -540,7 +539,7 @@ export async function adminDeleteRow(tab: string, row: any, render: () => void, 
   if (!schema) return;
   const rowId = row?.id ?? row?.[schema.cols?.[0]];
   if (!rowId) return;
-  if (!confirm('Delete this item?')) return;
+  if (!(await confirmDialog({ message: 'Delete this item? This cannot be undone.', danger: true }))) return;
   try {
     const base = normalizeAdminPath(schema.apiPath);
     await api.del(`${base}/${rowId}`);
@@ -664,7 +663,7 @@ export async function adminSaveRow(tab: string, render: () => void, loadAdmin: (
     render();
   } catch (e) {
     console.error('Failed to save admin row:', e);
-    alert('Save failed. Please check the values and try again.');
+    void noticeDialog({ message: 'Save failed. Please check the values and try again.' });
   }
 }
 
@@ -1117,7 +1116,7 @@ export function renderAdminView(options: {
       style: 'background:var(--accent);color:#fff;border-color:var(--accent);',
       onClick: async (e: MouseEvent) => {
         const btn = e.currentTarget as HTMLButtonElement;
-        const pagesRaw = window.prompt('How many pages of Kaggle competitions to fetch? (1–10, ~20 per page)', '3');
+        const pagesRaw = await promptDialog({ title: 'Discover Kaggle competitions', message: 'How many pages of Kaggle competitions to fetch? (1–10, ~20 per page)', defaultValue: '3', confirmLabel: 'Fetch' });
         if (pagesRaw === null) return;
         const pages = Math.max(1, Math.min(10, Number(pagesRaw) || 1));
         const original = btn.textContent;
@@ -1127,14 +1126,14 @@ export function renderAdminView(options: {
           const resp = await api.post('/api/kaggle/competitions/discover', { pages });
           if (!resp.ok) {
             const text = await resp.text().catch(() => '');
-            alert(`Discovery failed (HTTP ${resp.status}): ${text || resp.statusText}`);
+            void noticeDialog({ message: `Discovery failed (HTTP ${resp.status}): ${text || resp.statusText}` });
             return;
           }
           const body = await resp.json().catch(() => ({} as any));
-          alert(`Discovered ${body.inserted ?? 0} competitions across ${body.pages ?? pages} page(s).`);
+          void noticeDialog({ message: `Discovered ${body.inserted ?? 0} competitions across ${body.pages ?? pages} page(s).` });
           options.render();
         } catch (err) {
-          alert(`Discovery failed: ${err instanceof Error ? err.message : String(err)}`);
+          void noticeDialog({ message: `Discovery failed: ${err instanceof Error ? err.message : String(err)}` });
         } finally {
           btn.disabled = false;
           btn.textContent = original;
@@ -1383,7 +1382,7 @@ function showColumnContextMenu(
           const sum = nums.reduce((a, b) => a + b, 0);
           msg += `\nMin: ${Math.min(...nums)}\nMax: ${Math.max(...nums)}\nAvg: ${(sum / nums.length).toFixed(2)}\nSum: ${sum}`;
         }
-        alert(msg);
+        void noticeDialog({ message: msg });
         dismissCol();
       },
     },

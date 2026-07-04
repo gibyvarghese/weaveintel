@@ -1,4 +1,8 @@
 import { h } from './dom.js';
+import { canSeeArea } from './workspace-access.js';
+import { t } from './i18n.js';
+import { iconEl } from './icons.js';
+import { loadingPlaceholder } from './skeleton.js';
 import {
   state,
   getCalendarFocusDate,
@@ -14,16 +18,9 @@ import { pushAdminHash } from './admin-ui.js';
 import { bucketItems, bucketLabel, BUCKET_ORDER, itemCategoryColor, formatItemTime, quickAddAgendaItem } from './agenda-api.js';
 import type { Chat } from './types.js';
 
-function renderSidebarIcon(kind: 'home' | 'connectors' | 'admin' | 'dashboard' | 'calendar' | 'notes') {
-  const iconMap: Record<string, string> = {
-    home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.8V21h13V9.8"/><path d="M9.5 21v-6h5v6"/></svg>',
-    connectors: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h4a2 2 0 0 1 2 2v0"/><path d="M17 17h-4a2 2 0 0 1-2-2v0"/><rect x="3" y="4" width="4" height="6" rx="1.2"/><rect x="17" y="14" width="4" height="6" rx="1.2"/></svg>',
-    admin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a1.7 1.7 0 1 1-2.4 2.4l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V20a1.7 1.7 0 1 1-3.4 0v-.2a1 1 0 0 0-.6-.9 1 1 0 0 0-1.1.2l-.1.1a1.7 1.7 0 1 1-2.4-2.4l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H4a1.7 1.7 0 1 1 0-3.4h.2a1 1 0 0 0 .9-.6 1 1 0 0 0-.2-1.1l-.1-.1a1.7 1.7 0 1 1 2.4-2.4l.1.1a1 1 0 0 0 1.1.2h0a1 1 0 0 0 .6-.9V4a1.7 1.7 0 1 1 3.4 0v.2a1 1 0 0 0 .6.9h0a1 1 0 0 0 1.1-.2l.1-.1a1.7 1.7 0 1 1 2.4 2.4l-.1.1a1 1 0 0 0-.2 1.1v0a1 1 0 0 0 .9.6H20a1.7 1.7 0 1 1 0 3.4h-.2a1 1 0 0 0-.9.6z"/></svg>',
-    dashboard: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="1.2"/><rect x="13" y="3" width="8" height="5" rx="1.2"/><rect x="13" y="10" width="8" height="11" rx="1.2"/><rect x="3" y="13" width="8" height="8" rx="1.2"/></svg>',
-    calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
-    notes: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>',
-  };
-  return h('span', { className: 'side-icon', innerHTML: iconMap[kind] || iconMap['home'] });
+function renderSidebarIcon(kind: 'home' | 'connectors' | 'admin' | 'dashboard' | 'calendar' | 'notes' | 'design' | 'builder') {
+  // Single source of truth for every icon in the app (ui/icons.ts) — the same set the menus use.
+  return iconEl(kind, 'side-icon');
 }
 
 export function renderWorkspaceNav(options: {
@@ -44,14 +41,27 @@ export function renderWorkspaceNav(options: {
     'aria-label': 'Application navigation',
   });
   const navScroll = h('div', { className: 'workspace-nav-scroll', id: 'workspace-nav-scroll' });
-  navScroll.addEventListener('scroll', () => { state.sidebarScrollTop = navScroll.scrollTop; }, { passive: true });
+  navScroll.addEventListener('scroll', () => {
+    // Ignore scroll events fired by the programmatic scroll-restore (they can be clamped/transient during a
+    // render burst); only persist real user scrolls.
+    if (!state.suppressSidebarScrollPersist) state.sidebarScrollTop = navScroll.scrollTop;
+  }, { passive: true });
   const scrollSidebarBy = (delta: number) => {
     navScroll.scrollBy({ top: delta, behavior: 'smooth' });
   };
   nav.appendChild(
     h('div', { className: 'brand' },
-      h('span', { className: 'brand-mark' }, '✦'),
-      h('span', { className: 'word' }, 'geneWeave'),
+      // The logo lockup is a real control that routes HOME from any view (WCAG-friendly + expected UX).
+      h('button', {
+        type: 'button',
+        className: 'brand-home',
+        'aria-label': 'geneWeave home',
+        title: 'Home',
+        onClick: () => { state.view = 'chat'; options.render(); },
+      },
+        h('span', { className: 'brand-mark', 'aria-hidden': 'true' }, '✦'),
+        h('span', { className: 'word' }, 'geneWeave'),
+      ),
       h('button', {
         type: 'button',
         className: 'sidebar-collapse-btn',
@@ -127,11 +137,17 @@ export function renderWorkspaceNav(options: {
   };
 
   const menu = h('div', { className: 'workspace-menu', role: 'navigation', 'aria-label': 'Main menu' });
-  menu.appendChild(navBtn('chat', 'Home', renderSidebarIcon('home'), () => { state.view = 'chat'; options.render(); }));
-  menu.appendChild(navBtn('calendar', 'Calendar', renderSidebarIcon('calendar'), () => { state.view = 'calendar'; options.render(); }));
-  menu.appendChild(navBtn('notes', 'Notes', renderSidebarIcon('notes'), () => { state.view = 'notes'; options.render(); }));
-  menu.appendChild(navBtn('dashboard', 'Dashboard', renderSidebarIcon('dashboard'), () => { state.view = 'dashboard'; void options.loadDashboard(); }));
-  menu.appendChild(navBtn('connectors', 'Connectors', renderSidebarIcon('connectors'), () => { options.openConnectorsView(); }));
+  // m145 — labels come from the i18n catalog (t()) so the nav is shown in the reader's language.
+  menu.appendChild(navBtn('chat', t('nav.home'), renderSidebarIcon('home'), () => { state.view = 'chat'; options.render(); }));
+  menu.appendChild(navBtn('calendar', t('nav.calendar'), renderSidebarIcon('calendar'), () => { state.view = 'calendar'; options.render(); }));
+  menu.appendChild(navBtn('notes', t('nav.notes'), renderSidebarIcon('notes'), () => { state.view = 'notes'; options.render(); }));
+  // m143 — RBAC surface parity: only show an area if this user is allowed to (server-computed). Chat / Notes /
+  // Calendar / Home are always visible; Builder + Admin are admin-only; Design / Dashboard / Connectors are
+  // member-visible only when the workspace's role policy allows.
+  if (canSeeArea('design')) menu.appendChild(navBtn('design', t('nav.design'), renderSidebarIcon('design'), () => { state.view = 'design'; options.render(); }));
+  if (canSeeArea('builder')) menu.appendChild(navBtn('builder', t('nav.builder'), renderSidebarIcon('builder'), () => { state.view = 'builder'; options.render(); }));
+  if (canSeeArea('dashboard')) menu.appendChild(navBtn('dashboard', t('nav.dashboard'), renderSidebarIcon('dashboard'), () => { state.view = 'dashboard'; void options.loadDashboard(); }));
+  if (canSeeArea('connectors')) menu.appendChild(navBtn('connectors', t('nav.connectors'), renderSidebarIcon('connectors'), () => { options.openConnectorsView(); }));
   menu.appendChild(h('button', {
     type: 'button',
     className: state.view === 'scientific-validation' ? 'active' : '',
@@ -141,7 +157,7 @@ export function renderWorkspaceNav(options: {
     onClick: () => { state.view = 'scientific-validation'; options.render(); },
   },
     h('span', { className: 'side-icon', style: 'font-size:15px', 'aria-hidden': 'true' }, '🔬'),
-    h('span', { className: 'nav-label' }, 'Validation')
+    h('span', { className: 'nav-label' }, t('nav.validation'))
   ));
 
   const adminNode = h('div', { className: 'admin-nav-tree' });
@@ -162,7 +178,7 @@ export function renderWorkspaceNav(options: {
       options.render();
       void options.loadAdmin();
     },
-  }, renderSidebarIcon('admin'), h('span', { className: 'nav-label' }, 'Admin'), h('span', { className: `admin-caret${state.adminMenuExpanded ? ' open' : ''}`, 'aria-hidden': 'true' }, '▾')));
+  }, renderSidebarIcon('admin'), h('span', { className: 'nav-label' }, t('nav.admin')), h('span', { className: `admin-caret${state.adminMenuExpanded ? ' open' : ''}`, 'aria-hidden': 'true' }, '▾')));
 
   if (state.adminMenuExpanded && !state.sidebarCollapsed) {
     const sub = h('div', { className: 'admin-nav-sub' });
@@ -182,6 +198,8 @@ export function renderWorkspaceNav(options: {
           groupList.appendChild(h('button', {
             className: `admin-subtab${state.view === 'admin' && state.adminTab === tab.key ? ' active' : ''}`,
             'data-admin-tab': tab.key,
+            'data-focus-key': `admin-tab-${tab.key}`,
+            'aria-current': state.view === 'admin' && state.adminTab === tab.key ? 'page' : null,
             onClick: () => {
               state.view = 'admin';
               if (state.adminTab !== tab.key) {
@@ -206,6 +224,8 @@ export function renderWorkspaceNav(options: {
         groupList.appendChild(h('button', {
           className: `admin-subtab${state.view === 'admin' && state.adminTab === tabKey ? ' active' : ''}`,
           'data-admin-tab': tabKey,
+          'data-focus-key': `admin-tab-${tabKey}`,
+          'aria-current': state.view === 'admin' && state.adminTab === tabKey ? 'page' : null,
           onClick: () => {
             state.view = 'admin';
             if (state.adminTab !== tabKey) {
@@ -224,7 +244,7 @@ export function renderWorkspaceNav(options: {
 
     adminNode.appendChild(sub);
   }
-  menu.appendChild(adminNode);
+  if (canSeeArea('admin')) menu.appendChild(adminNode); // m143 — Admin tree is admin-only (surface parity)
   navScroll.appendChild(menu);
 
   if (typeof state.recentChatsExpanded !== 'boolean') {
@@ -239,7 +259,7 @@ export function renderWorkspaceNav(options: {
         options.render();
       },
     },
-      h('span', { className: 'workspace-history-label' }, 'Recent Chats'),
+      h('span', { className: 'workspace-history-label' }, t('nav.recentChats')),
       h('span', { className: `admin-caret${state.recentChatsExpanded ? ' open' : ''}` }, '▾')
     ),
     ...(!state.sidebarCollapsed && state.recentChatsExpanded
@@ -247,9 +267,24 @@ export function renderWorkspaceNav(options: {
           ? state.chats.slice(0, 14).map((chat: Chat) =>
               h('div', {
                   className: 'chat-item' + (state.currentChatId === chat.id ? ' active' : ''),
+                  // Keyboard-operable + SR-navigable: a role=button div (can't be a real <button> because it
+                  // wraps a nested delete <button>), tab-focusable, Enter/Space activates, and aria-current
+                  // marks the open chat for assistive tech.
+                  role: 'button',
+                  tabindex: '0',
+                  'data-focus-key': `chat-${chat.id}`,
+                  'aria-current': state.currentChatId === chat.id ? 'page' : null,
+                  'aria-label': `Open chat: ${chat.title || 'New Chat'}`,
                   onClick: () => {
                     state.view = 'chat';
                     if (state.currentChatId !== chat.id) void options.selectChat(chat.id);
+                  },
+                  onKeyDown: (e: KeyboardEvent) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      state.view = 'chat';
+                      if (state.currentChatId !== chat.id) void options.selectChat(chat.id);
+                    }
                   },
                 },
                 h('div', { className: 'chat-item-copy' },
@@ -292,7 +327,14 @@ export function renderWorkspaceTopCard(options: {
   const profileAnchor = h('div', { className: 'dropdown-anchor' });
   const profileBtn = h(
     'button',
-    { className: 'profile-avatar', title: 'Profile and preferences', onClick: openProfile },
+    {
+      className: 'profile-avatar',
+      title: 'Profile and preferences',
+      'aria-label': 'Profile and preferences',
+      'aria-haspopup': 'true',
+      'aria-expanded': state.showProfile ? 'true' : 'false',
+      onClick: openProfile,
+    },
     h('img', {
       src: getUserAvatarUrl(),
       alt: userName,
@@ -330,7 +372,7 @@ export function renderWorkspaceTopCard(options: {
       h('input', {
         type: 'text',
         value: state.chatSearchQuery || '',
-        placeholder: 'Search chats...',
+        placeholder: t('chat.searchPlaceholder'),
         onInput: (e: Event) => {
           state.chatSearchQuery = (e.target as HTMLInputElement).value || '';
           options.render();
@@ -350,9 +392,20 @@ export function renderWorkspaceTopCard(options: {
                   'div',
                   {
                     className: 'search-item',
+                    // H11 — keyboard-operable + SR-navigable (was a bare div onClick).
+                    role: 'button',
+                    tabindex: '0',
+                    'aria-label': `Open chat: ${chat.title || 'New Chat'}`,
                     onClick: () => {
                       state.chatSearchQuery = '';
                       void options.selectChat(chat.id);
+                    },
+                    onKeyDown: (e: KeyboardEvent) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        state.chatSearchQuery = '';
+                        void options.selectChat(chat.id);
+                      }
                     },
                   },
                   h('div', { className: 'ttl' }, chat.title || 'New Chat'),
@@ -371,8 +424,8 @@ export function renderWorkspaceTopCard(options: {
         className: 'nav-btn',
         title: 'Developer Documentation',
         onClick: () => { window.open('/docs', '_blank', 'noopener'); },
-      }, '? Docs'),
-      h('button', { className: 'nav-btn', onClick: () => { void options.createChat(); } }, '+ New Chat'),
+      }, `? ${t('action.docs')}`),
+      h('button', { className: 'nav-btn', onClick: () => { void options.createChat(); } }, `+ ${t('action.newChat')}`),
       profileAnchor
     )
   );
@@ -406,7 +459,13 @@ export function renderCalendarWidget(render: () => void): HTMLElement {
     const dYMD = toYMD(d);
     monthCells.push(h('div', {
       className: `md${counts[dYMD] ? ' has' : ''}${dYMD === selectedYMD ? ' active' : ''}`,
+      // H11 + FP-D — keyboard-operable + the selected day marked for assistive tech.
+      role: 'button',
+      tabindex: '0',
+      'aria-label': d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }) + (counts[dYMD] ? `, ${counts[dYMD]} item${counts[dYMD] === 1 ? '' : 's'}` : ''),
+      'aria-current': dYMD === selectedYMD ? 'date' : null,
       onClick: () => { setCalendarFocusDate(d); render(); },
+      onKeyDown: (e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCalendarFocusDate(d); render(); } },
     }, String(day)));
   }
 
@@ -488,7 +547,13 @@ export function renderCalendarWidget(render: () => void): HTMLElement {
             h('div', {
               className: `day-chip${toYMD(d) === selectedYMD ? ' active' : ''}`,
               title: `${counts[toYMD(d)] ?? 0} items`,
+              // H11 + FP-D — keyboard-operable day chip with the selected day marked.
+              role: 'button',
+              tabindex: '0',
+              'aria-label': d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }) + `, ${counts[toYMD(d)] ?? 0} items`,
+              'aria-current': toYMD(d) === selectedYMD ? 'date' : null,
               onClick: () => { setCalendarFocusDate(d); render(); },
+              onKeyDown: (e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCalendarFocusDate(d); render(); } },
             },
             h('div', { className: 'dw' }, d.toLocaleDateString(undefined, { weekday: 'short' })),
             h('div', { className: 'dn' }, String(d.getDate()).padStart(2, '0'))
@@ -587,7 +652,10 @@ export function renderActionsWidget(selectChat: (chatId: string) => Promise<void
       ? h('div', { className: 'action-item' }, h('div', { className: 'as' }, state.actionFeedLoading ? 'Loading…' : 'No actions'))
       : null,
     filtered.length > 10
-      ? h('div', { className: 'af-more', onClick: () => { state.view = 'actions'; render(); } }, `+${filtered.length - 10} more`)
+      ? h('div', { className: 'af-more', role: 'button', tabindex: '0', 'aria-label': `Show all ${filtered.length} actions`,
+          onClick: () => { state.view = 'actions'; render(); },
+          onKeyDown: (e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); state.view = 'actions'; render(); } },
+        }, `+${filtered.length - 10} more`)
       : null,
   );
 
@@ -612,7 +680,8 @@ export function renderProfileDropdown(options: {
     h('div', { className: 'pf-name' }, user.name || 'User'),
     h('div', { className: 'pf-email' }, user.email || ''),
     h('div', { className: 'pf-divider' }),
-    h('button', { className: 'pf-btn', onClick: () => { state.view = 'preferences'; state.showProfile = false; options.render(); } }, '⚙ Preferences'),
+    h('button', { className: 'pf-btn', onClick: () => { state.view = 'account'; state.accountSection = 'profile'; state.showProfile = false; options.render(); } }, '👤 Profile & account'),
+    h('button', { className: 'pf-btn', onClick: () => { state.view = 'account'; state.accountSection = 'prefs'; state.showProfile = false; options.render(); } }, '⚙ Preferences'),
     h('button', { className: 'pf-btn', onClick: () => { state.view = 'dashboard'; state.showProfile = false; options.render(); void options.loadDashboard(); } }, '📊 Dashboard'),
     h('button', { className: 'pf-btn', onClick: () => { state.view = 'admin'; state.adminMenuExpanded = true; state.showProfile = false; options.render(); void options.loadAdmin(); } }, '⚙ Admin'),
     h('div', { className: 'pf-divider' }),
@@ -630,7 +699,7 @@ export function renderDashboardView(options: {
   const dashboard = state.dashboard;
   const view = h('div', { className: 'dash-view' }, h('h2', null, 'Dashboard'));
   if (!dashboard || !dashboard.overview) {
-    view.appendChild(h('div', { className: 'empty-chat' }, 'Loading dashboard...'));
+    view.appendChild(loadingPlaceholder('cards', 'Loading dashboard…')); // m144 — skeleton instead of a blank flash
     return view;
   }
 

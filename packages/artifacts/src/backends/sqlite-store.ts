@@ -7,7 +7,7 @@
  *
  * This module uses a dynamic import for better-sqlite3 so that the
  * @weaveintel/artifacts package itself does not take a hard dependency
- * on better-sqlite3. The caller (geneWeave) already has it available.
+ * on better-sqlite3. The caller (the host application) already has it available.
  */
 
 import { newUUIDv7 } from '@weaveintel/core';

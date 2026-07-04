@@ -1,5 +1,5 @@
 /**
- * @weaveintel/prompts — Prompt optimizer abstraction (Phase 7)
+ * @weaveintel/prompts — Prompt optimizer abstraction
  *
  * Optimizers are pluggable components that can propose improved prompt text
  * while preserving auditability through deterministic diff metadata.

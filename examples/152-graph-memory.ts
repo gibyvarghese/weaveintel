@@ -18,11 +18,35 @@
  *   npx ts-node examples/152-graph-memory.ts
  */
 
-import { weaveContext, weaveRuntime } from '@weaveintel/core';
-import type { Tool } from '@weaveintel/core';
+import { weaveContext, weaveRuntime, capabilityId } from '@weaveintel/core';
+import type { Tool, Model, ModelResponse, ToolCall } from '@weaveintel/core';
 import { weaveAgent, createGraphMemoryToolSet, createGraphMemoryToolRegistry } from '@weaveintel/agents';
-import { createGraphMemoryStore } from '@weaveintel/graph';
-import { createMockModel } from '@weaveintel/devtools';
+import { createGraphMemoryStore } from '@weaveintel/memory';
+
+// A tiny scripted model: returns each step's response in order, emitting tool
+// calls (finishReason 'tool_calls') until a plain-content step ends the run.
+// The devtools createMockModel only scripts plain-text responses, so the graph
+// tool-calling flow is driven by this local helper.
+type ScriptStep = { toolCalls: ToolCall[] } | { content: string };
+
+function createScriptedModel(steps: ScriptStep[]): Model {
+  let idx = 0;
+  const capabilities = new Set([capabilityId('chat')]);
+  return {
+    info: { provider: 'mock', modelId: 'scripted-graph', capabilities },
+    capabilities,
+    hasCapability: (id) => capabilities.has(id),
+    async generate(): Promise<ModelResponse> {
+      const step = steps[Math.min(idx, steps.length - 1)];
+      idx++;
+      const usage = { promptTokens: 10, completionTokens: 10, totalTokens: 20 };
+      if ('toolCalls' in step) {
+        return { id: `s${idx}`, content: '', toolCalls: step.toolCalls, finishReason: 'tool_calls', model: 'scripted-graph', usage };
+      }
+      return { id: `s${idx}`, content: step.content, toolCalls: [], finishReason: 'stop', model: 'scripted-graph', usage };
+    },
+  };
+}
 
 // Helper: call a tool's invoke method directly (for direct use outside agents)
 async function invokeTool(tool: Tool, args: Record<string, unknown>) {
@@ -48,7 +72,7 @@ async function scenario1BuildKnowledgeGraph() {
   const store = createGraphMemoryStore();
   const registry = createGraphMemoryToolRegistry(store);
 
-  const model = createMockModel([
+  const model = createScriptedModel([
     // Add Alice
     { toolCalls: [{ id: 'tc1', name: 'graph_entity_add', arguments: JSON.stringify({ id: 'person:alice', type: 'person', name: 'Alice Chen', properties: { role: 'engineer', team: 'backend' } }) }] },
     // Add ACME Corp
@@ -94,7 +118,7 @@ async function scenario2SearchAndUpsert() {
   await invokeTool(addTool, { type: 'person', name: 'Bob Jones', properties: { role: 'marketing' } });
   await invokeTool(addTool, { type: 'product', name: 'WeaveChat', properties: { status: 'GA' } });
 
-  const model = createMockModel([
+  const model = createScriptedModel([
     // Search for "Bob"
     { toolCalls: [{ id: 'tc1', name: 'graph_entity_search', arguments: JSON.stringify({ query: 'Bob', limit: 5 }) }] },
     // Upsert Bob Smith with additional properties

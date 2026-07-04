@@ -1,5 +1,5 @@
 /**
- * @geneweave/api-client — typed client for the geneWeave /api/me surface.
+ * @weaveintel/api-client — typed client for the geneWeave /api/me surface.
  *
  * Wraps an injectable transport with bearer-token + CSRF injection from a
  * pluggable {@link TokenStore}, and exposes zod-validated typed methods for the
@@ -64,9 +64,10 @@ export {
   // Agenda + Calendar (WC2-WC5)
   type AgendaItem,
   type AgendaCategory,
-  // Notes (WC6-WC10)
+  // Notes (WC6-WC10 + Phase 7 mobile)
   type NoteListItem,
   type NoteDoc,
+  type NotesCapabilities,
 } from './client.js';
 
 // Run primitives re-exported from @weaveintel/client that appear in this
@@ -78,7 +79,7 @@ export {
   emptyRunViewModel,
   // Phase 5 — UX primitives: the framework-agnostic run-session controller and
   // the single SSE parser, surfaced so hosts (mobile, web-React via
-  // @weaveintel/react-client) configure them without importing @weaveintel/client.
+  // @weaveintel/client/react) configure them without importing @weaveintel/client.
   createRunSession,
   RUN_SESSION_SCHEMA_VERSION,
   RunResumeExpiredError,

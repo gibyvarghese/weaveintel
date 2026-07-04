@@ -15,6 +15,7 @@
 
 import { h } from './dom.js';
 import { api } from './api.js';
+import { noticeDialog, confirmDialog } from "./dialog.js";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -146,7 +147,7 @@ async function createClient(render: () => void): Promise<void> {
 }
 
 async function rotateClient(client: GatewayClient, render: () => void): Promise<void> {
-  if (!confirm(`Rotate the bearer token for "${client.name}"? The current token will stop working immediately.`)) return;
+  if (!(await confirmDialog({ message: `Rotate the bearer token for "${client.name}"? The current token will stop working immediately.`, danger: true }))) return;
   clientsState.acting[client.id] = 'rotating';
   clientsState.actionError[client.id] = '';
   render();
@@ -172,7 +173,7 @@ async function rotateClient(client: GatewayClient, render: () => void): Promise<
 }
 
 async function revokeClient(client: GatewayClient, render: () => void): Promise<void> {
-  if (!confirm(`Revoke client "${client.name}"? It will be soft-disabled but kept for audit history.`)) return;
+  if (!(await confirmDialog({ message: `Revoke client "${client.name}"? It will be soft-disabled but kept for audit history.`, danger: true }))) return;
   clientsState.acting[client.id] = 'revoking';
   render();
   try {
@@ -187,7 +188,7 @@ async function revokeClient(client: GatewayClient, render: () => void): Promise<
 }
 
 async function deleteClient(client: GatewayClient, render: () => void): Promise<void> {
-  if (!confirm(`Permanently delete client "${client.name}"? This removes the row entirely.`)) return;
+  if (!(await confirmDialog({ message: `Permanently delete client "${client.name}"? This removes the row entirely.`, danger: true }))) return;
   clientsState.acting[client.id] = 'deleting';
   render();
   try {

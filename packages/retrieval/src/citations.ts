@@ -3,7 +3,10 @@
  */
 import type { RetrievalResult, DocumentChunk } from '@weaveintel/core';
 
-export interface Citation {
+// The retrieval-chunk citation model (one entry per retrieved chunk). Named
+// `ExtractedCitation` so the canonical `Citation` (a character-verified quote
+// citation) can live in this package's RAG module — see `rag.ts`.
+export interface ExtractedCitation {
   index: number;
   chunkId: string;
   documentId: string;
@@ -13,14 +16,14 @@ export interface Citation {
 }
 
 export interface CitationResult {
-  citations: Citation[];
+  citations: ExtractedCitation[];
   formatted: string;
 }
 
 export function weaveCitationExtractor() {
   return {
     extract(result: RetrievalResult): CitationResult {
-      const citations: Citation[] = result.chunks.map((chunk, i) => ({
+      const citations: ExtractedCitation[] = result.chunks.map((chunk, i) => ({
         index: i + 1,
         chunkId: chunk.id,
         documentId: chunk.documentId,

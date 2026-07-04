@@ -1,45 +1,44 @@
 # @weaveintel/provider-openai
 
-OpenAI provider adapter for weaveIntel — chat completions, embeddings, and streaming.
+**The adapter that lets weaveIntel talk to OpenAI's models — chat, embeddings, images, and audio — through the framework's common provider interface.**
 
-## Features
+## Why it exists
 
-- **Auto-capability detection** — Detects chat, reasoning, vision, tool calling, streaming, and structured output capabilities based on model ID
-- **Streaming** — Native SSE streaming with proper chunk parsing
-- **Embeddings** — Full embedding model support via `createOpenAIEmbedding()`
-- **Auto-registration** — Importing this package registers `'openai'` as a provider in the model router
+Every AI vendor speaks its own dialect: the request shape, the field names, the way tool calls and images come back are all a little different. Wire your app straight to one vendor and switching later means a rewrite. Think of this package as a power adapter for travelling abroad — your laptop (the rest of weaveIntel) plugs into the same socket everywhere, and the adapter handles the local wiring. This one handles the OpenAI socket, and it covers the widest range of what OpenAI offers.
 
-## Usage
+## When to reach for it
 
-```typescript
-// Option 1: Direct creation
-import { createOpenAIModel, createOpenAIEmbedding } from '@weaveintel/provider-openai';
+Reach for this when you want your agents and pipelines to run on OpenAI — GPT chat models, embeddings, the agentic Responses API, image generation, text-to-speech and speech-to-text, moderation, managed vector stores, files, or fine-tuning. Prefer Claude instead? Use `@weaveintel/provider-anthropic`. Prefer Gemini? Use `@weaveintel/provider-google`. Want models on your own machine? Use `@weaveintel/provider-ollama` or `@weaveintel/provider-llamacpp`. The consuming code stays the same whichever you pick.
 
-const model = createOpenAIModel({ apiKey: '...', model: 'gpt-4o' });
-const embedding = createOpenAIEmbedding({ apiKey: '...' });
+## How to use it
 
-// Option 2: Via router (import triggers auto-registration)
-import '@weaveintel/provider-openai';
-import { createModel, createEmbeddingModel } from '@weaveintel/models';
+```ts
+import { weaveOpenAI } from '@weaveintel/provider-openai';
 
-const model = createModel({ provider: 'openai', model: 'gpt-4o' });
-const embedding = createEmbeddingModel({ provider: 'openai', model: 'text-embedding-3-small' });
+// One GPT instance, ready behind the framework's common interface.
+const model = weaveOpenAI('gpt-4o');
 
-// Option 3: Global config
-import { configureOpenAI, openai, openaiEmbedding } from '@weaveintel/provider-openai';
+const reply = await model.generate({
+  messages: [{ role: 'user', content: 'Explain photosynthesis in one sentence.' }],
+});
 
-configureOpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const model = openai('gpt-4o');
-const embedding = openaiEmbedding('text-embedding-3-small');
+console.log(reply.text);
 ```
 
-## API
+## What's in the box
 
-| Export | Description |
-|---|---|
-| `createOpenAIModel(opts)` | Create an OpenAI chat model |
-| `createOpenAIEmbedding(modelId?, opts?)` | Create an OpenAI embedding model |
-| `configureOpenAI(opts)` | Set global API key and options |
-| `openai(modelId, opts?)` | Convenience — create model with global config |
-| `openaiEmbedding(modelId?, opts?)` | Convenience — create embedding with global config |
-| `OpenAIProviderOptions` | Configuration type (apiKey, baseUrl, organization, etc.) |
+| Export | What it does |
+| --- | --- |
+| `weaveOpenAI`, `weaveOpenAIModel`, `weaveOpenAIConfig` | Chat models — the quick helper, the class, and its config. |
+| `weaveOpenAIEmbedding`, `weaveOpenAIEmbeddingModel` | Turn text into vectors for search and retrieval. |
+| `weaveOpenAIResponses`, `weaveOpenAIResponseModel` | The Responses API — an agentic loop with built-in tools. |
+| `weaveOpenAIImage`, `weaveOpenAIImageModel`, `buildImageGenerationBody`, `isGptImageModel` | Generate and edit images. |
+| `weaveOpenAIAudio`, `weaveOpenAIAudioModel` | Text-to-speech and speech-to-text. |
+| `weaveOpenAIVectorStore`, `weaveOpenAIVectorStoreClient` | Create and query OpenAI's managed vector stores. |
+| `weaveOpenAIFiles`, `weaveOpenAIFileStorage` | Upload and manage files. |
+| `weaveOpenAIModeration`, `weaveOpenAIModerationModel` | Check content against OpenAI's moderation model. |
+| `weaveOpenAIFineTuning`, `weaveOpenAIFineTuningProvider` | Run and manage fine-tuning jobs. |
+
+## License
+
+MIT.

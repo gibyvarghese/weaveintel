@@ -1,5 +1,5 @@
 /**
- * @weaveintel/guardrails — Phase 4 evaluators test suite
+ * @weaveintel/guardrails — evaluators test suite
  *
  * Covers:
  *   POSITIVE  — evaluators correctly allow benign inputs

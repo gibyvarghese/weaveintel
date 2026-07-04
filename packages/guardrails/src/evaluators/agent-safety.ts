@@ -1,5 +1,5 @@
 /**
- * @weaveintel/guardrails — evaluators/agent-safety.ts  (Phase 4)
+ * @weaveintel/guardrails — evaluators/agent-safety.ts
  *
  * LLM-judge evaluators for multi-agent-era safety threats:
  *

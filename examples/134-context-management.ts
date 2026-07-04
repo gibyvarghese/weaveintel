@@ -69,7 +69,7 @@ await agent1.run(ctx, {
 const seen1 = model1.seenMessages[0]!;
 console.log(`Model received ${seen1.length} messages (~${estimateTokens(seen1)} tokens)`);
 console.log(`System message preserved: ${seen1[0]?.role === 'system'}`);
-console.log(`Oldest user turns dropped: ${!seen1.some((m) => m.content?.includes('turn 1'))}`);
+console.log(`Oldest user turns dropped: ${!seen1.some((m) => typeof m.content === 'string' && m.content.includes('turn 1'))}`);
 
 // ── Strategy 2: sliding_window ────────────────────────────────────────────────
 
@@ -87,7 +87,7 @@ await agent2.run(ctx, {
 const seen2 = model2.seenMessages[0]!;
 const nonSystem2 = seen2.filter((m) => m.role !== 'system');
 console.log(`Non-system messages kept: ${nonSystem2.length} (of ${longHistory.length - 1} original)`);
-console.log(`Most recent content present: ${seen2.some((m) => m.content?.includes('turn 10'))}`);
+console.log(`Most recent content present: ${seen2.some((m) => typeof m.content === 'string' && m.content.includes('turn 10'))}`);
 
 // ── Strategy 3: summarize ─────────────────────────────────────────────────────
 
@@ -116,5 +116,5 @@ await agent3.run(ctx, {
 });
 const seen3 = model3.seenMessages[0]!;
 console.log(`summarize() called: ${summaryCalls.length > 0}`);
-console.log(`Summary injected: ${seen3.some((m) => m.content?.includes('Conversation summary'))}`);
-console.log(`Recent turns preserved: ${seen3.some((m) => m.content?.includes('turn 10'))}`);
+console.log(`Summary injected: ${seen3.some((m) => typeof m.content === 'string' && m.content.includes('Conversation summary'))}`);
+console.log(`Recent turns preserved: ${seen3.some((m) => typeof m.content === 'string' && m.content.includes('turn 10'))}`);

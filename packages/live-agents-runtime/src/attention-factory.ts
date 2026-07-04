@@ -34,11 +34,11 @@ import {
 
 // ---------------------------------------------------------------------------
 // Minimal DB interface (subset of DatabaseAdapter) — lets callers inject
-// the full GeneWeave adapter without this package depending on geneweave.
+// the full host-app adapter without this package depending on the host app.
 // ---------------------------------------------------------------------------
 
 /**
- * Minimal subset of the GeneWeave `DatabaseAdapter` that this factory needs.
+ * Minimal subset of the host `DatabaseAdapter` that this factory needs.
  * Any object exposing `getLiveAttentionPolicyByKey` satisfies this interface.
  */
 export interface AttentionPolicyDb {
@@ -47,7 +47,7 @@ export interface AttentionPolicyDb {
 
 /**
  * Shape of a `live_attention_policies` row.  Mirrors `LiveAttentionPolicyRow`
- * from `@weaveintel/geneweave` without taking a dependency on the app package.
+ * from the host application without taking a dependency on the app package.
  */
 export interface AttentionPolicyRowLike {
   id: string;

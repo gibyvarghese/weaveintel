@@ -5,14 +5,27 @@
     "rootDir": "./src",
     "composite": true
   },
-  "include": ["src"],
+  "include": [
+    "src"
+  ],
   "references": [
-    { "path": "../core" },
-    { "path": "../agents" },
-    { "path": "../tools" },
-    { "path": "../observability" },
-    { "path": "../persistence" },
-    { "path": "../resilience" },
-    { "path": "../reliability" }
+    {
+      "path": "../core"
+    },
+    {
+      "path": "../agents"
+    },
+    {
+      "path": "../tools"
+    },
+    {
+      "path": "../observability"
+    },
+    {
+      "path": "../persistence"
+    },
+    {
+      "path": "../resilience"
+    }
   ]
 }

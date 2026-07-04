@@ -49,6 +49,9 @@ function createInMemoryStore(): EncryptionStore {
     async upsertPolicy(p) {
       policies.set(p.tenantId, p);
     },
+    async deletePolicy(t) {
+      policies.delete(t);
+    },
     async listKeks(t) {
       return keks.filter((k) => k.tenantId === t);
     },
@@ -60,6 +63,9 @@ function createInMemoryStore(): EncryptionStore {
       if (!r) return;
       (r as { status: KekRecord['status'] }).status = status;
       (r as { rotatedAt: number | null }).rotatedAt = at ?? null;
+    },
+    async getKekById(t, kekId) {
+      return keks.find((k) => k.tenantId === t && k.id === kekId) ?? null;
     },
     async listDeks(t) {
       return deks.filter((d) => d.tenantId === t);
@@ -73,6 +79,14 @@ function createInMemoryStore(): EncryptionStore {
       (r as { status: DekRecord['status'] }).status = status;
       (r as { rotatedAt: number | null }).rotatedAt = at ?? null;
     },
+    async getDekById(t, dekId) {
+      return deks.find((d) => d.tenantId === t && d.id === dekId) ?? null;
+    },
+    async getMaxDekEpoch(t) {
+      const active = deks.filter((d) => d.tenantId === t && d.status === 'active');
+      if (active.length === 0) return null;
+      return active.reduce((max, d) => Math.max(max, d.epoch), 0);
+    },
     async listBiks(t) {
       return biks.filter((b) => b.tenantId === t);
     },
@@ -83,7 +97,7 @@ function createInMemoryStore(): EncryptionStore {
       const r = biks.find((b) => b.id === id);
       if (!r) return;
       (r as { status: BikRecord['status'] }).status = status;
-      (r as { rotatedAt: number | null }).rotatedAt = at ?? null;
+      (r as { revokedAt: number | null }).revokedAt = at ?? null;
     },
     async deleteAllWrappedMaterial(tenantId) {
       const k = keks.filter((x) => x.tenantId === tenantId).length;

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/live-agents — LLM loop scaffold (Phase 2.5).
+ * @weaveintel/live-agents — LLM loop scaffold.
  *
  * This sub-folder owns the live-agents-specific ReAct loop. It is the
  * SEAM between the live-agents runtime (heartbeat, attention, action

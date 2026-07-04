@@ -18,11 +18,11 @@
  *
  * ─── Packages used ──────────────────────────────────────────────────────────
  *   @weaveintel/core                — weaveContext
- *   @weaveintel/tools-marketdata   — fixtureMarketDataAdapter
- *   @weaveintel/tools-news         — fixtureNewsAdapter
- *   @weaveintel/tools-altdata      — fixtureAltDataAdapter
- *   @weaveintel/equity-scoring     — scoreUniverse, strategies
- *   @weaveintel/tools-broker       — createBrokerMCPServer, paperBrokerAdapter
+ *   @weaveintel/tools/marketdata   — fixtureMarketDataAdapter
+ *   @weaveintel/tools/news         — fixtureNewsAdapter
+ *   @weaveintel/tools/altdata      — fixtureAltDataAdapter
+ *   ./verticals/equity-scoring/src/index.js     — scoreUniverse, strategies
+ *   @weaveintel/tools/broker       — createBrokerMCPServer, paperBrokerAdapter
  *   @weaveintel/testing            — weaveFakeTransport
  *   @weaveintel/mcp-client         — weaveMCPClient
  *
@@ -30,13 +30,13 @@
  */
 
 import { weaveContext, type ExecutionContext } from '@weaveintel/core';
-import { fixtureMarketDataAdapter } from '@weaveintel/tools-marketdata';
-import { fixtureNewsAdapter } from '@weaveintel/tools-news';
-import { fixtureAltDataAdapter } from '@weaveintel/tools-altdata';
-import { scoreUniverse, strategies } from '@weaveintel/equity-scoring';
-import type { InputBundle, SymbolScore } from '@weaveintel/equity-scoring';
-import { createBrokerMCPServer, paperBrokerAdapter } from '@weaveintel/tools-broker';
-import type { PaperBrokerAdapter } from '@weaveintel/tools-broker';
+import { fixtureMarketDataAdapter } from '@weaveintel/tools/marketdata';
+import { fixtureNewsAdapter } from '@weaveintel/tools/news';
+import { fixtureAltDataAdapter } from '@weaveintel/tools/altdata';
+import { scoreUniverse, strategies } from './verticals/equity-scoring/src/index.js';
+import type { InputBundle, SymbolScore } from './verticals/equity-scoring/src/index.js';
+import { createBrokerMCPServer, paperBrokerAdapter } from '@weaveintel/tools/broker';
+import type { PaperBrokerAdapter } from '@weaveintel/tools/broker';
 import { weaveFakeTransport } from '@weaveintel/testing';
 import { weaveMCPClient } from '@weaveintel/mcp-client';
 

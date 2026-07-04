@@ -8,7 +8,7 @@
  * Tapping is a no-op for M4; a detail sheet arrives with the widget surface (M5).
  */
 import { Text, View } from 'react-native';
-import type { ToolCallView } from '@geneweave/api-client';
+import type { ToolCallView } from '@weaveintel/api-client';
 import { useTheme } from '../../providers/theme-provider';
 import { Icon, type IconName, type IconTone } from '../icon';
 

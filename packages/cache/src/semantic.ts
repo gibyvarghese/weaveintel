@@ -1,5 +1,5 @@
 /**
- * @weaveintel/cache — Semantic cache (Phase 4, redesigned).
+ * @weaveintel/cache — Semantic cache.
  *
  * Embedding-similarity cache: when a query's embedding is close enough to a
  * cached entry (cosine ≥ threshold) the cached response is returned instead of

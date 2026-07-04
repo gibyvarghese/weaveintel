@@ -16,8 +16,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { weaveContext } from '@weaveintel/core';
 import { weaveInMemoryTracer } from '@weaveintel/observability';
-import { createReplayEngine } from '@weaveintel/replay';
-import { weaveEvalRunner } from '@weaveintel/evals';
+import { createReplayEngine } from '@weaveintel/observability/replay';
+import { weaveEvalRunner } from '@weaveintel/testing/evals';
 import {
   createPhase7RuntimePersistence,
   type Phase7RuntimePersistence,

@@ -14,7 +14,7 @@
  *   1. Register a framework in the FrameworkRegistry.
  *   2. When building a prompt, provide content keyed by section.
  *   3. Call renderFramework() to assemble the final text in defined order.
- *   4. GeneWeave stores frameworks in the `prompt_frameworks` DB table.
+ *   4. A consuming app stores frameworks in the `prompt_frameworks` DB table.
  *
  * RELATIONSHIP TO PROMPTS:
  *   A prompt record can reference a framework key via its `framework` field.
@@ -144,7 +144,7 @@ export interface FrameworkRenderResult {
 /**
  * Stores and retrieves prompt frameworks by key.
  * Implementations can be in-memory (for package defaults) or DB-backed
- * (for GeneWeave and other apps that store frameworks via admin CRUD).
+ * (for a consuming app and other apps that store frameworks via admin CRUD).
  */
 export interface FrameworkRegistry {
   /**
@@ -168,7 +168,7 @@ export interface FrameworkRegistry {
 
 /**
  * Default in-memory framework registry pre-loaded with built-in frameworks.
- * GeneWeave overlays DB-sourced frameworks on top of this registry at startup.
+ * A consuming app overlays DB-sourced frameworks on top of this registry at startup.
  */
 export class InMemoryFrameworkRegistry implements FrameworkRegistry {
   private frameworks = new Map<string, PromptFramework>();
@@ -189,7 +189,7 @@ export class InMemoryFrameworkRegistry implements FrameworkRegistry {
 // ─── DB record adapter ────────────────────────────────────────
 
 /**
- * Shape of a row from the `prompt_frameworks` DB table in GeneWeave.
+ * Shape of a row from the `prompt_frameworks` DB table in a consuming app.
  * The `sections` column stores the section definitions as serialised JSON.
  */
 export interface PromptFrameworkRecordLike {
@@ -204,7 +204,7 @@ export interface PromptFrameworkRecordLike {
 
 /**
  * Convert a `prompt_frameworks` DB row into a typed PromptFramework.
- * Used by GeneWeave's DB adapter to hydrate framework records into the
+ * Used by a consuming app's DB adapter to hydrate framework records into the
  * shared package type so apps don't parse raw JSON by hand.
  *
  * @param record - A raw DB row from the prompt_frameworks table.
@@ -390,7 +390,7 @@ export const FRAMEWORK_JUDGE: PromptFramework = {
 
 /**
  * Singleton in-memory registry pre-loaded with built-in frameworks.
- * GeneWeave loads DB frameworks on top of this via loadFrameworksIntoRegistry().
+ * A consuming app loads DB frameworks on top of this via loadFrameworksIntoRegistry().
  * Other apps can import this directly or create their own registry instance.
  */
 export const defaultFrameworkRegistry = new InMemoryFrameworkRegistry();

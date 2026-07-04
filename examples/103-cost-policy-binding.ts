@@ -45,9 +45,9 @@ type Binding = {
   precedence: number;
 };
 const policies: Record<string, CostPolicy> = {
-  'tenant.economy': { tier: 'economy', description: 'cheapest acceptable' },
-  'tenant.perf':    { tier: 'performance', description: 'low latency' },
-  'tenant.custom':  { tier: 'custom', maxCostUsdPerRun: 0.05, hardKillOnCeiling: true },
+  'tenant.economy': { tier: 'economy' },
+  'tenant.perf':    { tier: 'performance' },
+  'tenant.custom':  { tier: 'custom', budgetCeilingUsd: 0.05 },
 };
 const bindings: Binding[] = [
   { bindingKind: 'mesh',     bindingRef: 'mesh-1',  policyKey: 'tenant.economy', precedence: 50 },

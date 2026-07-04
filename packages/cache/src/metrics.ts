@@ -1,5 +1,5 @@
 /**
- * @weaveintel/cache — Cache observability (Phase 3).
+ * @weaveintel/cache — Cache observability.
  *
  * `createCacheMetrics()` is an in-process counter sink implementing the core
  * `CacheMetrics` contract. `withMetrics(store, metrics)` wraps ANY `CacheStore`

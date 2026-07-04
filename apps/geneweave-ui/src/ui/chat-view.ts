@@ -6,6 +6,8 @@ import {
   queueFiles,
   removePendingAttachment,
 } from './utils.js';
+import { buildCiteToggle } from './chat-citations.js';
+import { t } from './i18n.js';
 import {
   initVoiceSession,
   endVoiceSession,
@@ -259,6 +261,7 @@ export function renderChatView(options: {
   render: () => void;
   renderMessages: () => void;
   sendMessage: (text: string) => Promise<void>;
+  stopStreaming?: () => void;
 }): HTMLElement {
   const view = h('div', { className: 'chat-view' });
 
@@ -306,7 +309,7 @@ export function renderChatView(options: {
     view.appendChild(banner);
   }
 
-  const textarea = h('textarea', { placeholder: 'Type a message...', rows: '1', 'aria-label': 'Message input', 'aria-multiline': 'true' }) as HTMLTextAreaElement;
+  const textarea = h('textarea', { placeholder: t('chat.placeholder'), rows: '1', 'aria-label': 'Message input', 'aria-multiline': 'true', 'data-focus-key': 'composer' }) as HTMLTextAreaElement;
   textarea.addEventListener('keydown', (e: KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -320,7 +323,18 @@ export function renderChatView(options: {
     textarea.style.height = Math.min(textarea.scrollHeight, 160) + 'px';
   });
 
-  const messageContainer = h('div', { className: 'messages', role: 'log', 'aria-live': 'polite', 'aria-label': 'Conversation messages', 'aria-relevant': 'additions' });
+  // H19 — the transcript is a `log` for structure, but it does NOT announce live: rebuilding it (or a
+  // per-token streaming patch) would make a screen reader re-read the conversation. A dedicated visually-hidden
+  // `role="status"` region (see ui/stream-announce.ts) announces the streaming answer accessibly instead.
+  const messageContainer = h('div', { className: 'messages', role: 'log', 'aria-live': 'off', 'aria-label': 'Conversation messages' });
+  // Track the transcript scroll so a full re-render (and streaming) can RESTORE it — and so we only
+  // auto-follow to the bottom when the user is already there (never yank them down mid-read). Round 3 / H14.
+  messageContainer.addEventListener('scroll', () => {
+    if (state.suppressTranscriptScrollPersist) return;
+    const el = messageContainer;
+    state.transcriptScrollTop = el.scrollTop;
+    state.transcriptAtBottom = (el.scrollHeight - el.scrollTop - el.clientHeight) < 80;
+  }, { passive: true });
   view.appendChild(messageContainer);
 
   const fileInput = h('input', { type: 'file', multiple: true, style: 'display:none' }) as HTMLInputElement;
@@ -447,6 +461,14 @@ export function renderChatView(options: {
       }),
     ),
     h('div', { className: 'composer-wrap' },
+      // Rejected uploads — a visible, specific reason per file (Round 3 / H20), not a silent drop.
+      ((state as any).uploadRejections?.length)
+        ? h('div', { className: 'upload-reject', role: 'alert' },
+            h('span', { className: 'upload-reject-icon', 'aria-hidden': 'true' }, '⚠'),
+            h('span', { className: 'upload-reject-text' },
+              `Couldn’t add: ${(state as any).uploadRejections.map((r: any) => `“${r.name}” (${r.reason})`).join(', ')}`),
+            h('button', { type: 'button', className: 'upload-reject-x', 'aria-label': 'Dismiss', onClick: () => { (state as any).uploadRejections = []; options.render(); } }, '×'))
+        : null,
       state.pendingAttachments?.length
         ? h('div', { className: 'attach-strip' },
             ...state.pendingAttachments.map((attachment: any, index: number) =>
@@ -462,20 +484,30 @@ export function renderChatView(options: {
           )
         : null,
       voiceBar,
-      textarea
+      textarea,
+      // m138 — "Cite sources" toggle (only rendered when the workspace has enabled cited answers).
+      (() => { const t = buildCiteToggle(options.render); return t ? h('div', { className: 'composer-tools' }, t) : null; })(),
     ),
-    h('button', {
-      type: 'button',
-      className: 'send-btn',
-      'aria-label': state.streaming ? 'Sending message…' : 'Send message',
-      'aria-disabled': state.streaming ? 'true' : 'false',
-      onClick: () => {
-        void options.sendMessage(textarea.value);
-        textarea.value = '';
-        textarea.style.height = 'auto';
-      },
-      disabled: state.streaming ? 'true' : null,
-    }, 'Send')
+    // While generating, offer a real STOP control (aborts + keeps partial output). Otherwise, Send.
+    state.streaming
+      ? h('button', {
+          type: 'button',
+          className: 'send-btn stop-btn',
+          'aria-label': 'Stop generating',
+          title: 'Stop generating',
+          onClick: () => { options.stopStreaming?.(); },
+        }, h('span', { 'aria-hidden': 'true' }, '■'), ' Stop')
+      : h('button', {
+          type: 'button',
+          className: 'send-btn',
+          'aria-label': 'Send message',
+          'aria-disabled': 'false',
+          onClick: () => {
+            void options.sendMessage(textarea.value);
+            textarea.value = '';
+            textarea.style.height = 'auto';
+          },
+        }, 'Send')
   ));
 
   setTimeout(() => {

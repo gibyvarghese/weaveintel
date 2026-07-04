@@ -10,11 +10,11 @@
  *
  * Graceful by construction: before sign-in, or on any fetch error, no override
  * is applied and the base brand theme renders. WCAG-AA enforcement on the
- * resolved override happens inside ThemeProvider/`@geneweave/tokens`.
+ * resolved override happens inside ThemeProvider/`@weaveintel/tokens`.
  */
 import type { ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import type { TenantThemeOverride } from '@geneweave/tokens';
+import type { TenantThemeOverride } from '@weaveintel/tokens';
 import { ThemeProvider } from './theme-provider';
 import { useAuth } from './auth-provider';
 import type { ThemePreference } from '../../lib';

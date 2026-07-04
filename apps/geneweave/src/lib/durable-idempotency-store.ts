@@ -6,7 +6,7 @@
  * `idempotency_records` via the `DatabaseAdapter`. Replaces the previous
  * per-file `createIdempotencyStore({ ttlMs })` (in-memory, lost on
  * restart) with `createDurableIdempotencyStore(...)` from
- * `@weaveintel/durability`.
+ * `@weaveintel/resilience`.
  *
  * The same `idempotency_records` table is used everywhere so operators
  * have one place to inspect / clear stale keys, and replays survive
@@ -18,7 +18,7 @@ import {
   type AsyncIdempotencyStore,
   type DurableIdempotencyEntry,
   type IdempotencyPolicy,
-} from '@weaveintel/durability';
+} from '@weaveintel/resilience';
 import type { DatabaseAdapter } from '../db.js';
 
 const DEFAULT_POLICY: IdempotencyPolicy = {

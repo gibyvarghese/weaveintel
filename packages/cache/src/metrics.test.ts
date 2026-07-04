@@ -1,5 +1,5 @@
 /**
- * @weaveintel/cache — Phase 3 metrics tests.
+ * @weaveintel/cache — metrics tests.
  * Positive, negative, stress, and a security/privacy case.
  */
 import { describe, it, expect } from 'vitest';

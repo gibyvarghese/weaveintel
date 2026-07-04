@@ -1,7 +1,7 @@
 {
   "name": "@weaveintel/provider-openai",
-  "version": "0.0.1",
-  "description": "OpenAI provider for weaveIntel \u2014 chat, embeddings, image generation, audio",
+  "version": "0.1.1",
+  "description": "OpenAI provider for weaveIntel — chat, embeddings, image generation, audio",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -13,7 +13,9 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*"
   ],
   "scripts": {
     "build": "tsc -b",
@@ -22,10 +24,12 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@weaveintel/core": "*",
-    "@weaveintel/models": "*",
-    "@weaveintel/resilience": "*",
-    "@weaveintel/tool-schema": "*"
+    "@weaveintel/core": "^0.1.1",
+    "@weaveintel/resilience": "^0.1.1",
+    "@weaveintel/tools": "^0.1.1"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  }
 }

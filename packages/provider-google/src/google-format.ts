@@ -1,6 +1,6 @@
 import type { ContentPart, ModelRequest, ModelResponse, CapabilityId } from '@weaveintel/core';
 import { Capabilities } from '@weaveintel/core';
-import { googleAdapter, translate } from '@weaveintel/tool-schema';
+import { googleAdapter, translate } from '@weaveintel/tools/schema';
 
 export interface GeminiPart {
   text?: string;

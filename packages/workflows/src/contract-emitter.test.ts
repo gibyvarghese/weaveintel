@@ -1,5 +1,5 @@
 /**
- * @weaveintel/workflows — Phase 4 contract emitter unit tests.
+ * @weaveintel/workflows — contract emitter unit tests.
  *
  * Covers `buildContractBody` (with/without bodyMap, `$` literal, missing
  * source paths) and `buildEmittedContract` (null when no `outputContract`,

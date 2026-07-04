@@ -4,10 +4,15 @@
     "outDir": "./dist",
     "rootDir": "./src"
   },
-  "include": ["src"],
+  "include": [
+    "src"
+  ],
   "references": [
-    { "path": "../core" },
-    { "path": "../models" },
-    { "path": "../tool-schema" }
+    {
+      "path": "../core"
+    },
+    {
+      "path": "../tools"
+    }
   ]
 }

@@ -1,5 +1,5 @@
 /**
- * @weaveintel/cache — Stampede protection: SWR, XFetch, negative caching (Phase 7).
+ * @weaveintel/cache — Stampede protection: SWR, XFetch, negative caching.
  *
  * Three composable pieces (G‑5 / G‑8):
  *   - `shouldServeStale` / `shouldEarlyRefresh` — pure decision helpers an app

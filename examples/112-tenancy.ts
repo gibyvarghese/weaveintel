@@ -56,7 +56,7 @@ import {
   createBudgetEnforcer,
   // Types (imported as types only — no runtime cost)
   type TenantEntitlement,
-} from '@weaveintel/tenancy';
+} from '@weaveintel/identity/tenancy';
 
 // weaveContext (re-exported as that alias from @weaveintel/core) is needed to
 // build the ExecutionContext that EntitlementPolicy.evaluate() receives —

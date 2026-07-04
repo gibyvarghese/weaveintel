@@ -29,7 +29,7 @@ import { newUUIDv7, weaveContext } from '@weaveintel/core';
 import type { ExecutionContext, MemoryEntry, MemoryStore, MemoryQuery, MemoryFilter, MemoryType } from '@weaveintel/core';
 import { applyCorrection, forgetUser, getProvenance, weaveGovernancePolicy } from '@weaveintel/memory';
 import type { GovernanceRule } from '@weaveintel/memory';
-import type { DurableConsentManager } from '@weaveintel/compliance';
+import type { DurableConsentManager } from '@weaveintel/guardrails/compliance';
 import type { ServerResponse } from 'node:http';
 import type { Router } from '../server-core.js';
 import { readBody } from '../server-core.js';

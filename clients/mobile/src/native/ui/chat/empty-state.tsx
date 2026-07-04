@@ -7,7 +7,7 @@
  * alone — chat still works.
  */
 import { ScrollView, Pressable, Text, View } from 'react-native';
-import type { StarterPrompt } from '@geneweave/api-client';
+import type { StarterPrompt } from '@weaveintel/api-client';
 import { useTheme } from '../../providers/theme-provider';
 
 export interface EmptyStateProps {

@@ -184,7 +184,7 @@ describe('weaveOtlpSink', () => {
 
     const sink = weaveOtlpSink({
       endpoint: 'http://localhost:19999',
-      serviceName: 'geneweave',
+      serviceName: 'my-app',
       batchSize: 1,
       exportTimeoutMs: 100,
     });
@@ -214,6 +214,41 @@ describe('weaveOtlpSink', () => {
     const tokenAttr = attrs.find((a) => a.key === GEN_AI.USAGE_INPUT_TOKENS);
     expect(tokenAttr?.value).toEqual({ intValue: 100 });
 
+    fetchSpy.mockRestore();
+  });
+});
+
+// ─── De-branding: the framework default must not carry a consuming app's name ──
+describe('createOtelTracer — brand-neutral service.name default', () => {
+  function serviceNameFromPost(fetchSpy: { mock: { calls: unknown[][] } }): string | undefined {
+    const body = JSON.parse((fetchSpy.mock.calls[0]?.[1] as RequestInit)?.body as string);
+    const attrs = body.resourceSpans[0].resource.attributes as Array<{ key: string; value: { stringValue?: string } }>;
+    return attrs.find((a) => a.key === 'service.name')?.value?.stringValue;
+  }
+
+  async function emitOneSpanAndFlush(tracer: ReturnType<typeof createOtelTracer>) {
+    tracer.sink.record({
+      traceId: 't', spanId: 's', name: 'gen_ai.chat',
+      startTime: 1000, endTime: 2000, status: 'ok', attributes: {}, events: [],
+    });
+    await tracer.sink.flush?.();
+    await new Promise((r) => setTimeout(r, 10));
+  }
+
+  it('defaults service.name to the neutral framework name when the app does not set one', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(new Response(null, { status: 200 }));
+    const tracer = createOtelTracer({ endpoint: 'http://localhost:19998' });
+    await emitOneSpanAndFlush(tracer);
+    // Not 'geneweave' — the app's brand must never be the framework default.
+    expect(serviceNameFromPost(fetchSpy)).toBe('weaveintel');
+    fetchSpy.mockRestore();
+  });
+
+  it("honours the app's injected service.name (this is how the reference app keeps its label)", async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(new Response(null, { status: 200 }));
+    const tracer = createOtelTracer({ endpoint: 'http://localhost:19998', serviceName: 'geneweave' });
+    await emitOneSpanAndFlush(tracer);
+    expect(serviceNameFromPost(fetchSpy)).toBe('geneweave');
     fetchSpy.mockRestore();
   });
 });

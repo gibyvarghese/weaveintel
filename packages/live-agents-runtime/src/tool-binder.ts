@@ -2,8 +2,8 @@
  * Tool Binder — Phase 3 of the DB-driven live-agents runtime.
  *
  * Resolves the **per-agent** tool surface from the database, replacing
- * geneweave's hardcoded `KAGGLE_CAPABILITY_MATRIX` and per-domain
- * `createKaggleTools()` factory.
+ * a consuming app's hardcoded capability matrix and per-domain
+ * tool factory.
  *
  * Strategy:
  *   1. Read every enabled `live_agent_tool_bindings` row for the agent.
@@ -11,24 +11,23 @@
  *      row via the supplied DB facade.
  *   3. For each binding that only specifies an `mcp_server_url`, synthesise
  *      an inline `ToolCatalogRow`-shaped record with `source = 'mcp'` and
- *      `config = { endpoint }` so downstream code (e.g. geneweave's
+ *      `config = { endpoint }` so downstream code (e.g. a consuming app's
  *      `createToolRegistry`) can connect without any extra branching.
  *
  * The binder deliberately returns plain data — it never builds the
- * `ToolRegistry` itself. That responsibility stays in the geneweave bridge
- * (`apps/geneweave/src/live-agents/agent-tool-registry.ts`) which already
- * owns the canonical `createToolRegistry` factory plus its policy /
- * credential / audit wiring.
+ * `ToolRegistry` itself. That responsibility stays in the host application's
+ * bridge, which already owns the canonical `createToolRegistry` factory plus
+ * its policy / credential / audit wiring.
  *
  * The exported DB facade interfaces are intentionally narrow: the runtime
- * package never imports the full geneweave `DatabaseAdapter`. Any caller
+ * package never imports the full host application `DatabaseAdapter`. Any caller
  * (test fixture, in-memory mock, real SQLite) just has to implement these
  * three methods.
  */
 
 /**
  * Minimal shape of a `live_agent_tool_bindings` row that the binder needs.
- * Mirrors `LiveAgentToolBindingRow` in geneweave but kept structurally typed
+ * Mirrors `LiveAgentToolBindingRow` in the host application but kept structurally typed
  * so callers can use their own row type without any mapping.
  */
 export interface AgentToolBindingRowLike {
@@ -43,7 +42,7 @@ export interface AgentToolBindingRowLike {
 
 /**
  * Minimal shape of a `tool_catalog` row that the binder needs to forward to
- * `createToolRegistry({ catalogEntries })`. The geneweave `ToolCatalogRow`
+ * `createToolRegistry({ catalogEntries })`. The host application's `ToolCatalogRow`
  * is structurally compatible with this contract.
  */
 export interface ToolCatalogRowLike {
@@ -58,14 +57,14 @@ export interface ToolCatalogRowLike {
   risk_level?: string;
   tags?: string | null;
   // Other catalog fields are passed through opaquely by callers when needed.
-  // No index signature on purpose: lets concrete row types like geneweave's
-  // `ToolCatalogRow` (which lack an index signature) satisfy this contract
+  // No index signature on purpose: lets concrete row types like the host
+  // application's `ToolCatalogRow` (which lack an index signature) satisfy this contract
   // without an explicit cast.
 }
 
 /**
  * Narrow DB facade the binder depends on. Keep it small so the runtime
- * package stays decoupled from geneweave's full adapter surface.
+ * package stays decoupled from the host application's full adapter surface.
  */
 export interface AgentToolBindingDb {
   listLiveAgentToolBindings(opts?: {

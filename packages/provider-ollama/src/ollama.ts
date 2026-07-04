@@ -32,8 +32,8 @@ import {
   normalizeError,
   deadlineSignal,
 } from '@weaveintel/core';
-import { weaveRegisterModel, weaveRegisterEmbedding } from '@weaveintel/models';
-import { openaiAdapter, translate } from '@weaveintel/tool-schema';
+import { weaveRegisterModel, weaveRegisterEmbedding } from '@weaveintel/core/models';
+import { openaiAdapter, translate } from '@weaveintel/tools/schema';
 import { ollamaFetch, ollamaFetchStream } from './_fetch.js';
 
 // ─── Configuration ───────────────────────────────────────────

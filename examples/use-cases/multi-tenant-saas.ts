@@ -62,7 +62,7 @@ import {
   createEntitlementStore,
   createEntitlementPolicy,
   createBudgetEnforcer,
-} from '@weaveintel/tenancy';
+} from '@weaveintel/identity/tenancy';
 
 /* ── Encryption ──────────────────────────────────────────────────────────── */
 import {
@@ -123,10 +123,16 @@ class InMemoryEncryptionStore implements EncryptionStore {
   async updateKekStatus(id: string, s: KeyStatus, ts: number) {
     this.keks = this.keks.map(k => k.id === id ? { ...k, status: s, rotatedAt: s === 'previous' ? ts : k.rotatedAt, revokedAt: s === 'revoked' ? ts : k.revokedAt } : k);
   }
+  async getKekById(t: string, kekId: string) { return this.keks.find(k => k.tenantId === t && k.id === kekId) ?? null; }
   async listDeks() { return [...this.deks]; }
   async insertDek(d: DekRecord) { this.deks.push(d); }
   async updateDekStatus(id: string, s: KeyStatus, ts: number) {
     this.deks = this.deks.map(d => d.id === id ? { ...d, status: s, rotatedAt: s === 'previous' ? ts : d.rotatedAt, revokedAt: s === 'revoked' ? ts : d.revokedAt } : d);
+  }
+  async getDekById(t: string, dekId: string) { return this.deks.find(d => d.tenantId === t && d.id === dekId) ?? null; }
+  async getMaxDekEpoch(t: string) {
+    const active = this.deks.filter(d => d.tenantId === t && d.status === 'active');
+    return active.length ? active.reduce((m, d) => Math.max(m, d.epoch), 0) : null;
   }
   async listBiks() { return [...this.biks]; }
   async insertBik(b: BikRecord) { this.biks.push(b); }
@@ -332,8 +338,8 @@ async function main() {
     const limits = TIER_BUDGETS[t.tier]!;
     budget.setBudget({
       tenantId,
-      daily:   { maxTokens: limits.maxTokens,       maxCostUsd: limits.maxCostUsd, maxSteps: 1000, maxRuns: 100 },
-      monthly: { maxTokens: limits.maxTokens * 30,  maxCostUsd: limits.maxCostUsd * 30, maxSteps: 30_000, maxRuns: 3_000 },
+      daily:   { maxTokens: limits.maxTokens,       maxCostUsd: limits.maxCostUsd, maxSteps: 1000 },
+      monthly: { maxTokens: limits.maxTokens * 30,  maxCostUsd: limits.maxCostUsd * 30, maxSteps: 30_000 },
     });
   }
 
@@ -473,7 +479,7 @@ async function main() {
 
     // computeUsd calculates cost from token counts and pricing rates
     const costUsd = computeUsd(
-      { inputTokens: result.inputTokens, outputTokens: result.outputTokens },
+      { modelId: model, inputTokens: result.inputTokens, outputTokens: result.outputTokens },
       { inputPerMillion: pricing.inputPerMillion, outputPerMillion: pricing.outputPerMillion },
     );
 
@@ -556,7 +562,7 @@ async function main() {
     // Step 5: record cost
     const pricing = PRICING[model]!;
     const costUsd = computeUsd(
-      { inputTokens: result.inputTokens, outputTokens: result.outputTokens },
+      { modelId: model, inputTokens: result.inputTokens, outputTokens: result.outputTokens },
       { inputPerMillion: pricing.inputPerMillion, outputPerMillion: pricing.outputPerMillion },
     );
     await ledger.record({

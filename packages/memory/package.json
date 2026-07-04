@@ -1,7 +1,7 @@
 {
   "name": "@weaveintel/memory",
-  "version": "0.0.1",
-  "description": "Memory implementations \u2014 conversation, semantic, entity",
+  "version": "0.1.1",
+  "description": "Memory implementations — conversation, semantic, entity",
   "type": "module",
   "exports": {
     ".": {
@@ -21,9 +21,8 @@
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.810.0",
     "@aws-sdk/lib-dynamodb": "^3.810.0",
-    "@weaveintel/core": "*",
-    "@weaveintel/graph": "*",
-    "@weaveintel/human-tasks": "*",
+    "@weaveintel/core": "^0.1.1",
+    "@weaveintel/human-tasks": "^0.1.1",
     "better-sqlite3": "^11.10.0",
     "mongodb": "^6.16.0",
     "pg": "^8.13.1",
@@ -33,5 +32,13 @@
     "@types/better-sqlite3": "^7.6.13",
     "typescript": "^5.7.0",
     "vitest": "^3.2.6"
-  }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*"
+  ]
 }

@@ -18,7 +18,7 @@
  * The policy engine adds an extra layer for content-level checks beyond PII.
  */
 import { weaveContext } from '@weaveintel/core';
-import { weaveRedactor, weavePolicyEngine } from '@weaveintel/redaction';
+import { weaveRedactor, weavePolicyEngine } from '@weaveintel/guardrails/redaction';
 
 async function main() {
   const ctx = weaveContext({ userId: 'demo-user' });

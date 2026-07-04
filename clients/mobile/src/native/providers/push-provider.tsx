@@ -26,7 +26,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useRouter } from 'expo-router';
-import type { GeneweaveClient } from '@geneweave/api-client';
+import type { GeneweaveClient } from '@weaveintel/api-client';
 import { useAuth } from './auth-provider';
 import {
   configureForegroundNotificationHandler,

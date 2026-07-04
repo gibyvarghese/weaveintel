@@ -60,7 +60,7 @@ import {
 // ---------------------------------------------------------------------------
 
 /**
- * Minimal subset of geneweave's `live_run_events` row the overlay writes.
+ * Minimal subset of the host's `live_run_events` row the overlay writes.
  * Apps using a different schema can adapt in the `appendAuditEvent` callback.
  */
 export interface ModelResolvedAuditEvent {

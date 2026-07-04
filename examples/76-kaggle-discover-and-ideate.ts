@@ -28,7 +28,7 @@ import { weaveFakeTransport } from '@weaveintel/testing';
 import {
   createKaggleMCPServer,
   fixtureKaggleAdapter,
-} from '@weaveintel/tools-kaggle';
+} from '../apps/geneweave/src/kaggle/index.js';
 
 const KAGGLE_DISCOVERER_TOOLS = [
   'kaggle.competitions.list',

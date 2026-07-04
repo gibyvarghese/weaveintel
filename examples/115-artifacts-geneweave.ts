@@ -485,10 +485,8 @@ async function demonstrateTenantSettings(): Promise<void> {
       sandbox_html: true,
     },
   });
-  const { ExecutionContext } = await import('@weaveintel/core').catch(() => ({ ExecutionContext: null }));
-  void ExecutionContext;
   const tool = blockedRegistry.get('emit_artifact')!;
-  const ctx = { userId: 'ent-user', chatId: 'chat-001' } as Parameters<typeof tool.invoke>[0];
+  const ctx = { userId: 'ent-user', chatId: 'chat-001' } as unknown as Parameters<typeof tool.invoke>[0];
 
   // HTML is NOT in allowed_types — should be blocked
   const htmlResult = await tool.invoke(ctx, { name: 'emit_artifact', arguments: { name: 'blocked.html', type: 'html', data: '<html/>' } });
@@ -606,7 +604,7 @@ After saving all 3, respond with: "All 3 Phase 3 artifacts saved successfully."`
   // Download one to verify content
   const mdArt = listBody.artifacts.find(a => a.type === 'markdown');
   if (mdArt) {
-    const dlRes = await fetch(`${url}/api/admin/artifacts/${(mdArt as { id: string }).id}/download`);
+    const dlRes = await fetch(`${url}/api/admin/artifacts/${(mdArt as unknown as { id: string }).id}/download`);
     const dlText = await dlRes.text();
     info(`\nDownloaded "${mdArt.name}": ${dlText.slice(0, 120).replace(/\n/g, ' ')}`);
     ok('Download endpoint returns live agent artifact content');

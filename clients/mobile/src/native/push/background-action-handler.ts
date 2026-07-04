@@ -24,7 +24,7 @@
 import * as TaskManager from 'expo-task-manager';
 import * as BackgroundFetch from 'expo-background-fetch';
 import * as Notifications from 'expo-notifications';
-import { createGeneweaveClient } from '@geneweave/api-client';
+import { createGeneweaveClient } from '@weaveintel/api-client';
 import { createSecureStoreKv } from '../adapters/expo-secure-store';
 import {
   getStoredHost,

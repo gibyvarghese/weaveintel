@@ -174,9 +174,9 @@ async function main() {
     ],
     // Cost per million tokens (used by the scorer to rank candidates)
     costs: [
-      { modelId: 'claude-haiku-4-5-20251001',  providerId: 'anthropic', inputPerMToken: 0.80,  outputPerMToken: 4.00 },
-      { modelId: 'claude-sonnet-4-6',          providerId: 'anthropic', inputPerMToken: 3.00,  outputPerMToken: 15.00 },
-      { modelId: 'claude-opus-4-7',            providerId: 'anthropic', inputPerMToken: 15.00, outputPerMToken: 75.00 },
+      { modelId: 'claude-haiku-4-5-20251001',  providerId: 'anthropic', inputCostPer1M: 0.80,  outputCostPer1M: 4.00 },
+      { modelId: 'claude-sonnet-4-6',          providerId: 'anthropic', inputCostPer1M: 3.00,  outputCostPer1M: 15.00 },
+      { modelId: 'claude-opus-4-7',            providerId: 'anthropic', inputCostPer1M: 15.00, outputCostPer1M: 75.00 },
     ],
     // Quality scores (0–1) influence model preference alongside cost
     qualities: [
@@ -250,21 +250,21 @@ async function main() {
   // One endpoint state per model — shared across all callers in the process
   const endpointKey = 'anthropic:claude-sonnet-4-6';
   const ep = getOrCreateEndpointState(endpointKey, {
-    rateLimit:   { capacity: 10, refillRate: 5 },   // 10 req burst, 5 req/sec steady
-    circuit:     { threshold: 3, cooldownMs: 500 },  // open after 3 failures, cool for 500ms
+    rateLimit:   { capacity: 10, refillPerSec: 5 },       // 10 req burst, 5 req/sec steady
+    circuit:     { failureThreshold: 3, cooldownMs: 500 }, // open after 3 failures, cool for 500ms
     concurrency: { maxConcurrent: 5 },
   });
 
   // Signal bus lets you observe circuit state changes for dashboards / alerts
   const bus = createResilienceSignalBus();
   bus.on(signal => {
-    if (signal.type === 'circuit_opened') {
+    if (signal.kind === 'circuit_opened') {
       warn(`Circuit OPENED for ${endpointKey} — consecutive failures: ${signal.consecutiveFailures}`);
     }
-    if (signal.type === 'circuit_half_opened') {
+    if (signal.kind === 'circuit_half_opened') {
       info(`Circuit HALF-OPEN for ${endpointKey} — testing one probe request`);
     }
-    if (signal.type === 'circuit_closed') {
+    if (signal.kind === 'circuit_closed') {
       ok(`Circuit CLOSED for ${endpointKey} — endpoint recovered`);
     }
   });
@@ -274,12 +274,12 @@ async function main() {
   const resilientCall = createResilientCallable(
     async (model: string, prompt: string) => simulateLlmCall(model, prompt, true /* flaky */),
     {
-      endpointId: endpointKey,
+      endpoint: endpointKey,
       retry: {
-        maxAttempts:    3,
-        initialDelayMs: 50,
-        maxDelayMs:     500,
-        jitterFactor:   0.3,
+        maxAttempts: 3,
+        baseDelayMs: 50,
+        maxDelayMs:  500,
+        jitter:      true,
       },
       signalBus: bus,
     },
@@ -414,14 +414,14 @@ async function main() {
 
     // Step 2: Execute with resilience — non-flaky here for a clean demo
     const ep2 = getOrCreateEndpointState(`anthropic:${model}`, {
-      rateLimit:   { capacity: 20, refillRate: 10 },
-      circuit:     { threshold: 5, cooldownMs: 1000 },
+      rateLimit:   { capacity: 20, refillPerSec: 10 },
+      circuit:     { failureThreshold: 5, cooldownMs: 1000 },
       concurrency: { maxConcurrent: 10 },
     });
 
     const reliableCall = createResilientCallable(
       async (m: string, p: string) => simulateLlmCall(m, p, false /* stable */),
-      { endpointId: `anthropic:${model}`, retry: { maxAttempts: 2, initialDelayMs: 50, maxDelayMs: 200, jitterFactor: 0.2 } },
+      { endpoint: `anthropic:${model}`, retry: { maxAttempts: 2, baseDelayMs: 50, maxDelayMs: 200, jitter: true } },
     );
 
     const response = await reliableCall(model, query);

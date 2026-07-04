@@ -1,5 +1,5 @@
 /**
- * @weaveintel/guardrails — Phase 4 seed data (mid-2026)
+ * @weaveintel/guardrails — seed data (mid-2026)
  *
  * 18 new guardrail rows across five compliance and safety categories:
  *

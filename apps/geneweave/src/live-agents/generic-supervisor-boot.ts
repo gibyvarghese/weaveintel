@@ -55,7 +55,7 @@ import {
   createDbLiveRunEventReader,
   createDbLiveRunStepReader,
 } from '../cost/db-live-trace-tools.js';
-import { createLiveTraceTools } from '@weaveintel/live-agents-trace-tools';
+import { createLiveTraceTools } from '@weaveintel/live-agents/trace-tools';
 import {
   getLlmEndpointPressure,
   isPressureBlocking,
@@ -331,6 +331,11 @@ export async function startGenericSupervisorIfEnabled(
     handlerRegistry: registry,
     modelFactory,
     modelResolver: cachingModelResolver,
+    // Brand identity injected by the app: the framework now defaults these to
+    // neutral 'weaveintel-*' values, so geneWeave passes its own to keep worker
+    // ids and background-tick audit attribution exactly as before.
+    workerIdPrefix: 'geneweave-live-worker',
+    systemPrincipal: 'human:geneweave-system',
     // ─── Phase 3 (live-agents capability parity) ────────────────
     // First-class per-tick policy bundle. Mirrors the DB-backed
     // primitives already wired into ChatEngine.toolOptions so every

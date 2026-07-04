@@ -14,7 +14,7 @@
  */
 
 import { contrastRatio, meetsAA, roundRatio, AA_CONTRAST_NORMAL, AA_CONTRAST_LARGE } from './color.js';
-import { darkColors, lightColors, type ColorTokens } from './palette.js';
+import { neutralDark, neutralLight, type ColorTokens } from './palette.js';
 import { typography, type FontFamilies, type TypographyTokens } from './typography.js';
 import { spacing, radii, darkElevation, lightElevation, type SpacingScale, type RadiiScale, type ElevationScale } from './spacing.js';
 import { motion, type MotionTokens } from './motion.js';
@@ -32,11 +32,15 @@ export interface Theme {
   motion: MotionTokens;
 }
 
-/** The two base brand themes. */
-export const themes: Readonly<Record<ThemeName, Theme>> = {
+/**
+ * The engine's two NEUTRAL reference themes (dark + light), assembled from the neutral palette + the
+ * generic scales. Self-contained defaults; an app builds its OWN themes from its palette + these scales
+ * (see a consuming app's own `src/brand/`). `defaultTheme` is the neutral dark theme.
+ */
+export const neutralThemes: Readonly<Record<ThemeName, Theme>> = {
   dark: {
     name: 'dark',
-    colors: darkColors,
+    colors: neutralDark,
     typography,
     spacing,
     radii,
@@ -45,7 +49,7 @@ export const themes: Readonly<Record<ThemeName, Theme>> = {
   },
   light: {
     name: 'light',
-    colors: lightColors,
+    colors: neutralLight,
     typography,
     spacing,
     radii,
@@ -53,6 +57,9 @@ export const themes: Readonly<Record<ThemeName, Theme>> = {
     motion,
   },
 };
+
+/** The engine's default theme (neutral dark) — a sensible zero-config starting point. */
+export const defaultTheme: Theme = neutralThemes.dark;
 
 // ---------------------------------------------------------------------------
 // Per-tenant theming

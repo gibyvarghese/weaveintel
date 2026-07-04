@@ -6,6 +6,7 @@ import {
   DEFAULT_RBAC_POLICY,
   hasPersonaPermission,
   resolvePersonaPermissions,
+  canAccessArea as canAccessAreaWithPolicy,
 } from '@weaveintel/identity';
 
 export type GeneWeavePersona =
@@ -49,6 +50,13 @@ export function canPersonaAccess(persona: string | null | undefined, permission:
   const known = asKnownPersona(persona);
   if (!known) return false;
   return hasPersonaPermission(DEFAULT_RBAC_POLICY, known, permission);
+}
+
+/** Can this persona see/use a UI capability area (RBAC surface parity)? Unknown persona → fail-closed. */
+export function canPersonaAccessArea(persona: string | null | undefined, area: string): boolean {
+  const known = asKnownPersona(persona);
+  if (!known) return false;
+  return canAccessAreaWithPolicy(DEFAULT_RBAC_POLICY, known, area);
 }
 
 export function toolPermissionFor(toolName: string): string {

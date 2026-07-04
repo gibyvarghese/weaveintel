@@ -1,5 +1,5 @@
 /**
- * @weaveintel/a2a — Agent-as-A2A-server adapter (v1.0, Phase 3)
+ * @weaveintel/a2a — Agent-as-A2A-server adapter
  *
  * `weaveAgentAsA2AServer` wraps any `Agent` as an `A2AServer` conforming to
  * A2A v1.0. Phase 3 additions vs Phase 2:
@@ -633,7 +633,7 @@ export function weaveAgentAsA2AServer(opts: AgentA2AServerOptions): A2AServer {
     },
 
     async start(_port: number): Promise<void> {
-      // HTTP serving handled by host app (geneWeave registers routes).
+      // HTTP serving handled by host app (the host application registers routes).
     },
 
     async stop(): Promise<void> {

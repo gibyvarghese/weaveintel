@@ -48,7 +48,7 @@ import type {
   A2AStreamEvent,
   ExecutionContext,
 } from '@weaveintel/core';
-import { weaveOpenAIModel } from '@weaveintel/openai';
+import { weaveOpenAIModel } from '@weaveintel/provider-openai';
 
 // ── Env ───────────────────────────────────────────────────────────────────
 

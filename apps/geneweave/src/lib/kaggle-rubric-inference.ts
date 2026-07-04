@@ -31,7 +31,7 @@ import type {
   KaggleCredentials,
   KaggleLeaderboardEntry,
   KaggleCompetitionFile,
-} from '@weaveintel/tools-kaggle';
+} from '../kaggle/index.js';
 import type { KaggleCompetitionRubricRow } from '../db-types.js';
 
 /** Lookup table for common Kaggle evaluation metrics → direction. */

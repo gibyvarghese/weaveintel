@@ -1,5 +1,5 @@
 /**
- * @weaveintel/encryption — Break-glass evaluator (Phase 10).
+ * @weaveintel/encryption — Break-glass evaluator.
  *
  * Pure functions over a `BreakGlassRequest[]` snapshot. Mirrors the design of
  * `alert-evaluator.ts`: no DB / IO, host owns persistence and routing. Evaluators

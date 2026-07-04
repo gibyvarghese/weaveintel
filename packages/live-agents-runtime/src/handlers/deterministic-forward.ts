@@ -152,7 +152,7 @@ function buildDeterministicForward(
     throw new Error(
       `deterministic.forward: binding ${ctx.binding.id} uses AGENT_BY_ROLE ` +
         '("' + cfg.to.roleKey + '") but HandlerContext.resolveAgentByRole is not set. ' +
-        'Geneweave must supply this resolver when wiring this handler kind.',
+        'The host application must supply this resolver when wiring this handler kind.',
     );
   }
 

@@ -1,5 +1,5 @@
 /**
- * @weaveintel/encryption — Phase 9 metrics + alert evaluator unit tests.
+ * @weaveintel/encryption — metrics + alert evaluator unit tests.
  */
 
 import { describe, expect, it } from 'vitest';

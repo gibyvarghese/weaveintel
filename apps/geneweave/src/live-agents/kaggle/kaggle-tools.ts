@@ -25,7 +25,7 @@ import {
   KaggleRateLimitError,
   type KaggleAdapter,
   type KaggleCredentials,
-} from '@weaveintel/tools-kaggle';
+} from '../../kaggle/index.js';
 
 /**
  * Resolve Kaggle credentials from KAGGLE_USERNAME / KAGGLE_KEY env vars.

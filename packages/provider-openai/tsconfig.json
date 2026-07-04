@@ -4,11 +4,18 @@
     "outDir": "./dist",
     "rootDir": "./src"
   },
-  "include": ["src"],
+  "include": [
+    "src"
+  ],
   "references": [
-    { "path": "../core" },
-    { "path": "../models" },
-    { "path": "../resilience" },
-    { "path": "../tool-schema" }
+    {
+      "path": "../core"
+    },
+    {
+      "path": "../resilience"
+    },
+    {
+      "path": "../tools"
+    }
   ]
 }

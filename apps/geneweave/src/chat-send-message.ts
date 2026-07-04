@@ -10,7 +10,7 @@ import type { SemanticCache } from '@weaveintel/core';
 import { semanticLookup, semanticStore, type SemanticConfig } from './chat-semantic-utils.js';
 import { readResponseWithSwr, writeResponseWithSwr, readNegativeCache, writeNegativeCache } from './cache-stampede.js';
 import type { RuntimeRoutingSlot } from '@weaveintel/core';
-import type { DurableConsentManager } from '@weaveintel/compliance';
+import type { DurableConsentManager } from '@weaveintel/guardrails/compliance';
 import type { DatabaseAdapter } from './db.js';
 import { normalizePersona } from './rbac.js';
 import { buildReasoningRequestMetadata, reasoningAdjustedTemperature, reasoningAdjustedMaxTokens, type ReasoningRequestMetadata } from './chat-reasoning-utils.js';

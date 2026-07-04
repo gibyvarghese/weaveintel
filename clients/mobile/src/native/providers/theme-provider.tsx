@@ -13,7 +13,7 @@
  */
 import { createContext, useContext, useMemo, type ReactNode } from 'react';
 import { useColorScheme } from 'react-native';
-import type { TenantThemeOverride } from '@geneweave/tokens';
+import type { TenantThemeOverride } from '@weaveintel/tokens';
 import { resolveAppTheme, type ResolvedAppTheme, type ThemePreference } from '../../lib';
 
 const ThemeContext = createContext<ResolvedAppTheme | null>(null);

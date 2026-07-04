@@ -3,7 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { DatabaseAdapter } from './db.js';
 import { canPersonaAccess, normalizePersona } from './rbac.js';
 import { authenticateRequest, verifyCSRF, type AuthContext } from './auth.js';
-import { OAuthClient, createOAuthProvider, type OAuthProviderName } from '@weaveintel/oauth';
+import { OAuthClient, createOAuthProvider, type OAuthProviderName } from '@weaveintel/identity/oauth';
 import type { HttpRateLimiter, LoginFailureStore } from './http-rate-limiter.js';
 
 export type Handler = (

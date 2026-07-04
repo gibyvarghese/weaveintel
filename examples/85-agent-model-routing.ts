@@ -78,6 +78,7 @@ async function main(): Promise<void> {
     run_key: `phase35-demo-${Date.now()}`,
     label: 'Phase 3.5 model routing demo',
     status: 'RUNNING',
+    stop_requested: 0,
     started_at: new Date().toISOString(),
     completed_at: null,
     summary: null,

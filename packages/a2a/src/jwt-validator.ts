@@ -1,5 +1,5 @@
 /**
- * @weaveintel/a2a — JWT Validator (Phase 5)
+ * @weaveintel/a2a — JWT Validator
  *
  * Validates bearer JWTs on inbound A2A requests. Enforces:
  *   - `exp` (with clock-skew tolerance)

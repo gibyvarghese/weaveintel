@@ -13,6 +13,17 @@
  *   3. **Entity**   — name-match score on stored entity entries. Boosts
  *      factual knowledge-graph entries that share tokens with the query.
  *
+ *   4. **Recency**  — *temporal decay*: newer memories score higher, with an
+ *      exponential half-life (the "second brain" wants what you told it recently
+ *      to surface first). Off by default (weight 0); opt in via `recencyWeight`.
+ *
+ *   5. **Importance** — the entry's salience weight (LLM-rated significance).
+ *      Off by default; opt in via `importanceWeight`.
+ *
+ * Signals 4–5 make retrieval *temporally aware* (the Generative-Agents recency ×
+ * importance × relevance scoring). Set `excludeSuperseded` to drop facts that have
+ * been invalidated (bi-temporal `invalidAt`) — e.g. a preference you've since changed.
+ *
  * Each signal's raw scores are normalised to [0, 1] independently, then
  * combined as a weighted sum. Results are deduplicated by entry id and the
  * top-K entries are returned with their per-signal scores for explainability.
@@ -41,6 +52,16 @@ export interface FusedMemorySearchOpts {
   readonly keywordWeight?: number;
   /** Weight for the entity-name-match signal. Defaults to 0.15. */
   readonly entityWeight?: number;
+  /** Weight for the temporal recency signal (exponential decay). Defaults to 0 (off). */
+  readonly recencyWeight?: number;
+  /** Weight for the importance/salience signal. Defaults to 0 (off). */
+  readonly importanceWeight?: number;
+  /** Half-life for the recency decay, in ms. Defaults to 14 days. */
+  readonly halfLifeMs?: number;
+  /** Reference "now" for recency decay, in ms since epoch. Defaults to Date.now(). */
+  readonly nowMs?: number;
+  /** Drop entries that have been superseded/invalidated (bi-temporal `invalidAt` in the past). */
+  readonly excludeSuperseded?: boolean;
 }
 
 export interface FusedMemoryResult {
@@ -51,7 +72,29 @@ export interface FusedMemoryResult {
     readonly semantic?: number;
     readonly keyword?: number;
     readonly entity?: number;
+    readonly recency?: number;
+    readonly importance?: number;
   };
+}
+
+/** Exponential recency decay in [0,1]: 1.0 at age 0, 0.5 at one half-life, → 0 as it ages. */
+export function recencyDecay(ageMs: number, halfLifeMs: number): number {
+  if (!(halfLifeMs > 0)) return 1;
+  const a = Math.max(0, ageMs);
+  return Math.pow(0.5, a / halfLifeMs);
+}
+
+/** The age (ms) of a memory relative to `nowMs`, using bi-temporal `validAt` then `createdAt`. */
+function memoryAgeMs(entry: MemoryEntry, nowMs: number): number {
+  const t = Date.parse(entry.validAt ?? entry.createdAt ?? '');
+  return Number.isFinite(t) ? nowMs - t : 0;
+}
+
+/** Whether a memory has been superseded (bi-temporal `invalidAt` set and in the past). */
+function isSuperseded(entry: MemoryEntry, nowMs: number): boolean {
+  if (!entry.invalidAt) return false;
+  const t = Date.parse(entry.invalidAt);
+  return Number.isFinite(t) && t <= nowMs;
 }
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
@@ -114,6 +157,10 @@ export async function fusedMemorySearch(
   const semanticW = opts.semanticWeight ?? 0.6;
   const keywordW = opts.keywordWeight ?? 0.25;
   const entityW = opts.entityWeight ?? 0.15;
+  const recencyW = opts.recencyWeight ?? 0;
+  const importanceW = opts.importanceWeight ?? 0;
+  const halfLifeMs = opts.halfLifeMs ?? 14 * 24 * 60 * 60 * 1000;
+  const nowMs = opts.nowMs ?? Date.now();
 
   const filter = (opts.userId || opts.tenantId)
     ? {
@@ -170,7 +217,11 @@ export async function fusedMemorySearch(
   const semanticIdSet = new Set(semanticResults.map((e) => e.id));
 
   // ── Score per signal ─────────────────────────────────────────────────────
-  const entries = [...byId.values()];
+  // Temporal awareness: optionally drop facts that have been superseded (bi-temporal invalidAt).
+  const entries = (opts.excludeSuperseded
+    ? [...byId.values()].filter((e) => !isSuperseded(e, nowMs))
+    : [...byId.values()]);
+  if (entries.length === 0) return [];
 
   const rawSemantic: number[] = entries.map((e) => {
     if (!semanticIdSet.has(e.id)) return 0;
@@ -189,6 +240,15 @@ export async function fusedMemorySearch(
     e.type === 'entity' ? entityScore(queryTokens, e.content) : 0,
   );
 
+  // Temporal signals — recency (exponential decay) + importance (salience). Already in [0,1].
+  const rawRecency: number[] = entries.map((e) => (recencyW > 0 ? recencyDecay(memoryAgeMs(e, nowMs), halfLifeMs) : 0));
+  const rawImportance: number[] = entries.map((e) => {
+    if (importanceW <= 0) return 0;
+    const meta = typeof e.metadata?.['importance'] === 'number' ? (e.metadata['importance'] as number) : undefined;
+    const imp = typeof e.importance === 'number' ? e.importance : meta;
+    return typeof imp === 'number' ? Math.max(0, Math.min(1, imp)) : 0.5;
+  });
+
   const normSemantic = normalise(rawSemantic);
   const normKeyword = normalise(rawKeyword);
   const normEntity = normalise(rawEntity);
@@ -198,7 +258,9 @@ export async function fusedMemorySearch(
     const sem = normSemantic[i] ?? 0;
     const kw = normKeyword[i] ?? 0;
     const ent = normEntity[i] ?? 0;
-    const score = sem * semanticW + kw * keywordW + ent * entityW;
+    const rec = rawRecency[i] ?? 0;
+    const imp = rawImportance[i] ?? 0;
+    const score = sem * semanticW + kw * keywordW + ent * entityW + rec * recencyW + imp * importanceW;
     return {
       entry,
       score,
@@ -206,6 +268,8 @@ export async function fusedMemorySearch(
         ...(sem > 0 ? { semantic: sem } : {}),
         ...(kw > 0 ? { keyword: kw } : {}),
         ...(ent > 0 ? { entity: ent } : {}),
+        ...(recencyW > 0 ? { recency: rec } : {}),
+        ...(importanceW > 0 ? { importance: imp } : {}),
       },
     };
   });

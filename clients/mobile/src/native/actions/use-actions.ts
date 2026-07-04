@@ -14,7 +14,7 @@
 import { useCallback, useMemo, useRef } from 'react';
 import type React from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { NotificationAction, Reminder, Task } from '@geneweave/api-client';
+import type { NotificationAction, Reminder, Task } from '@weaveintel/api-client';
 import { useAuth } from '../providers/auth-provider';
 import {
   applyReminderReschedule,

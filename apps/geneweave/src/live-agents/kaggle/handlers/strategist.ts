@@ -1,6 +1,6 @@
 /** Kaggle Strategist — agentic LLM ReAct loop wrapper + deterministic preset rotator. */
 import type { TaskHandler } from '@weaveintel/live-agents';
-import type { KaggleCompetition } from '@weaveintel/tools-kaggle';
+import type { KaggleCompetition } from '../../../kaggle/index.js';
 import { createKaggleStrategistHandler } from '../strategist-agent.js';
 import {
   competitionSlugFrom,

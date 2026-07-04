@@ -35,6 +35,43 @@ export interface OpenAIImageEditRequest {
   readonly n?: number;
 }
 
+/** True for the GPT Image family (gpt-image-1, gpt-image-2, …). These differ from DALL·E. */
+export function isGptImageModel(modelId: string): boolean {
+  return /^gpt-image/i.test(modelId);
+}
+
+/**
+ * Build the /v1/images/generations request body PER MODEL, exactly as the OpenAI Image API expects.
+ *
+ *   • GPT Image models (gpt-image-1/2): return base64 BY DEFAULT and REJECT `response_format`
+ *     ("Unknown parameter: 'response_format'"). They instead support `output_format` (png/jpeg/webp),
+ *     `output_compression`, `background` (transparent/opaque/auto) and `moderation` (low/auto), and
+ *     `quality` is low/medium/high/auto.
+ *   • DALL·E models (dall-e-2/3): support `response_format` (url|b64_json), and dall-e-3 supports
+ *     `style` (vivid|natural) and `quality` standard|hd.
+ *
+ * Exported pure so it can be unit-tested without a network call.
+ */
+export function buildImageGenerationBody(modelId: string, request: ImageGenerationRequest): Record<string, unknown> {
+  const body: Record<string, unknown> = { model: modelId, prompt: request.prompt };
+  if (request.size) body['size'] = request.size;
+  if (request.quality) body['quality'] = request.quality;
+  if (request.n) body['n'] = request.n;
+
+  if (isGptImageModel(modelId)) {
+    // GPT Image: NEVER send response_format (it errors). Base64 is the default return shape.
+    if (request.background) body['background'] = request.background;
+    if (request.outputFormat) body['output_format'] = request.outputFormat;
+    if (typeof request.outputCompression === 'number') body['output_compression'] = request.outputCompression;
+    if (request.moderation) body['moderation'] = request.moderation;
+  } else {
+    // DALL·E: response_format is supported; ask for base64 so we never depend on a fetchable URL.
+    body['response_format'] = 'b64_json';
+    if (request.style) body['style'] = request.style;
+  }
+  return body;
+}
+
 export function weaveOpenAIImageModel(
   modelId: string = 'gpt-image-1',
   providerOptions?: OpenAIProviderOptions,
@@ -56,19 +93,13 @@ export function weaveOpenAIImageModel(
     ...caps,
 
     async generateImage(ctx: ExecutionContext, request: ImageGenerationRequest): Promise<ImageGenerationResponse> {
-      const body: Record<string, unknown> = {
-        model: modelId,
-        prompt: request.prompt,
-      };
-      if (request.size) body['size'] = request.size;
-      if (request.quality) body['quality'] = request.quality;
-      if (request.n) body['n'] = request.n;
-      body['response_format'] = 'b64_json';
+      // Model-aware body (GPT Image rejects response_format; DALL·E supports it). See buildImageGenerationBody.
+      const body = buildImageGenerationBody(modelId, request);
 
       const signal = deadlineSignal(ctx);
       try {
         const raw = (await openaiRequest(baseUrl, '/images/generations', body, headers, signal)) as Record<string, unknown>;
-        const data = raw['data'] as Array<Record<string, unknown>>;
+        const data = (raw['data'] as Array<Record<string, unknown>> | undefined) ?? [];
 
         return {
           images: data.map((d) => ({
@@ -77,6 +108,7 @@ export function weaveOpenAIImageModel(
             revisedPrompt: d['revised_prompt'] as string | undefined,
           })),
           model: modelId,
+          ...(raw['usage'] ? { usage: raw['usage'] as Record<string, unknown> } : {}),
         };
       } catch (err) {
         throw normalizeError(err, 'openai');
@@ -93,12 +125,13 @@ export function weaveOpenAIImageModel(
       if (request.size) body['size'] = request.size;
       if (request.quality) body['quality'] = request.quality;
       if (request.n) body['n'] = request.n;
-      body['response_format'] = 'b64_json';
+      // GPT Image rejects response_format (returns base64 by default); only DALL·E accepts it.
+      if (!isGptImageModel(modelId)) body['response_format'] = 'b64_json';
 
       const signal = deadlineSignal(ctx);
       try {
         const raw = (await openaiRequest(baseUrl, '/images/edits', body, headers, signal)) as Record<string, unknown>;
-        const data = raw['data'] as Array<Record<string, unknown>>;
+        const data = (raw['data'] as Array<Record<string, unknown>> | undefined) ?? [];
 
         return {
           images: data.map((d) => ({
@@ -107,6 +140,7 @@ export function weaveOpenAIImageModel(
             revisedPrompt: d['revised_prompt'] as string | undefined,
           })),
           model: modelId,
+          ...(raw['usage'] ? { usage: raw['usage'] as Record<string, unknown> } : {}),
         };
       } catch (err) {
         throw normalizeError(err, 'openai');

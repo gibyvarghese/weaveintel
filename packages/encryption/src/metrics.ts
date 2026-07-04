@@ -1,5 +1,5 @@
 /**
- * @weaveintel/encryption — metrics emitter contract (Phase 9).
+ * @weaveintel/encryption — metrics emitter contract.
  *
  * Mirrors the AuditEmitter pattern: a fire-and-forget interface that the
  * package calls from hot paths (encrypt/decrypt/blind-index/wrap/unwrap)
@@ -125,7 +125,7 @@ export interface InMemoryMetricsEmitterOptions {
  * bounded — labels collapse to `(name, tenantId, table, provider, cache, kind)`
  * tuples, and excess series are dropped rather than ballooning memory.
  *
- * NOT thread-safe across worker threads — geneweave runs single-process today.
+ * NOT thread-safe across worker threads — assumes a single-process host today.
  * If you need multi-process aggregation, swap this for a Redis-backed impl.
  */
 export class InMemoryMetricsEmitter implements MetricsEmitter {

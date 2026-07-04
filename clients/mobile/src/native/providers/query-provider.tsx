@@ -8,7 +8,7 @@
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useRef, type ReactNode } from 'react';
-import { AuthExpiredError } from '@geneweave/api-client';
+import { AuthExpiredError } from '@weaveintel/api-client';
 
 function makeQueryClient(): QueryClient {
   return new QueryClient({

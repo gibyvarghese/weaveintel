@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/guardrails",
-  "version": "0.0.1",
+  "version": "0.1.1",
   "description": "Guardrail pipeline — evaluation chain, risk classification, cost guard, governance",
   "type": "module",
   "exports": {
@@ -8,6 +8,21 @@
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./spotlighting": {
+      "import": "./dist/spotlighting.js",
+      "types": "./dist/spotlighting.d.ts",
+      "default": "./dist/spotlighting.js"
+    },
+    "./redaction": {
+      "import": "./dist/redaction/index.js",
+      "types": "./dist/redaction/index.d.ts",
+      "default": "./dist/redaction/index.js"
+    },
+    "./compliance": {
+      "import": "./dist/compliance/index.js",
+      "types": "./dist/compliance/index.d.ts",
+      "default": "./dist/compliance/index.js"
     }
   },
   "main": "./dist/index.js",
@@ -20,11 +35,20 @@
     "guardrails:eval": "npx tsx src/eval/runner.ts"
   },
   "dependencies": {
-    "@weaveintel/core": "*"
+    "@weaveintel/core": "^0.1.1",
+    "@weaveintel/persistence": "^0.1.1"
   },
   "devDependencies": {
-    "@weaveintel/testing": "*",
+    "@weaveintel/testing": "^0.1.1",
     "typescript": "^5.7.0",
     "vitest": "^3.2.6"
-  }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*"
+  ]
 }

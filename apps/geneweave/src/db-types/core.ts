@@ -124,6 +124,31 @@ export interface UserPreferencesRow {
   theme: string;
   show_process_card: number;
   updated_at: string;
+  // m119 — per-user preferred language for sourced images.
+  notes_image_language?: string;
+  // m136 — Account settings surface (profile + formatting preferences). All nullable/defaulted.
+  display_name?: string | null;
+  pronouns?: string | null;
+  role_title?: string | null;
+  working_hours?: string | null;
+  about?: string | null;
+  status_text?: string | null;
+  status_emoji?: string | null;
+  language?: string;
+  timezone?: string | null;
+  date_format?: string;
+  week_start?: string;
+  ui_variant?: string;
+}
+
+/** m136 — one row per (user, notification event); which channels are on. */
+export interface UserNotificationPrefRow {
+  user_id: string;
+  event_key: string;
+  in_app: number;
+  email: number;
+  push: number;
+  updated_at: string;
 }
 
 export interface ChatSettingsRow {

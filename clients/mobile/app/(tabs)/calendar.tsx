@@ -26,8 +26,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../src/native/providers/auth-provider';
 import { useTheme } from '../../src/native/providers/theme-provider';
 import { Icon } from '../../src/native/ui/icon';
-import type { Theme } from '@geneweave/tokens';
-import type { AgendaItem, AgendaCategory } from '@geneweave/api-client';
+import type { Theme } from '@weaveintel/tokens';
+import type { AgendaItem, AgendaCategory } from '@weaveintel/api-client';
 
 type Bucket = 'Overdue' | 'Today' | 'Tomorrow' | 'This week' | 'Next week' | 'Later' | 'Unscheduled';
 const BUCKET_ORDER: Bucket[] = ['Overdue', 'Today', 'Tomorrow', 'This week', 'Next week', 'Later', 'Unscheduled'];

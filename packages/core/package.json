@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/core",
-  "version": "0.0.1",
+  "version": "0.1.1",
   "description": "Core contracts, types, and runtime for weaveIntel AI framework",
   "type": "module",
   "main": "./dist/index.js",
@@ -10,10 +10,37 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./models": {
+      "import": "./dist/models/index.js",
+      "types": "./dist/models/index.d.ts",
+      "default": "./dist/models/index.js"
+    },
+    "./contracts": {
+      "import": "./dist/contracts/index.js",
+      "types": "./dist/contracts/index.d.ts",
+      "default": "./dist/contracts/index.js"
+    },
+    "./plugins": {
+      "import": "./dist/plugins/index.js",
+      "types": "./dist/plugins/index.d.ts",
+      "default": "./dist/plugins/index.js"
+    },
+    "./capability-packs": {
+      "import": "./dist/capability-packs/index.js",
+      "types": "./dist/capability-packs/index.d.ts",
+      "default": "./dist/capability-packs/index.js"
+    },
+    "./i18n": {
+      "import": "./dist/i18n/index.js",
+      "types": "./dist/i18n/index.d.ts",
+      "default": "./dist/i18n/index.js"
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*"
   ],
   "scripts": {
     "build": "tsc -b",
@@ -24,5 +51,8 @@
   "license": "MIT",
   "devDependencies": {
     "vitest": "^3.2.6"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

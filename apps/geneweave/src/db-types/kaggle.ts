@@ -34,8 +34,8 @@ export interface SvHypothesisRow {
   status: SvHypothesisStatus;
   budget_envelope_id: string;         // FK → hv_budget_envelope.id
   workflow_run_id: string | null;
-  trace_id: string | null;            // @weaveintel/replay trace
-  contract_id: string | null;         // @weaveintel/contracts completion contract
+  trace_id: string | null;            // @weaveintel/observability/replay trace
+  contract_id: string | null;         // @weaveintel/core/contracts completion contract
   created_at: string;
   updated_at: string;
 }
@@ -109,7 +109,7 @@ export interface SvAgentTurnRow {
 
 // ─── Phase K3: Kaggle projection rows ────────────────────────
 // Source of truth for evidence + agent decisions remains
-// @weaveintel/contracts and live-agents StateStore. These three
+// @weaveintel/core/contracts and live-agents StateStore. These three
 // rows back the GeneWeave admin UI and analytics views.
 
 export interface KaggleCompetitionTrackedRow {
@@ -164,7 +164,7 @@ export interface KaggleRunRow {
 }
 
 // Phase K4 — One artifact per kaggle_run row. Stores the actual
-// @weaveintel/contracts CompletionReport JSON and the @weaveintel/replay
+// @weaveintel/core/contracts CompletionReport JSON and the @weaveintel/observability/replay
 // RunLog JSON so admin UI + replay endpoint can reconstruct deterministically.
 export interface KaggleRunArtifactRow {
   id: string;
@@ -191,7 +191,7 @@ export interface KaggleDiscussionSettingsRow {
 // Phase K6 — append-only log of every Kaggle discussion post the platform
 // has executed. Source of truth for "what did the bot say in public" lives
 // here for fast operator review; the underlying contract + replay trace
-// remain in @weaveintel/contracts and @weaveintel/replay.
+// remain in @weaveintel/core/contracts and @weaveintel/observability/replay.
 export interface KaggleDiscussionPostRow {
   id: string;
   tenant_id: string | null;

@@ -1,75 +1,45 @@
 # @weaveintel/core
 
-Core contracts, types, and runtime primitives for the weaveIntel AI framework.
+**The dependency-free foundation every other weaveIntel package is built on: shared contracts, types, the WeaveRuntime, and persistence interfaces.**
 
-**This package has zero vendor dependencies.** It defines the interfaces that all other packages implement or consume.
+## Why it exists
 
-## What's Inside
+Imagine a big building where the plumbing, wiring, and doorframes all have to line up. If every team invented its own pipe diameter, nothing would connect. `core` is the set of agreed-upon fittings: the exact shape of a `Model`, a `Tool`, a run event, an audit log. Every provider, router, and app speaks these shapes, so a piece written by one team drops cleanly into work by another. Crucially, `core` depends on *no* other `@weaveintel` package — everyone depends on it, never the reverse.
 
-### Capability System
-- `CapabilityId`, `Capabilities` — standard capability identifiers (Chat, Embedding, Streaming, ToolCalling, Vision, etc.)
-- `HasCapabilities`, `createCapabilitySet()` — runtime capability checking
+## When to reach for it
 
-### Execution Context
-- `ExecutionContext` — carries userId, traceId, budget, deadline, and abort signal through every call
-- `createExecutionContext()`, `childContext()`, `isExpired()`, `deadlineSignal()`
+Reach for `core` whenever you need a type or interface that crosses package boundaries — defining a model, describing a tool, wiring the `WeaveRuntime` slots (egress, secrets, audit, persistence, resilience) that features run against. If you want a working model client, router, or prompt engine, don't stop here — install the package that *implements* the contract (e.g. `@weaveintel/routing`). `core` is the vocabulary, not the machinery.
 
-### Model Contracts
-- `Model` — `generate()` + optional `stream()`, extends `HasCapabilities`
-- `EmbeddingModel` — `embed()` for vector embeddings
-- `RerankerModel`, `ImageModel`, `AudioModel` — specialized model contracts
-- `ModelRequest`, `ModelResponse`, `StreamChunk`, `ModelStream`, `TokenUsage`
+## How to use it
 
-### Tool System
-- `Tool`, `ToolRegistry`, `ToolSchema` — typed tool definitions
-- `defineTool()` — convenience factory
-- `createToolRegistry()` — in-memory registry with lookup
+```ts
+import { weaveRuntime, weaveContext, defineTool as weaveTool } from '@weaveintel/core';
 
-### Middleware & Pipeline
-- `Middleware<T, R>` — generic middleware type
-- `composeMiddleware()` — compose middleware chain into a single handler
-- `Pipeline<T, R>` — class-based pipeline builder
-- `timeoutMiddleware()`, `retryMiddleware()` — built-in middleware
+const clock = weaveTool({
+  name: 'now',
+  description: 'Return the current ISO timestamp',
+  schema: { type: 'object', properties: {} },
+  async execute() {
+    return { iso: new Date().toISOString() };
+  },
+});
 
-### Event System
-- `EventBus`, `WeaveEvent`, `EventTypes` — 30+ standard event types
-- `createEventBus()`, `createEvent()` — factory functions
+const runtime = weaveRuntime({ /* egress, secrets, audit, persistence slots */ });
+const ctx = weaveContext({ runtime });
 
-### Documents & Retrieval
-- `Document`, `DocumentChunk`, `DocumentMetadata`, `Provenance`
-- `VectorStore`, `VectorRecord`, `Retriever`, `Chunker`, `ChunkingStrategy`
-- `Connector` hierarchy — `Listable`, `Readable`, `Searchable`, `Watchable`, `Syncable`
+console.log(await clock.execute({}, ctx));
+```
 
-### Agent Contracts
-- `Agent`, `AgentConfig`, `AgentInput`, `AgentResult`, `AgentStep`
-- `Supervisor`, `DelegationRequest`, `DelegationResult`
+## What's in the box
 
-### Memory
-- `MemoryStore`, `MemoryEntry`, `MemoryType`
-- `ConversationMemory`, `SemanticMemory`, `EntityMemory`
+- **Runtime** — `weaveRuntime`, its typed slots (`RuntimeEgressSlot`, `RuntimePersistenceSlot`, `RuntimeRoutingSlot`, …), `assertRuntimeRequires`, in-memory persistence and audit.
+- **Model & tool contracts** — `Model`, `ModelRequest`, `Message`, `Tool`, `weaveTool`, `weaveToolRegistry`.
+- **Execution** — `weaveContext`, `ExecutionBudget`, `WeaveIntelError`, `classifyError`, `weaveEventBus`, `WeavePipeline`/middleware.
+- **Contracts galore** — memory, security, guardrails, observability, agents, workflows, MCP, A2A, RAG/vectorstore, compliance, and more.
+- **Runtime plumbing** — `newUUIDv7`, `createLogger`, `assertSafeOutboundUrl`, `createHardenedFetch`, `parseSseStream`, `applyJsonPatch`.
 
-### Security
-- `Redactor`, `RedactionResult`, `Detection`, `RedactionPolicy`
-- `ContentClassifier`, `PolicyEngine`, `AuditLogger`, `SecretResolver`
+Subpath entry points: `@weaveintel/core/models`, `/contracts`, `/plugins`, `/capability-packs`, `/i18n`.
 
-### Observability
-- `Tracer`, `Span`, `TraceSink`, `SpanRecord`
-- `UsageTracker`, `UsageRecord`, `RunLog`, `StepLog`
+## License
 
-### Admin Capability Schema (Phase 9)
-- `AdminFieldDef`, `AdminTabDef`, `AdminTabGroup`, `AdminTabMap` — shared schema contracts for DB-driven admin capability UIs
-- `normalizeAdminTabsForModelDiscovery()` — enforces model-facing description labels for LLM-callable entities (prompts, skills, tools, workers)
-- Used by GeneWeave admin schema composition to reduce app-local duplication and keep metadata quality consistent
-
-### Protocol Contracts
-- **MCP:** `MCPClient`, `MCPServer`, `MCPToolDefinition`, `MCPResource`, `MCPPrompt`, `MCPTransport`
-- **A2A:** `A2AClient`, `A2AServer`, `A2ATask`, `AgentCard`, `AgentSkill`, `InternalA2ABus`
-
-### Error Handling
-- `WeaveIntelError` — typed error with `code`, `retryable`, `details`
-- `normalizeError()` — normalize unknown errors to WeaveIntelError
-- 20+ error codes: `RATE_LIMITED`, `TIMEOUT`, `INVALID_CONFIG`, `TOOL_EXECUTION_FAILED`, etc.
-
-### Plugin Registry
-- `PluginRegistry`, `PluginDescriptor`, `PluginType`
-- `createPluginRegistry()` — register and query plugins by type
+MIT.

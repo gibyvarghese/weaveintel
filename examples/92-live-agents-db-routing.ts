@@ -109,12 +109,13 @@ async function demoPinnedOverlay() {
   const events: ModelResolvedAuditEvent[] = [];
   const overlay = weaveAgentOverlayResolver({
     base,
-    getAgentRow: async (id): Promise<AgentModelFieldsRowLike | null> => {
+    getAgentRow: async (id): Promise<(AgentModelFieldsRowLike & { id: string }) | null> => {
       if (id === 'agent-pinned') {
-        return { model_pinned_id: 'gpt-4o-2024-08-06' };
+        return { id, model_pinned_id: 'gpt-4o-2024-08-06' };
       }
       if (id === 'agent-capability') {
         return {
+          id,
           model_capability_json: JSON.stringify({ task: 'tool_use' }),
           model_routing_policy_key: 'low-cost',
         };

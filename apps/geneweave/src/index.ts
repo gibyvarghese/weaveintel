@@ -32,7 +32,7 @@ import { createDurableCostLedger, createRuntimeCostAdapter } from '@weaveintel/c
 const log = createLogger('geneweave');
 import { weaveConsoleTracer, createOtelTracer } from '@weaveintel/observability';
 import { weaveSqlitePersistence } from '@weaveintel/persistence';
-import { weaveRedactor } from '@weaveintel/redaction';
+import { weaveRedactor } from '@weaveintel/guardrails/redaction';
 import { createDatabaseAdapter, type DatabaseAdapter, type DatabaseConfig } from './db.js';
 import { ChatEngine, type ProviderConfig } from './chat.js';
 import { createGeneWeaveServer } from './server.js';
@@ -46,6 +46,10 @@ import {
 } from './workflow-engine.js';
 import { startToolHealthJob } from './tool-health-job.js';
 import { startArtifactRetentionJob } from './artifact-retention-job.js';
+import { startNoteActivityRetentionJob } from './note-activity-retention-job.js';
+import { startNoteScheduledAgentJob } from './note-scheduled-agent-job.js';
+import { startNoteMemoryJob } from './note-memory-job.js';
+import { createModelTextGenerator } from './note-ai-sql.js';
 import {
   createTriggerDispatcher,
   createDurableTriggerRateLimiter,
@@ -54,7 +58,7 @@ import {
   WebhookOutTargetAdapter,
   type TriggerDispatcher,
 } from '@weaveintel/triggers';
-import { OAuthClient, createDurableOAuthStateStore } from '@weaveintel/oauth';
+import { OAuthClient, createDurableOAuthStateStore } from '@weaveintel/identity/oauth';
 import { setOAuthClient } from './server-core.js';
 import { createDbTriggerStore } from './triggers/db-trigger-store.js';
 import { createWorkflowTargetAdapter, createContractTargetAdapter } from './triggers/target-adapters.js';
@@ -175,7 +179,7 @@ import { initPgVectorSemanticMemory } from './memory-pgvector.js';
 import { initMemoryConsolidation } from './memory-consolidation.js';
 import { createGeneWeaveMemoryStore, createKeywordSemanticMemory } from './memory-store-adapter.js';
 import { weaveSemanticMemory, weaveWorkingMemory, createRuntimeMemoryAdapter } from '@weaveintel/memory';
-import { createRuntimeComplianceAdapter } from '@weaveintel/compliance';
+import { createRuntimeComplianceAdapter } from '@weaveintel/guardrails/compliance';
 import { createRuntimeIdentityAdapter } from '@weaveintel/identity';
 import { weaveInMemoryCacheStore, weaveRedisCacheStore, weaveTieredCacheStore, createRuntimeCacheAdapter, createCacheMetrics, withMetrics, weaveSemanticCache, createCacheInvalidator, createSingleflight } from '@weaveintel/cache';
 import { setActiveCacheInvalidator, loadInvalidationRules } from './cache-invalidator.js';
@@ -199,8 +203,8 @@ export let geneweaveEncryptionMetrics: (MetricsEmitter & { snapshot?: InMemoryMe
  * It wires together all WeaveIntel subsystems in order:
  *
  *  1. Database — SQLite adapter for persistence (users, sessions, chats, metrics)
- *  2. ChatEngine — orchestrates @weaveintel/models, @weaveintel/agents,
- *     @weaveintel/observability, @weaveintel/redaction, @weaveintel/evals,
+ *  2. ChatEngine — orchestrates @weaveintel/core/models, @weaveintel/agents,
+ *     @weaveintel/observability, @weaveintel/guardrails/redaction, @weaveintel/testing/evals,
  *     @weaveintel/guardrails, @weaveintel/routing, and @weaveintel/cache
  *  3. seedDefaultData — creates admin user and default settings on first run
  *  4. HTTP Server — zero-dependency router with auth, CORS, SSE streaming
@@ -637,6 +641,15 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
 
   // m77 Phase 1: Start artifact retention job (runs at startup + every 6 h)
   startArtifactRetentionJob(db);
+
+  // weaveNotes Phase 0-B: prune note activity older than the configured retention horizon.
+  startNoteActivityRetentionJob(db);
+
+  // weaveNotes Phase 3: fire schedule-triggered workspace agents whose next run is due (polls 1/min).
+  startNoteScheduledAgentJob(db, createModelTextGenerator({ providers: activeProviders, defaultProvider: config.defaultProvider, defaultModel: config.defaultModel, runtime }));
+
+  // weaveNotes Phase 5: background memory ("second brain") — distil durable memories from changed notes.
+  startNoteMemoryJob(db, createModelTextGenerator({ providers: activeProviders, defaultProvider: config.defaultProvider, defaultModel: config.defaultModel, runtime }));
 
   // 5-EN. Phase 1 (Tenant Encryption): bootstrap the per-tenant key
   // manager wired to SQLite-backed EncryptionStore + audit emitter.

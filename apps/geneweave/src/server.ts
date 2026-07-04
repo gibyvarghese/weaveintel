@@ -19,6 +19,8 @@ import type { DatabaseAdapter } from './db.js';
 import { SQLiteAdapter } from './db-sqlite.js';
 import { createSqliteA2ATaskStore } from '@weaveintel/a2a';
 import type { ChatEngine } from './chat.js';
+import { createModelTextGenerator } from './note-ai-sql.js';
+import { createModelImageGenerator, createModelVisionVerifier } from './note-creative-sql.js';
 import type { VoiceEngine } from './voice-engine.js';
 import { DashboardService } from './dashboard.js';
 import { SPA_HTML, STYLES_CSP_HASH, SCRIPT_CSP_HASHES } from './ui-server.js';
@@ -26,11 +28,16 @@ import { getDocsHTML } from './docs-html.js';
 import { authenticateRequest, verifyCSRF } from './auth.js';
 import { createNotificationsHub } from './notifications-wiring.js';
 import { MeRunExecutor } from './me-run-executor.js';
+import { startPresenceSweeper } from './presence-sql.js';
+import { createNotificationRelay, enqueueRunTerminalNotifications } from './run-notifications-outbox.js';
+import { startHandoffSweeper } from './handoff-sql.js';
+import { createCoeditRepo } from './coedit-sql.js';
+import { matchRunControlPath, isAllowedWsOrigin, handleRunControlConnection, MAX_CONTROL_MESSAGE_BYTES } from './run-control-ws.js';
 import { createChatPipelineMeRunAgent } from './me-run-agent.js';
 import { type TriggerDispatcherHandle } from './admin/api/triggers.js';
 import { type LoadedGatewayConfig } from './mcp-gateway.js';
-import { type OAuthProviderName } from '@weaveintel/oauth';
-import { createHealthChecker, createIdempotencyStore } from '@weaveintel/reliability';
+import { type OAuthProviderName } from '@weaveintel/identity/oauth';
+import { createHealthChecker, createIdempotencyStore } from '@weaveintel/resilience';
 import {
   Router,
   json,
@@ -46,7 +53,7 @@ import {
   SERVER_MAX_REQUESTS_PER_SOCKET,
 } from './server-core.js';
 import { createHttpRateLimiter, createLoginFailureStore } from './http-rate-limiter.js';
-import { createDurableConsentManager } from '@weaveintel/compliance';
+import { createDurableConsentManager } from '@weaveintel/guardrails/compliance';
 import {
   registerAuthRoutes,
   registerModelRoutes,
@@ -62,11 +69,20 @@ import {
   registerMeConversationsRoutes,
   registerMeMemoryRoutes,
   registerMeAgendaRoutes,
+  registerMeAccountRoutes,
+  registerMeFeedbackRoutes,
+  registerMeCitationsRoutes,
+  registerMeVersionsRoutes,
+  registerMeI18nRoutes,
+  registerMeSuggestedPromptsRoutes,
+  registerMeAccessibilityRoutes,
+  registerMeWorkspaceRoutes,
   registerMeNotesRoutes,
   registerMeComplianceRoutes,
   registerVoiceRoutes,
   registerArtifactRoutes,
   registerShareRoutes,
+  registerRunShareRoutes,
 } from './routes/index.js';
 
 export interface ServerConfig {
@@ -229,21 +245,115 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   registerMemoryRoutes(router, db);
   registerLiveAgentRoutes(router, db);
   registerAdminLiveRunStreamRoute(router, db);
+  // Collaboration Phase 3: the durable notification relay (transactional outbox
+  // → in-app feed + signed webhooks). Crash-safe and restart-safe.
+  const notificationRelay = createNotificationRelay({ db });
+  const meRunExecutor = new MeRunExecutor({
+    db,
+    runAgent: createChatPipelineMeRunAgent(chatEngine, db),
+    // On terminal: enqueue one outbox row per subscriber, then nudge the relay
+    // to drain immediately (it also drains on its own interval). Fire-and-forget.
+    onTerminal: (runId) => {
+      void (async () => {
+        const run = await db.getUserRunById(runId);
+        if (run) await enqueueRunTerminalNotifications(db, run);
+        await notificationRelay.drainOnce();
+        // Collaboration Phase 7: if the run has a co-edit doc, merge the agent's
+        // final output into it as the agent peer (idempotent) + broadcast live.
+        const coeditRow = await db.getCoeditDocByRun(runId).catch(() => null);
+        if (coeditRow) {
+          const events = await db.listUserRunEvents(runId).catch(() => []);
+          let fullText = '';
+          for (const ev of events) { if (ev.kind === 'text.delta') { try { const p = JSON.parse(ev.payload) as { delta?: unknown }; if (typeof p.delta === 'string') fullText += p.delta; } catch { /* */ } } }
+          const result = await createCoeditRepo(db).agentAppend(coeditRow.id, runId, fullText).catch(() => null);
+          if (result && result.applied.length > 0) meRunExecutor.broadcastEphemeral(runId, 'coedit.op', { docId: coeditRow.id, ops: result.applied });
+        }
+      })().catch(() => { /* best-effort */ });
+    },
+  });
   registerMeRoutes(router, db, {
     notifications: createNotificationsHub({ db }),
-    runExecutor: new MeRunExecutor({
-      db,
-      runAgent: createChatPipelineMeRunAgent(chatEngine, db),
-    }),
+    runExecutor: meRunExecutor,
+    notificationRelay,
   });
+  // Collaboration Phase 1: start the presence TTL sweeper (reaps participants
+  // who stopped heartbeating, e.g. closed a tab without a clean leave, and
+  // re-broadcasts the updated "who's watching" snapshot).
+  startPresenceSweeper(db, meRunExecutor);
+  // Collaboration Phase 3: start the relay loop and run a one-shot reconcile so
+  // any notification owed before a restart (run finished while the process was
+  // down, or a crash between terminal + enqueue) is delivered on boot.
+  notificationRelay.start();
+  void notificationRelay.reconcile();
+  // Collaboration Phase 5: SLA sweeper — time out overdue handoffs so an
+  // unbounded human wait never deadlocks a run; broadcast each timeout live.
+  startHandoffSweeper(db, (runId, kind, payload) => meRunExecutor.broadcastEphemeral(runId, kind, payload));
   registerMeConversationsRoutes(router, db);
   // M5-3: pass consent manager so isGranted() is called on every memory write path.
   registerMeMemoryRoutes(router, db, { consentManager: config.runtime ? createDurableConsentManager({ runtime: config.runtime, namespace: 'consent' }) : undefined });
   registerMeAgendaRoutes(router, db);
-  registerMeNotesRoutes(router, db);
+  registerMeAccountRoutes(router, db);
+  registerMeFeedbackRoutes(router, db);
+  // m138: answer citations in chat — grounded answers over the user's own workspace with verified [n]
+  // sources. Reuses the notes "Ask your workspace" engine, so it needs the same LLM text generator.
+  registerMeCitationsRoutes(router, db, { aiGenerate: createModelTextGenerator(chatEngine.modelConfig) });
+  // m139: regenerate an answer, keeping version history — needs an LLM to produce the alternative.
+  registerMeVersionsRoutes(router, db, { aiGenerate: createModelTextGenerator(chatEngine.modelConfig) });
+  // m140: per-tenant accessibility defaults (streaming announcements + reduced motion) for the client.
+  registerMeAccessibilityRoutes(router, db);
+  // m143: workspace roles — which UI areas this user sees (surface parity) + member role management.
+  registerMeWorkspaceRoutes(router, db);
+  // m145: internationalisation — the effective UI message pack for the reader's language.
+  registerMeI18nRoutes(router, db);
+  // m146: suggested/starter prompts — the empty-chat conversation starters (curated + personalised).
+  registerMeSuggestedPromptsRoutes(router, db);
+  // weaveNotes Phase 3: give the notes routes an LLM generator (built from the chat
+  // engine's resolved providers + default model) so the AI co-author actions work.
+  // weaveNotes Phase 4: pass the share-token secret + public base url so a note can be
+  // published as a shareable artifact.
+  registerMeNotesRoutes(router, db, {
+    aiGenerate: createModelTextGenerator(chatEngine.modelConfig),
+    imageGenerate: createModelImageGenerator(chatEngine.modelConfig),
+    verifyVision: createModelVisionVerifier(chatEngine.modelConfig),
+    // weaveNotes Phase 4: detailed (segmented) speech-to-text via the voice engine's audio model.
+    ...(voiceEngine ? { transcribe: (a: { audio: Buffer; mimeType?: string; language?: string; model?: string }) => voiceEngine.transcribeDetailed(a) } : {}),
+    jwtSecret,
+    ...(publicBaseUrl ? { publicBaseUrl } : {}),
+    // Run a note action through the geneWeave SUPERVISOR, which DELEGATES to the weaveNotes Editor
+    // worker agent — the worker calls the create_diagram / restructure_note / … tool (its callbacks
+    // are wired into the worker's registry) → stages a suggestion. We give the supervisor ONLY the
+    // weaveNotes Editor worker (workersOverride) and NO direct note tools (toolsOverride: []), so it
+    // must hand the work to the specialist rather than calling the tool itself. Uses an ephemeral
+    // chat that is deleted afterwards so the user's chat history stays clean.
+    runNoteAgentAction: async ({ userId, noteId, instruction, mode }) => {
+      const chatId = `note-agent-${noteId.slice(0, 8)}-${Math.random().toString(36).slice(2, 10)}`;
+      // In SUPERVISOR mode, give the supervisor ONLY the weaveNotes Editor worker (from the seeded
+      // worker_agents row) and NO direct note tools, so it MUST delegate to the specialist. In AGENT
+      // mode the single chat agent calls the note tool itself (the tools are force-registered).
+      let overrides: { workersOverride?: import('./chat-runtime.js').WorkerDef[]; toolsOverride?: string[] } = {};
+      if (mode === 'supervisor') {
+        try {
+          const editor = (await db.listEnabledWorkerAgents()).find((w) => w.name === 'weavenotes_editor');
+          if (editor) {
+            let tools: string[]; try { tools = JSON.parse(editor.tool_names ?? '[]') as string[]; } catch { tools = []; }
+            overrides = { workersOverride: [{ name: editor.name, description: editor.description ?? 'Co-authors the user’s notes.', tools, persona: editor.persona ?? 'agent_worker' }], toolsOverride: [] };
+          }
+        } catch { /* fall back to default supervisor topology */ }
+      }
+      try {
+        await db.createChat({ id: chatId, userId, title: 'weaveNotes assistant', model: chatEngine.modelConfig.defaultModel, provider: chatEngine.modelConfig.defaultProvider });
+        const r = await chatEngine.sendMessage(userId, chatId, instruction, { modeOverride: mode, ...overrides });
+        return { ok: Boolean(r.assistantContent?.trim()), content: r.assistantContent };
+      } finally {
+        try { await db.deleteChat(chatId, userId); } catch { /* best-effort cleanup */ }
+      }
+    },
+  });
   registerMeComplianceRoutes(router, db, config.runtime);
   registerArtifactRoutes(router, db, { jwtSecret, publicBaseUrl });
   registerShareRoutes(router, db, { jwtSecret });
+  // Collaboration Phase 4: public, read-only, redacted run-review share links.
+  registerRunShareRoutes(router, db);
 
   // Voice agent routes — registered only when audio provider is configured
   if (voiceEngine) {
@@ -613,19 +723,31 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   server.maxHeadersCount = SERVER_MAX_HEADERS_COUNT;
   server.maxRequestsPerSocket = SERVER_MAX_REQUESTS_PER_SOCKET;
 
-  // ── WebSocket upgrade — voice sessions ─────────────────────────────────────
-  // Path: /api/voice/sessions/:sessionId/ws
-  // We use dynamic import so `ws` is only loaded when the upgrade event fires.
-  if (voiceEngine) {
+  // ── WebSocket upgrade — voice sessions + run control channel ───────────────
+  //   Voice:        /api/voice/sessions/:sessionId/ws   (gated on voiceEngine)
+  //   Run control:  /api/me/runs/:runId/control          (Collaboration Phase 6)
+  // One upgrade listener routes by path; `ws` is dynamically imported on demand.
+  {
     server.on('upgrade', async (req: IncomingMessage, socket, head: Buffer) => {
       const url = req.url ?? '';
-      const wsMatch = url.match(/^\/api\/voice\/sessions\/([^/?#]+)\/(ws|realtime)/);
-      if (!wsMatch) {
+      const controlMatch = matchRunControlPath(url);
+      const wsMatch = voiceEngine ? url.match(/^\/api\/voice\/sessions\/([^/?#]+)\/(ws|realtime)/) : null;
+      if (!controlMatch && !wsMatch) {
         socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
         socket.destroy();
         return;
       }
-      const sessionId = wsMatch[1]!;
+      // CSWSH defense (Phase 6): validate Origin against the host for the control
+      // channel — a browser cannot forge Origin, so this blocks cross-site hijack.
+      if (controlMatch) {
+        const allowed = (process.env['GENEWEAVE_WS_ALLOWED_ORIGINS'] ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+        if (!isAllowedWsOrigin(req.headers.origin, { allowed, host: req.headers.host })) {
+          socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
+          socket.destroy();
+          return;
+        }
+      }
+      const sessionId = wsMatch?.[1] ?? '';
 
       // L-6: Authenticate via an opaque short-lived ticket (preferred) or a
       // Bearer JWT (legacy fallback for clients not yet updated). The ticket path
@@ -677,22 +799,25 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
 
       try {
         const { WebSocketServer } = await import('ws');
-        const wss = new WebSocketServer({ noServer: true });
+        const wss = new WebSocketServer({ noServer: true, maxPayload: controlMatch ? MAX_CONTROL_MESSAGE_BYTES : undefined });
         const isRealtime = !!url.match(/\/realtime$/);
         wss.handleUpgrade(req, socket, head, async (ws) => {
           try {
-            if (isRealtime) {
+            if (controlMatch) {
+              // Collaboration Phase 6 — bidirectional run control plane.
+              await handleRunControlConnection(ws, controlMatch.runId, { userId: auth.userId, tenantId: auth.tenantId }, { db, runExecutor: meRunExecutor });
+            } else if (isRealtime) {
               await voiceEngine!.handleRealtimeWebSocket({ sessionId, userId: auth.userId, ws });
             } else {
               await voiceEngine!.handleWebSocket({ sessionId, userId: auth.userId, ws, req });
             }
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
-            logger.error(`voice-ws session error`, { sessionId, msg });
+            logger.error(`ws session error`, { sessionId, runId: controlMatch?.runId, msg });
           }
         });
       } catch (err) {
-        logger.error('voice-ws failed to handle upgrade', { err });
+        logger.error('ws failed to handle upgrade', { err });
         socket.write('HTTP/1.1 500 Internal Server Error\r\n\r\n');
         socket.destroy();
       }

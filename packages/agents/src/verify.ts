@@ -11,7 +11,7 @@
  */
 
 import type { Verifier, VerifyResult, ExecutionContext } from '@weaveintel/core';
-import type { RubricJudgeAdapter, RubricCriterion } from '@weaveintel/evals';
+import type { RubricJudgeAdapter, RubricCriterion } from '@weaveintel/testing/evals';
 
 export interface RubricVerifierOptions {
   /** Rubric judge to score the output. */

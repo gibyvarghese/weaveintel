@@ -11,8 +11,8 @@
  * with `stop()` (cancel), `regenerate()` (re-run the last input), `approve()` /
  * `reject()` (HITL decisions), throttled notifications (smooth streaming) and a
  * tiny `getState`/`subscribe` store — the exact shape `useSyncExternalStore`
- * wants, so `@weaveintel/react-client`'s `useRun` is a thin wrapper and a vanilla
- * host (apps/geneweave-ui) can drive the same controller without a framework.
+ * wants, so `@weaveintel/client/react`'s `useRun` is a thin wrapper and a vanilla
+ * host (the reference UI app) can drive the same controller without a framework.
  *
  * Browser-safe: no Node.js APIs. Timers are injectable for deterministic tests.
  */
@@ -121,6 +121,12 @@ export interface RunSession {
   resume(runId: string): Promise<string>;
   /** Post a client event into the running run. */
   sendEvent(payload: Record<string, unknown>): Promise<void>;
+  /**
+   * Collaboration Phase 1 — send a presence heartbeat for the active run ("I'm
+   * watching"). The incoming `presence.update` snapshot lands in `model.presence`.
+   * Pass `'offline'` (or `{ leave: true }`) to leave.
+   */
+  setPresence(state?: string): Promise<void>;
   /** Resolve a HITL approval part by task id. */
   approve(taskId: string): Promise<void>;
   /** Reject a HITL approval part by task id. */
@@ -345,6 +351,11 @@ export function createRunSession(opts: RunSessionOptions): RunSession {
     await client.postEvent(runId, payload);
   }
 
+  async function setPresence(state: string = 'online'): Promise<void> {
+    if (!runId) throw new Error('no active run for presence');
+    await client.setPresence(runId, state === 'offline' ? { leave: true } : { presence: state });
+  }
+
   const approve = (taskId: string): Promise<void> =>
     sendEvent({ kind: 'approval.decision', payload: { taskId, action: 'approve' } });
   const reject = (taskId: string): Promise<void> =>
@@ -388,6 +399,7 @@ export function createRunSession(opts: RunSessionOptions): RunSession {
     regenerate,
     resume,
     sendEvent,
+    setPresence,
     approve,
     reject,
     reset,

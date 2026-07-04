@@ -1,5 +1,5 @@
 /**
- * Example 117 — @weaveintel/tools-time end-to-end (no API keys, in-memory only).
+ * Example 117 — @weaveintel/tools/time end-to-end (no API keys, in-memory only).
  *
  * PROBLEM THIS PACKAGE SOLVES
  * ----------------------------
@@ -9,7 +9,7 @@
  * multiple timezones, format switching, or stateful countdown/stopwatch
  * management.
  *
- * @weaveintel/tools-time provides:
+ * @weaveintel/tools/time provides:
  *
  *   - **getTimezoneSnapshot()** — a single call that returns the localised date,
  *     time, and human-readable string for any IANA timezone.  Agents embed this
@@ -50,7 +50,7 @@ import {
   type TimezoneSnapshot,
   type TimerRecord,
   type StopwatchRecord,
-} from '@weaveintel/tools-time';
+} from '@weaveintel/tools/time';
 import { weaveContext } from '@weaveintel/core';
 
 // ── Presentation helpers ──────────────────────────────────────────────────────
@@ -76,7 +76,7 @@ const FIXED_NOW = new Date('2026-05-27T12:00:00.000Z');
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  console.log('\n@weaveintel/tools-time — full surface-area example\n');
+  console.log('\n@weaveintel/tools/time — full surface-area example\n');
 
   // ════════════════════════════════════════════════════════════════════════════
   // 1. getTimezoneSnapshot() — multiple timezones
@@ -192,7 +192,7 @@ async function main(): Promise<void> {
   store.saveTimer(scope, timerRecord);
 
   // Retrieve and verify the saved timer.
-  const retrieved = store.getTimer(scope, 'timer_demo_001');
+  const retrieved = await store.getTimer(scope, 'timer_demo_001');
   assert.ok(retrieved !== null);
   assert.equal(retrieved!.state, 'running');
   ok(`saveTimer → getTimer: state="${retrieved!.state}", label="${retrieved!.label}"`);
@@ -208,7 +208,7 @@ async function main(): Promise<void> {
   };
   store.saveTimer(scope, pausedTimer);
 
-  const afterPause = store.getTimer(scope, 'timer_demo_001');
+  const afterPause = await store.getTimer(scope, 'timer_demo_001');
   assert.equal(afterPause!.state, 'paused');
   assert.equal(afterPause!.elapsedMs, 5_000);
   ok(`After pause: state="${afterPause!.state}", elapsedMs=${afterPause!.elapsedMs}ms`);
@@ -225,7 +225,7 @@ async function main(): Promise<void> {
   };
   store.saveTimer(scope, resumedTimer);
 
-  const afterResume = store.getTimer(scope, 'timer_demo_001');
+  const afterResume = await store.getTimer(scope, 'timer_demo_001');
   assert.equal(afterResume!.state, 'running');
   ok(`After resume: state="${afterResume!.state}", startedAt set to ${afterResume!.startedAt}`);
 
@@ -240,13 +240,13 @@ async function main(): Promise<void> {
   };
   store.saveTimer(scope, stoppedTimer);
 
-  const afterStop = store.getTimer(scope, 'timer_demo_001');
+  const afterStop = await store.getTimer(scope, 'timer_demo_001');
   assert.equal(afterStop!.state, 'stopped');
   assert.equal(afterStop!.elapsedMs, 13_000);
   ok(`After stop: state="${afterStop!.state}", total elapsedMs=${afterStop!.elapsedMs}ms (13 s)`);
 
   // 3e. listTimers() returns all timers in scope.
-  const allTimers = store.listTimers(scope);
+  const allTimers = await store.listTimers(scope);
   assert.equal(allTimers.length, 1);
   ok(`listTimers(scope) → ${allTimers.length} timer in scope`);
 
@@ -291,7 +291,7 @@ async function main(): Promise<void> {
     ok(`Lap ${i + 1} recorded at ${lapElapsed}ms`);
   }
 
-  const afterLaps = store.getStopwatch(scope, 'watch_demo_001');
+  const afterLaps = await store.getStopwatch(scope, 'watch_demo_001');
   assert.equal(afterLaps!.laps.length, 3);
   assert.deepEqual([...afterLaps!.laps], [3_200, 7_500, 12_800]);
   ok(`laps array: [${afterLaps!.laps.join(', ')}]ms`);
@@ -312,7 +312,7 @@ async function main(): Promise<void> {
     pausedAt: new Date().toISOString(),
   };
   store.saveStopwatch(scope, pausedWatch);
-  assert.equal(store.getStopwatch(scope, 'watch_demo_001')!.state, 'paused');
+  assert.equal((await store.getStopwatch(scope, 'watch_demo_001'))!.state, 'paused');
   ok(`Stopwatch paused at elapsedMs=${pausedWatch.elapsedMs}ms`);
 
   // 4c. Resume the stopwatch.
@@ -324,7 +324,7 @@ async function main(): Promise<void> {
     pausedAt: undefined,
   };
   store.saveStopwatch(scope, resumedWatch);
-  assert.equal(store.getStopwatch(scope, 'watch_demo_001')!.state, 'running');
+  assert.equal((await store.getStopwatch(scope, 'watch_demo_001'))!.state, 'running');
   ok(`Stopwatch resumed`);
 
   // 4d. Stop the stopwatch.
@@ -337,7 +337,7 @@ async function main(): Promise<void> {
   };
   store.saveStopwatch(scope, stoppedWatch);
 
-  const finalWatch = store.getStopwatch(scope, 'watch_demo_001');
+  const finalWatch = await store.getStopwatch(scope, 'watch_demo_001');
   assert.equal(finalWatch!.state, 'stopped');
   assert.equal(finalWatch!.elapsedMs, 18_500);
   assert.equal(finalWatch!.laps.length, 3);
@@ -389,9 +389,9 @@ async function main(): Promise<void> {
   ok(`createTimeTools() returned ${tools.length} Tool objects`);
 
   for (const tool of tools) {
-    // Each Tool from @weaveintel/tools-time has a .schema object (ToolSchema)
+    // Each Tool from @weaveintel/tools/time has a .schema object (ToolSchema)
     // with .name, .description, and .parameters (JSON Schema), plus an .invoke()
-    // method. The .schema shape matches what @weaveintel/tool-schema uses when
+    // method. The .schema shape matches what @weaveintel/tools/schema uses when
     // translating for Anthropic/OpenAI/Google formats.
     const schema = tool.schema as { name: string; description: string; parameters: Record<string, unknown> };
     assert.ok(typeof schema.name === 'string' && schema.name.length > 0, `Tool missing name`);
@@ -417,7 +417,7 @@ async function main(): Promise<void> {
   // Done
   // ════════════════════════════════════════════════════════════════════════════
   console.log(`\n${'═'.repeat(62)}`);
-  console.log('  All @weaveintel/tools-time assertions passed.');
+  console.log('  All @weaveintel/tools/time assertions passed.');
   console.log(`${'═'.repeat(62)}\n`);
 }
 

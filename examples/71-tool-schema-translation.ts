@@ -1,7 +1,7 @@
 /**
  * Example 71 — Tool Schema Translation (anyWeave Phase 3)
  *
- * Demonstrates the @weaveintel/tool-schema package:
+ * Demonstrates the @weaveintel/tools/schema package:
  *
  *  1. Translate the same canonical ToolDefinition[] into OpenAI, Anthropic,
  *     and Google formats — proving one definition feeds every provider.
@@ -27,7 +27,7 @@ import {
   translate,
   translateConversationHistory,
   validate,
-} from '@weaveintel/tool-schema';
+} from '@weaveintel/tools/schema';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Step 1 — One canonical tool definition, three provider formats

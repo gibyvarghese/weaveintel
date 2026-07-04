@@ -6,8 +6,8 @@
 
 import { newUUIDv7 } from '@weaveintel/core';
 import type { ExecutionContext } from '@weaveintel/core';
-import { weaveRedactor } from '@weaveintel/redaction';
-import { weaveEvalRunner } from '@weaveintel/evals';
+import { weaveRedactor } from '@weaveintel/guardrails/redaction';
+import { weaveEvalRunner } from '@weaveintel/testing/evals';
 import type { DatabaseAdapter } from './db.js';
 
 /** Tool names whose output is for internal reasoning only and should be excluded from tool-evidence filters. */

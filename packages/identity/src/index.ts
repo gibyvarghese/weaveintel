@@ -28,8 +28,10 @@ export type { AccessRule } from './access.js';
 
 export {
   DEFAULT_RBAC_POLICY,
+  NAV_AREA_PERMISSION,
   resolvePersonaPermissions,
   hasPersonaPermission,
+  canAccessArea,
   extendIdentityWithPersona,
 } from './rbac.js';
 export type {

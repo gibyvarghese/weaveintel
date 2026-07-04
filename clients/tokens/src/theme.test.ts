@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  themes,
+  neutralThemes,
   auditThemeContrast,
   resolveTenantTheme,
   applyTenantTheme,
@@ -12,7 +12,7 @@ const THEME_NAMES: ThemeName[] = ['dark', 'light'];
 
 describe('theme contrast audit (WCAG-AA)', () => {
   for (const name of THEME_NAMES) {
-    const theme = themes[name];
+    const theme = neutralThemes[name];
 
     it(`${name}: every text-on-surface pair meets AA`, () => {
       const audit = auditThemeContrast(theme);
@@ -48,36 +48,36 @@ describe('theme contrast audit (WCAG-AA)', () => {
 
 describe('per-tenant theming', () => {
   it('returns the base theme unchanged when no override is supplied', () => {
-    expect(resolveTenantTheme(themes.dark)).toBe(themes.dark);
+    expect(resolveTenantTheme(neutralThemes.dark)).toBe(neutralThemes.dark);
   });
 
   it('merges a color override without mutating the base theme', () => {
-    const baseAccent = themes.dark.colors.accent;
+    const baseAccent = neutralThemes.dark.colors.accent;
     const override: TenantThemeOverride = { colors: { accent: '#44E0BE' } };
-    const resolved = resolveTenantTheme(themes.dark, override);
+    const resolved = resolveTenantTheme(neutralThemes.dark, override);
 
     expect(resolved.colors.accent).toBe('#44E0BE');
     // Untouched tokens are preserved.
-    expect(resolved.colors.background).toBe(themes.dark.colors.background);
-    expect(resolved.typography).toBe(themes.dark.typography);
+    expect(resolved.colors.background).toBe(neutralThemes.dark.colors.background);
+    expect(resolved.typography).toBe(neutralThemes.dark.typography);
     // Base is not mutated.
-    expect(themes.dark.colors.accent).toBe(baseAccent);
+    expect(neutralThemes.dark.colors.accent).toBe(baseAccent);
   });
 
   it('overrides font families and corner radii', () => {
-    const resolved = resolveTenantTheme(themes.light, {
+    const resolved = resolveTenantTheme(neutralThemes.light, {
       typography: { families: { display: 'Lora' } },
       radii: { md: 4 },
     });
     expect(resolved.typography.families.display).toBe('Lora');
     // Other families fall through.
-    expect(resolved.typography.families.body).toBe(themes.light.typography.families.body);
+    expect(resolved.typography.families.body).toBe(neutralThemes.light.typography.families.body);
     expect(resolved.radii.md).toBe(4);
-    expect(resolved.radii.lg).toBe(themes.light.radii.lg);
+    expect(resolved.radii.lg).toBe(neutralThemes.light.radii.lg);
   });
 
   it('applies an AA-clean tenant brand', () => {
-    const result = applyTenantTheme(themes.dark, { colors: { accentStrong: '#2FE0B6' } });
+    const result = applyTenantTheme(neutralThemes.dark, { colors: { accentStrong: '#2FE0B6' } });
     expect(result.degraded).toBe(false);
     expect(result.audit.pass).toBe(true);
     expect(result.theme.colors.accentStrong).toBe('#2FE0B6');
@@ -86,22 +86,22 @@ describe('per-tenant theming', () => {
   it('audits — does not throw — a tenant override that breaks contrast', () => {
     // A near-background "text" color destroys readability.
     const broken: TenantThemeOverride = { colors: { text: '#101A15' } };
-    const resolved = resolveTenantTheme(themes.dark, broken);
+    const resolved = resolveTenantTheme(neutralThemes.dark, broken);
     const audit = auditThemeContrast(resolved);
     expect(audit.pass).toBe(false);
     expect(audit.failures.some((f) => f.foreground === 'text')).toBe(true);
   });
 
   it('degrades gracefully to the base theme when enforceContrast rejects an override', () => {
-    const result = applyTenantTheme(themes.dark, { colors: { text: '#101A15' } });
+    const result = applyTenantTheme(neutralThemes.dark, { colors: { text: '#101A15' } });
     expect(result.degraded).toBe(true);
-    expect(result.theme).toBe(themes.dark); // fell back to base
+    expect(result.theme).toBe(neutralThemes.dark); // fell back to base
     expect(result.audit.pass).toBe(false);
   });
 
   it('honors enforceContrast:false to keep a failing override (opt-in)', () => {
     const result = applyTenantTheme(
-      themes.dark,
+      neutralThemes.dark,
       { colors: { text: '#101A15' } },
       { enforceContrast: false },
     );

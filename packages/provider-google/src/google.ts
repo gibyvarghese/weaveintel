@@ -22,7 +22,7 @@ import type {
   ExecutionContext,
 } from '@weaveintel/core';
 import { weaveCapabilities, normalizeError, deadlineSignal } from '@weaveintel/core';
-import { weaveRegisterModel } from '@weaveintel/models';
+import { weaveRegisterModel } from '@weaveintel/core/models';
 import { type GoogleProviderOptions } from './google-types.js';
 import {
   DEFAULT_BASE_URL,

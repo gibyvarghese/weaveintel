@@ -63,9 +63,9 @@ async function scenario1InterruptAndResume() {
 
   const phase1Model = stubModel([
     // Step 0: calls search tool — checkpoint saved
-    { id: '1', model: 'stub', content: '', toolCalls: [{ id: 'tc1', name: 'search', arguments: '{}' }], finishReason: 'tool_use', usage },
+    { id: '1', model: 'stub', content: '', toolCalls: [{ id: 'tc1', name: 'search', arguments: '{}' }], finishReason: 'tool_calls', usage },
     // Step 1: would be terminal — but we "crash" before reaching it
-    { id: '2', model: 'stub', content: 'France's capital is Paris.', toolCalls: [], finishReason: 'stop', usage },
+    { id: '2', model: 'stub', content: "France's capital is Paris.", toolCalls: [], finishReason: 'stop', usage },
   ]);
 
   const agent1 = weaveAgent({

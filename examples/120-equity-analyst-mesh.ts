@@ -14,13 +14,13 @@
  * ─── Packages used ──────────────────────────────────────────────────────────
  *   @weaveintel/core
  *     • weaveContext         — execution context carrier
- *   @weaveintel/tools-marketdata
+ *   @weaveintel/tools/marketdata
  *     • fixtureMarketDataAdapter — deterministic market data, no network
- *   @weaveintel/tools-news
+ *   @weaveintel/tools/news
  *     • fixtureNewsAdapter       — deterministic news articles, no network
- *   @weaveintel/tools-altdata
+ *   @weaveintel/tools/altdata
  *     • fixtureAltDataAdapter    — deterministic ESG / trends data, no network
- *   @weaveintel/equity-scoring
+ *   ./verticals/equity-scoring/src/index.js
  *     • scoreUniverse            — cross-sectional z-score ranking
  *     • computeFactor            — individual factor computation
  *     • strategies               — pre-built ScoringStrategy registry
@@ -34,15 +34,15 @@
  */
 
 import { weaveContext } from '@weaveintel/core';
-import { fixtureMarketDataAdapter } from '@weaveintel/tools-marketdata';
-import { fixtureNewsAdapter } from '@weaveintel/tools-news';
-import { fixtureAltDataAdapter } from '@weaveintel/tools-altdata';
+import { fixtureMarketDataAdapter } from '@weaveintel/tools/marketdata';
+import { fixtureNewsAdapter } from '@weaveintel/tools/news';
+import { fixtureAltDataAdapter } from '@weaveintel/tools/altdata';
 import {
   scoreUniverse,
   explainScore,
   strategies,
-} from '@weaveintel/equity-scoring';
-import type { InputBundle, SymbolScore } from '@weaveintel/equity-scoring';
+} from './verticals/equity-scoring/src/index.js';
+import type { InputBundle, SymbolScore } from './verticals/equity-scoring/src/index.js';
 
 // ── Console helpers ────────────────────────────────────────────────────────
 

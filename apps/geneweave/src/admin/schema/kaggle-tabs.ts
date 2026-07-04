@@ -4,7 +4,7 @@ import type { AdminTabDef } from '@weaveintel/core';
  * Phase K3 — Kaggle projection admin tabs.
  *
  * These three tabs surface the GeneWeave-side projection of Kaggle agent work.
- * Source of truth for evidence + decisions remains @weaveintel/contracts and
+ * Source of truth for evidence + decisions remains @weaveintel/core/contracts and
  * the live-agents StateStore. Operators use these tabs to:
  *   - curate the watchlist of competitions (kaggle-competitions)
  *   - review candidate approaches the ideator drafted (kaggle-approaches)
@@ -53,8 +53,8 @@ export const KAGGLE_ADMIN_TABS: Record<string, AdminTabDef> = {
     fields: [
       { key: 'competition_ref', label: 'Competition Ref' },
       { key: 'approach_id', label: 'Approach ID' },
-      { key: 'contract_id', label: 'Contract ID (links to @weaveintel/contracts)' },
-      { key: 'replay_trace_id', label: 'Replay Trace ID (links to @weaveintel/replay)' },
+      { key: 'contract_id', label: 'Contract ID (links to @weaveintel/core/contracts)' },
+      { key: 'replay_trace_id', label: 'Replay Trace ID (links to @weaveintel/observability/replay)' },
       { key: 'mesh_id', label: 'Mesh ID (live-agents)' },
       { key: 'agent_id', label: 'Agent ID (live-agents)' },
       { key: 'kernel_ref', label: 'Kaggle Kernel Ref' },
@@ -104,8 +104,8 @@ export const KAGGLE_ADMIN_TABS: Record<string, AdminTabDef> = {
     cols: ['run_id', 'contract_id', 'replay_trace_id', 'created_at'],
     fields: [
       { key: 'run_id', label: 'Run ID', readonly: true },
-      { key: 'contract_id', label: 'Contract ID (@weaveintel/contracts)', readonly: true },
-      { key: 'replay_trace_id', label: 'Replay Trace ID (@weaveintel/replay)', readonly: true },
+      { key: 'contract_id', label: 'Contract ID (@weaveintel/core/contracts)', readonly: true },
+      { key: 'replay_trace_id', label: 'Replay Trace ID (@weaveintel/observability/replay)', readonly: true },
       { key: 'contract_report_size', label: 'Contract Report Size (bytes)', readonly: true },
       { key: 'replay_run_log_size', label: 'Replay RunLog Size (bytes)', readonly: true },
       { key: 'created_at', label: 'Created At', readonly: true },
@@ -223,8 +223,8 @@ export const KAGGLE_ADMIN_TABS: Record<string, AdminTabDef> = {
       { key: 'body_preview', label: 'Body Preview', textarea: true, readonly: true },
       { key: 'url', label: 'URL', readonly: true },
       { key: 'status', label: 'Status', readonly: true },
-      { key: 'contract_id', label: 'Contract ID (@weaveintel/contracts)', readonly: true },
-      { key: 'replay_trace_id', label: 'Replay Trace ID (@weaveintel/replay)', readonly: true },
+      { key: 'contract_id', label: 'Contract ID (@weaveintel/core/contracts)', readonly: true },
+      { key: 'replay_trace_id', label: 'Replay Trace ID (@weaveintel/observability/replay)', readonly: true },
       { key: 'posted_at', label: 'Posted At', readonly: true },
     ],
   },

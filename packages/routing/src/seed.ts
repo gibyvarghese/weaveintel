@@ -271,7 +271,7 @@ export const DEFAULT_PROVIDER_ADAPTERS: ProviderAdapterSeedRow[] = [
   {
     provider: 'openai',
     display_name: 'OpenAI Chat Completions / Responses',
-    adapter_module: '@weaveintel/tool-schema/openai',
+    adapter_module: '@weaveintel/tools/schema/openai',
     tool_format: 'openai_json',
     tool_call_response_format: 'tool_calls_array',
     tool_result_format: 'tool_message',
@@ -283,7 +283,7 @@ export const DEFAULT_PROVIDER_ADAPTERS: ProviderAdapterSeedRow[] = [
   {
     provider: 'anthropic',
     display_name: 'Anthropic Messages',
-    adapter_module: '@weaveintel/tool-schema/anthropic',
+    adapter_module: '@weaveintel/tools/schema/anthropic',
     tool_format: 'anthropic_xml',
     tool_call_response_format: 'tool_use_block',
     tool_result_format: 'tool_result_block',
@@ -295,7 +295,7 @@ export const DEFAULT_PROVIDER_ADAPTERS: ProviderAdapterSeedRow[] = [
   {
     provider: 'google',
     display_name: 'Google Gemini',
-    adapter_module: '@weaveintel/tool-schema/google',
+    adapter_module: '@weaveintel/tools/schema/google',
     tool_format: 'google_function',
     tool_call_response_format: 'function_call',
     tool_result_format: 'function_response',
@@ -307,7 +307,7 @@ export const DEFAULT_PROVIDER_ADAPTERS: ProviderAdapterSeedRow[] = [
   {
     provider: 'ollama',
     display_name: 'Ollama (OpenAI-compatible)',
-    adapter_module: '@weaveintel/tool-schema/openai',
+    adapter_module: '@weaveintel/tools/schema/openai',
     tool_format: 'openai_json',
     tool_call_response_format: 'tool_calls_array',
     tool_result_format: 'tool_message',
@@ -320,7 +320,7 @@ export const DEFAULT_PROVIDER_ADAPTERS: ProviderAdapterSeedRow[] = [
   {
     provider: 'xai',
     display_name: 'xAI Grok (OpenAI-compatible)',
-    adapter_module: '@weaveintel/tool-schema/openai',
+    adapter_module: '@weaveintel/tools/schema/openai',
     tool_format: 'openai_json',
     tool_call_response_format: 'tool_calls_array',
     tool_result_format: 'tool_message',
@@ -332,7 +332,7 @@ export const DEFAULT_PROVIDER_ADAPTERS: ProviderAdapterSeedRow[] = [
   {
     provider: 'mistral',
     display_name: 'Mistral AI',
-    adapter_module: '@weaveintel/tool-schema/openai',
+    adapter_module: '@weaveintel/tools/schema/openai',
     tool_format: 'openai_json',
     tool_call_response_format: 'tool_calls_array',
     tool_result_format: 'tool_message',
@@ -344,7 +344,7 @@ export const DEFAULT_PROVIDER_ADAPTERS: ProviderAdapterSeedRow[] = [
   {
     provider: 'amazon',
     display_name: 'Amazon Bedrock (Converse API)',
-    adapter_module: '@weaveintel/tool-schema/amazon',
+    adapter_module: '@weaveintel/tools/schema/amazon',
     tool_format: 'openai_json',
     tool_call_response_format: 'tool_calls_array',
     tool_result_format: 'tool_message',
@@ -356,7 +356,7 @@ export const DEFAULT_PROVIDER_ADAPTERS: ProviderAdapterSeedRow[] = [
   {
     provider: 'deepseek',
     display_name: 'DeepSeek (OpenAI-compatible)',
-    adapter_module: '@weaveintel/tool-schema/openai',
+    adapter_module: '@weaveintel/tools/schema/openai',
     tool_format: 'openai_json',
     tool_call_response_format: 'tool_calls_array',
     tool_result_format: 'tool_message',
@@ -368,7 +368,7 @@ export const DEFAULT_PROVIDER_ADAPTERS: ProviderAdapterSeedRow[] = [
   {
     provider: 'meta',
     display_name: 'Meta Llama (via Groq / Together)',
-    adapter_module: '@weaveintel/tool-schema/openai',
+    adapter_module: '@weaveintel/tools/schema/openai',
     tool_format: 'openai_json',
     tool_call_response_format: 'tool_calls_array',
     tool_result_format: 'tool_message',

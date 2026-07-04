@@ -6,7 +6,7 @@
  * a shared health-tracking instance that both the chat path and the live-agent
  * supervisor consume without importing the concrete tracker class.
  *
- * Usage (in geneWeave boot):
+ * Usage (in host application boot):
  *   const tracker = new ModelHealthTracker();
  *   const routingAdapter = createRuntimeRoutingAdapter(tracker);
  *   const runtime = weaveRuntime({ ..., routing: routingAdapter });

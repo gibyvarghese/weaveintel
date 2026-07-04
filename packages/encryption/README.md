@@ -1,19 +1,40 @@
-# `@weaveintel/encryption`
+# @weaveintel/encryption
 
-Per-tenant envelope encryption for multi-tenant data stores.
+**Per-tenant envelope encryption for sensitive fields: pluggable KMS providers, a key manager, and authenticated (AEAD) crypto.**
 
-- AES-256-GCM authenticated encryption with required AAD (`tenant|table|column|rowId|epoch`).
-- Three-layer key hierarchy: KMS root → KEK → DEK → ciphertext.
-- Pluggable `KmsProvider` (built-in `local`; cloud providers in Phase 7).
-- Pluggable `EncryptionStore` and `AuditEmitter` interfaces — apps wire DB persistence.
-- Sentinel ciphertext format `enc:v1:<epoch>:<iv_b64>:<ct_b64>` — plaintext rows pass through unchanged.
+## Why it exists
 
-## Reusability invariant
+You store customer data, and each customer wants their own lock — one tenant's key should never open another tenant's records, and you should never have to decrypt everything just to rotate one key. Doing this by hand means juggling raw keys in your database, which is exactly what auditors don't want to see. Think of it like a bank's safe-deposit vault: each box has its own key, the bank holds a master key that unlocks the boxes but never sees what's inside, and you can re-key one box without touching the rest. This package is that vault for your fields.
 
-Depends ONLY on `@weaveintel/core` and Node `node:crypto`. No app or DB imports. Any host wires persistence via the `EncryptionStore`/`AuditEmitter`/`KmsProvider` interfaces.
+## When to reach for it
 
-## Phase 1 scope
+Reach for it when you store per-tenant sensitive data (PII, secrets, documents) and need field-level encryption, key rotation, or bring-your-own-key (BYOK) with a real KMS behind it. If you only need to *hide* data from a model or a log without storing it encrypted at rest, use `@weaveintel/guardrails/redaction` instead.
 
-`KmsProvider`, `LocalKmsProvider`, `weaveTenantKeyManager` (encrypt / decrypt / bootstrapTenant / rotateDek / rotateKek), envelope codec, default field policy. Rotation rewriting and blind indexes ship in later phases.
+## How to use it
 
-See `docs/TENANT_ENCRYPTION_DESIGN.md` for full design.
+```ts
+import { createTenantKeyManager, LocalKmsProvider, encryptValue, decryptValue } from '@weaveintel/encryption';
+
+const keys = createTenantKeyManager({ kms: new LocalKmsProvider() });
+
+const sealed = await encryptValue('alice@example.com', { keyManager: keys, tenantId: 't-42' });
+const plain = await decryptValue(sealed, { keyManager: keys, tenantId: 't-42' });
+```
+
+## What's in the box
+
+Main entry (`@weaveintel/encryption`):
+
+- Core crypto: `encryptValue`, `decryptValue`, `isEncrypted`.
+- Key manager: `createTenantKeyManager` / `TenantKeyManager` — per-tenant keys, wrapping, rotation.
+- KMS providers: `LocalKmsProvider`, `AwsKmsProvider`, `AzureKeyVaultProvider`, `GcpKmsProvider`, `VaultTransitProvider`.
+- BYOK: `ByokPemKmsProvider`, `LocalByokKeystore`, `approveBreakGlass`, plus signed attestation helpers.
+- Rotation & lifecycle: `weaveRewriteScheduler`, `weavePurgeScheduler`, blind-index helpers for searchable ciphertext.
+
+Store subpaths (each pulls in an optional peer driver):
+
+- `@weaveintel/encryption/sqlite`, `/postgres`, `/mongodb`, `/redis`, `/dynamodb` — persist wrapped keys and audit records in your database.
+
+## License
+
+MIT.

@@ -14,6 +14,16 @@ import {
   weaveInMemoryStateStore,
 } from '@weaveintel/live-agents';
 import { weaveContext } from '@weaveintel/core';
+import type { Model } from '@weaveintel/core';
+
+// Heartbeat now requires a Model; this demo never invokes it (attention/action
+// path only), so a minimal no-op stub suffices.
+const NOOP_MODEL = {
+  info: { id: 'noop', provider: 'noop', family: 'noop' },
+  async generate() {
+    return { content: '', toolCalls: [], usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 } };
+  },
+} as unknown as Model;
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -126,6 +136,7 @@ async function main() {
     stateStore: store,
     workerId: 'worker-phase4-1',
     concurrency: 1,
+    model: NOOP_MODEL,
   });
 
   const result = await heartbeat.tick(weaveContext({ userId: 'human:ops-admin-1' }));

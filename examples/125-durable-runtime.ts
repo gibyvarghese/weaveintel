@@ -17,7 +17,7 @@ import assert from 'node:assert/strict';
 
 import { weaveRuntime } from '@weaveintel/core';
 import { weaveSqlitePersistence } from '@weaveintel/persistence';
-import { createDurableDeadLetterQueue } from '@weaveintel/reliability';
+import { createDurableDeadLetterQueue } from '@weaveintel/resilience';
 import { createDurableCostMeter } from '@weaveintel/workflows';
 
 async function main(): Promise<void> {

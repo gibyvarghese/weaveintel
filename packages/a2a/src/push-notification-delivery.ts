@@ -1,5 +1,5 @@
 /**
- * @weaveintel/a2a — Push Notification Delivery (Phase 5)
+ * @weaveintel/a2a — Push Notification Delivery
  *
  * Delivers A2ATask state updates to registered webhook endpoints after each
  * task state transition. Supports HMAC-SHA256 payload signing and retry.

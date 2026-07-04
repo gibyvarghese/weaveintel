@@ -1,0 +1,1593 @@
+{
+  "generatedFrom": "restructure/framework-app-separation Phase 0 baseline",
+  "counts": {
+    "totalWorkspaces": 94,
+    "packages": 87,
+    "clients": 4,
+    "apps": 3,
+    "published": 92,
+    "private": 2
+  },
+  "workspaces": [
+    {
+      "name": "@geneweave/desktop",
+      "dir": "clients/desktop",
+      "version": "1.0.0",
+      "private": true,
+      "internalDeps": [],
+      "dependents": [],
+      "externalDepCount": 3
+    },
+    {
+      "name": "@weaveintel/a11y",
+      "dir": "packages/a11y",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [],
+      "dependents": [],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/a2a",
+      "dir": "packages/a2a",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core"
+      ],
+      "dependents": [
+        "@weaveintel/agents",
+        "@weaveintel/geneweave-api",
+        "@weaveintel/live-agents-runtime"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/agents",
+      "dir": "packages/agents",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/a2a",
+        "@weaveintel/compliance",
+        "@weaveintel/core",
+        "@weaveintel/cost-governor",
+        "@weaveintel/evals",
+        "@weaveintel/graph",
+        "@weaveintel/human-tasks",
+        "@weaveintel/models",
+        "@weaveintel/prompts"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api",
+        "@weaveintel/live-agents",
+        "@weaveintel/live-agents-runtime",
+        "@weaveintel/recipes",
+        "@weaveintel/weaveintel"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/api-client",
+      "dir": "clients/api-client",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/client",
+        "@weaveintel/core"
+      ],
+      "dependents": [
+        "geneweave-mobile"
+      ],
+      "externalDepCount": 1
+    },
+    {
+      "name": "@weaveintel/artifacts",
+      "dir": "packages/artifacts",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core"
+      ],
+      "dependents": [],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/cache",
+      "dir": "packages/cache",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/capability-packs",
+      "dir": "packages/capability-packs",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/client",
+      "dir": "packages/client",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core"
+      ],
+      "dependents": [
+        "@weaveintel/api-client",
+        "@weaveintel/react-client"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/coedit",
+      "dir": "packages/coedit",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [],
+      "dependents": [
+        "@weaveintel/geneweave-api"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/collaboration",
+      "dir": "packages/collaboration",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/compliance",
+      "dir": "packages/compliance",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/persistence"
+      ],
+      "dependents": [
+        "@weaveintel/agents"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/contracts",
+      "dir": "packages/contracts",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/core",
+      "dir": "packages/core",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [],
+      "dependents": [
+        "@weaveintel/a2a",
+        "@weaveintel/agents",
+        "@weaveintel/api-client",
+        "@weaveintel/artifacts",
+        "@weaveintel/cache",
+        "@weaveintel/capability-packs",
+        "@weaveintel/client",
+        "@weaveintel/collaboration",
+        "@weaveintel/compliance",
+        "@weaveintel/contracts",
+        "@weaveintel/cost-governor",
+        "@weaveintel/devtools",
+        "@weaveintel/encryption",
+        "@weaveintel/equity-scoring",
+        "@weaveintel/evals",
+        "@weaveintel/extraction",
+        "@weaveintel/geneweave-api",
+        "@weaveintel/graph",
+        "@weaveintel/guardrails",
+        "@weaveintel/human-tasks",
+        "@weaveintel/identity",
+        "@weaveintel/live-agents",
+        "@weaveintel/live-agents-demo",
+        "@weaveintel/live-agents-runtime",
+        "@weaveintel/live-agents-trace-tools",
+        "@weaveintel/mcp-client",
+        "@weaveintel/mcp-server",
+        "@weaveintel/mcp-statsnz",
+        "@weaveintel/memory",
+        "@weaveintel/models",
+        "@weaveintel/notifications",
+        "@weaveintel/oauth",
+        "@weaveintel/observability",
+        "@weaveintel/persistence",
+        "@weaveintel/plugins",
+        "@weaveintel/prompts",
+        "@weaveintel/provider-anthropic",
+        "@weaveintel/provider-google",
+        "@weaveintel/provider-llamacpp",
+        "@weaveintel/provider-ollama",
+        "@weaveintel/provider-openai",
+        "@weaveintel/recipes",
+        "@weaveintel/redaction",
+        "@weaveintel/reliability",
+        "@weaveintel/replay",
+        "@weaveintel/resilience",
+        "@weaveintel/retrieval",
+        "@weaveintel/routing",
+        "@weaveintel/sandbox",
+        "@weaveintel/skills",
+        "@weaveintel/social-growth",
+        "@weaveintel/tenancy",
+        "@weaveintel/testing",
+        "@weaveintel/tool-schema",
+        "@weaveintel/tools",
+        "@weaveintel/tools-altdata",
+        "@weaveintel/tools-broker",
+        "@weaveintel/tools-browser",
+        "@weaveintel/tools-dropbox",
+        "@weaveintel/tools-enterprise",
+        "@weaveintel/tools-filewatch",
+        "@weaveintel/tools-gcal",
+        "@weaveintel/tools-gdrive",
+        "@weaveintel/tools-gmail",
+        "@weaveintel/tools-http",
+        "@weaveintel/tools-imap",
+        "@weaveintel/tools-kaggle",
+        "@weaveintel/tools-marketdata",
+        "@weaveintel/tools-news",
+        "@weaveintel/tools-onedrive",
+        "@weaveintel/tools-outlook",
+        "@weaveintel/tools-outlook-cal",
+        "@weaveintel/tools-search",
+        "@weaveintel/tools-slack",
+        "@weaveintel/tools-social",
+        "@weaveintel/tools-time",
+        "@weaveintel/tools-webhook",
+        "@weaveintel/triggers",
+        "@weaveintel/ui-primitives",
+        "@weaveintel/voice",
+        "@weaveintel/weaveintel",
+        "@weaveintel/workflows"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/cost-governor",
+      "dir": "packages/cost-governor",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/tools"
+      ],
+      "dependents": [
+        "@weaveintel/agents",
+        "@weaveintel/geneweave-api"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/devtools",
+      "dir": "packages/devtools",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/durability",
+      "dir": "packages/durability",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/reliability"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api",
+        "@weaveintel/notifications"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/encryption",
+      "dir": "packages/encryption",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/equity-scoring",
+      "dir": "packages/equity-scoring",
+      "version": "0.1.0",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/tools-altdata",
+        "@weaveintel/tools-marketdata",
+        "@weaveintel/tools-news"
+      ],
+      "dependents": [],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/evals",
+      "dir": "packages/evals",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core"
+      ],
+      "dependents": [
+        "@weaveintel/agents",
+        "@weaveintel/geneweave-api"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/extraction",
+      "dir": "packages/extraction",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core"
+      ],
+      "dependents": [],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/geneweave-api",
+      "dir": "apps/geneweave",
+      "version": "1.0.0",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/a2a",
+        "@weaveintel/agents",
+        "@weaveintel/cache",
+        "@weaveintel/capability-packs",
+        "@weaveintel/coedit",
+        "@weaveintel/collaboration",
+        "@weaveintel/contracts",
+        "@weaveintel/core",
+        "@weaveintel/cost-governor",
+        "@weaveintel/devtools",
+        "@weaveintel/durability",
+        "@weaveintel/encryption",
+        "@weaveintel/evals",
+        "@weaveintel/geneweave-ui",
+        "@weaveintel/guardrails",
+        "@weaveintel/human-tasks",
+        "@weaveintel/i18n",
+        "@weaveintel/identity",
+        "@weaveintel/live-agents",
+        "@weaveintel/live-agents-runtime",
+        "@weaveintel/live-agents-trace-tools",
+        "@weaveintel/mcp-server",
+        "@weaveintel/mcp-statsnz",
+        "@weaveintel/memory",
+        "@weaveintel/models",
+        "@weaveintel/notes",
+        "@weaveintel/notifications",
+        "@weaveintel/oauth",
+        "@weaveintel/observability",
+        "@weaveintel/persistence",
+        "@weaveintel/prompts",
+        "@weaveintel/provider-anthropic",
+        "@weaveintel/provider-google",
+        "@weaveintel/provider-llamacpp",
+        "@weaveintel/provider-ollama",
+        "@weaveintel/provider-openai",
+        "@weaveintel/recipes",
+        "@weaveintel/redaction",
+        "@weaveintel/reliability",
+        "@weaveintel/replay",
+        "@weaveintel/resilience",
+        "@weaveintel/routing",
+        "@weaveintel/sandbox",
+        "@weaveintel/scope",
+        "@weaveintel/skills",
+        "@weaveintel/tenancy",
+        "@weaveintel/testing",
+        "@weaveintel/tokens",
+        "@weaveintel/tools",
+        "@weaveintel/tools-browser",
+        "@weaveintel/tools-enterprise",
+        "@weaveintel/tools-http",
+        "@weaveintel/tools-search",
+        "@weaveintel/tools-time",
+        "@weaveintel/triggers",
+        "@weaveintel/ui-primitives",
+        "@weaveintel/workflows"
+      ],
+      "dependents": [],
+      "externalDepCount": 2
+    },
+    {
+      "name": "@weaveintel/geneweave-ui",
+      "dir": "apps/geneweave-ui",
+      "version": "1.0.0",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/tokens",
+        "@weaveintel/ui-primitives"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api"
+      ],
+      "externalDepCount": 15
+    },
+    {
+      "name": "@weaveintel/graph",
+      "dir": "packages/graph",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core"
+      ],
+      "dependents": [
+        "@weaveintel/agents",
+        "@weaveintel/memory"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/guardrails",
+      "dir": "packages/guardrails",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/testing"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/human-tasks",
+      "dir": "packages/human-tasks",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core"
+      ],
+      "dependents": [
+        "@weaveintel/agents",
+        "@weaveintel/geneweave-api",
+        "@weaveintel/memory",
+        "@weaveintel/workflows"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/i18n",
+      "dir": "packages/i18n",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [],
+      "dependents": [
+        "@weaveintel/geneweave-api"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/identity",
+      "dir": "packages/identity",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api",
+        "@weaveintel/live-agents"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/live-agents",
+      "dir": "packages/live-agents",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/agents",
+        "@weaveintel/core",
+        "@weaveintel/identity",
+        "@weaveintel/mcp-client",
+        "@weaveintel/memory",
+        "@weaveintel/observability",
+        "@weaveintel/replay",
+        "@weaveintel/tools"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api",
+        "@weaveintel/live-agents-demo",
+        "@weaveintel/live-agents-runtime"
+      ],
+      "externalDepCount": 6
+    },
+    {
+      "name": "@weaveintel/live-agents-demo",
+      "dir": "apps/live-agents-demo",
+      "version": "0.1.0",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/live-agents",
+        "@weaveintel/persistence",
+        "@weaveintel/testing"
+      ],
+      "dependents": [],
+      "externalDepCount": 1
+    },
+    {
+      "name": "@weaveintel/live-agents-runtime",
+      "dir": "packages/live-agents-runtime",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/a2a",
+        "@weaveintel/agents",
+        "@weaveintel/core",
+        "@weaveintel/live-agents",
+        "@weaveintel/tools"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/live-agents-trace-tools",
+      "dir": "packages/live-agents-trace-tools",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/tools"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/mcp-client",
+      "dir": "packages/mcp-client",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/mcp-server"
+      ],
+      "dependents": [
+        "@weaveintel/live-agents",
+        "@weaveintel/tools-altdata(dev)",
+        "@weaveintel/tools-broker(dev)",
+        "@weaveintel/tools-dropbox",
+        "@weaveintel/tools-filewatch",
+        "@weaveintel/tools-gcal",
+        "@weaveintel/tools-gdrive",
+        "@weaveintel/tools-gmail",
+        "@weaveintel/tools-imap",
+        "@weaveintel/tools-kaggle(dev)",
+        "@weaveintel/tools-marketdata(dev)",
+        "@weaveintel/tools-news(dev)",
+        "@weaveintel/tools-onedrive",
+        "@weaveintel/tools-outlook",
+        "@weaveintel/tools-outlook-cal",
+        "@weaveintel/tools-slack",
+        "@weaveintel/tools-webhook"
+      ],
+      "externalDepCount": 1
+    },
+    {
+      "name": "@weaveintel/mcp-server",
+      "dir": "packages/mcp-server",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api",
+        "@weaveintel/mcp-client(dev)",
+        "@weaveintel/mcp-statsnz",
+        "@weaveintel/sandbox",
+        "@weaveintel/tools-altdata",
+        "@weaveintel/tools-broker",
+        "@weaveintel/tools-dropbox",
+        "@weaveintel/tools-filewatch",
+        "@weaveintel/tools-gcal",
+        "@weaveintel/tools-gdrive",
+        "@weaveintel/tools-gmail",
+        "@weaveintel/tools-imap",
+        "@weaveintel/tools-kaggle",
+        "@weaveintel/tools-marketdata",
+        "@weaveintel/tools-news",
+        "@weaveintel/tools-onedrive",
+        "@weaveintel/tools-outlook",
+        "@weaveintel/tools-outlook-cal",
+        "@weaveintel/tools-slack",
+        "@weaveintel/tools-webhook"
+      ],
+      "externalDepCount": 1
+    },
+    {
+      "name": "@weaveintel/mcp-statsnz",
+      "dir": "packages/mcp-statsnz",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/mcp-server",
+        "@weaveintel/tools-http"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/memory",
+      "dir": "packages/memory",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/graph",
+        "@weaveintel/human-tasks"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api",
+        "@weaveintel/live-agents",
+        "@weaveintel/persistence"
+      ],
+      "externalDepCount": 6
+    },
+    {
+      "name": "@weaveintel/models",
+      "dir": "packages/models",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core"
+      ],
+      "dependents": [
+        "@weaveintel/agents",
+        "@weaveintel/geneweave-api",
+        "@weaveintel/provider-anthropic",
+        "@weaveintel/provider-google",
+        "@weaveintel/provider-llamacpp",
+        "@weaveintel/provider-ollama",
+        "@weaveintel/provider-openai"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/notes",
+      "dir": "packages/notes",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/tokens"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api",
+        "geneweave-mobile"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/notifications",
+      "dir": "packages/notifications",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/durability",
+        "@weaveintel/resilience"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/oauth",
+      "dir": "packages/oauth",
+      "version": "0.1.0",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/persistence"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/observability",
+      "dir": "packages/observability",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api",
+        "@weaveintel/live-agents",
+        "@weaveintel/weaveintel"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/persistence",
+      "dir": "packages/persistence",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/memory"
+      ],
+      "dependents": [
+        "@weaveintel/compliance(dev)",
+        "@weaveintel/geneweave-api",
+        "@weaveintel/live-agents-demo",
+        "@weaveintel/oauth(dev)",
+        "@weaveintel/reliability(dev)",
+        "@weaveintel/weaveintel"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/plugins",
+      "dir": "packages/plugins",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core"
+      ],
+      "dependents": [],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/prompts",
+      "dir": "packages/prompts",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core"
+      ],
+      "dependents": [
+        "@weaveintel/agents",
+        "@weaveintel/geneweave-api"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/provider-anthropic",
+      "dir": "packages/provider-anthropic",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/models",
+        "@weaveintel/resilience",
+        "@weaveintel/tool-schema"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api(peer)"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/provider-google",
+      "dir": "packages/provider-google",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/models",
+        "@weaveintel/resilience",
+        "@weaveintel/tool-schema"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api(peer)"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/provider-llamacpp",
+      "dir": "packages/provider-llamacpp",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/models",
+        "@weaveintel/tool-schema"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api(peer)"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/provider-ollama",
+      "dir": "packages/provider-ollama",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/models",
+        "@weaveintel/tool-schema"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api(peer)"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/provider-openai",
+      "dir": "packages/provider-openai",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/models",
+        "@weaveintel/resilience",
+        "@weaveintel/tool-schema"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api(peer)"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/react-client",
+      "dir": "packages/react-client",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/client"
+      ],
+      "dependents": [],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/recipes",
+      "dir": "packages/recipes",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/agents",
+        "@weaveintel/core"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/redaction",
+      "dir": "packages/redaction",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/reliability",
+      "dir": "packages/reliability",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/persistence"
+      ],
+      "dependents": [
+        "@weaveintel/durability",
+        "@weaveintel/geneweave-api",
+        "@weaveintel/tools-broker",
+        "@weaveintel/tools-kaggle",
+        "@weaveintel/tools-marketdata",
+        "@weaveintel/tools-news",
+        "@weaveintel/weaveintel"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/replay",
+      "dir": "packages/replay",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api",
+        "@weaveintel/live-agents"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/resilience",
+      "dir": "packages/resilience",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api",
+        "@weaveintel/notifications",
+        "@weaveintel/provider-anthropic",
+        "@weaveintel/provider-google",
+        "@weaveintel/provider-openai",
+        "@weaveintel/tools",
+        "@weaveintel/tools-http",
+        "@weaveintel/tools-kaggle",
+        "@weaveintel/tools-marketdata",
+        "@weaveintel/weaveintel"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/retrieval",
+      "dir": "packages/retrieval",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core"
+      ],
+      "dependents": [],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/routing",
+      "dir": "packages/routing",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/sandbox",
+      "dir": "packages/sandbox",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/mcp-server"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api",
+        "@weaveintel/testing",
+        "@weaveintel/tools-kaggle"
+      ],
+      "externalDepCount": 1
+    },
+    {
+      "name": "@weaveintel/scope",
+      "dir": "packages/scope",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/testing"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/skills",
+      "dir": "packages/skills",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/social-growth",
+      "dir": "packages/social-growth",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/workflows"
+      ],
+      "dependents": [],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/tenancy",
+      "dir": "packages/tenancy",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/testing",
+      "dir": "packages/testing",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/sandbox"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api(dev)",
+        "@weaveintel/guardrails(dev)",
+        "@weaveintel/live-agents-demo(dev)",
+        "@weaveintel/scope(dev)",
+        "@weaveintel/tools-altdata(dev)",
+        "@weaveintel/tools-broker(dev)",
+        "@weaveintel/tools-dropbox(dev)",
+        "@weaveintel/tools-filewatch(dev)",
+        "@weaveintel/tools-gcal(dev)",
+        "@weaveintel/tools-gdrive(dev)",
+        "@weaveintel/tools-gmail(dev)",
+        "@weaveintel/tools-imap(dev)",
+        "@weaveintel/tools-kaggle(dev)",
+        "@weaveintel/tools-marketdata(dev)",
+        "@weaveintel/tools-news(dev)",
+        "@weaveintel/tools-onedrive(dev)",
+        "@weaveintel/tools-outlook(dev)",
+        "@weaveintel/tools-outlook-cal(dev)",
+        "@weaveintel/tools-slack(dev)",
+        "@weaveintel/tools-webhook(dev)"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/tokens",
+      "dir": "clients/tokens",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [],
+      "dependents": [
+        "@weaveintel/geneweave-api",
+        "@weaveintel/geneweave-ui",
+        "@weaveintel/notes(dev)",
+        "geneweave-mobile"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/tool-schema",
+      "dir": "packages/tool-schema",
+      "version": "0.1.0",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core"
+      ],
+      "dependents": [
+        "@weaveintel/provider-anthropic",
+        "@weaveintel/provider-google",
+        "@weaveintel/provider-llamacpp",
+        "@weaveintel/provider-ollama",
+        "@weaveintel/provider-openai"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/tools",
+      "dir": "packages/tools",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/resilience"
+      ],
+      "dependents": [
+        "@weaveintel/cost-governor",
+        "@weaveintel/geneweave-api",
+        "@weaveintel/live-agents",
+        "@weaveintel/live-agents-runtime",
+        "@weaveintel/live-agents-trace-tools",
+        "@weaveintel/tools-altdata",
+        "@weaveintel/tools-broker",
+        "@weaveintel/tools-browser",
+        "@weaveintel/tools-dropbox",
+        "@weaveintel/tools-enterprise",
+        "@weaveintel/tools-filewatch",
+        "@weaveintel/tools-gcal",
+        "@weaveintel/tools-gdrive",
+        "@weaveintel/tools-gmail",
+        "@weaveintel/tools-http",
+        "@weaveintel/tools-imap",
+        "@weaveintel/tools-kaggle",
+        "@weaveintel/tools-marketdata",
+        "@weaveintel/tools-news",
+        "@weaveintel/tools-onedrive",
+        "@weaveintel/tools-outlook",
+        "@weaveintel/tools-outlook-cal",
+        "@weaveintel/tools-search",
+        "@weaveintel/tools-slack",
+        "@weaveintel/tools-social",
+        "@weaveintel/tools-webhook",
+        "@weaveintel/weaveintel"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/tools-altdata",
+      "dir": "packages/tools-altdata",
+      "version": "0.1.0",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/mcp-client",
+        "@weaveintel/mcp-server",
+        "@weaveintel/testing",
+        "@weaveintel/tools"
+      ],
+      "dependents": [
+        "@weaveintel/equity-scoring"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/tools-broker",
+      "dir": "packages/tools-broker",
+      "version": "0.1.0",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/mcp-client",
+        "@weaveintel/mcp-server",
+        "@weaveintel/reliability",
+        "@weaveintel/testing",
+        "@weaveintel/tools",
+        "@weaveintel/tools-marketdata"
+      ],
+      "dependents": [],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/tools-browser",
+      "dir": "packages/tools-browser",
+      "version": "0.1.0",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/tools"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api"
+      ],
+      "externalDepCount": 1
+    },
+    {
+      "name": "@weaveintel/tools-dropbox",
+      "dir": "packages/tools-dropbox",
+      "version": "0.1.0",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/mcp-client",
+        "@weaveintel/mcp-server",
+        "@weaveintel/testing",
+        "@weaveintel/tools"
+      ],
+      "dependents": [],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/tools-enterprise",
+      "dir": "packages/tools-enterprise",
+      "version": "0.1.0",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/tools"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/tools-filewatch",
+      "dir": "packages/tools-filewatch",
+      "version": "0.1.0",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/mcp-client",
+        "@weaveintel/mcp-server",
+        "@weaveintel/testing",
+        "@weaveintel/tools"
+      ],
+      "dependents": [],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/tools-gcal",
+      "dir": "packages/tools-gcal",
+      "version": "0.1.0",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/mcp-client",
+        "@weaveintel/mcp-server",
+        "@weaveintel/testing",
+        "@weaveintel/tools"
+      ],
+      "dependents": [],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/tools-gdrive",
+      "dir": "packages/tools-gdrive",
+      "version": "0.1.0",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/mcp-client",
+        "@weaveintel/mcp-server",
+        "@weaveintel/testing",
+        "@weaveintel/tools"
+      ],
+      "dependents": [],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/tools-gmail",
+      "dir": "packages/tools-gmail",
+      "version": "0.1.0",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/mcp-client",
+        "@weaveintel/mcp-server",
+        "@weaveintel/testing",
+        "@weaveintel/tools"
+      ],
+      "dependents": [],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/tools-http",
+      "dir": "packages/tools-http",
+      "version": "0.1.0",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/resilience",
+        "@weaveintel/tools"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api",
+        "@weaveintel/mcp-statsnz"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/tools-imap",
+      "dir": "packages/tools-imap",
+      "version": "0.1.0",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/mcp-client",
+        "@weaveintel/mcp-server",
+        "@weaveintel/testing",
+        "@weaveintel/tools"
+      ],
+      "dependents": [],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/tools-kaggle",
+      "dir": "packages/tools-kaggle",
+      "version": "0.1.0",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/mcp-client",
+        "@weaveintel/mcp-server",
+        "@weaveintel/reliability",
+        "@weaveintel/resilience",
+        "@weaveintel/sandbox",
+        "@weaveintel/testing",
+        "@weaveintel/tools"
+      ],
+      "dependents": [],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/tools-marketdata",
+      "dir": "packages/tools-marketdata",
+      "version": "0.1.0",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/mcp-client",
+        "@weaveintel/mcp-server",
+        "@weaveintel/reliability",
+        "@weaveintel/resilience",
+        "@weaveintel/testing",
+        "@weaveintel/tools"
+      ],
+      "dependents": [
+        "@weaveintel/equity-scoring",
+        "@weaveintel/tools-broker"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/tools-news",
+      "dir": "packages/tools-news",
+      "version": "0.1.0",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/mcp-client",
+        "@weaveintel/mcp-server",
+        "@weaveintel/reliability",
+        "@weaveintel/testing",
+        "@weaveintel/tools"
+      ],
+      "dependents": [
+        "@weaveintel/equity-scoring"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/tools-onedrive",
+      "dir": "packages/tools-onedrive",
+      "version": "0.1.0",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/mcp-client",
+        "@weaveintel/mcp-server",
+        "@weaveintel/testing",
+        "@weaveintel/tools"
+      ],
+      "dependents": [],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/tools-outlook",
+      "dir": "packages/tools-outlook",
+      "version": "0.1.0",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/mcp-client",
+        "@weaveintel/mcp-server",
+        "@weaveintel/testing",
+        "@weaveintel/tools"
+      ],
+      "dependents": [],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/tools-outlook-cal",
+      "dir": "packages/tools-outlook-cal",
+      "version": "0.1.0",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/mcp-client",
+        "@weaveintel/mcp-server",
+        "@weaveintel/testing",
+        "@weaveintel/tools"
+      ],
+      "dependents": [],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/tools-search",
+      "dir": "packages/tools-search",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/tools"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/tools-slack",
+      "dir": "packages/tools-slack",
+      "version": "0.1.0",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/mcp-client",
+        "@weaveintel/mcp-server",
+        "@weaveintel/testing",
+        "@weaveintel/tools"
+      ],
+      "dependents": [],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/tools-social",
+      "dir": "packages/tools-social",
+      "version": "0.1.0",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/tools"
+      ],
+      "dependents": [],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/tools-time",
+      "dir": "packages/tools-time",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/tools-webhook",
+      "dir": "packages/tools-webhook",
+      "version": "0.1.0",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/mcp-client",
+        "@weaveintel/mcp-server",
+        "@weaveintel/testing",
+        "@weaveintel/tools"
+      ],
+      "dependents": [],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/triggers",
+      "dir": "packages/triggers",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api"
+      ],
+      "externalDepCount": 6
+    },
+    {
+      "name": "@weaveintel/ui-primitives",
+      "dir": "packages/ui-primitives",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api",
+        "@weaveintel/geneweave-ui"
+      ],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/voice",
+      "dir": "packages/voice",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core"
+      ],
+      "dependents": [],
+      "externalDepCount": 1
+    },
+    {
+      "name": "@weaveintel/weaveintel",
+      "dir": "packages/weaveintel",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/agents",
+        "@weaveintel/core",
+        "@weaveintel/observability",
+        "@weaveintel/persistence",
+        "@weaveintel/reliability",
+        "@weaveintel/resilience",
+        "@weaveintel/tools"
+      ],
+      "dependents": [],
+      "externalDepCount": 0
+    },
+    {
+      "name": "@weaveintel/workflows",
+      "dir": "packages/workflows",
+      "version": "0.0.1",
+      "private": false,
+      "internalDeps": [
+        "@weaveintel/core",
+        "@weaveintel/human-tasks"
+      ],
+      "dependents": [
+        "@weaveintel/geneweave-api",
+        "@weaveintel/social-growth"
+      ],
+      "externalDepCount": 6
+    },
+    {
+      "name": "geneweave-mobile",
+      "dir": "clients/mobile",
+      "version": "0.0.1",
+      "private": true,
+      "internalDeps": [
+        "@weaveintel/api-client",
+        "@weaveintel/notes",
+        "@weaveintel/tokens"
+      ],
+      "dependents": [],
+      "externalDepCount": 29
+    }
+  ]
+}

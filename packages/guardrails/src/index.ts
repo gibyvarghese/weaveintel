@@ -144,3 +144,12 @@ export {
   type GuardrailConditionContext,
 } from './condition-context.js';
 export { evaluateCondition } from './condition-evaluator.js';
+
+// ── Prompt-injection spotlighting (instruction–data separation, OWASP LLM01) ──
+// Also available as the subpath import `@weaveintel/guardrails/spotlighting`.
+export {
+  makeFence,
+  fenceUntrusted,
+  spotlightPreamble,
+  spotlight,
+} from './spotlighting.js';

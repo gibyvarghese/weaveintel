@@ -11,9 +11,9 @@
  *   These cover most patterns (LLM ReAct loop, simple message router) and
  *   serve as the reference implementations for future kinds (Phase 6+).
  *
- * Geneweave is the canonical consumer (see
- * `apps/geneweave/src/live-agents/handler-registry-boot.ts`), but any app
- * that uses `@weaveintel/live-agents` can plug this package in.
+ * The reference application is the canonical consumer (its handler-registry
+ * boot module wires this in), but any app that uses `@weaveintel/live-agents`
+ * can plug this package in.
  */
 
 export {
@@ -101,7 +101,7 @@ export {
 
 // Phase 2 (live-agents capability parity) — DB-backed ModelResolver and
 // per-agent overlay. Together these lift the per-tick routing pattern
-// previously hand-written in geneweave's kaggle heartbeat into the
+// previously hand-written in a consuming app's heartbeat loop into the
 // reusable runtime layer.
 export {
   weaveDbModelResolver,
@@ -117,7 +117,7 @@ export {
 } from './agent-overlay-resolver.js';
 
 // Phase 3 (live-agents capability parity) — DB-backed `LiveAgentPolicy`
-// composer. Bundles geneweave's `DbToolPolicyResolver`, `DbToolApprovalGate`,
+// composer. Bundles the host application's `DbToolPolicyResolver`, `DbToolApprovalGate`,
 // `DbToolRateLimiter`, `DbToolAuditEmitter` into a single policy slot
 // passed to `createHeartbeatSupervisor` (or any consumer of `HandlerContext`).
 export {

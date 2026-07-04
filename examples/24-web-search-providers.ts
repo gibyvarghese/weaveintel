@@ -1,7 +1,7 @@
 /**
  * Example 24 — Web Search Provider Ecosystem
  *
- * Demonstrates the full @weaveintel/tools-search package:
+ * Demonstrates the full @weaveintel/tools/search package:
  *  • DuckDuckGoProvider with automatic HTML SERP fallback
  *  • Multi-provider SearchRouter with ordered fallback chain
  *  • Fan-out (parallel search across all providers)
@@ -9,7 +9,7 @@
  *  • Wiring the router into an agent's tool registry
  *
  * WeaveIntel packages used:
- *   @weaveintel/tools-search — Web search provider ecosystem:
+ *   @weaveintel/tools/search — Web search provider ecosystem:
  *     • DuckDuckGoProvider  — No API key required. Hits DuckDuckGo Instant Answer API;
  *                             automatically falls back to HTML SERP parsing when the
  *                             Instant Answer API returns zero results (common for event/
@@ -51,7 +51,7 @@ import {
   ExaProvider,
   createSearchRouter,
   createSearchTools,
-} from '@weaveintel/tools-search';
+} from '@weaveintel/tools/search';
 import {
   weaveContext,
   weaveToolRegistry,

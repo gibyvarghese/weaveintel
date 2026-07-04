@@ -18,6 +18,8 @@ export {
 export {
   weaveOpenAIImageModel,
   weaveOpenAIImage,
+  buildImageGenerationBody,
+  isGptImageModel,
 } from './openai-images.js';
 
 // Audio — TTS & STT

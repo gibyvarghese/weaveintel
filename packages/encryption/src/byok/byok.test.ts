@@ -1,5 +1,5 @@
 /**
- * @weaveintel/encryption — Phase 10 BYOK / HYOK / break-glass / attestation tests.
+ * @weaveintel/encryption — BYOK / HYOK / break-glass / attestation tests.
  */
 
 import { describe, expect, it } from 'vitest';

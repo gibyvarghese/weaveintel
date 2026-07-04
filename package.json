@@ -21,6 +21,7 @@
     "check:workspace-topology": "node scripts/validate-workspace-topology.mjs",
     "check:no-raw-fetch": "node scripts/check-no-raw-fetch.mjs",
     "check:no-adhoc-resilience": "node scripts/check-no-adhoc-resilience.mjs",
+    "check:no-app-brand": "node scripts/check-no-app-brand.mjs",
     "check:vocab-w9": "node scripts/check-vocab-w9.mjs --w9-only",
     "test:examples": "tsc --noEmit --project tsconfig.examples.json",
     "lint": "turbo lint",
@@ -29,13 +30,16 @@
     "format": "prettier --write \"{packages,apps}/*/src/**/*.ts\"",
     "format:check": "prettier --check \"{packages,apps}/*/src/**/*.ts\"",
     "release:bump": "node scripts/bump-version.mjs",
-    "release:tag": "node scripts/tag-release.mjs"
+    "release:tag": "node scripts/tag-release.mjs",
+    "test:docs-samples": "node scripts/extract-docs-samples.mjs && tsc --noEmit -p tsconfig.docs-samples.json"
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "^0.110.0",
     "@changesets/cli": "^2.27.0",
     "@types/ws": "^8.18.1",
     "@vitest/coverage-v8": "^3.2.6",
     "dotenv": "^17.4.2",
+    "openai": "^6.45.0",
     "prettier": "^3.3.0",
     "tsx": "^4.21.0",
     "turbo": "^2.3.0",

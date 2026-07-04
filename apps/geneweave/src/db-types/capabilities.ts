@@ -10,7 +10,7 @@ export interface CapabilityPackRow {
   name: string;
   description: string;
   authored_by: string | null;
-  /** JSON-serialized `CapabilityPack` manifest from `@weaveintel/capability-packs`. */
+  /** JSON-serialized `CapabilityPack` manifest from `@weaveintel/core/capability-packs`. */
   manifest: string;
   installed_at: string | null;
   installed_by: string | null;

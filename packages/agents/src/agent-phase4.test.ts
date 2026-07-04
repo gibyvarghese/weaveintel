@@ -1,5 +1,5 @@
 /**
- * @weaveintel/agents — Phase 4 tests
+ * @weaveintel/agents — tests
  *
  * P4-1: createMemoryToolSet — portable memory tool set factory
  * P4-2: memoryContext hook — proactive memory context injection
@@ -17,8 +17,8 @@ import { weaveAgent } from './agent.js';
 import { createMemoryToolSet, createMemoryToolRegistry } from './memory-tools.js';
 import type { MemoryToolSetOptions, SemanticMemoryEntry, EntityMemoryEntry } from './memory-tools.js';
 import { createGraphMemoryToolSet, createGraphMemoryToolRegistry } from './memory-graph.js';
-import { createGraphMemoryStore } from '@weaveintel/graph';
-import type { GraphMemoryStore } from '@weaveintel/graph';
+import { createGraphMemoryStore } from '@weaveintel/memory';
+import type { GraphMemoryStore } from '@weaveintel/memory';
 import type { Tool } from '@weaveintel/core';
 import { makeCtx, stubSequenceModel, stubTextModel } from './test-helpers.js';
 import { weaveToolRegistry, weaveTool } from '@weaveintel/core';

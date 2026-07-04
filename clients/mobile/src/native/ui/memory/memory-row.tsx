@@ -8,7 +8,7 @@
  * through the central {@link Icon} and colors from {@link useTheme}.
  */
 import { Pressable, Text, View } from 'react-native';
-import type { MemoryItem } from '@geneweave/api-client';
+import type { MemoryItem } from '@weaveintel/api-client';
 import { memoryIsLocked, provenanceLabel } from '../../../lib';
 import { useTheme } from '../../providers/theme-provider';
 import { Icon } from '../icon';

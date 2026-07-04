@@ -26,7 +26,7 @@
  *      each agent at provisioning time.
  */
 
-import { liveKaggleAdapter, wrapAdapterWithResilience } from '@weaveintel/tools-kaggle';
+import { liveKaggleAdapter, wrapAdapterWithResilience } from '../../kaggle/index.js';
 import type {
   HandlerContext,
   HandlerKindRegistration,

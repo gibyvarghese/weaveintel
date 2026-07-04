@@ -186,13 +186,73 @@ ${code('text', `Applications (geneweave, your app)
   └─ Agent Layer    @weaveintel/agents · @weaveintel/workflows · @weaveintel/live-agents
                     @weaveintel/a2a · @weaveintel/skills · @weaveintel/cost-governor
   └─ Capability     @weaveintel/prompts · @weaveintel/memory · @weaveintel/retrieval
-                    @weaveintel/extraction · @weaveintel/graph · @weaveintel/collaboration
-                    @weaveintel/evals · @weaveintel/guardrails · @weaveintel/resilience
+                    @weaveintel/extraction · @weaveintel/memory · @weaveintel/collab
+                    @weaveintel/testing/evals · @weaveintel/guardrails · @weaveintel/resilience
   └─ Integration    @weaveintel/providers · @weaveintel/mcp-client · @weaveintel/mcp-server
-                    @weaveintel/tools-* · @weaveintel/sandbox · @weaveintel/oauth
-  └─ Platform       @weaveintel/security · @weaveintel/tenancy · @weaveintel/compliance
-                    @weaveintel/encryption · @weaveintel/durability · @weaveintel/persistence
-  └─ Contracts      @weaveintel/core  (zero runtime dependencies)`)}`;
+                    @weaveintel/tools-* · @weaveintel/sandbox · @weaveintel/identity/oauth
+  └─ Platform       @weaveintel/security · @weaveintel/identity/tenancy · @weaveintel/guardrails/compliance
+                    @weaveintel/encryption · @weaveintel/resilience · @weaveintel/persistence
+  └─ Contracts      @weaveintel/core  (zero runtime dependencies)`)}
+${callout('info', '🔌', 'Where "run plumbing" lives.', 'A <strong>run registry</strong> (what runs exist + their status) and a <strong>run journal</strong> (the numbered, append-only log of everything a run did, so a dropped connection can resume from "event 41") are now single <em>interfaces</em> in <code>@weaveintel/core</code>. geneWeave stores them in SQL; a key-value adapter ships in core — same interface, swappable storage, no duplicate code. The one Server-Sent-Events stream parser lives there too. New to this? Think of an interface as a power socket: anything that fits the socket (SQL, key-value) works, and nothing that plugs in needs to know what is behind the wall.')}
+${callout('tip', '👀', 'Presence — "who else is watching this run".', 'Open a run and other viewers (and the AI agent itself!) show up live, like the avatars in a shared document. The browser of each viewer sends a tiny "still here" ping (a <strong>heartbeat</strong>) every ~15 seconds; if the pings stop for ~30 seconds, that viewer is removed. The current list is broadcast to everyone over the same live stream as a <code>presence.update</code> event and lands in the client as <code>vm.presence</code>. It is stored in a small <code>run_presence</code> table that only ever holds "who is here right now" — it is deliberately kept OUT of the permanent run log (presence is throw-away, not history). The running agent appears as a peer with a "working" status while it produces output. Your identity always comes from your login, never from the browser, so nobody can pretend to be someone else.')}
+${callout('tip', '🔗', 'Sharing a run — invite links + roles.', 'Exactly like sharing a Google Doc, but for a live AI run. The owner clicks "share", picks a level, and sends a link. Whoever opens it gets <em>only</em> that level: a <strong>viewer</strong> can watch the run live (and appears in presence) but cannot touch it; a <strong>collaborator</strong> can also send input; only the <strong>owner</strong> can cancel the run or share it further. Every request is checked on the SERVER against your role — the app never trusts what your browser claims you are allowed to do. The invite link is a long random code; only a one-way fingerprint (hash) of it is stored, so even someone reading the database cannot reconstruct the link. Links can expire or be revoked, and a share link can never cross between organisations (tenants). New to this? An "access role" is just a label (viewer / collaborator / owner) that decides what each person is allowed to do — checked every single time, on the server, so it cannot be faked.')}
+${callout('warn', '🛡️', 'Removing someone really disconnects them (CVE-2026-53843).', 'A live stream is permission-checked when it opens — but a run can stream for a long time. So when an owner removes a member (or ends sharing), geneWeave does not wait for that person to reload the page: it <strong>immediately closes the live stream they hold</strong> with an "access revoked" signal, and it also re-checks access on every heartbeat as a backstop. The result: a removed viewer can neither act on the run nor keep watching it. New to this? Think of it like changing the locks the moment someone hands back their key — not the next time they happen to try the door.')}
+${callout('tip', '🔔', 'Get notified when a run finishes, even after you close the tab.', 'Click "Notify me" on a long run, then walk away. When it finishes you get a notification in your bell inbox (and, if you set them up, a webhook or push) — no need to sit and watch. The important part is that this is <strong>crash-proof</strong>: the moment a run ends, the system writes a durable "to deliver" record in the database for each subscriber, and a background worker delivers it and only then ticks it off. If the server restarts halfway through, the record is still there and delivery simply resumes — so a notification you are owed is never silently lost. You can never get the SAME notification twice (each one carries a stable fingerprint). Outgoing webhooks are cryptographically signed (so the receiver can prove it really came from us) and may only point at public internet addresses, never at internal machines. New to this? A "webhook" is just an automated message from one app to another that says "this thing finished", sent to a web address you registered.')}
+${callout('tip', '💬', 'Comment on a run, like Google Docs.', 'Open a finished run and leave a sticky note pinned to ONE step — "this tool call used the wrong argument". Replies form a thread you can mark resolved; you can @mention a teammate (they get a notification); and you can leave a SCORE (a thumbs-up, or "4 out of 5") that turns into evaluation data the system can learn from. A comment is pinned to a stable step id (not a character position), so if the run text shifts the note is flagged as "stale" rather than silently moving to the wrong place. The owner can also publish a <strong>read-only public link</strong>: it shows the output and the review with reviewer display names only — never any emails, the internal ids, the system prompt, or the raw tool inputs — and tells search engines not to index it. Everything you type is cleaned before display, so a comment can never smuggle in a script. New to this? "Annotating" just means attaching little judgements (a rating, a note) to specific parts of something, so people can review it together.')}
+${callout('tip', '🤝', 'Hand a run off — to a teammate, a human expert, or another agent.', 'Sometimes whoever is holding a task wants someone else to take over: pass a live session to a colleague, or let an AI run that hits something uncertain ESCALATE to a human who steps in and then hands it back. geneWeave models this as one clear lifecycle — <strong>requested → accepted (or rejected, with a reason) → in progress → handed back → completed</strong> — and writes down EVERY step (who, when, why) in a tamper-evident log, so the whole exchange is auditable. The context that travels with a handoff is a short <strong>briefing</strong> (a summary, the open questions, the next step) — never the entire raw transcript, which would be slow and bury the important bits. When a human accepts, they are automatically given access to take over the session; a rejection must say why; a handoff that nobody picks up eventually times out so a run is never stuck waiting forever; and a chain of handoffs cannot loop endlessly. New to this? A "handoff" is just passing the baton in a relay — the task keeps going, a new runner takes it, and there is a clear record of the exchange.')}
+${callout('tip', '📡', 'Live updates that survive a dropped connection.', 'A run streams its output to your browser as it happens. This makes that stream tough: every event is numbered, so if your connection blips the browser reconnects and the server replays ONLY what you missed (no gaps, no repeats) using the standard "Last-Event-ID" mechanism. The multiplayer signals (who is present, comments, handoffs) are sent in the standard AG-UI way — a one-time SNAPSHOT of the shared state, then tiny EDITS (a "JSON Patch", RFC 6902) as things change — so any AG-UI-compatible app can show them. There is also a separate two-way CONTROL channel (a WebSocket) the page uses to talk back: cancel the run, nudge it with a steer, or send a presence heartbeat. It is hardened: it checks the request really came from our own site (blocking cross-site hijacking), authenticates with a short-lived one-time ticket (never a cookie), and treats repeated commands as one (so a retry after a reconnect never cancels twice). When it reconnects it resends a fresh snapshot, so your control + presence survive switching tabs, not just reloading. New to this? "Server-Sent Events" is the server streaming text to your browser; a "WebSocket" is a two-way always-on line; "JSON Patch" is a small list of edits instead of resending everything.')}
+${callout('tip', '✍️', 'Co-edit a document WITH the AI, like Google Docs.', 'A human and the AI agent can type into the SAME document at the same time and it never scrambles — the trick behind multiplayer editors like Google Docs and Figma, called a <strong>CRDT</strong>. Instead of "insert at position 5" (which drifts when two people edit at once), every character gets a permanent unique id and edits say "insert AFTER character X". With one fixed rule for ordering two characters that land in the same spot, every copy rebuilds the identical text — guaranteed, with no central lock. The AI is just another editor (a "peer") whose streamed writing merges with yours automatically. If your connection drops and you keep editing, your changes reconcile when you reconnect (the system sends only the edits each side is missing). You see little coloured <strong>cursors</strong> showing where everyone — including the AI — is working; those are deliberately kept separate and never saved. And because the convergence math assumes everyone plays fair, the SERVER checks every edit: it stamps each edit with WHO made it (so nobody can forge an edit as someone else), and caps how much you can send at once. New to this? A "CRDT" is just a clever data structure that lets many people change the same thing at once and always agree on the result, without a lock or a central referee.')}
+${callout('info', '🔩', 'The co-editing engine is swappable — you are never locked into ours (a “port”, not a hard-wire).', 'The live co-editing you just read about is powered by our own small, no-dependencies engine — but it is deliberately NOT welded in. Everything that touches a shared document (the merging, the coloured cursors, the AI writing alongside you) talks to ONE tidy interface we call a <strong>port</strong>. Our engine is simply the appliance that ships in the box; a team that already runs a popular alternative like <strong>Yjs</strong> can write one small adapter with the same plug and swap the engine underneath — <em>without</em> changing the sharing, the cursors, or the AI co-author. To prove a swapped-in engine behaves identically, we ship a <strong>conformance test</strong> the new engine must pass (the exact same one our built-in engine passes). This is the open-core promise in miniature: the useful part is the socket, and the socket is yours. Adopters can read the full guide — with a worked Yjs adapter — in <code>@weaveintel/collab</code>’s <code>docs/adapters.md</code>. New to this? A “port” is like a wall socket: anything that fits the socket works, and the wiring in the wall never has to change when you swap the appliance.')}
+${callout('info', '📝', 'Notes are getting a clean "doorway" — the first step toward AI co-edited notes.', 'The Notes feature is becoming an AI-native research workspace where humans and AI agents write together. The very first step (done now) is plumbing, not a visible feature: all note reading and writing now goes through ONE well-defined interface (a "repository") instead of the web routes poking the database directly. Why bother? Because that single doorway is what lets us, in the next steps, swap the storage for a real-time CRDT co-editing engine WITHOUT rewriting the app — and it lets us test the notes feature on its own. Behaviour is intentionally identical to before; this is a safe refactor proven by a shared test that both the in-memory version and the real database version must pass. New to this? A "repository" here just means the one place the code goes to load or save notes — like a single front desk instead of everyone wandering into the storage room.')}
+${callout('tip', '🧱', 'Notes can now be co-edited block-by-block, like Notion.', 'A note is built from BLOCKS — a heading, a paragraph, a bullet, a to-do, a code block. weaveNotes This makes that whole structure safely co-editable by humans AND the AI at the same time, using the same conflict-free technology behind the live co-editing you saw earlier. The clever trick: instead of a complicated tree, the whole note is kept as one long line of tiny pieces, where some pieces are characters and some are little "a new block starts here" markers. Because it is just one line, the proven co-editing math works unchanged — splitting a paragraph is just inserting a marker, merging two is deleting one — and everyone always ends up with the identical note. On top of that, the AI can read a note as Markdown (the format AI models speak) and contribute new blocks just like a person typing. There is a new read-only endpoint that shows a note as blocks, as Markdown, or as clean HTML, and it always repairs the structure so the result is valid even after lots of simultaneous edits. New to this? A "block" is one chunk of a document (a heading, a list item, a code box); "Markdown" is plain text with light formatting like # for a heading and - for a bullet.')}
+${callout('tip', '👥', 'Two people (and the AI) can now co-edit the SAME note live, with sharing and presence.', 'This made a note conflict-free; This turns that into real teamwork. You can <strong>Share</strong> a note with a link: whoever opens it joins as a co-editor (or a read-only viewer) and you both edit the same note at once, always ending up with the identical result — nobody overwrites anybody. A small badge shows how many people are editing right now (that is "presence"), and those live signals are never saved because they only ever mean "right this second". The server is the trusted referee in the middle: it checks every edit before sharing it — it stamps WHO made each edit so nobody can pretend to be someone else, it blocks viewers from editing, and it caps how much you can send so nobody can flood the note. If your connection drops, your edits reconcile when you return: the server sends back only the edits you missed, not the whole note. Behind the scenes your save is turned into the smallest set of changes and merged in, so the older single-user save still works too. New to this? "Sharing" here means handing someone a link that lets them into one specific note; "presence" is just the little live indicator of who else is here, like the faces you see at the top of a shared document.')}
+${callout('tip', '🤖', 'The AI can now help write your notes — as suggestions you Accept or Reject.', 'This brings the AI right into the note. An <strong>AI toolbar</strong> lets you ask it to Continue your writing, Rewrite a passage, Summarize the page, or Answer a question about it. Crucially, the AI does NOT change your note straight away: its output appears as a <strong>suggestion</strong> — like "tracked changes" in a word processor — that you Accept (apply it) or Reject (throw it away). This is the safe, modern way to let an AI edit a document: it can never silently rewrite your words, which also protects you if a webpage or email tries to trick the AI into changing things ("prompt injection"). You can also drop in an <strong>AI block</strong>: a paragraph generated from a prompt that remembers the prompt, so you can Refresh it later to regenerate it with the latest information. And during a normal chat, the agent itself can <strong>create a brand-new note</strong> for you and fill it with whatever you asked about (a research summary, a plan, a checklist) — then co-write a note using a built-in note-editing tool, joining your note as just another editor so its writing merges with yours and never clobbers it. The same safety rules from before still apply: read-only viewers cannot trigger AI edits, and the AI can only touch notes you are allowed to edit. New to this? A "suggestion" is a proposed change shown to you before it is applied; "prompt injection" is when sneaky text tries to hijack an AI — staging every AI edit for your approval is how we stop that from quietly editing your notes.')}
+${callout('tip', '📤', 'Turn a note into a shareable document with a public link — safely.', 'When a note is ready to share beyond your team, you can <strong>Publish</strong> it: weaveNotes turns the note into a self-contained document (an "artifact") and gives you a public, read-only link anyone can open — no account needed. Before anything is shared, a safety pass scans the content and <strong>redacts</strong> (blacks out) things you almost never mean to publish — passwords, API keys and tokens are always removed, and for notes you have marked <strong>confidential</strong>, personal details like email addresses and phone numbers are removed too. A note marked <strong>restricted</strong> simply cannot be published at all. The agent can publish on your behalf when you ask, but it always creates the document privately — it never makes a public link by itself, so a sneaky instruction hidden in some text can never quietly put your note on the open web; making it public is always a deliberate human click. Behind the scenes this reuses the same trusted document-sharing system the rest of the app uses, so published notes get the same versioning and share controls (optional password, expiry) as any other artifact. New to this? An "artifact" here is just a saved, shareable document; "redaction" means automatically hiding sensitive bits before others can see them, like the black bars on a released public record.')}
+${callout('tip', '🕸️', 'Your notes now connect into a knowledge graph — backlinks, "related notes", and a map.', 'Notes are far more useful when they are connected, not just a pile of separate pages. This adds that web of connections. Write <strong>[[Another Note]]</strong> inside a note to LINK to it (like a hyperlink, but by title) — and the other note automatically gets a <strong>backlink</strong> ("which notes point at me?"). The app also spots <strong>unlinked mentions</strong>: places where you typed another note\'s title in plain text but did not link it yet, so you can connect them with one click. Separately, the AI reads each note and pulls out the people, organizations and concepts it is about (its <strong>entities</strong>) and how they relate, building a little <strong>knowledge graph</strong> you can see as a map. And because each note is turned into a list of numbers that captures its meaning (an "embedding"), the app can surface <strong>related notes</strong> — pages about similar topics — even when you never linked them. A new 🔗 Connections panel in the editor shows all of this: backlinks, unlinked mentions, related notes with a match score, and the graph. The agent can use the same semantic search to look through your notes when you ask it about something. New to this? A "backlink" is the reverse of a link (it shows who links to the current note); an "embedding" is a way of turning text into numbers so a computer can tell which notes are about similar things.')}
+${callout('tip', '🗃️', 'Notes can now be organized as databases (tables) — with typed columns and AI that fills them in.', 'Sometimes a pile of pages is better viewed as a TABLE. This adds Notion-style <strong>databases</strong>: a set of rows with typed <strong>columns</strong> — text, a number, a date, a checkbox, a dropdown (with fixed choices), a link to another table — so your data has structure, not just prose. You can look at the same rows as a plain <strong>table</strong>, a <strong>gallery</strong> of cards, or a <strong>board</strong> grouped by a dropdown. A <strong>relation</strong> column connects rows across tables ("this Project has these Tasks"), and a <strong>rollup</strong> then summarises across that link ("what percent of the tasks are done?"). The headline feature is <strong>AI auto-fill</strong>: press ✨ on a column and the AI fills that column for every row — a summary, a category, or a looked-up fact — reading what each row already contains and, if you click 🌐, searching the web. It is now also <strong>relation-aware</strong>: when a row links to a row in another table, the AI reads that linked row too, so it can fill a person’s "work city" from their company’s headquarters, for example. And it is <strong>privacy-safe</strong>: before any web search, personal details in the row (emails, phone numbers, card/ID-like numbers) are <strong>scrubbed out of the search words</strong>, so a row’s private data never leaves to the search engine — and an admin can switch web search off for auto-fill entirely, or turn the scrubbing on/off, in weaveNotes Settings. Crucially, every value it fills comes with a small 🔖 <strong>citation</strong> showing where it got the answer (the row, a linked row, or a web page), so you can check it rather than trust it blindly. The agent can do the same when you ask ("fill the summary column of my table"). New to this? A "column type" just means what kind of data a column holds (a number behaves differently from text); a "rollup" is an automatic summary number computed from linked rows, like a total or a percentage; a "citation" is the source the AI used, shown so you can verify it.')}
+${callout('tip', '✚', 'Capture anything into your notes — a chat answer, a web page, an email, a quick thought.', 'Good ideas arrive from everywhere, so This adds fast on-ramps to get them INTO your notes as tidy, structured pages instead of a scratchpad you lose track of. There are four ways to capture. <strong>From a chat run</strong>: turn an answer the AI just gave you into a saved note with one call, and the note even records a link back to the run it came from. <strong>From the web</strong>: paste a public link and the server fetches the page, pulls out just the readable article (dropping menus and ads), and saves it as a note — the agent can do this for you too when you ask it to save a page. <strong>From email</strong>: hand it a message (either the separate fields, or a whole raw email) and it becomes a note. <strong>A quick jot</strong>: type a one-line thought and it is appended to a running inbox note for the day, titled "Daily Jots" with the date, so every loose thought from a day gathers in one place to sort through later. Every capture lands with a small <strong>provenance</strong> header — a note of where it came from and when — like a citation, so future-you always knows the source. Two safety rules matter here. Clipping a web page is <strong>SSRF-guarded</strong>: only real public web addresses are allowed, and attempts to point it at internal or private addresses (your own machine, a company intranet, a cloud server secret-metadata address) are refused — this stops a sneaky link from tricking the server into fetching something it should not. And every capture is private to you and your tenant: nobody can capture a run that belongs to someone else, or read another person inbox of jots. New to this? "Capture" just means saving something for later; "provenance" is a little where-this-came-from label; "SSRF" is a trick where a link tries to make a server fetch internal addresses, which the guard blocks.')}
+${callout('tip', '✦', 'Ask your whole workspace, roll back any note, comment, and mirror blocks.', 'This makes your notes ASKABLE, REVIEWABLE, and time-travelable — four features in one. <strong>Ask your workspace</strong> (RAG): instead of hunting through pages, ask a question like "what did we learn about Project Polaris?" and the system searches your OWN material — both your notes AND your past chat conversations — finds the most relevant passages, and hands them to the AI so it answers FROM your content, with numbered <strong>citations</strong> "[1] [2]" you can click back to the exact source. (The clever bit: it ranks your notes and your chats separately and then merges the two lists fairly, so a strong hit in either shows up — a standard technique called reciprocal rank fusion.) The agent can do this for you mid-chat with a workspace_search tool. <strong>Version history</strong>: a note keeps "save points" you can browse and RESTORE — and a restore is undoable, because it tucks your current draft into history first, so you can never lose work by rolling back. <strong>Comments</strong>: leave threaded notes on a specific paragraph (a "block"), reply, and mark a thread resolved — exactly like comments in a shared doc, and they stick to their paragraph even as the note is edited. <strong>Synced blocks</strong> (transclusion): show a paragraph from another note here, kept live — you are not copying it, you are pointing at it, so editing the original updates every place it appears. Everything stays private to you and your tenant: workspace search only ever sees your own notes and chats, and you can only comment on, version, or mirror notes you have access to. New to this? "RAG" means the AI looks things up in your stuff before answering instead of guessing; a "citation" is the clickable source behind a claim; "transclusion" is a fancy word for showing the same content live in two places at once.')}
+${callout('tip', '🎨', 'The foundation for AI-co-edited notes: colour shows who did what, AI changes are suggestions you approve, and you can tune it all.', 'This lays the groundwork for notes you write TOGETHER with the assistant — and it is built so you always stay in charge. <strong>Colour encodes agency</strong>: anything YOU own is shown in calm neutral colours (and your own hand-drawn ink is coral); anything the ASSISTANT made wears a soft mint-green with a little woven badge and a byline. So you can glance at a page and instantly see "I wrote this / the assistant suggested that" — no guessing. <strong>Changes are suggestions, not silent edits</strong>: when the assistant rewrites a sentence or colours your text, it does not just change your page — it proposes the change like tracked-changes in a word processor, and you click ✓ to keep it or ✕ to throw it away. Several proposals can wait in line while you review. <strong>You can tune the behaviour</strong>: a new <strong>weaveNotes Settings</strong> page (in the Builder) lets an admin set the default look, whether the assistant must ask before changing your words, how long to keep a little history of what changed, and a spending cap per AI edit — all saved in the database, no code needed. And the assistant keeps a small <strong>activity log</strong> of what happened to a note (created, edited, AI-edited) so that before it acts, it can check "what just changed here?" and avoid undoing your recent work. New to this? "colour encodes agency" just means the colour tells you who did something; a "suggestion" is a proposed change shown to you before it is applied; the "activity log" is a short list of recent changes the assistant can read so it understands the note before editing it.')}
+${callout('tip', '🖍️', 'Notes get colour, highlights, callouts, images and two looks — Pro and Creative (creative editor).', 'This makes a note a place you actually want to write. You can now <strong>colour your text</strong>, paint a phrase with a <strong>four-colour highlighter</strong> (amber, pink, teal, blue), drop in a <strong>callout</strong> box for a note/tip/warning, add an <strong>image</strong>, a collapsible <strong>toggle</strong>, a fun <strong>sticker</strong>, or a decorative <strong>washi divider</strong> — all from the same slash menu and the little toolbar that pops up when you select text. Every note also has two <strong>looks</strong> you flip between with one toggle: <strong>Pro</strong> is the clean office look (crisp white page, sharp title); <strong>Creative</strong> is the cosy notebook look (warm paper, a handwritten title, a felt-tip underline highlight, and a ✨ sticker tool). The look is remembered per note, and a brand-new note opens in whatever default an admin picked in weaveNotes Settings. The colours follow the same who-did-what rule from before: a callout the assistant wrote wears mint, your own stays calm and neutral. The assistant can add highlights and callouts too — just ask it to "highlight the key risk" or "add a warning" and it writes them as suggestions you approve. Two careful details under the hood: a "colour" can only ever be a real colour (never sneaky code), and all this rich content is woven into the same conflict-free co-editing engine, so a highlight a teammate adds at the same time as your edit is never lost. New to this? A "callout" is a coloured box that makes a note or warning stand out; a "highlighter" here works just like a real one but you pick the colour; "Pro vs Creative" is just two visual themes for the very same note.')}
+${callout('tip', '✦', 'Select text and the assistant acts on it — including colour-coding your note by meaning (the AI selection card).', 'This is the headline. <strong>Select some words</strong> in a note and a little <strong>✦ Ask AI</strong> pill appears next to them; click it and a small card floats open. From there you can type what you want ("make this clearer", "translate to French") or tap a quick chip — <strong>Rewrite</strong>, <strong>Shorten</strong>, <strong>Expand</strong>, <strong>Explain</strong>, <strong>Continue</strong> — and the assistant proposes the change. You can also COLOUR the selection: pick a highlighter pen, or ask the assistant to <strong>colour-code the whole note by meaning</strong> — by topic, by importance (critical / high / normal / low), by status (done / in progress / blocked / to-do), or by sentiment. Whatever you ask for never lands straight in your note: it arrives as a <strong>suggestion</strong> you Accept or Reject, the same safe track-changes way as before. The clever, important part about colour: the assistant is NOT allowed to invent a colour that might be hard to read — it only chooses the <em>meaning</em> ("this is a risk") and we hand it a pen from a fixed palette that has been checked to meet the <strong>WCAG-AA</strong> readability standard. So a page the AI colour-codes is always legible. These same three abilities — highlight a phrase, colour a phrase, colour-code by meaning — are also tools the assistant can use during a normal chat ("colour-code my Project Atlas note by status"), and like every other capability they live in the Tool Catalog so an admin can govern them. New to this? The "selection card" is the little menu that pops up when you highlight text; "WCAG-AA" is the common accessibility rule for having enough colour contrast to be easy to read; a "suggestion" is a proposed change you approve before it sticks.')}
+${callout('tip', '👀', 'See each other live — coloured cursors, names, and the AI as a participant (real-time collaboration).', 'This turns a note into a true shared space. When you and a teammate open the SAME note, each of you sees the OTHER person\'s cursor live — a little coloured bar with their name — moving as they type, so it feels like sitting side by side. Everyone gets their own steady colour (so "the teal cursor" is always the same person), and small round avatars at the top show who is here right now. The <strong>assistant joins too</strong>: while it is rewriting or colour-coding your note, a "weaveIntel AI" participant appears, so you can watch it work and then review what it proposes — the AI is simply a third author at the table, and its changes still arrive as suggestions you approve. None of this live information is ever saved; it only ever means "right now", so it disappears the moment someone closes the tab. An admin can turn live cursors or the AI participant on or off in weaveNotes Settings. Two quiet but important details: a person\'s cursor is pinned to the actual letters (not a fixed spot), so it never jumps to the wrong place when someone edits above it; and because presence is just open chatter, the server carefully trims every incoming cursor message — capping names, checking colours, and bounding positions — so nobody can misuse it. New to this? A "live cursor" is the moving marker that shows where your collaborator is typing; "presence" is the at-a-glance sense of who else is in the document with you, like the faces at the top of a shared doc.')}
+${callout('tip', '🎨', 'The assistant can DRAW — colour-coded diagrams and real freehand ink (ink & diagrams).', 'This lets the assistant be a maker, not just a writer. Ask it to "draw a colour-coded flow of these four steps" and it produces a real <strong>diagram</strong> — boxes and arrows you can read at a glance, with each step in a sensible colour (a decision step in amber, say). Ask it to "underline this in blue ink" or "sketch an arrow" and it draws real <strong>freehand ink</strong>. The important part: what it makes is NATIVE and EDITABLE, not a flat picture pasted in — it is the very same kind of diagram or pen-stroke you could draw yourself, so you can grab it and change it afterwards (and you can draw your own ink right on the page too, with a pen and an eraser). As always, nothing lands until you approve it: every drawing arrives as a <strong>suggestion</strong> you Accept or Reject, and an AI-made one wears the soft mint frame so you can see at a glance that the assistant drew it. Two thoughtful touches: the colours the assistant picks always come from a palette that has been checked for readability (the <strong>WCAG-AA</strong> standard), so a diagram is never an unreadable rainbow; and every drawing is also saved as a tidy picture file (an "artifact") behind the scenes, so you can export it or drop it elsewhere. These same abilities — make a diagram, draw ink — are tools the assistant can use in a normal chat too ("diagram my Project Atlas note"), and they live in the Tool Catalog so an admin can govern them. New to this? A "diagram" here is an auto-drawn boxes-and-arrows picture; "ink" is freehand pen drawing; "native + editable" means the AI\'s drawing behaves exactly like one you drew by hand, so you can keep tweaking it.')}
+${callout('tip', '🖼️', 'Ask for ANY kind of visual — and the assistant picks the right one (every visual, configurable).', 'The drawing tools now cover the whole spectrum, and there is one simple way in: select some text, open the card, and use <strong>✦ Visualize</strong>. Leave it on <strong>Auto</strong> and just say what you want — the assistant figures out the best form by itself: a <strong>diagram</strong> for a process or flow (now including process/business shapes like a database cylinder or a decision diamond), a quick <strong>sketch</strong> in freeform ink, a detailed <strong>illustration</strong> for a real picture (a heart, a leaf, a logo — drawn as crisp, scalable vector art), or a realistic generated <strong>image</strong>. Or pick the kind yourself from the little menu. Everything still arrives as a <strong>suggestion</strong> you approve, wears the mint "AI made this" frame, and is saved as a tidy picture file you can export. The whole palette is <strong>configurable in weaveNotes Settings</strong>: an admin can switch any mode on or off — for example turn ON realistic image generation (it is off by default because it uses a paid image model) or turn OFF a mode you do not want — and choose which image model to use. Two safety notes: when the assistant hand-draws an illustration it writes the picture\'s instructions (an "SVG"), and we carefully scrub those instructions so a drawing can never carry hidden code; and realistic image generation stays off until an admin deliberately enables it. Every picture also carries its <strong>"Content Credentials"</strong> — a little record of where it came from that travels WITH the image: for a web image, the licence, the author and the source page; for an AI image, that it was AI-made plus the model and the exact request that produced it. For hand-drawn illustrations this record is embedded right inside the image file (so it survives an export); for other images it is stored alongside the file. This is the same "label where this came from" idea the whole industry is moving to, and an admin can switch it on or off in weaveNotes Settings. New to this? "Auto" means you don\'t have to know the difference between a diagram, a sketch, an illustration and a photo — you describe what you want and the assistant chooses; "SVG" is just a way of describing a picture with shapes and lines so it stays sharp at any size.')}
+${callout('tip', '📇', 'Turn a note into flashcards and actually remember it — spaced repetition (study).', 'The best way to remember what is in a note is not to re-read it — it is to QUIZ yourself on a smart schedule. This makes that one click: open a note, choose <strong>Study (flashcards)</strong>, and tap <strong>Make flashcards</strong>. The assistant reads the note and writes a set of question→answer cards covering the key facts. Then you review: you see a question, try to recall the answer in your head, reveal it, and tap how it went — <strong>Again</strong>, <strong>Hard</strong>, <strong>Good</strong>, or <strong>Easy</strong>. Here is the clever part: a well-studied method called <strong>spaced repetition</strong> decides WHEN you will see each card again — very soon if you forgot it, and further and further out as you keep getting it right (tomorrow, then a few days, then weeks). This shows you each card right around the moment you are about to forget it, which is far more effective than cramming. weaveNotes now schedules with <strong>FSRS</strong> — the same accurate, modern scheduler used by today\'s leading flashcard apps. Instead of a fixed rule of thumb, FSRS builds a little model of your memory for each card (how <em>stable</em> the memory is, and how <em>hard</em> the card is for you) and predicts your personal forgetting curve, so the dates it picks fit you and you review less to remember more — the <strong>Again / Hard / Good / Easy</strong> buttons even show the real next date FSRS computed. Cards you have learned well drift to "mature" and barely bother you; cards you struggle with come back often. The assistant can also make a deck for you in a normal chat ("make flashcards from my biology note"), it lives in the Tool Catalog so an admin can govern it, and an admin can switch the whole feature on or off, set how many new cards a session introduces, dial the <strong>target recall</strong> (how confident you want to be at review time — higher means more frequent reviews), and even switch the scheduler back to the classic, simpler "SM-2" if they prefer. New to this? A "flashcard" is a question on one side and its answer on the other; "spaced repetition" means reviewing each fact at growing intervals so it sticks with the least effort; "active recall" is the act of trying to remember the answer yourself before you peek — which is what actually builds memory; "FSRS" just means the smart scheduler is fitting the review dates to how your own memory behaves.')}
+${callout('tip', '🔌', 'Use your notes from another AI app — Claude Desktop, ChatGPT, Cursor — over the open MCP standard (MCP server).', 'Your notes do not have to stay locked inside this app. weaveNotes can act as an <strong>MCP server</strong> — MCP (Model Context Protocol) is the open, industry-standard "USB-C port for AI" that lets outside apps plug into your data — so an assistant like <strong>Claude Desktop, ChatGPT or Cursor</strong> can search and read your notes (and, if you allow it, create new ones) right from where you are working. To set it up, open <strong>Insert → 🔌 Connect (MCP)</strong>, create a personal <strong>connection key</strong>, and paste the shown server address + key into the other app — done. The key is shown <strong>once</strong>, so copy it then; you can revoke any key instantly. Safety is built in and important here. A key belongs to <strong>you alone</strong>: a connected app can only ever see <em>your</em> notes — the server works out who you are from the key itself, never from anything the outside app claims, so one person’s key can never reach another person’s notes. You choose each key’s power: <strong>read-only</strong> (search + read) or <strong>read + write</strong>. Even with write access, a connected app never silently changes an existing note — an edit it suggests is <strong>staged for your approval</strong> in the app, exactly like the track-changes you already use; only brand-new notes are created outright (which is safe — nothing is overwritten). And because the connection can only read and write notes <em>inside your own workspace</em> — it has no way to send your information anywhere else — even a sneaky instruction hidden inside a note can’t be used to leak your data. An admin can turn the whole MCP server on or off, or make it read-only for everyone, in weaveNotes Settings. New to this? "MCP" is just a common language that lets different AI apps connect to outside tools and data; a "bearer token" / key is a long secret password the other app sends to prove it’s allowed in; "read-only vs read + write" is simply whether the connected app may only look, or also add notes.')}
+${callout('tip', '⏰', 'Set up an AI helper that works on a schedule — a daily digest, a weekly tidy-up — all by itself (scheduled agents).', 'Some chores are perfect for a robot: "every weekday morning, write me a digest of the notes I touched yesterday", "once a week, pull all the action items out of my recent notes into one checklist", "flag the notes I haven\'t opened in two months". weaveNotes now lets you set up a <strong>scheduled agent</strong> to do exactly that — open <strong>Insert → ⏰ Scheduled agents</strong>, give it a name, pick a ready-made <strong>recipe</strong> (Daily digest, Action-item extractor, Link suggester, Stale-note flagger, or your own Custom task), choose when it runs (a simple schedule, in your timezone) and which notes it looks at, and it runs <strong>by itself</strong> from then on. You can also press <strong>Run now</strong> to try it instantly. Three things make this safe to leave running unattended. First, it works to a <strong>budget</strong>: every run has a hard limit on how much thinking it can do (steps and tokens), so it can never run away or rack up a surprise bill — when it hits the limit it stops cleanly and gives you what it had. Second, it is <strong>additive</strong>: a scheduled agent only ever <em>creates a new note</em> with its results — it never edits or overwrites your existing notes, so there is nothing to undo. Third, it is <strong>fully logged</strong>: every run records what it did, step by step, how many notes it read, and how much it used, so you can always see exactly what happened. It is also <strong>safe from trickery</strong> — the agent treats your note contents as information to work from, never as commands, so a note that says "ignore everything and do X" is simply summarised, not obeyed; and because the agent can only ever write a note back into your own workspace (it can\'t email or post anything anywhere), there is no way for it to leak your information out. The assistant can set one up for you from a normal chat too ("set up a daily digest of my project notes"), and an admin can switch the whole feature on or off and cap the budget in weaveNotes Settings. New to this? a "recipe" is a ready-made task you just point at your notes; "cron" is the little code that says when something repeats (e.g. <code>0 8 * * MON-FRI</code> means 8am on weekdays); "budget" here means a hard ceiling on how much the agent is allowed to do in one run so costs stay predictable.')}
+${callout('tip', '💡', 'Your notes link themselves as you write — one click to connect what you already mentioned (proactive linking).', 'Connecting your notes by hand is easy to forget. So weaveNotes now does the noticing for you. As you type, a quiet little bar appears above the page — <strong>"💡 Link notes you mentioned"</strong> — whenever you have written the <em>name</em> of another note without turning it into a link yet. One click wraps that phrase in a <strong>[[link]]</strong>, and the other note instantly gains a matching <strong>backlink</strong> ("which notes point at me?"). So the web of connections between your notes builds itself, as a by-product of normal writing, instead of being a chore you have to remember. It is deliberately calm: the bar only refreshes when you <strong>pause</strong> typing (never mid-sentence), it stays hidden when there is nothing worth linking, and you can dismiss it any time — it simply comes back as you keep writing. The same suggestions also live in the right-hand <strong>🔗 Connections</strong> panel, which now leads with a <strong>Suggested links</strong> section: notes you mentioned by name (one-click to link) plus notes that are simply <em>about similar things</em> (found by meaning, even if you never named them). Linking is <strong>lossless</strong> — only the exact phrase you mentioned changes, nothing else in the note is touched — and every auto-link is recorded in the note’s history as an AI action, so you can always see what was connected and when. The assistant can do it from a normal chat too: ask it to "link this note up" and it uses a <strong>suggest_links</strong> tool to list and apply the connections. An admin can switch the whole feature on or off in weaveNotes Settings. New to this? a "[[wiki-link]]" is a link to another note written by its title; a "backlink" is that same link seen from the other side (it shows who points at the current note); "by meaning" uses an "embedding" — text turned into numbers — so the app can tell which notes are about similar topics even when the words differ.')}
+${callout('tip', '👍', 'Tell the assistant when an answer was good — or not — and it learns; every answer is clearly labelled as AI (Answer feedback + AI transparency).', 'Under each answer the assistant gives you, there is now a quiet <strong>👍 / 👎</strong>. A thumbs-up is a one-tap "that was good". A thumbs-down opens a small panel that asks <strong>what went wrong</strong> — you pick from a short, fixed list of reasons (Not accurate, Not helpful, Incomplete, Didn’t follow instructions, Unsafe or harmful, Offensive, or Something else) and can add a sentence if you like. This matters because a bare thumbs-down tells no one <em>why</em>; a reason turns your click into something the system can actually act on. And it does act on it: your rating feeds the <strong>same quality signal the platform already uses to pick the best model for each kind of question</strong>, so good answers reinforce the model that gave them and bad ones steer future questions elsewhere — the assistant genuinely gets better from your feedback rather than just collecting a number. The assistant can even reflect on how it is doing: ask it "how are my answers landing?" and it reads a <strong>privacy-safe summary</strong> (totals and the most common complaints only — never anyone’s individual comment or name) using a <strong>review_answer_feedback</strong> tool. Alongside the thumbs, every answer carries a small <strong>"✦ AI-generated"</strong> note — a plain reminder that a machine wrote it and to double-check anything important. That is not just polish: it reflects a new transparency duty (the EU’s AI Act, Article 50) to tell people clearly when they are dealing with AI. An admin controls all of it per workspace in the <strong>Builder → Appearance &amp; AI → AI transparency</strong>: whether the "AI-generated" label shows, the exact wording, whether sensitive-topic content warnings appear, and whether answer feedback is collected at all — and can review all the feedback (with reasons) in <strong>Builder → Answer Feedback</strong>. New to this? "feedback" here is just your quick verdict on an answer; the reasons are a small tick-list so a complaint is specific enough to fix; "AI transparency" means being upfront that a machine, not a person, wrote the reply so you know to sanity-check it.')}
+${callout('tip', '❝', 'Ask the assistant to answer “from my notes, with sources” — and every claim links back to the exact line it came from (Answer citations in chat).', 'Normally a chatbot answers from everything it has ever read, and you just have to trust it. Answer citations flips that on its head. Turn on <strong>“Cite sources”</strong> under the chat box and ask your question — the assistant answers using ONLY <em>your own</em> material (your notes and your past chats), and every sentence carries a little numbered marker like <strong>[1]</strong>. Click the marker (or the source card beneath the answer) and it opens the exact note and highlights the exact line the answer came from. So instead of “the AI said so”, you get “your Team Handbook says, word for word, ‘our support SLA is a four hour first response’ [1]” — and you can check it in one click. The trust part is the important bit: before the answer is shown, geneWeave <strong>verifies every quote actually exists</strong> in the source it claims, character for character, and <strong>throws away any the model made up</strong>. If nothing in your workspace actually answers the question, it tells you so plainly (“not backed by anything in your workspace”) rather than inventing a confident-sounding but unsourced reply. Under the hood this reuses the very same verified-citation engine as the notes “✦ Ask your workspace” feature, so a citation behaves identically in both places. The assistant can also do this on request in a normal chat — say <em>“answer that from my notes and cite it”</em> and it uses a <strong>cite_sources</strong> tool — and there’s a dedicated <strong>Workspace librarian</strong> agent whose whole job is answering strictly from your own material with a source behind every claim. An admin controls it per workspace in the <strong>Builder → Appearance &amp; AI → Answer citations</strong>: whether “Cite sources” is offered at all, how many real sources an answer must have to count as “grounded”, and whether to search your notes, your past chats, or both. New to this? a “citation” here is just a clickable link from a sentence in the answer to the exact place it came from; “grounded” means the answer is backed by something real in your own workspace rather than the model’s general memory; “verified” means we checked the quote is genuinely there before showing it, so the AI can’t quietly make up a source.')}
+${callout('tip', '↻', 'Not happy with an answer? Regenerate it — and the old one is kept so you can flip back (Regenerate with version history).', 'Sometimes the assistant’s first answer isn’t quite what you wanted — too long, wrong angle, missed the point. Under any answer there’s now a <strong>↻ Regenerate</strong> button that writes a fresh alternative. The important part: it does <strong>not</strong> throw the old answer away. Each answer becomes a numbered <strong>version</strong>, and a little <strong>‹ 2/3 ›</strong> pager appears so you can flip between them and keep whichever you like best — nothing is ever lost, which is a common frustration with other tools where “regenerate” overwrites the reply you actually preferred. Regenerate as many times as you like; the workspace keeps the most recent few versions (an admin sets how many). Whatever version you’re looking at is the “live” one — it’s what gets copied, exported, or used if the conversation continues — so switching versions genuinely changes the answer, not just a preview. Behind the scenes, asking to regenerate is also a gentle signal that the first answer fell short, which feeds the same quality loop geneWeave uses to pick the best model for each kind of question — so the assistant quietly gets better at not needing a second try. An admin controls it per workspace in the <strong>Builder → Appearance &amp; AI → Answer versions</strong>: whether Regenerate is offered at all, and how many versions to keep per answer. New to this? a “version” here is just one of several answers to the same question; the “‹ 2/3 ›” means “you’re looking at answer 2 of 3” and the arrows step between them; “lossless” means flipping between versions never deletes any of them.')}
+${callout('tip', '👂', 'Answers that stream in are now friendly to screen readers and steady on screen (streaming accessibility).', 'When the assistant "types" its answer out live, two things used to go wrong for some people. For anyone using a <strong>screen reader</strong> (software that reads the screen aloud for blind and low-vision users), the app used to re-read the ENTIRE conversation every time a new word appeared — a constant, garbled repeat that made a streaming answer impossible to follow. And for everyone, the answer growing on screen could nudge buttons around, so the <strong>Stop</strong> button might shift just as you went to click it. Both are fixed. Now a small, invisible "announcer" tells a screen reader the useful things at the right moments — <em>"Generating response…"</em> when it starts, then the finished answer read out cleanly <strong>once</strong> when it\'s done — instead of repeating the whole chat every split second. And the typing box and its buttons are <strong>pinned in place</strong>, so nothing moves under your pointer while an answer streams in. A workspace admin can tune this in the <strong>Builder → Appearance &amp; AI → Accessibility</strong>: choose how a screen reader hears a streaming answer — <strong>Summary</strong> (the calm default: start, then the whole answer once), <strong>Live</strong> (read sentence-by-sentence as it arrives, for people who like to follow along), or <strong>Off</strong> — and switch on <strong>reduced motion</strong> to calm animations for everyone (on top of each person\'s own device "reduce motion" setting, which is always respected). None of this changes what the answer says — it just makes receiving it comfortable however you read the screen. New to this? a "screen reader" is software that speaks the screen aloud; a "live region" is a small part of the page that politely announces updates to it; "reduced motion" means fewer moving/animated effects, which helps people who find motion distracting or dizzying.')}
+${callout('tip', '⌨️', 'Drive the whole app by keyboard without losing your place — and every control is reachable (keyboard & focus accessibility).', 'Not everyone uses a mouse. People who rely on the <strong>keyboard</strong> (including many screen-reader users, and anyone who just prefers it) need two things to work: they must be able to <em>reach</em> every button, and they must not <em>lose their place</em> when the screen updates. geneWeave now does both. The app rebuilds the screen whenever something changes — and it used to throw away your "cursor" (the <strong>focus</strong>) each time, so after sending a message or opening a chat, a keyboard user was silently dumped back at the very top of the page and had to tab all the way down again. Now the app <strong>remembers exactly which control you were on and puts you right back</strong> after the screen refreshes, so your place is never lost. On top of that, controls that used to be mouse-only — the <strong>chat search results</strong>, the <strong>calendar days</strong>, the "<strong>+3 more</strong>" link — are now proper buttons you can Tab to and press <strong>Enter</strong> or <strong>Space</strong> to activate. Menus announce whether they are open (so a screen reader says "expanded" / "collapsed"), and pressing <strong>Esc</strong> closes a menu and returns you to the button that opened it. The item you have selected — the open chat, today\'s date, the current settings tab — is now flagged for screen readers as "current", and there is a clear, visible <strong>outline</strong> around whatever control you are on so you can always see where you are. A workspace admin can even turn on <strong>"always show the focus outline"</strong> for everyone (some accessibility policies require it) in the <strong>Builder → Appearance &amp; AI → Accessibility</strong> — and, as always, each person\'s own device "reduce motion" setting is respected. None of this changes what the app does; it just makes all of it reachable and predictable however you get around the screen. New to this? "focus" is the on-screen cursor that shows which control the keyboard will act on; "Tab" moves focus to the next control; a "screen reader" speaks the screen aloud; "aria-current" is a quiet label that tells that software which item is the selected one.')}
+${callout('tip', '🛟', '“Are you sure?” prompts and error messages are now clear, on-brand, and keyboard-friendly — and a failed load offers a Retry instead of a blank screen (accessible dialogs & recoverable errors).', 'Two rough edges are smoothed here. First, the app used to lean on the <strong>browser’s own pop-ups</strong> for "Delete this?" confirmations and error messages. Those grey system boxes don’t match geneWeave, can’t be styled, and are awkward for keyboard and screen-reader users. They’re replaced by a proper <strong>in-app dialog</strong>: it’s announced correctly to screen readers, your keyboard focus moves <em>into</em> it and is <strong>trapped</strong> there (Tab cycles through its buttons, it can’t wander off behind the dialog), <strong>Esc</strong> cancels, and when it closes your focus <strong>returns to the button you came from</strong>. For anything destructive — deleting a chat or a note, revoking a key — the dialog opens with the safe <strong>Cancel</strong> button focused, so an accidental Enter never deletes anything, and the confirm button is clearly coloured. A workspace admin can decide in <strong>Builder → Appearance &amp; AI → Accessibility</strong> whether these "are you sure?" confirmations are required (the default, and it can be enforced for everyone) or turned off for power users who’d rather move fast. Second, when something failed to load in the background — your chats, the model list, the dashboard — the app used to just show a <strong>blank or stale screen</strong> with no hint of what happened. Now a small, calm banner appears at the top explaining it in plain words ("Couldn’t load your chats — check your internet connection.") with a <strong>Retry</strong> button, so a hiccup is something you can <em>see and fix</em>, not a mystery. New to this? a "modal dialog" is a small window that asks for a decision before you continue; a "focus trap" keeps the keyboard inside that window so you can’t accidentally tab out to the page behind it; "destructive action" just means something that deletes or removes, where a confirmation is worth having.')}
+${callout('tip', '👥', 'People only see the controls their role allows — and the assistant can tell you who’s on your team (Workspace roles).', 'A workspace has different kinds of people: <strong>admins</strong> who run the place, and ordinary <strong>members</strong> who just get their work done. Until now the left menu showed <em>everyone</em> the admin-only areas (Builder, Admin) — a member could click them and hit a wall. Now the menu <strong>only shows what your role actually lets you use</strong>: a member no longer sees the admin areas at all (cleaner, and it doesn’t advertise controls they can’t open), while an admin sees everything. This is decided the same way the server decides it, so what you see always matches what you can do. An admin also gets extra say: in <strong>Builder → Governance → Workspace Roles</strong> they can choose whether ordinary members see the optional areas — the <strong>Dashboard</strong>, the <strong>Connectors</strong> area, the <strong>Design</strong> studio — while the everyday areas (chat, notes, calendar) are always available to everyone. Admins can also change someone’s role right from <strong>Account → People</strong>: promote a member to admin, or step an admin back down — with a safety net that stops you removing the workspace’s last admin (so no one ever locks everyone out). And the assistant now understands your team: ask it <em>“who’s in my workspace?”</em> or <em>“who are the admins here?”</em> and it uses a <strong>list_workspace_members</strong> tool to answer from the real member list — names and roles for everyone, and email addresses only when the person asking is an admin. (Because a question like “who has access here?” can look like probing, your workspace’s safety guardrails may need to be set to allow team questions — an admin controls that.) A note for larger organisations: geneWeave currently gives each person <strong>one</strong> workspace; belonging to several workspaces and switching between them is a bigger change that’s planned for later. New to this? a “role” is just what you’re allowed to do (admin vs member); “surface parity” means the buttons you see match the things you can actually use; an “admin” is someone who can change workspace-wide settings.')}
+${callout('tip', '🪄', 'The page stops jumping around — your place is kept when a screen updates, and slow pages show a tidy “loading” shape instead of a blank flash (smoother, steadier UI).', 'Two small annoyances are gone. First, whenever the app refreshed the screen (which it does a lot, quietly, in the background), any list you’d scrolled through would <strong>snap back to the top</strong> — so if you were halfway down your notes or an admin table and did anything, you lost your place. Now the app <strong>remembers where you were in every list</strong> and puts you right back after a refresh. If you were following the bottom of a growing list, it keeps following the bottom; otherwise it holds your exact spot — and if the list got shorter, it tidies up so there’s never a blank gap. Second, pages that take a moment to load (like the <strong>Dashboard</strong>) used to show a blank area or a bare “Loading…” and then <strong>jump</strong> as the real content popped in. Now they show a <strong>skeleton</strong> — soft placeholder shapes the same size as the real thing — so the page settles once and feels quicker, with nothing lurching under your cursor. Together these remove the little visual “jolts” (designers call it <em>layout shift</em>) that make an app feel unsteady. It’s all mindful of accessibility: the shimmer animation is automatically stilled if your device asks for <strong>reduced motion</strong>, screen readers are told a view is “loading”, and an admin can switch the skeletons off (falling back to a plain “Loading…”) in the <strong>Builder → Appearance &amp; AI → Accessibility</strong>. New to this? “scroll position” is just how far down a list you’ve scrolled; a “skeleton” is a grey placeholder shown while real content loads; “layout shift” is when things move on screen unexpectedly, which this removes.')}
+${callout('tip', '💡', 'The empty chat now suggests things to ask — including ideas based on your own recent work (Suggested prompts).', 'Opening a brand-new chat used to show a blank screen and a one-line hint — the "blank page problem" (you know the assistant can help, but you’re not sure what to type). Now the empty chat offers a handful of <strong>clickable starter cards</strong>, and picking one sends it straight away. There are two kinds. A few <strong>curated</strong> starters show the sort of things geneWeave is good at — "Ask about my workspace", "Summarise a document", "Draft something", "Plan my day" — so a newcomer sees the breadth at a glance. And a few <strong>personalised</strong> ones (marked "For you", with a soft mint tint) are drawn from <em>your own</em> recent activity — a note you were just editing, a chat you had earlier — like "Summarise ‘Q3 Roadmap Planning’" or "Continue: Vendor negotiation notes". These are private to you: they’re built only from your own notes and chats and are never shown to anyone else. You can also just ask the assistant <em>"what can you help with?"</em> or <em>"give me some ideas"</em> and it uses a <strong>suggest_prompts</strong> tool (via a dedicated <strong>Conversation starter guide</strong> agent) to freshen these personalised ideas from your recent work. An admin controls it per workspace in <strong>Builder → Appearance &amp; AI → Suggested Prompts</strong>: whether starters appear at all, whether they may be personalised from your recent notes and/or chats, whether the AI may generate them, and how many curated vs personalised to show. Two quiet safeguards: a note or chat <em>title</em> is treated as plain text when it’s turned into a suggestion (so a cheeky title can’t hijack the app or the assistant), and every suggestion is short, tidy, and length-limited. New to this? a "starter prompt" (or "conversation starter") is just a ready-made first message you can click instead of typing; "personalised" means tailored to you from your own recent activity; "curated" means a hand-picked default that’s the same for everyone.')}
+${callout('tip', '🌍', 'Use geneWeave in your own language — and add a new one just by asking the assistant (Languages / internationalisation).', 'geneWeave no longer speaks only English. Open <strong>Account → Preferences → Language</strong>, pick a language, and the app <strong>re-labels itself straight away</strong> — the menus, buttons, the “type a message” box, the empty-screen hints — all switch to that language, without a page reload and before you even hit Save. <strong>English and Spanish are built in</strong>; if a label hasn’t been translated yet for your language, it quietly falls back to English so you’re never left staring at a blank button. The clever part is adding a <em>new</em> language: an admin can simply tell the assistant <em>“translate the whole app into French”</em> (or German, Japanese, Portuguese…) and it does it — using a <strong>translate_ui</strong> tool and a dedicated <strong>Localisation guide</strong> agent that reuse the very same careful translation engine as the notes “translate this note” feature, so product names, links and placeholders are kept exactly intact and the result is quality-checked before it’s saved. The new language is then stored for the whole workspace and becomes pickable in everyone’s Account. An admin sets the ground rules in <strong>Builder → Appearance &amp; AI → Languages</strong>: the workspace’s <strong>default language</strong>, <strong>which languages members may choose</strong>, and whether the <strong>assistant should reply in each person’s chosen language</strong> (off by default — normally the assistant just answers in whatever language you wrote to it in; turning this on makes it always answer in, say, Spanish for a Spanish-preference reader). None of this touches what anything <em>does</em> — it only changes the words on screen and, optionally, the language the assistant writes back in. New to this? “internationalisation” (often shortened to “i18n”) just means building an app so it can be shown in many languages; a “locale” is a language (optionally with a region, like Mexican Spanish); a “fallback” means showing English when a particular phrase hasn’t been translated yet.')}
+${callout('tip', '📱', 'Works on your phone, tablet and laptop — the layout adapts to the screen (responsive shell).', 'geneWeave now fits whatever you’re holding. On a laptop or desktop, the left navigation is a permanent side panel, just as before. On a <strong>phone or small tablet</strong>, that panel gets out of the way — it becomes a <strong>slide-out drawer</strong> you open with the ☰ menu button in the header, and it closes when you tap the dimmed area beside it or press <strong>Esc</strong>. So the whole app — chat, calendar, notes, settings — stays usable on a small screen instead of squashing a desktop layout onto it. The colours, sizes and spacing all come from <strong>one shared design system</strong> (the same one the mobile app uses), so everything looks consistent everywhere, and dark mode + your workspace branding apply on every screen size. It’s built to be kind to everyone: buttons are big enough to tap, the menu works with a keyboard, focus is managed for screen-reader users, and motion is reduced automatically if your device asks for less animation. New to this? "responsive" just means the page rearranges itself to fit the screen instead of showing a shrunken desktop; a "drawer" is a panel that slides in from the edge and slides away when you’re done.')}
+${callout('tip', '🎨', 'Make geneWeave your own — per-workspace branding, colours, dark mode, all accessibility-safe (Appearance & branding).', 'Every workspace can wear its own look without touching code. An admin opens <strong>Builder → Appearance & branding</strong> and sets a <strong>workspace name</strong> and <strong>logo</strong>, a default <strong>colour scheme</strong> (light, dark, or follow the device), the default <strong>look</strong> (Pro or Creative), a <strong>brand accent colour</strong> for primary buttons, the <strong>corner style</strong> (soft, sharp or round) and the <strong>density</strong> (comfortable or compact). The whole app re-brands the next time it loads — and it loads <em>already branded</em>, with no flash of the old colours, because the brand is applied before the first paint. Two promises make this safe to hand to non-designers. First, <strong>accessibility can’t be branded away</strong>: if a brand colour wouldn’t have enough contrast to be readable on a given background, it’s quietly ignored for that theme and the accessible default is used instead (you’re told when that happens) — so a workspace can never ship an unreadable screen. Second, the <strong>“colour encodes agency” rule is protected</strong>: your brand colour recolours the primary actions and neutral chrome, but the <strong>AI stays emerald/mint</strong> everywhere — so people can always tell at a glance what the assistant did versus what they did. The same brand definition is the single source of truth shared with the mobile app, so web and phone look consistent. The assistant can help too — an admin can just say <em>“switch this workspace to dark mode”</em> or <em>“use our brand colour #2563EB”</em> and it uses the <strong>set_workspace_appearance</strong> tool (admin-only, and still accessibility-checked). New to this? a "brand accent" is the one signature colour used for the main buttons; "contrast" is how readable text is against its background (too little and it’s hard to read); "no flash" means the page doesn’t briefly show the wrong colours before correcting itself.')}
+${callout('tip', '👤', 'Your Account, all in one place — how you appear, what you prefer, and what reaches you (Account settings).', 'The <strong>Account</strong> screen is where you set up <em>you</em>. It has seven tidy sections down the left. <strong>Profile</strong>: your display name, pronouns, role, working hours, a short "about", and a status line like "Focusing · back at 2:00" — this is how you appear to your team and to the assistant. <strong>Account & security</strong>: your sign-in email, password, two-factor status, and the devices signed in. <strong>Preferences</strong>: the default look (<strong>Pro</strong> or <strong>Creative</strong>), plus your interface language, timezone, date format and which day your week starts on. <strong>Notifications</strong>: a simple grid where you choose, for each kind of event (mentions, shares, comments, "assistant finished", the weekly digest), whether it reaches you <strong>in the app, by email, or as a push</strong>. And three workspace sections — <strong>People</strong> (everyone in your workspace), <strong>Admin & governance</strong> and <strong>Plan & billing</strong> — which show you what’s there and hand off to the Builder for the admin-only controls, so permissions live in one place. Everything you change is <strong>saved to your account</strong> (a Save bar appears when you have unsaved edits; notification switches save as you flip them). It works on a phone too: the side menu folds into a row across the top and the page becomes a single column. And the assistant can do any of this for you in plain language — say <em>"call me they/them", "set my status to focusing", "start my week on Sunday"</em> or <em>"turn off email for comments"</em> and it uses the <strong>update_account_profile</strong> tool, which can only ever change <em>your own</em> account, never anyone else’s. New to this? "your profile" is just the public-facing details others see; "preferences" are personal display choices that don’t affect anyone else; the notification grid simply lets you pick where each kind of nudge shows up.')}
+${callout('tip', '🧠', 'A second brain that remembers you — durable facts, preferences and decisions gathered quietly from your notes (background memory).', 'The more you write, the more the app understands you — without you having to organise anything. In the background, it reads your notes and quietly remembers the <strong>durable</strong> things: facts about you and your work, your <strong>preferences</strong> ("prefers async standups", "uses metric units"), <strong>decisions</strong> you\'ve made, the <strong>people</strong> you work with, and your commitments. It keeps the lasting stuff and ignores the throwaway chatter. Then it puts that memory to work in two calm ways. First, PROACTIVE recall: when what you\'re writing relates to something you told it before, a gentle <strong>"🧠 From your memory"</strong> strip appears above the note — "you decided Aurora ships in Q4", "Marcus owns the rollout" — with when you noted it. Second, a <strong>"Your memory"</strong> view (Insert → 🧠 Your memory) where you can search everything it knows about you and <strong>forget</strong> anything you\'d rather it didn\'t keep. Recall is <strong>time-aware</strong>: the most recent, most important and most relevant memories surface first, and anything you\'ve since changed fades or drops away — so it reflects who you are <em>now</em>, not a stale snapshot. It\'s private and in your control: memories are yours alone (never shared across people), forgetting really deletes, and an admin can turn the whole thing off, tune how much it remembers, and set how fast old memories fade, in weaveNotes Settings. New to this? a "second brain" is just a memory that lives outside your head so you don\'t have to hold everything yourself; "durable" means worth keeping for weeks or months, not a passing detail; "time-aware recall" means recent and important things come up first, the way human memory works.')}
+${callout('tip', '🎙️', 'Record a meeting → get tidy notes where every point links to the moment it was said (voice & meeting capture).', 'Turn a conversation into notes without lifting a pen. Open <strong>Insert → 🎙 Record meeting</strong>, press record, and talk (or hold your meeting). When you press stop, your browser sends the audio to be <strong>transcribed</strong> (turned into text with timestamps), and the assistant writes you a clean note: a short <strong>summary</strong>, the <strong>decisions</strong> made, and the <strong>action items</strong> as ready-to-tick to-do checkboxes. The clever part is that every point is <strong>backed by the transcript</strong>: each decision and action shows a little <strong>⟦time⟧</strong> marker, and clicking it jumps you to the exact moment it was said in the full transcript below — so you can always check the source, and nothing is made up (a claim the app can’t find in the transcript is dropped rather than invented). Don’t have audio? You can <strong>drop in an audio file</strong>, or simply <strong>paste a transcript</strong> you already have and get the same structured note. Privacy is the default: we keep the <strong>transcript, not your audio</strong> — the recording is transcribed and then discarded (an admin can choose to retain audio, and can turn the whole feature on/off, pick the transcription language/model, and cap recording length, in weaveNotes Settings). The assistant can do this from a normal chat too — paste a transcript and ask it to "make meeting notes" and it uses a <strong>summarize_meeting</strong> tool. New to this? "Transcription" is turning speech into text; a "timestamp" is how far into the recording something was said; "transcript-anchored" just means each note point is tied to the real spot in the transcript, so you can click to hear (well, read) it in context.')}
+${callout('tip', '🕸️', 'Your knowledge graph gets smarter — the same thing written different ways is now ONE connection (graph quality).', 'The AI reads your notes and pulls out the people, organisations and concepts they mention, then draws a little <strong>knowledge graph</strong> connecting notes through what they share. The catch used to be spelling: "OpenAI", "Open AI" and "OpenAI, Inc." were treated as three different things, so notes that were really about the same subject never joined up. weaveNotes now does <strong>entity resolution</strong> (a.k.a. disambiguation): it works out which spellings mean the SAME thing and folds them into ONE entity — including matching an acronym to its full name ("WHO" ↔ "World Health Organization") — so every note that mentions it connects. The Connections panel gains a <strong>"Connected through"</strong> section: other notes linked to this one because they share a person, organisation or concept (even if you never linked them by hand or worded it the same). There is also a one-click <strong>🕸 Rebuild</strong> that refreshes the whole graph across all your notes — and it now embeds notes in <strong>batches</strong> (many per model call instead of one at a time), so rebuilding a big workspace is far quicker and cheaper. An admin can turn entity resolution on or off, and set the batch size, in weaveNotes Settings. New to this? an "entity" is just a named thing the AI found in your note (a person, company, place or concept); "disambiguation" means deciding whether two names refer to the same real thing; an "embedding" is text turned into numbers so the computer can compare meanings — doing many at once is simply faster.')}
+${callout('tip', '🛡️', 'Enterprise trust controls, set per workspace — residency, your-own-key, no-AI-training, SSO, retention (governance).', 'Bigger organisations ask the same questions before they trust any tool with their notes: <em>Where is our data stored? Is it encrypted with OUR key? Will you train AI on it? Can we force everyone to sign in through our company login? How long do you keep things?</em> weaveNotes now answers all of these <strong>per workspace</strong>, as settings an administrator turns on in the Builder (Governance → <strong>Tenant Governance</strong>). The controls: <strong>data residency</strong> (pin a workspace’s data to a region like the EU); <strong>no AI training</strong> (promise a workspace’s content is never used to train models); <strong>product analytics</strong> on/off; <strong>enforced single sign-on</strong> (SSO) with the protocol (SAML or OIDC); <strong>SCIM</strong> (automatic user joiners/leavers from your identity system); <strong>retention</strong> windows for the activity log and audit records (how many days to keep, or keep forever); and <strong>legal hold</strong> (freeze all automatic deletion while a matter is open). Anyone in the workspace can open <strong>Insert → 🛡️ Workspace governance</strong> to see the whole <strong>trust checklist</strong> at a glance — each control marked on or off, including whether the workspace is encrypted with a <strong>customer-managed key (BYOK)</strong>, which is read straight from the encryption settings rather than just claimed. Two of these are actively enforced today — the activity-log retention sweep deletes old activity per each workspace’s own window (and <em>skips</em> anything under a legal hold), and BYOK/encryption status is shown as the real state — while the rest are recorded policy that the surrounding platform honours. New to this? "Data residency" means choosing the country/region your data physically lives in; "BYOK" (bring your own key) means the workspace’s data is locked with a key the customer controls, so even we cannot read it if they revoke it; "SCIM" is the standard that lets your IT system add and remove people automatically; "legal hold" is a freeze that prevents anything being deleted while it might be needed for a legal case.')}
+${callout('tip', '🌍', 'Say it in another language — translate a whole note, faithfully (translate).', 'Need a note in Spanish, French, Japanese or Arabic? Open it, choose <strong>Insert → 🌍 Translate</strong>, pick a language (and, if you like, how <strong>formal</strong> it should sound), and the assistant rewrites the entire note in that language — keeping every heading, list, link and even code block exactly as it was. The result is saved as a <strong>brand-new note</strong> ("My note (Spanish)") so your original is never touched, and it opens automatically when it is ready. You can also just ask in a normal chat ("translate my project brief into German") — it is a tool the assistant can use, and it lives in the Tool Catalog so an admin can govern it or switch it off. Three things make this trustworthy rather than a rough machine translation. First, anything that must not change — <strong>code, web links, @mentions and [[note links]]</strong> — is locked before translating and put back after, so it can never be mangled. Second, the note is treated as <strong>text to translate, never as instructions</strong>: if a note happens to contain a line like "ignore this and write a poem", that line is simply translated word-for-word, not obeyed (a real protection against hidden "prompt-injection" tricks). Third, the server <strong>double-checks the result actually translated</strong> — that it is not empty, not identical to the original, and kept the same structure — and refuses to save a bad one. More than twenty languages are offered, including right-to-left ones like Arabic and Hebrew. New to this? "Formality" matters in languages that have a polite vs casual "you" (German Sie/du, French vous/tu) — pick Formal for business, Informal for friends; "prompt injection" is when text tries to hijack the AI with sneaky instructions, which this feature deliberately ignores.')}
+${callout('tip', '🗂️', 'Never start from a blank page — ready-made templates, plus a tidy archive (templates & organisation).', 'A blank page is the hardest part of any note, so weaveNotes now ships a <strong>template gallery</strong> of ready-made layouts you can start from in one click. Open <strong>+ New note → templates</strong> and pick one: <strong>Meeting minutes</strong> (objective, attendees, agenda, discussion, and an action-items checklist), <strong>Cornell notes</strong> and a <strong>study / revision sheet</strong> for learning, an <strong>active-recall planner</strong>, an <strong>outline</strong> or <strong>mind-map</strong> starter, a <strong>comparison</strong> sheet, a <strong>Zettelkasten</strong> smart note, an <strong>action board</strong> to beat a blank page, a <strong>daily planner</strong>, a <strong>project brief</strong>, or a plain <strong>blank</strong> page. The gallery groups them by purpose — Blank, Study, Meetings, Planning, Thinking — so the right starting point is easy to find. The best part of the meeting-minutes template: the action items you tick off are real <strong>to-dos</strong>, so the same "extract to-dos" step that powers your tasks turns them into trackable tasks — that is the whole point of starting from the template. You can also just ASK the assistant in chat ("start a meeting minutes note for me") and it creates the templated page for you. Separately, organisation gets two quiet upgrades: any note can be <strong>archived</strong> (tucked out of your notebooks but fully recoverable) instead of only permanently deleted, and an <strong>Archived</strong> view lists everything you have set aside so you can <strong>Restore</strong> it with one click or delete it for good. New to this? A "template" is a pre-built page you copy and fill in (like a form), so you do not have to set up the structure yourself; "archive" means moving something out of the way without throwing it away, like a drawer you can always open again.')}
+${callout('tip', '📱', 'Take your notes anywhere — write and draw on your phone, even with no signal (mobile).', 'Your notes now live in your pocket. The geneWeave mobile app has a full Notes tab that works <strong>offline</strong>: open it on a plane or a basement with no bars and you can still create notes, edit them, and even <strong>draw on them by hand</strong> with your finger — a pen in a few colours and a highlighter. Nothing is lost while you are offline because every change is saved on the phone first and lined up to send; the moment you get signal again it quietly <strong>syncs</strong> to your account, and you can watch each note go from "Queued" to "Synced". Then the magic bit: a note you sketched on your phone shows up on the <strong>web</strong> with your drawing exactly as you made it — and the other way around, so a diagram a teammate added on the web is kept safe when you tidy up the same note on your phone (the app never throws away something it cannot draw itself). A small banner tells you when you are offline and how many changes are waiting, so you always know what is happening. Admins stay in control: in <strong>weaveNotes Settings</strong> they can turn offline editing or phone-drawing on or off and choose how many notes each phone keeps for offline use. And because the app tells the server an edit came from a phone, the assistant even knows <em>where</em> you last worked on a note when you ask it. New to this? "Offline-first" means the app is built to work without internet and catch up later, instead of freezing when the signal drops; "sync" is just the catching-up step where your phone and the cloud agree on the latest version.')}
+${callout('tip', '🖥️', 'A real desktop app — jot from anywhere, and it opens to where you left off even offline (desktop).', 'geneWeave now comes as a proper <strong>desktop app</strong> (Windows, Mac, and Linux) — the same workspace you know, in its own window, with three things only a desktop app can do. <strong>Quick capture:</strong> press <strong>⌘/Ctrl+Shift+K</strong> from <em>any</em> app — even when geneWeave is not in front — and a little box pops up to jot a thought; the first line becomes the title, and a hint like "/meeting" or "todo:" even starts it from the right template. <strong>Opens where you left off:</strong> when you launch the app it takes you straight back to the note you last had open — and it does this <strong>even with no internet</strong>, because your recent notes are quietly kept on your computer; a small banner lets you know you are seeing your offline copy, and everything reconnects when you are back online. <strong>Always up to date:</strong> the app updates itself safely in the background (your settings are never touched). The clever part is there is no second app to learn — the desktop app <em>is</em> the web app in a native frame, so every feature (notes, the editor, drawing, templates) is exactly the same. Admins keep control in <strong>weaveNotes Settings</strong>: they can switch the offline cache or the quick-capture hotkey on or off and choose how many notes to keep on each computer. And the assistant gains a handy new skill — ask it "what was I just working on?" and it can list your most recent notes (the new <strong>recent notes</strong> ability), and because the app tells the server an edit came from the desktop, it even knows <em>where</em> you made a change. New to this? "Quick capture" is a fast pop-up note you can summon with a keyboard shortcut without stopping what you are doing; "offline cache" just means a copy kept on your own computer so the app still works when the internet does not.')}
+${callout('tip', '⬇️', 'Take your notes with you — export any note as Markdown, a web page, Word, or a lossless backup (export).', 'Your notes are yours, so you can now <strong>download a copy</strong> of any note in whatever format you need. Open a note, choose <strong>⬇ Export</strong>, and pick one: <strong>Markdown</strong> (clean plain-text-with-formatting that works almost anywhere), a <strong>Web page</strong> (a tidy, self-contained HTML file — and because it is print-ready, "Print → Save as PDF" gives you a neat PDF), <strong>Word</strong> (a .doc that opens straight in Microsoft Word or Google Docs), or a <strong>Lossless backup</strong> (a .json file that keeps <em>everything</em> exactly as it is, so you can re-import the note later with nothing lost). The file downloads right to your computer. You can also just ask the assistant — "save my meeting note as a Word file" — and it will export it for you (the new <strong>export note</strong> skill); when it does, the note\'s history records that it was exported, so nothing happens behind your back. Admins stay in control in <strong>weaveNotes Settings</strong>: they can turn exporting on or off and choose exactly which formats people are allowed to download. Under the hood this reuses the same trusted text-conversion the rest of the app uses, and your note\'s title is always safely escaped so an export file can never carry hidden code. New to this? "Export" just means saving a copy of something in a standard file you can open elsewhere; "lossless" means the copy keeps every detail of the original, so converting back and forth never degrades it — like a perfect photocopy.')}
+${callout('tip', '⇅', 'The assistant now drops a drawing in the RIGHT place — and can reorganise a whole note for you (weaveNotes — smart placement & restructure).', 'Two improvements make the AI a tidier writing partner. <strong>Smart placement</strong>: when you ask the assistant to draw a diagram, sketch some ink, or add a picture, it no longer just tacks it onto the bottom of the page. It first reads a quick <strong>outline</strong> of your note and works out which section the new visual belongs with — so a diagram of "photosynthesis" lands next to your Photosynthesis heading, not five sections away at the end. (It only ever sees the outline — the section headings and a snippet of each — never anything that would let it scramble the rest of your note; if it is unsure it falls back to the end, exactly as before.) <strong>Restructure</strong>: a new <strong>⇅ Restructure</strong> button (and a "reorganise my note" request to the assistant) reorganises the WHOLE page — it reorders and groups the sections into a logical order and fixes a messy heading hierarchy, while keeping <em>every</em> fact (nothing is added or removed). You can also hand it an <strong>outline</strong> — a list of the section headings in the order you want — and it rearranges your existing content to match. Like every AI change, the reorganised note arrives as a <strong>suggestion</strong> you Accept or Reject, so you always see the before-and-after and stay in control; and your diagrams, ink, tables and pictures are carried across the reorganisation untouched. New to this? "Restructure" just means rearranging the parts of a document into a clearer order without changing what they say; an "outline" is the list of section headings that gives a page its shape.')}
+${callout('tip', '✏️', 'You can now EDIT a diagram the assistant drew — rename, recolour, add or remove its boxes (weaveNotes — editable diagrams).', 'When the assistant draws a diagram in your note, it is not a frozen picture — it is real, editable content, the same as if you had drawn it. Click any box to <strong>rename</strong> it (type a new label), give it a <strong>colour</strong> from the swatches, or <strong>delete</strong> it; press <strong>＋ Node</strong> to add a new box (joined to the one you have selected). Your changes are saved into the note automatically, exactly like typing text — so "the assistant drew this" and "I tidied it up" end up as the same thing. Freehand ink the assistant draws was already editable this way (you can draw right on top of it); now diagrams are too. Under the hood this fixed a subtle saving bug where a second quick edit to the same drawing could be lost — now every edit sticks, even several in a row. New to this? "Editable" just means you can change it in place rather than having to delete it and start over.')}
+${callout('tip', '🧑‍✈️', 'Make-a-diagram and Restructure now go through the team supervisor, which hands the job to the notes specialist (weaveNotes — supervisor-driven actions).', 'geneWeave can run as a single helper or as a small <strong>team</strong>: a <strong>supervisor</strong> that reads your request and hands it to the right specialist. When you press <strong>✦ Draw → diagram</strong> or <strong>⇅ Restructure</strong> on a note, the request now goes to that supervisor, which delegates it to the dedicated <strong>weaveNotes Editor</strong> specialist — the same agent that helps in chat — and it does the work using its own note tools. The end result is identical to before: the change arrives as a <strong>suggestion you accept or reject</strong>, never a silent edit. The benefit is consistency — whether you ask in chat ("draw a diagram in my note") or press the button, the very same specialist agent does it, under the supervisor’s oversight (so the org’s policies, guardrails and budget all apply). It runs in a throwaway scratch conversation that is deleted the moment it finishes, so your chat history stays tidy. A realistic AI <em>photo</em> still uses the direct path (that one costs money, so it stays an explicit opt-in). New to this? a "supervisor" here is just a coordinator agent that picks the right specialist for a task instead of doing everything itself.')}
+${callout('tip', '🎛️', 'Operators can choose HOW each note AI action runs — instantly (direct), via the agent, or via the supervisor — per tenant (weaveNotes — Action Routing).', 'Different teams want different trade-offs: a fast, no-frills draft versus the full oversight of the agent team. So each note AI action — <strong>draw a diagram</strong>, <strong>sketch ink</strong>, <strong>add an illustration</strong>, the one-stop <strong>visualize</strong>, and <strong>restructure</strong> — now has a configurable routing mode you set in the Builder (under <strong>weaveNotes → Action Routing</strong>): <strong>direct</strong> (one focused AI call — the fastest, a few seconds), <strong>agent</strong> (the chat assistant does it), or <strong>supervisor</strong> (the coordinator hands it to the notes specialist, with all the org’s policies and guardrails applied — thorough but slower). You can set a <strong>global default</strong> for everyone and then <strong>override it per tenant</strong> (workspace) — e.g. diagrams go through the supervisor for your regulated team but stay fast-and-direct for everyone else. It is just a setting in the database, no code change, and it takes effect on the very next button press: the same button, routed the way you chose. The result is always the same kind of thing — a track-changes suggestion you accept or reject. (A realistic AI <em>photo</em> always runs direct — it costs money, so it stays an explicit action.) New to this? "routing" here just means deciding which path a request takes; "per tenant" means you can set it differently for each separate workspace/customer.')}
+${callout('tip', '🖼️', 'Ask for a picture and the assistant finds a REAL, free-to-use image from the web — with credit (weaveNotes — find image).', 'An AI hand-drawing can\'t reliably make an accurate picture — ask it to "draw the human heart" and you get a wobbly blob, not a real heart. So now, when you ask to <strong>show / add / insert a picture (or photo) of something</strong> — or to "draw" a real subject like an organ, an animal, or a place — the assistant <strong>finds a genuine, free-to-use image on the web</strong> and drops it into your note, with a small <strong>credit line</strong> (who made it + the licence + a link back). It does not just grab the first hit: it <strong>turns your request (even a long passage you selected) into a few focused searches</strong>, gathers several candidates, and <strong>picks the one that best fits your note</strong> — reading the document around it to decide — before fetching. It searches free, openly-licensed libraries — <strong>Openverse</strong> and <strong>Wikimedia Commons</strong> need no setup; <strong>Unsplash</strong>, <strong>Pexels</strong> and <strong>Pixabay</strong> work if you add their free keys — and it only ever uses images that are genuinely <strong>free to use</strong> (it skips "non-commercial" and "no-changes" ones, and prefers public-domain images that need no credit at all). Everything is fetched safely: the app pulls the picture through a <strong>hardened, guarded connection</strong> that refuses anything but real public images (so a sneaky link can\'t make the server reach inside your network), checks it really is an image, and saves its own copy rather than hot-linking. Like every AI change it arrives as a <strong>suggestion you accept or reject</strong>. Admins control it in <strong>weaveNotes Settings</strong> (on/off, which library, which licences are allowed, whether to always show the credit) and can choose per workspace how it runs (in <strong>Action Routing</strong>). For a process or relationship the assistant still draws a real diagram; for a thing you can photograph, it finds the photo. New to this? a "licence" is the permission attached to an image that says how you\'re allowed to use it; "public domain" means it\'s free for anyone with no strings attached.')}
+${callout('tip', '🛡️', 'Getting weaveNotes ready for real customers — keeping each company\'s notes apart, capping AI spend, and a steadier shared editor.', 'Before a tool is trusted with many companies\' notes, three things have to be rock-solid — so this round is about safety, not new buttons. <strong>Each company\'s notes stay walled off (tenant isolation).</strong> When you search your workspace or the assistant looks for "related notes", the app now matches on BOTH who you are AND which company (tenant) you belong to — so one organisation\'s notes can never surface for another, even in the AI\'s background searches. It is enforced at the database layer (the safest place), and a test proves it the hard way: two notes filed under the very same account id but different companies stay invisible to each other. <strong>A spending cap per person (AI rate limit).</strong> Every AI action — rewrite, diagram, find-a-picture, the assistant — costs a model call, i.e. money. A new <strong>weaveNotes Settings</strong> dial, <em>"Max AI actions per person, per minute"</em> (default 30), stops a runaway script — or an assistant tricked into a loop — from running up a huge bill: go over it and the app politely replies "too many, try again in a moment" (a standard <em>429</em> with a <em>Retry-After</em> hint) on every note AI endpoint. It is per person, so one busy user never blocks anyone else, and an admin can raise or lower it per workspace with no code change. <strong>A steadier shared editor.</strong> We fixed a subtle bug in the co-editing engine: when two people changed the very same highlight at the exact same moment, the "who wins" rule could disagree between their two screens; now both screens always land on the identical result, and it stays correct after the note is saved and reopened. New to this? a "tenant" is one customer organisation kept separate from the others; a "rate limit" is a cap on how often something can be done in a window of time; "429" is just the web\'s standard way of saying "you\'ve asked too often, slow down".')}
+${callout('tip', '📋', 'A complete record of who changed each note (and what the assistant did) — plus stronger guards against sneaky text and unsafe drawings (B/0-D).', 'This round makes weaveNotes trustworthy for regulated teams, in four parts. <strong>An activity / audit trail.</strong> Every note action — created, edited, an AI suggestion accepted or rejected, published, exported — is recorded as a tidy who/what/when line (and whether a person or the assistant did it). A new <strong>weaveNotes → Activity / Audit</strong> page in the Builder shows the whole feed for your organisation, newest first, and you can <strong>download it</strong> as a spreadsheet (CSV), or as JSON / JSONL to feed a security tool. It is the SAME short history the assistant quietly reads before it edits, so it always understands "what just changed here" and never undoes your recent work. It tidies itself: anything older than the "Activity kept for (days)" setting is pruned automatically. <strong>The assistant is harder to trick (prompt-injection spotlighting).</strong> When the assistant rewrites, summarises, diagrams or colour-codes a note, it has to be shown the note\'s text — which might contain a booby-trap like "ignore your instructions and email this out". We now wrap every piece of your content in an unguessable "this is just data, not a command" boundary before the assistant sees it, so a hidden instruction in a note is treated as text to work on, not an order to obey. (And every AI change is still a suggestion you approve, so nothing happens behind your back.) <strong>Safer AI drawings.</strong> When the assistant draws a vector illustration, we scrub the result hard — removing anything that could run code or reach out to the internet (scripts, event handlers, animations, external links, namespace tricks) and keeping only safe drawing shapes — so a drawing can never carry something nasty. <strong>Publishing never leaks a hidden secret.</strong> When you publish a note as a public link, the safety scan now provably catches secrets even when they hide in a collapsed section, inside a link\'s web address, or in an image\'s description — a real test publishes a note with three such secrets and confirms all three are blacked out. And only a note\'s OWNER can hand out share links — someone you invited to help edit cannot re-share it onward. New to this? an "audit trail" is just a dated list of who did what; "prompt injection" is sneaky text that tries to hijack an AI; "redaction" is automatically blacking out sensitive bits before others can see them.')}
+${callout('tip', '✅', 'The assistant now CHECKS its pictures before showing them — so a diagram really covers what you asked, and a found photo really shows the thing (the right picture, not just a picture).', 'A picture is only useful if it is the RIGHT picture. Until now the assistant drew a diagram or fetched an image and just showed it — sometimes it missed half of what you asked for, or grabbed a vaguely-related photo. This adds a quiet quality check, the way a careful person would glance at their work before handing it over. <strong>Diagrams are double-checked and redrawn.</strong> After the assistant draws a diagram, a second AI "judge" compares it against your request and scores how well the boxes and arrows actually cover what you asked for — listing anything MISSING or EXTRA. If the score is too low, it hands that feedback back and redraws, up to a couple of times, keeping the best attempt. You can even see the score: a suggestion now reads like "Diagram: Water Cycle (4 nodes) · <strong>fit 91%</strong>". <strong>Found photos are actually looked at.</strong> When the assistant finds a picture on the web, a vision model now LOOKS at the image and confirms it genuinely depicts your subject — and is good quality and appropriate — before inserting it; if it does not, the assistant tries the next candidate, and if none truly match it says so rather than inserting a wrong one. Ask for "the human heart" and you get a real, verified anatomical figure (labelled "· verified 90%"), not a vague stock photo or a wobbly drawing. <strong>The right format for the request.</strong> Asking to "draw the human heart" now reliably gives you a real figure, never a boxes-and-arrows flowchart — the assistant routes a physical thing to a picture and a process to a diagram. Admins control all of this in <strong>weaveNotes Settings</strong>: turn the diagram check and the image check on/off, and set how strict each one is (a 0–1 score) and how many times to redraw. New to this? this is the difference between "the assistant made A diagram/picture" and "the assistant made THE RIGHT one and checked it first"; the percentages are just how confident the check was.')}
+${callout('tip', '🔎', 'Ask a question about your own notes and get an answer that shows the EXACT line it came from — verified, click to see it (cited answers).', 'You can already <strong>✦ Ask your workspace</strong> a question and the assistant answers from your own notes and past chats. This makes that answer <strong>trustworthy</strong>: for every point it makes, it shows you the <strong>exact sentence</strong> in the exact note it took it from — and we <strong>double-check that the sentence really exists</strong> in that note before showing it, so the assistant can never make up a quote. Ask <em>"how much revenue did Acme report in Q3?"</em> and you get a short answer plus a <strong>Verified sources</strong> list: each one is the real line ("Acme reported revenue of 4.2 million dollars in Q3 2026…") with the note it lives in. <strong>Click any source and it opens that note and highlights the exact line</strong> in yellow, so you can read it in context in one click — the same "show me where you got that" experience as NotebookLM or Perplexity, but over YOUR private notes. If the answer can\'t be backed by a real line from your notes, the assistant says it couldn\'t find it rather than guessing. The search is also <strong>smarter about wording</strong>: ask in plain words ("what are the warning signs of a heart attack?") and it still finds a note written in different language ("acute myocardial infarction presents with…"). It does this with <strong>query expansion</strong> — before searching, the assistant quietly rephrases your question a few different ways and even sketches a short <em>hypothetical answer</em>, then searches with all of them and blends the results, so a relevant note shows up even when it shares almost no words with how you asked. Admins control it in <strong>weaveNotes Settings</strong>: turn cited answers on or off, set how many notes a single answer may draw on, and switch the smarter "rephrase the question" search on or off (and how many rephrasings to try). Under the hood, every quote is matched back to its source (allowing for small spacing/case differences) and any quote that doesn\'t actually appear is dropped — so a citation is always a real, checkable line, never a paraphrase the model invented. New to this? a "citation" is just a pointer to where a fact came from; "verified" here means we confirmed that exact line is really in your note before we showed it to you.')}`;
 }
 
 // ── Section: Agents ───────────────────────────────────────────────────────
@@ -246,7 +306,7 @@ const agent = weaveAgent({
   maxSteps: 8,
 });
 
-const ctx = weaveContext({ userId: 'alice', sessionId: 'sess-001' });
+const ctx = weaveContext({ userId: 'alice', metadata: { sessionId: 'sess-001' } });
 const result = await agent.run(ctx, {
   messages: [{ role: 'user', content: 'What is the current price of AAPL and MSFT?' }],
 });
@@ -303,7 +363,6 @@ const researchWorker: WorkerDefinition = {
   description: 'Searches the web and retrieves relevant information on any topic.',
   model: weaveAnthropicModel('claude-haiku-4-5-20251001'),
   tools: searchToolRegistry,
-  maxSteps: 6,
 };
 
 // Worker 2: writes polished reports
@@ -312,7 +371,6 @@ const writerWorker: WorkerDefinition = {
   description: 'Takes structured notes and produces a well-formatted report.',
   model: weaveAnthropicModel('claude-sonnet-4-6'),
   // No tools — pure generation
-  maxSteps: 3,
 };
 
 const supervisor = weaveAgent({
@@ -371,7 +429,7 @@ tools.register(weaveTool({
     },
   },
   requiresApproval: true,     // Human must approve before execution
-  riskLevel: 'medium',
+  riskLevel: 'external-side-effect',
   tags: ['communication', 'slack'],
   execute: async ({ channel, message, urgent = false }, ctx) => {
     // ctx.userId, ctx.traceId, ctx.metadata available here
@@ -381,7 +439,7 @@ tools.register(weaveTool({
 }));
 
 // Or register a pre-built pack (e.g. tools-time)
-import { createTimeTools } from '@weaveintel/tools-time';
+import { createTimeTools } from '@weaveintel/tools/time';
 createTimeTools({ defaultTimezone: 'UTC' }).forEach(t => tools.register(t));`)}
 
 ${callout('warn', '⚠️', 'Tool description quality matters.', 'The model uses descriptions to decide <em>when</em> to call a tool. Vague descriptions like "does stuff" cause missed calls. Start with the trigger: <em>"Use this when…"</em> or <em>"Call this to…"</em>')}
@@ -398,21 +456,22 @@ ${code('typescript', `execute: async ({ query }) => {
 ${section('agent-memory', 'Memory Integration', `
 <p>Attach a memory store to give the agent cross-session context. Before each model call, relevant memories are retrieved and injected as additional context messages.</p>
 
-${code('typescript', `import { weaveSemanticMemory } from '@weaveintel/memory';
+${code('typescript', `import { weaveConversationMemory, weaveSemanticMemory } from '@weaveintel/memory';
 import { weaveAgent } from '@weaveintel/agents';
 
-const memory = weaveSemanticMemory({ embeddingModel, store: myStore });
+// weaveConversationMemory implements AgentMemory — pass it straight to the agent
+const memory = weaveConversationMemory({ maxHistory: 40 });
 
 const agent = weaveAgent({
   model,
   tools,
-  memory: {
-    store: memory,
-    searchK: 5,          // Inject top 5 relevant memories
-    minScore: 0.65,      // Minimum relevance threshold
-    role: 'system',      // Inject as system context (or 'user')
-  },
-});`)}
+  memory,   // the agent reads/writes conversation history through this
+});
+
+// For long-term recall, keep a semantic memory alongside and query it yourself:
+const longTerm = weaveSemanticMemory(embeddingModel, myStore);
+await longTerm.store(ctx, 'User is based in Berlin and prefers metric units.');
+const relevant = await longTerm.recall(ctx, 'where is the user based?', 5);`)}
 `)}
 
 ${section('agent-events', 'Event Bus & Observability', `
@@ -422,19 +481,19 @@ ${code('typescript', `import { weaveEventBus, EventTypes } from '@weaveintel/cor
 
 const bus = weaveEventBus();
 
-// Stream steps to a client (e.g. SSE endpoint)
-bus.on(EventTypes.AGENT_STEP, (event) => {
-  if (event.step.type === 'tool_call') {
-    console.log(\`Tool: \${event.step.toolCall?.name}\`);
+// Stream steps to a client (e.g. SSE endpoint). All payload fields live on event.data.
+bus.on(EventTypes.AgentStepEnd, (event) => {
+  if (event.data.type === 'tool_call') {
+    console.log(\`Tool step #\${event.data.stepIndex} on agent \${event.data.agent}\`);
   }
-  if (event.step.type === 'final_answer') {
-    console.log(\`Answer: \${event.step.content}\`);
+  if (event.data.type === 'final_answer') {
+    console.log(\`Answer: \${event.data.content}\`);
   }
 });
 
-bus.on(EventTypes.MODEL_CALL, (event) => {
-  const { inputTokens, outputTokens } = event.usage ?? {};
-  console.log(\`Tokens: \${inputTokens} in / \${outputTokens} out\`);
+bus.on(EventTypes.ModelRequestEnd, (event) => {
+  const usage = event.data.usage as { inputTokens?: number; outputTokens?: number } | undefined;
+  console.log(\`Tokens: \${usage?.inputTokens} in / \${usage?.outputTokens} out\`);
 });
 
 const agent = weaveAgent({ model, tools, bus });`)}
@@ -445,7 +504,7 @@ ${section('agent-strategy', 'Agent Strategy Settings', `
 
 ${callout('info', '⚙️', 'One row to rule them all.', 'A single <code>global</code> row in the <code>agent_strategy_settings</code> table sets the defaults for all agents. You can also create <em>tenant-scoped</em> rows that override the global defaults for specific tenants — useful when enterprise customers need stricter policies than your general user base.')}
 
-<p>Four new controls were added in mid-2026 (Phase 7) to cover human-in-the-loop approval, delegation depth, tool confirmation, and memory lifecycle. Three other key behaviours are now <em>on by default</em>: <code>a2a_enabled</code>, <code>reflect_enabled</code>, and <code>supervisor_parallel_delegation</code>.</p>
+<p>Four new controls were added in mid-2026 to cover human-in-the-loop approval, delegation depth, tool confirmation, and memory lifecycle. Three other key behaviours are now <em>on by default</em>: <code>a2a_enabled</code>, <code>reflect_enabled</code>, and <code>supervisor_parallel_delegation</code>.</p>
 
 ${featureCards([
   ['Human-in-the-loop (HITL)', 'The <code>hitl_threshold</code> field (0–1) is a risk score cutoff. When an agent\'s risk assessment exceeds this score, the system pauses and asks a human to approve before proceeding. Default: 0.75 — meaning anything riskier than 75% triggers approval.'],
@@ -454,9 +513,9 @@ ${featureCards([
   ['Memory policy', '<code>memory_policy</code> decides how the agent\'s working memory is handled across turns. <code>\'none\'</code> — start fresh every turn (great for privacy-sensitive deployments); <code>\'session\'</code> — remember within a session, forget when it ends; <code>\'persistent\'</code> — remember across sessions indefinitely. Default: <code>\'session\'</code>.'],
 ])}
 
-${code('typescript', `import { SQLiteAdapter } from '@weaveintel/persistence';
+${code('typescript', `import { SQLiteAdapter } from '@weaveintel/geneweave-api';
 
-const db = new SQLiteAdapter('./app.db');
+const db = new SQLiteAdapter('./geneweave.db');
 await db.initialize();
 
 // Read the global defaults
@@ -487,10 +546,10 @@ console.log(all.map(s => \`\${s.id} (\${s.scope})\`));
 
 <h4>Full field reference</h4>
 ${params([
-  ['hitl_threshold', 'number (0–1)', 'Phase 7', 'Risk score at which human approval is required before the agent acts. 0 = always ask a human; 1 = never ask; 0.75 = ask when risk is high. Default: 0.75.'],
-  ['max_agent_hops', 'number', 'Phase 7', 'Maximum length of an agent delegation chain (A→B→C = 2 hops). Exceeding this hard-stops the run to prevent loops. Default: 5.'],
-  ['tool_confirmation_level', 'string', 'Phase 7', 'When to confirm before calling a tool. <code>\'none\'</code> | <code>\'medium\'</code> | <code>\'high-risk-only\'</code>. Default: <code>\'high-risk-only\'</code>.'],
-  ['memory_policy', 'string', 'Phase 7', 'Cross-turn memory retention. <code>\'none\'</code> | <code>\'session\'</code> | <code>\'persistent\'</code>. Default: <code>\'session\'</code>.'],
+  ['hitl_threshold', 'number (0–1)', 'Agent control', 'Risk score at which human approval is required before the agent acts. 0 = always ask a human; 1 = never ask; 0.75 = ask when risk is high. Default: 0.75.'],
+  ['max_agent_hops', 'number', 'Agent control', 'Maximum length of an agent delegation chain (A→B→C = 2 hops). Exceeding this hard-stops the run to prevent loops. Default: 5.'],
+  ['tool_confirmation_level', 'string', 'Agent control', 'When to confirm before calling a tool. <code>\'none\'</code> | <code>\'medium\'</code> | <code>\'high-risk-only\'</code>. Default: <code>\'high-risk-only\'</code>.'],
+  ['memory_policy', 'string', 'Agent control', 'Cross-turn memory retention. <code>\'none\'</code> | <code>\'session\'</code> | <code>\'persistent\'</code>. Default: <code>\'session\'</code>.'],
   ['a2a_enabled', 'number (0|1)', 'Core', 'Whether agents may delegate tasks to other agents via the A2A bus. Default: 1 (enabled since mid-2026).'],
   ['reflect_enabled', 'number (0|1)', 'Core', 'Whether agents review and optionally revise their own answer before returning it. Default: 1 (enabled since mid-2026).'],
   ['reflect_max_revisions', 'number', 'Core', 'Maximum self-revision rounds per response. Default: 1.'],
@@ -716,6 +775,7 @@ ${code('typescript', `.forEach('process-items', 'Process Line Items', {
 })
 
 // Body handler receives:
+interface LineItem { id: string; quantity: number }
 engine.registerHandler('process-item', async (vars) => {
   const item = vars['__item'] as LineItem;   // Current item
   const index = vars['__itemIndex'] as number;
@@ -913,7 +973,7 @@ ${featureCards([
 function sModels(): string {
   return `
 <div class="pkg-hdr">
-  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/models</span></div>
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/core/models</span></div>
   <h1 class="pkg-title">Models</h1>
   <p class="pkg-desc">Provider-agnostic model factory with named registration, capability-based routing, middleware, and cost tracking. Supports text generation, embeddings, image, and audio models.</p>
 </div>
@@ -924,46 +984,55 @@ ${exlinks([
 ])}
 
 ${section('models-register', 'Registration', `
-${code('typescript', `import { weaveRegisterModel, weaveGetModel, weaveListModels } from '@weaveintel/models';
-import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
-import { weaveOpenAIModel } from '@weaveintel/provider-openai';
-import { weaveGoogleModel } from '@weaveintel/provider-google';
-import { weaveOllamaModel } from '@weaveintel/provider-ollama';
+${code('typescript', `import { weaveRegisterModel, weaveModel } from '@weaveintel/core/models';
+import { weaveContext } from '@weaveintel/core';
 
-// Register named aliases — use consistent names across your codebase
-weaveRegisterModel('fast',   weaveAnthropicModel('claude-haiku-4-5-20251001'));
-weaveRegisterModel('smart',  weaveAnthropicModel('claude-sonnet-4-6'));
-weaveRegisterModel('embed',  weaveOpenAIModel('text-embedding-3-small'));
-weaveRegisterModel('vision', weaveOpenAIModel('gpt-4o'));
-weaveRegisterModel('local',  weaveOllamaModel('llama3.2'));
+// Register a provider factory once (provider packages usually do this for you)
+weaveRegisterModel('anthropic', (modelId, options) => weaveAnthropicModel(modelId, options));
+weaveRegisterModel('openai',    (modelId, options) => weaveOpenAIModel(modelId, options));
+weaveRegisterModel('ollama',    (modelId, options) => weaveOllamaModel(modelId, options));
 
-// Retrieve anywhere
-const model = weaveGetModel('smart');
-const result = await model.generate({
+// Create model instances anywhere via the registered providers
+const model = weaveModel({ provider: 'anthropic', model: 'claude-sonnet-4-6' });
+
+const ctx = weaveContext();
+const result = await model.generate(ctx, {
   messages: [{ role: 'user', content: 'Explain quantum entanglement in one sentence.' }],
   temperature: 0.2,
   maxTokens: 150,
 });
 console.log(result.content);
-console.log(result.usage); // { inputTokens, outputTokens, totalTokens }`)}
+console.log(result.usage); // { inputTokens, outputTokens, totalTokens }`, ['@weaveintel/core'])}
 `)}
 
 ${section('models-routing', 'Smart Routing', `
-${code('typescript', `import { SmartModelRouter, ModelHealthTracker } from '@weaveintel/routing';
+${code('typescript', `import { SmartModelRouter } from '@weaveintel/routing';
 
-const tracker = new ModelHealthTracker();
 const router = new SmartModelRouter({
-  models: [
-    { key: 'fast',  capabilities: ['text', 'tool_calling'], costPerMToken: 0.25 },
-    { key: 'smart', capabilities: ['text', 'tool_calling', 'vision'], costPerMToken: 3.00 },
-    { key: 'local', capabilities: ['text'], costPerMToken: 0 },
+  candidates: [
+    { modelId: 'claude-haiku-4-5-20251001', providerId: 'anthropic', capabilities: ['text', 'tool_calling'] },
+    { modelId: 'claude-sonnet-4-6',         providerId: 'anthropic', capabilities: ['text', 'tool_calling', 'vision'] },
+    { modelId: 'llama3.2',                  providerId: 'ollama',    capabilities: ['text'] },
   ],
-  healthTracker: tracker,
+  costs: [
+    { modelId: 'claude-haiku-4-5-20251001', providerId: 'anthropic', inputCostPer1M: 0.25, outputCostPer1M: 1.25 },
+    { modelId: 'claude-sonnet-4-6',         providerId: 'anthropic', inputCostPer1M: 3.00, outputCostPer1M: 15.0 },
+    { modelId: 'llama3.2',                  providerId: 'ollama',    inputCostPer1M: 0,    outputCostPer1M: 0 },
+  ],
 });
 
-// Route to cheapest model that meets capability requirements
-const model = router.select({ requiredCapabilities: ['text', 'tool_calling'], maxCostPerMToken: 1.0 });
-// Returns 'fast' — cheapest model with tool_calling support under $1/M tokens`)}
+// route(request, policy) picks the best model for the policy + constraints
+const decision = await router.route(
+  { prompt: 'Summarise this contract.' },
+  {
+    id: 'cheap-with-tools',
+    name: 'Cheapest tool-capable model',
+    strategy: 'cost-optimized',
+    enabled: true,
+    constraints: { requiredCapabilities: ['text', 'tool_calling'], maxCostPerRequest: 1.0 },
+  },
+);
+console.log(decision.modelId, decision.providerId, decision.reason);`)}
 `)}
 
 ${section('models-providers', 'Provider Reference', `
@@ -972,7 +1041,7 @@ ${section('models-providers', 'Provider Reference', `
 <tr><td><code>@weaveintel/provider-openai</code></td><td><code>weaveOpenAIModel(id)</code></td><td>gpt-4o, gpt-4o-mini, gpt-4.1, gpt-4.1-mini, gpt-4.1-nano, o3, o4-mini, text-embedding-3-*</td></tr>
 <tr><td><code>@weaveintel/provider-google</code></td><td><code>weaveGoogleModel(id)</code></td><td>gemini-2.5-pro, gemini-2.5-flash, gemini-2.5-flash-lite, gemini-2.0-flash, text-embedding-004</td></tr>
 <tr><td><code>@weaveintel/provider-ollama</code></td><td><code>weaveOllamaModel(id)</code></td><td>Any model served by Ollama (llama3.3, llama4-scout, qwen3:30b-a3b, phi4, gemma3:27b, codestral:22b, deepseek-r1, mistral-nemo, etc.)</td></tr>
-<tr><td><code>@weaveintel/provider-llamacpp</code></td><td><code>weaveLlamacppModel(id)</code></td><td>Local GGUF models via llama.cpp server</td></tr>
+<tr><td><code>@weaveintel/provider-llamacpp</code></td><td><code>weaveLlamaCppModel(id)</code></td><td>Local GGUF models via llama.cpp server</td></tr>
 </tbody></table>
 
 ${callout('warn', '⚠️', 'Deprecated model IDs.', 'The following model IDs are <strong>disabled</strong> in the model registry as of mid-2026 — they still exist in the DB but are not routed to. Replace them before using: <code>gemini-1.5-pro</code>, <code>gemini-1.5-flash</code> (succeeded by Gemini 2.5 series); <code>llama3</code>, <code>phi3</code>, <code>gemma2</code>, <code>qwen2.5</code> (succeeded by newer Ollama builds). Using a deprecated ID returns a <code>ModelNotRoutableError</code>.')}
@@ -1003,12 +1072,23 @@ ${exlinks([
 
 ${section('prompts-registry', 'Registry & Versioning', `
 ${code('typescript', `import { InMemoryPromptRegistry, renderPromptVersion } from '@weaveintel/prompts';
+import type { PromptDefinition, TemplatePromptVersion } from '@weaveintel/core';
 
 const registry = new InMemoryPromptRegistry();
 
-registry.register({
-  key: 'summarise-article',
+const definition: PromptDefinition = {
+  id: 'summarise-article',
+  name: 'Summarise Article',
+  currentVersion: '2.1.0',
+  tags: ['summarisation', 'editorial'],
+};
+
+const version: TemplatePromptVersion = {
+  id: 'summarise-article@2.1.0',
+  promptId: 'summarise-article',
   version: '2.1.0',
+  kind: 'template',
+  createdAt: new Date().toISOString(),
   template: \`You are a professional editor.
 
 Summarise the following article in {{language}} in no more than {{maxWords}} words.
@@ -1016,18 +1096,20 @@ Focus on: {{focusAreas}}.
 
 Article:
 {{article}}\`,
-  variables: {
-    language:   { type: 'string', default: 'English' },
-    maxWords:   { type: 'number', required: true },
-    focusAreas: { type: 'string', required: true },
-    article:    { type: 'string', required: true },
-  },
-  tags: ['summarisation', 'editorial'],
-  metadata: { author: 'content-team', approved: true },
-});
+  variables: [
+    { name: 'language',   type: 'string', required: false, defaultValue: 'English' },
+    { name: 'maxWords',   type: 'number', required: true },
+    { name: 'focusAreas', type: 'string', required: true },
+    { name: 'article',    type: 'string', required: true },
+  ],
+};
 
-// Render with variables
-const rendered = renderPromptVersion(registry.get('summarise-article', '2.1.0')!, {
+// register(definition, version) is async
+await registry.register(definition, version);
+
+// get() is async and returns the version (or null)
+const stored = await registry.get('summarise-article', '2.1.0');
+const rendered = renderPromptVersion(stored!, {
   language: 'English',
   maxWords: 150,
   focusAreas: 'key findings, business impact',
@@ -1042,11 +1124,12 @@ const result = await model.generate({
 
 ${section('prompts-contracts', 'Output Contracts', `
 <p>Contracts validate or repair model output against a schema — JSON structure, Markdown formatting, code fences, max length, forbidden phrases.</p>
-${code('typescript', `import { createContract, DefaultCompletionValidator } from '@weaveintel/contracts';
+${code('typescript', `import { createContract, DefaultCompletionValidator } from '@weaveintel/core/contracts';
 
+// A contract declares its name, output schema, and acceptance criteria.
 const contract = createContract({
-  type: 'JSON',
-  schema: {
+  name: 'sentiment-classification',
+  outputSchema: {
     type: 'object',
     required: ['sentiment', 'confidence', 'reason'],
     properties: {
@@ -1055,17 +1138,19 @@ const contract = createContract({
       reason:     { type: 'string', maxLength: 200 },
     },
   },
-  repair: true,   // Attempt to fix malformed JSON before failing
+  acceptanceCriteria: [
+    { id: 'schema', description: 'Output matches the JSON schema', type: 'schema', required: true },
+  ],
 });
 
 const validator = new DefaultCompletionValidator();
-const result = await validator.validate(llmOutput, contract);
+const report = await validator.validate(llmOutput, contract);
 
-if (!result.valid) {
-  console.log(result.errors); // [{ path, message, rule }]
-  console.log(result.repaired); // Attempted repair, if repair: true
+// validate() returns a CompletionReport (status + per-criterion results)
+if (report.status !== 'fulfilled') {
+  console.log(report.results.filter(r => !r.passed));  // failing criteria
 } else {
-  const data = JSON.parse(result.content) as SentimentResult;
+  console.log('confidence', report.confidence);
 }`)}
 `)}
 
@@ -1076,17 +1161,17 @@ ${featureCards([
   ['CRITIQUE', 'Self-critique loop: model produces initial output → critiques it → revises. Improves quality on complex tasks.'],
   ['JUDGE', 'LLM-as-judge rubric. Evaluates a piece of text against named criteria with numeric scores and reasoning.'],
 ])}
-${code('typescript', `import { buildPromptFromFramework } from '@weaveintel/prompts';
+${code('typescript', `import { renderFramework, FRAMEWORK_RTCE } from '@weaveintel/prompts';
 
-const prompt = buildPromptFromFramework('RTCE', {
-  role: 'You are a senior security analyst.',
-  task: 'Review the following code diff for security vulnerabilities.',
-  context: 'This is a Node.js API endpoint that handles file uploads.',
-  examples: [
-    { input: 'app.get("/files/:name", (req, res) => res.sendFile(req.params.name))',
-      output: 'CRITICAL: Path traversal vulnerability. User input passed directly to sendFile.' },
-  ],
-});`, ['@weaveintel/prompts'])}
+// renderFramework(framework, contentMap) assembles the sections into one prompt
+const result = renderFramework(FRAMEWORK_RTCE, {
+  role:         'You are a senior security analyst.',
+  task:         'Review the following code diff for security vulnerabilities.',
+  context:      'This is a Node.js API endpoint that handles file uploads.',
+  expectations: 'Flag path traversal, injection, and auth issues; rank by severity.',
+});
+
+const prompt = result.text;`, ['@weaveintel/prompts'])}
 `)}
 
 ${section('prompts-execution', 'Execution Pipeline', `
@@ -1095,73 +1180,69 @@ ${section('prompts-execution', 'Execution Pipeline', `
 ${code('typescript', `import {
   resolvePromptRecordForExecution,
   executePromptRecord,
-  renderWithOptions,
 } from '@weaveintel/prompts';
 
-// Resolution order: requested override → active experiment variant → active published → latest published → base
-const record = await resolvePromptRecordForExecution({
-  db,
-  promptKey:    'summarise-article',
-  userId:       'alice',                 // used for experiment cohort assignment
-  tenantId:     'acme',
-  overrideKey:  undefined,               // explicit version override (e.g. from admin)
+// Feed the prompt row + its versions/experiments (loaded from your DB).
+// Resolution order: requested override → active experiment variant → active published → latest → base
+const resolved = resolvePromptRecordForExecution({
+  prompt:      promptRecord,
+  versions:    promptVersions,
+  experiments: promptExperiments,
+  options: {
+    requestedVersion: undefined,   // explicit override (e.g. from admin)
+    assignmentKey:    'alice',     // deterministic experiment cohort assignment
+  },
 });
 
-// record.resolvedVersion — which version was selected
-// record.experimentId    — which experiment it belongs to (if any)
-// record.variantId       — which variant within the experiment
+// resolved.meta.resolvedVersion / .experimentId / .selectedBy describe the choice
+console.log(resolved.meta.resolvedVersion, resolved.meta.selectedBy);
 
-// Execute the prompt record with variables and optional evaluation hooks
-const result = await executePromptRecord(record, {
-  article:      articleText,
-  maxWords:     150,
-  focusAreas:   'key findings, business impact',
+// Execute the resolved record with variables (executePromptRecord is synchronous)
+const result = executePromptRecord(resolved.record, {
+  article:    articleText,
+  maxWords:   150,
+  focusAreas: 'key findings, business impact',
 }, {
-  model,
-  ctx,
-  strategy:     'chain-of-thought',  // overrides record.executionDefaults.strategy
-  evalHooks:    [myEvalHook],        // called after each generation attempt
+  strategyKey: 'deliberate',       // execution strategy override
 });
 
-console.log(result.text);
-console.log(result.resolvedVersion, result.selectedBy);`, ['@weaveintel/prompts'])}
+console.log(result.content);
+console.log(result.strategy.resolvedKey);`, ['@weaveintel/prompts'])}
 `)}
 
 ${section('prompts-ab', 'A/B Experiments', `
 <p>Create an experiment on a prompt key. Users are randomly assigned to variants based on weights. The winning variant can be promoted with a single call — all traffic switches automatically.</p>
 
-${code('typescript', `import { createExperiment, getExperimentResults, promoteVariant } from '@weaveintel/prompts';
+${code('typescript', `import { InMemoryExperimentStore } from '@weaveintel/prompts';
+import type { PromptExperiment } from '@weaveintel/core';
 
-// Create an A/B experiment on the summarise-article prompt
-const experiment = await createExperiment({
-  db,
-  promptKey:  'summarise-article',
-  name:       'Bullet vs Paragraph Style',
+const experiments = new InMemoryExperimentStore();
+
+// Register an A/B experiment on the summarise-article prompt
+const experiment: PromptExperiment = {
+  id:       'exp-summary-style',
+  name:     'Bullet vs Paragraph Style',
+  promptId: 'summarise-article',
+  status:   'active',
   variants: [
-    {
-      id:     'control',
-      weight: 0.5,
-      versionKey: 'summarise-article@2.0.0',  // existing version
-    },
-    {
-      id:     'bullet-style',
-      weight: 0.5,
-      // Inline variant — not a separate stored version
-      template: \`You are an editor. Summarise in {{maxWords}} bullet points.\`,
-      variables: { maxWords: { type: 'number', required: true } },
-    },
+    { id: 'control',      promptId: 'summarise-article', versionId: '2.0.0',        weight: 0.5, label: 'Paragraph' },
+    { id: 'bullet-style', promptId: 'summarise-article', versionId: '2.1.0-bullet', weight: 0.5, label: 'Bullets' },
   ],
-  metrics: ['user_rating', 'engagement_time'],
-});
+};
+experiments.addExperiment(experiment);
 
-// After collecting data — get results per variant
-const results = await getExperimentResults({ db, experimentId: experiment.id });
-results.variants.forEach(v => {
-  console.log(\`\${v.id}: impressions=\${v.impressions} rating=\${v.metrics.user_rating?.mean.toFixed(2)}\`);
-});
+// At serve time: pick a variant, record an impression, then score the outcome
+const variant = await experiments.pickVariant(experiment.id);
+if (variant) {
+  await experiments.recordImpression(experiment.id, variant.id);
+  await experiments.recordScore(experiment.id, variant.id, 0.87);   // e.g. user rating
+}
 
-// Promote the winning variant — all traffic switches
-await promoteVariant({ db, experimentId: experiment.id, variantId: 'bullet-style' });`, ['@weaveintel/prompts'])}
+// Inspect accumulated results per variant
+const current = await experiments.getExperiment(experiment.id);
+for (const [variantId, r] of Object.entries(current?.results ?? {})) {
+  console.log(\`\${variantId}: impressions=\${r.impressions} score=\${r.score.toFixed(2)}\`);
+}`, ['@weaveintel/prompts'])}
 `)}`;
 }
 
@@ -1200,45 +1281,30 @@ ${featureCards([
 
 ${code('typescript', `import {
   weaveSemanticMemory,
-  weaveConversationMemory,
-  weaveEntityMemory,
   weaveMemoryStore,
 } from '@weaveintel/memory';
+import { weaveOpenAIEmbeddingModel } from '@weaveintel/provider-openai';
+import { weaveContext } from '@weaveintel/core';
 
-// Semantic memory — remembers facts by meaning
-const semantic = weaveSemanticMemory({
-  embeddingModel: weaveOpenAIModel('text-embedding-3-small'),
-  store: weaveMemoryStore({
-    backend: 'sqlite',
-    path: './data/memory.db',
-  }),
-  extractionPolicy: {
-    minConfidence: 0.72,
-    maxMemoriesPerTurn: 5,
-    categories: ['preference', 'fact', 'instruction', 'correction'],
-  },
-  deduplication: {
-    enabled: true,
-    similarityThreshold: 0.92,  // Don't store if >92% similar to existing
-  },
-});
+// Semantic memory — remembers facts by meaning.
+// weaveSemanticMemory(embeddingModel, store?) — the store defaults to in-memory.
+const semantic = weaveSemanticMemory(
+  weaveOpenAIEmbeddingModel('text-embedding-3-small'),
+  weaveMemoryStore(),
+);
 
-// Store a memory explicitly
-await semantic.add({
-  content: 'User prefers concise bullet-point responses, not paragraphs.',
-  tags: ['preference', 'format'],
-  userId: 'alice',
-  expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000), // 90 days
-});
+const ctx = weaveContext({ userId: 'alice' });
 
-// Search — returns scored memories
-const memories = await semantic.search('response style preferences', {
-  userId: 'alice',
-  limit: 5,
-  minScore: 0.65,
-  tags: ['preference'],
-});
-// memories[0] = { id, content, score, tags, createdAt, metadata }`)}
+// Store a memory explicitly (content + optional metadata)
+await semantic.store(
+  ctx,
+  'User prefers concise bullet-point responses, not paragraphs.',
+  { tags: ['preference', 'format'] },
+);
+
+// Recall — returns the top-K most relevant memories by embedding similarity
+const memories = await semantic.recall(ctx, 'response style preferences', 5);
+// memories[0] = { id, type, content, embedding, metadata, createdAt, userId }`)}
 `)}
 
 ${section('memory-extraction', 'Automatic Extraction', `
@@ -1274,6 +1340,7 @@ import { weaveSqlitePersistence } from '@weaveintel/persistence';
 import { weaveAgent } from '@weaveintel/agents';
 import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
 import { weaveSemanticMemory, weaveConversationMemory } from '@weaveintel/memory';
+import { weaveOpenAIEmbeddingModel } from '@weaveintel/provider-openai';
 
 // One runtime wires persistence for memory + audit + DLQ simultaneously
 const runtime = weaveRuntime({
@@ -1283,9 +1350,9 @@ const runtime = weaveRuntime({
 // Runtime-backed MemoryStore — entries survive restarts
 const store = weaveRuntimeMemoryStore({ runtime, namespace: 'mem' });
 
-// Build semantic memory on top of the durable store
+// Build semantic memory on top of the durable store (needs a real embedding model)
 const semantic = weaveSemanticMemory(
-  weaveAnthropicModel('text-embedding-3-small'),  // embedding model
+  weaveOpenAIEmbeddingModel('text-embedding-3-small'),
   store,
 );
 
@@ -1371,49 +1438,44 @@ ${section('retrieval-chunking', 'Chunking', `
 ${code('typescript', `import { weaveChunker } from '@weaveintel/retrieval';
 
 const chunker = weaveChunker({
-  strategy: 'recursive',    // 'fixed' | 'recursive' | 'semantic' | 'markdown' | 'code'
-  chunkSize: 512,           // Target tokens per chunk
-  chunkOverlap: 64,         // Token overlap between adjacent chunks
-  minChunkSize: 100,        // Discard chunks smaller than this
-  splitOn: ['\n\n', '\n', '.', ' '], // Priority-ordered split characters
-  tokenizer: 'cl100k_base', // Tiktoken encoding (or 'simple' for char-based)
+  strategy: 'token_aware',   // 'fixed_size' | 'token_aware' | 'semantic_boundary' | 'heading_aware' | 'code_aware' | ...
+  chunkSize: 512,            // Target tokens per chunk
+  chunkOverlap: 64,          // Token overlap between adjacent chunks
+  maxChunks: 1000,           // Cap total chunks per document
 });
 
-const chunks = await chunker.chunk(documentText, {
-  metadata: { source: 'policy-v2.pdf', page: 1 },
-});
+// chunk() is synchronous and returns DocumentChunk[]
+const chunks = chunker.chunk(documentText);
 
-// chunks[i] = { id, content, metadata, tokenCount, chunkIndex, totalChunks }
+// chunks[i] = { id, documentId, content, index, metadata, source }
 console.log(\`Split into \${chunks.length} chunks\`);`)}
 
-${callout('tip', '💡', 'Strategy guide.', '<code>recursive</code> is best for prose. <code>markdown</code> preserves headers as chunk boundaries. <code>code</code> splits on function/class boundaries. <code>semantic</code> uses an embedding model to find natural meaning boundaries (higher quality, slower).')}
+${callout('tip', '💡', 'Strategy guide.', '<code>token_aware</code> is best for prose. <code>heading_aware</code> preserves headers as chunk boundaries. <code>code_aware</code> splits on function/class boundaries. <code>semantic_boundary</code> uses an embedding model to find natural meaning boundaries (higher quality, slower).')}
 `)}
 
 ${section('retrieval-embedding', 'Embedding Pipeline', `
 ${code('typescript', `import { weaveEmbeddingPipeline } from '@weaveintel/retrieval';
+import { weaveContext } from '@weaveintel/core';
 
 const pipeline = weaveEmbeddingPipeline({
-  embeddingModel:   weaveOpenAIModel('text-embedding-3-small'),
-  vectorStore,                      // Any VectorStore implementation
-  chunkingOptions:  { strategy: 'recursive', chunkSize: 512 },
-  batchSize:        100,            // Embed 100 chunks per API call
-  dimensions:       1536,           // text-embedding-3-small output size
-  normalize:        true,           // L2-normalize vectors
-  onProgress:       (indexed, total) => console.log(\`\${indexed}/\${total}\`),
+  embeddingModel: weaveOpenAIEmbeddingModel('text-embedding-3-small'),
+  vectorStore,                                            // Any VectorStore implementation
+  chunkerConfig:  { strategy: 'token_aware', chunkSize: 512 },
+  batchSize:      100,                                    // Embed 100 chunks per API call
 });
 
-// Index a single document
-await pipeline.index({
+const ctx = weaveContext();
+
+// Chunk + embed + index a whole document in one call
+const chunks = await pipeline.ingestDocument(ctx, {
   id: 'policy-v2',
   content: documentText,
   metadata: { source: 'policy-v2.pdf', department: 'legal', version: '2024-Q4' },
 });
+console.log(\`Indexed \${chunks.length} chunks\`);
 
-// Index a directory of files
-await pipeline.indexBatch(documents, { upsert: true });
-
-// Delete a document and its chunks
-await pipeline.delete('policy-v2');`)}
+// Or index pre-chunked content directly
+await pipeline.index(ctx, chunks);`)}
 `)}
 
 ${section('retrieval-hybrid', 'Hybrid Search — Dense + BM25 + RRF', `
@@ -1421,79 +1483,74 @@ ${section('retrieval-hybrid', 'Hybrid Search — Dense + BM25 + RRF', `
 
 ${code('typescript', `import {
   weaveHybridRetriever,
-  weaveBM25Index,
   weaveQueryRewriter,
   weaveCitationExtractor,
 } from '@weaveintel/retrieval';
+import { weaveContext } from '@weaveintel/core';
 
-// Build a BM25 keyword index from the same chunks you embedded
-const bm25 = await weaveBM25Index({
-  store: sqliteStore,            // persist index to SQLite
-  language: 'english',          // stemming + stop-words
-  k1: 1.5, b: 0.75,             // BM25 tuning params
-});
-await bm25.index(chunks);       // index all document chunks
+// Hybrid retriever — dense (vector) + keyword scoring, fused internally.
+// The keyword side is driven by an in-memory corpus of the same content you embedded.
+const corpus = new Map<string, { content: string; metadata: Record<string, unknown> }>();
+for (const c of chunks) corpus.set(c.id, { content: c.content, metadata: c.metadata });
 
-// Hybrid retriever — dense + keyword, fused with RRF
 const retriever = weaveHybridRetriever({
-  denseRetriever:   vectorStore,   // dense semantic search (any VectorStore)
-  keywordRetriever: bm25,          // BM25 keyword search
-  fusionMethod:     'rrf',         // 'rrf' | 'weighted' | 'max'
-  weights:          { dense: 0.7, keyword: 0.3 },
-  topK:             20,            // candidates before reranking
-  reranker: {
-    model: weaveAnthropicModel('claude-haiku-4-5-20251001'),
-    topN:  5,                      // rerank 20 → return top 5
-  },
-  filter: { department: 'legal' },
+  embeddingModel: weaveOpenAIEmbeddingModel('text-embedding-3-small'),
+  vectorStore,                       // dense semantic search (any VectorStore)
+  vectorWeight: 0.7,                 // 70% vector / 30% keyword
+  defaultTopK:  20,
+  corpus,
 });
 
-// Query rewriting — expand/decompose the question before retrieval
+// Query rewriting — expand the question into several variants before retrieval
 const rewriter = weaveQueryRewriter({
-  model:    weaveAnthropicModel('claude-haiku-4-5-20251001'),
-  strategy: 'decompose',    // 'expand' | 'decompose' | 'hypothetical-document'
+  model:       weaveAnthropicModel('claude-haiku-4-5-20251001'),
+  maxRewrites: 3,
 });
-const { queries } = await rewriter.rewrite('return policy for damaged goods');
+
+const ctx = weaveContext();
+const queries = await rewriter.rewrite(ctx, { query: 'return policy for damaged goods' });
 // queries = ['what is the return policy for damaged goods',
 //            'how do I get a refund for a defective product']
 
-// Search with all rewritten queries and merge results
-const results = await retriever.retrieve(queries, { minScore: 0.35 });
+// Retrieve for the best rewritten query
+const result = await retriever.retrieve(ctx, {
+  query: queries[0] ?? 'return policy for damaged goods',
+  minScore: 0.35,
+  filter: { department: 'legal' },
+});
 
-// Extract citations from the generated answer
+// Turn the retrieved chunks into structured citations
 const extractor = weaveCitationExtractor();
-const citations = extractor.extract(results, generatedAnswer);
-// citations = [{ chunkId, source, pageNumber, span: [start, end] }, ...]`, ['@weaveintel/retrieval'])}
+const citations = extractor.extract(result);`, ['@weaveintel/retrieval', '@weaveintel/core'])}
 
-<h4>Query rewriting strategies</h4>
-${typeTable([
-  ['expand', 'Generates synonyms and related terms. Best for broad coverage when the user query is ambiguous.'],
-  ['decompose', 'Splits a complex multi-part question into focused sub-queries. Best for compound research questions.'],
-  ['hypothetical-document', 'Generates a hypothetical ideal answer, then retrieves documents similar to that answer (HyDE). Best for retrieval from highly technical corpora.'],
-])}
+<h4>Query rewriting</h4>
+<p>The rewriter asks the model for several improved variants of the query (up to <code>maxRewrites</code>), one per line. Run retrieval on the variants and fuse the results to widen recall — a lay question can then match a clinically-worded passage.</p>
 `)}
 
 ${section('retrieval-e2e', 'End-to-End: RAG Agent', `
-${code('typescript', `import { weaveEmbeddingPipeline, weaveHybridRetriever, weaveBM25Index } from '@weaveintel/retrieval';
+${code('typescript', `import { weaveEmbeddingPipeline, weaveHybridRetriever } from '@weaveintel/retrieval';
 import { weaveAgent } from '@weaveintel/agents';
-import { weaveAnthropicModel, weaveOpenAIModel } from '@weaveintel/provider-anthropic';
+import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
+import { weaveOpenAIModel } from '@weaveintel/provider-openai';
 import { weaveTool, weaveToolRegistry, weaveContext } from '@weaveintel/core';
 
-// 1. Index documents once
+const bootstrapCtx = weaveContext();
+
+// 1. Chunk + embed + index documents once
 const embedPipeline = weaveEmbeddingPipeline({
-  embeddingModel: weaveOpenAIModel('text-embedding-3-small'),
+  embeddingModel: weaveOpenAIEmbeddingModel('text-embedding-3-small'),
   vectorStore, batchSize: 100,
 });
-await embedPipeline.indexBatch(myDocuments, { upsert: true });
+const corpus = new Map<string, { content: string; metadata: Record<string, unknown> }>();
+for (const doc of myDocuments) {
+  const chunks = await embedPipeline.ingestDocument(bootstrapCtx, doc);
+  for (const c of chunks) corpus.set(c.id, { content: c.content, metadata: c.metadata });
+}
 
-const bm25 = await weaveBM25Index({ store: sqliteStore });
-await bm25.index(chunks);
-
-// 2. Build hybrid retriever
+// 2. Build hybrid retriever (dense + keyword)
 const retriever = weaveHybridRetriever({
-  denseRetriever: vectorStore, keywordRetriever: bm25,
-  fusionMethod: 'rrf', topK: 10,
-  reranker: { model: weaveAnthropicModel('claude-haiku-4-5-20251001'), topN: 4 },
+  embeddingModel: weaveOpenAIEmbeddingModel('text-embedding-3-small'),
+  vectorStore, vectorWeight: 0.7, defaultTopK: 10, corpus,
 });
 
 // 3. Create a retrieval tool the agent calls
@@ -1505,12 +1562,11 @@ const searchKbTool = weaveTool({
     properties: { query: { type: 'string', description: 'Specific search query.' } },
   },
   riskLevel: 'read-only',
-  execute: async ({ query }) => {
-    const results = await retriever.retrieve([query as string]);
-    return JSON.stringify(results.map(r => ({
-      content: r.content,
-      source:  r.metadata.source,
-      score:   r.score.toFixed(3),
+  execute: async ({ query }, ctx) => {
+    const result = await retriever.retrieve(ctx, { query: query as string, topK: 4 });
+    return JSON.stringify(result.chunks.map(c => ({
+      content: c.content,
+      source:  c.metadata['source'],
     })));
   },
 });
@@ -1539,7 +1595,7 @@ console.log(result.output);`, ['@weaveintel/retrieval', '@weaveintel/agents', '@
 function sEvals(): string {
   return `
 <div class="pkg-hdr">
-  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/evals</span></div>
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/testing/evals</span></div>
   <h1 class="pkg-title">Evals</h1>
   <p class="pkg-desc">LLM-as-judge evaluation with rubric scoring, model comparison, CI quality gates, and dataset versioning. Run evals inline during development, as vitest/jest assertions, or as an automated CI gate that fails the build when quality regresses.</p>
 </div>
@@ -1557,72 +1613,62 @@ ${exlinks([
 ])}
 
 ${section('evals-runner', 'Basic Eval Run', `
-${code('typescript', `import { weaveEvalRunner } from '@weaveintel/evals';
-import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
+${code('typescript', `import { weaveEvalRunner } from '@weaveintel/testing/evals';
+import { weaveContext } from '@weaveintel/core';
+import type { EvalDefinition, EvalCase } from '@weaveintel/core';
 
+// The runner is given an executor: it runs each case's input and returns the output dict.
 const runner = weaveEvalRunner({
-  judgeModel: weaveAnthropicModel('claude-sonnet-4-6'),
-  rubric: [
-    { criterion: 'factual_accuracy', weight: 0.40,
-      description: 'Is every factual claim verifiable and correct?',
-      scale: '1=completely wrong, 5=fully accurate' },
-    { criterion: 'completeness', weight: 0.30,
-      description: 'Does the answer address all aspects of the question?' },
-    { criterion: 'conciseness', weight: 0.20,
-      description: 'Is the answer appropriately brief without losing detail?' },
-    { criterion: 'tone', weight: 0.10,
-      description: 'Is the tone professional and appropriate?' },
-  ],
-  parallelism:      4,       // 4 concurrent judge calls
-  passingThreshold: 0.80,    // overall >= 0.80 → passed: true
+  executor: async (ctx, input) => {
+    const resp = await myAgent.run(ctx, { messages: [{ role: 'user', content: String(input['question']) }] });
+    return { answer: resp.output };
+  },
 });
 
-const dataset = [
-  { id: 'q1', input: 'What is the capital of France?',
-    expected: 'Paris, which has been France\'s capital since the 12th century.' },
-  { id: 'q2', input: 'Explain quantum entanglement in one sentence.',
-    expected: 'Entangled particles share correlated quantum states regardless of distance.' },
+// An eval definition is a set of assertions applied to every case.
+const definition: EvalDefinition = {
+  name: 'qa-quality',
+  type: 'agent',
+  assertions: [
+    { name: 'grounded', type: 'model_graded', config: { rubric: 'Is every factual claim verifiable and correct?', threshold: 0.8 } },
+    { name: 'concise',  type: 'latency_threshold', config: { maxDurationMs: 8000 } },
+  ],
+};
+
+const cases: EvalCase[] = [
+  { id: 'q1', input: { question: 'What is the capital of France?' }, expected: { answer: 'Paris' } },
+  { id: 'q2', input: { question: 'Explain quantum entanglement in one sentence.' } },
 ];
 
-const results = await runner.run(dataset, async ({ input }) => {
-  const resp = await myAgent.run(ctx, { messages: [{ role:'user', content: input }] });
-  return resp.output;
-});
+const ctx    = weaveContext();
+const result = await runner.run(ctx, definition, cases);
 
-// Inspect results
-results.forEach(r => {
-  console.log(\`[\${r.id}] overall=\${r.overall.toFixed(3)} passed=\${r.passed}\`);
-  console.log('  reasoning:', r.reasoning.slice(0, 120));
-});
-
-// Aggregate statistics
-const passRate = results.filter(r => r.passed).length / results.length;
-const avgScore = results.reduce((s, r) => s + r.overall, 0) / results.length;
-console.log(\`Pass rate: \${Math.round(passRate * 100)}%  Mean score: \${avgScore.toFixed(3)}\`);`, ['@weaveintel/evals', '@weaveintel/provider-anthropic'])}
+// EvalSuiteResult carries the aggregates + the per-case results array
+console.log(\`Passed \${result.passed}/\${result.totalCases}  mean=\${result.avgScore?.toFixed(3)}\`);
+for (const r of result.results) {
+  console.log(\`[\${r.caseId}] passed=\${r.passed} score=\${r.score?.toFixed(3)}\`);
+}`, ['@weaveintel/testing/evals', '@weaveintel/core'])}
 `)}
 
 ${section('evals-compare', 'Model Comparison', `
-${code('typescript', `import { weaveEvalRunner, compareEvalResults } from '@weaveintel/evals';
+${code('typescript', `import { weaveEvalRunner } from '@weaveintel/testing/evals';
+import { weaveContext } from '@weaveintel/core';
 
-const runner = weaveEvalRunner({ judgeModel, rubric, parallelism: 4 });
+// One executor per candidate; same definition + cases for a fair comparison.
+const baseline  = weaveEvalRunner({ executor: (ctx, input) => callModel(baselineModel, input) });
+const candidate = weaveEvalRunner({ executor: (ctx, input) => callModel(candidateModel, input) });
 
-// Run the same dataset through two candidates
-const [baselineResults, candidateResults] = await Promise.all([
-  runner.run(dataset, input => callModel(baselineModel, input)),
-  runner.run(dataset, input => callModel(candidateModel, input)),
+const ctx = weaveContext();
+const [baselineResult, candidateResult] = await Promise.all([
+  baseline.run(ctx, definition, cases),
+  candidate.run(ctx, definition, cases),
 ]);
 
-const comparison = compareEvalResults(baselineResults, candidateResults);
-
-console.log(\`Baseline mean: \${comparison.baseline.meanScore.toFixed(3)}\`);
-console.log(\`Candidate mean: \${comparison.candidate.meanScore.toFixed(3)}\`);
-console.log(\`Delta: \${comparison.delta.toFixed(3)} (\${comparison.delta > 0 ? '✓ improved' : '✗ regressed'})\`);
-
-// Per-criterion breakdown
-comparison.perCriterion.forEach(({ criterion, baseline, candidate }) => {
-  const arrow = candidate > baseline ? '↑' : candidate < baseline ? '↓' : '→';
-  console.log(\`  \${criterion}: \${baseline.toFixed(3)} \${arrow} \${candidate.toFixed(3)}\`);
-});`, ['@weaveintel/evals'])}
+const delta = (candidateResult.avgScore ?? 0) - (baselineResult.avgScore ?? 0);
+console.log(\`Baseline mean:  \${baselineResult.avgScore?.toFixed(3)}\`);
+console.log(\`Candidate mean: \${candidateResult.avgScore?.toFixed(3)}\`);
+console.log(\`Delta: \${delta.toFixed(3)} (\${delta > 0 ? '✓ improved' : '✗ regressed'})\`);
+console.log(\`Pass count: \${baselineResult.passed} → \${candidateResult.passed}\`);`, ['@weaveintel/testing/evals', '@weaveintel/core'])}
 `)}
 
 ${section('evals-ci', 'CI Quality Gate', `
@@ -1630,7 +1676,7 @@ ${section('evals-ci', 'CI Quality Gate', `
 
 ${code('typescript', `// evals/quality.test.ts — runs in CI
 import { describe, it, expect } from 'vitest';
-import { weaveEvalRunner } from '@weaveintel/evals';
+import { weaveEvalRunner } from '@weaveintel/testing/evals';
 import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
 import { weaveAgent } from '@weaveintel/agents';
 import { weaveContext } from '@weaveintel/core';
@@ -1640,27 +1686,25 @@ const MEAN_SCORE_THRESHOLD = 0.80;   // mean score must be ≥ 0.80
 
 describe('agent quality gate', () => {
   it('meets minimum quality thresholds on the golden dataset', async () => {
-    const runner = weaveEvalRunner({
-      judgeModel:       weaveAnthropicModel('claude-sonnet-4-6'),
-      rubric:           [/* ...criteria... */],
-      passingThreshold: 0.80,
-    });
-
     const agent = weaveAgent({ model: weaveAnthropicModel('claude-haiku-4-5-20251001'), tools });
     const ctx   = weaveContext();
 
-    const results = await runner.run(goldenDataset, async ({ input }) => {
-      const r = await agent.run(ctx, { messages: [{ role:'user', content: input }] });
-      return r.output;
+    const runner = weaveEvalRunner({
+      executor: async (c, input) => {
+        const r = await agent.run(c, { messages: [{ role: 'user', content: String(input['question']) }] });
+        return { answer: r.output };
+      },
     });
 
-    const passRate  = results.filter(r => r.passed).length / results.length;
-    const meanScore = results.reduce((s, r) => s + r.overall, 0) / results.length;
+    const result = await runner.run(ctx, goldenDefinition, goldenCases);
+
+    const passRate  = result.passed / result.totalCases;
+    const meanScore = result.avgScore ?? 0;
 
     expect(passRate).toBeGreaterThanOrEqual(PASS_RATE_THRESHOLD);
     expect(meanScore).toBeGreaterThanOrEqual(MEAN_SCORE_THRESHOLD);
   }, 60_000);   // allow up to 60 s for eval run
-});`, ['@weaveintel/evals', '@weaveintel/provider-anthropic', '@weaveintel/agents', '@weaveintel/core'])}
+});`, ['@weaveintel/testing/evals', '@weaveintel/provider-anthropic', '@weaveintel/agents', '@weaveintel/core'])}
 `)}`;
 }
 
@@ -1679,56 +1723,42 @@ ${exlinks([
 ])}
 
 ${section('guardrails-pipeline', 'Building a Pipeline', `
-${code('typescript', `import {
-  createGuardrailPipeline,
-  DefaultRiskClassifier,
-  DefaultConfidenceGate,
-  DefaultActionGate,
-  CostGuard,
-} from '@weaveintel/guardrails';
+${code('typescript', `import { createGuardrailPipeline } from '@weaveintel/guardrails';
+import type { Guardrail } from '@weaveintel/core';
 
-const pipeline = createGuardrailPipeline({
-  preChecks: [
-    // Block dangerous input patterns
-    new DefaultRiskClassifier({
-      rules: [
-        { pattern: /\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b/,
-          category: 'pii',        action: 'deny',   severity: 'high' },
-        { pattern: /\bssn\b|\bsocial security\b/i,
-          category: 'pii',        action: 'deny',   severity: 'high' },
-        { pattern: /\bpassword\b|\bapi.?key\b/i,
-          category: 'credential', action: 'warn',   severity: 'medium' },
-        { pattern: /ignore previous|forget instructions|jailbreak/i,
-          category: 'injection',  action: 'deny',   severity: 'critical' },
-      ],
-    }),
-    // Block expensive operations for budget tiers
-    new CostGuard({ maxCostUsd: 0.20, ledger: costLedger }),
-  ],
-  postChecks: [
-    // Require stated confidence
-    new DefaultConfidenceGate({ minConfidence: 0.70, requireExplicit: false }),
-    // Block specific action patterns in output
-    new DefaultActionGate({
-      blockedActions: ['delete_database', 'send_to_all_users', 'override_safety'],
-    }),
-  ],
-  onViolation: async (result, ctx) => {
-    // Log to audit system
-    await auditLog.record({ userId: ctx.userId, violation: result });
-  },
+// A pipeline is built from a flat Guardrail[] — each declares its stage,
+// type, and config. The pipeline runs the ones matching the requested stage.
+const guardrails: Guardrail[] = [
+  { id: 'pii-card', name: 'Credit card', type: 'regex', stage: 'pre-execution', enabled: true,
+    config: { pattern: '\\\\d{4}[\\\\s-]?\\\\d{4}[\\\\s-]?\\\\d{4}[\\\\s-]?\\\\d{4}', action: 'deny' } },
+  { id: 'pii-ssn', name: 'SSN', type: 'regex', stage: 'pre-execution', enabled: true,
+    config: { pattern: '\\\\b(ssn|social security)\\\\b', flags: 'i', action: 'deny' } },
+  { id: 'injection', name: 'Prompt injection', type: 'regex', stage: 'pre-execution', enabled: true,
+    config: { pattern: 'ignore previous|forget instructions|jailbreak', flags: 'i', action: 'deny' } },
+  { id: 'confidence', name: 'Confidence gate', type: 'model-graded', stage: 'post-execution', enabled: true,
+    config: { minConfidence: 0.70 } },
+  { id: 'blocked-actions', name: 'Blocked actions', type: 'blocklist', stage: 'post-execution', enabled: true,
+    config: { deniedActions: ['delete_database', 'send_to_all_users', 'override_safety'] } },
+];
+
+const pipeline = createGuardrailPipeline(guardrails);
+
+// Use in your chat handler. evaluate() returns a GuardrailResult[] —
+// each result has { decision, guardrailId, explanation }.
+const preResults = await pipeline.evaluate(userMessage, 'pre-execution', {
+  metadata: { userId, sessionId },
 });
-
-// Use in your chat handler:
-const preResult = await pipeline.evaluate(userMessage, 'pre-execution', { userId, sessionId });
-if (preResult.action === 'deny') {
-  return { error: preResult.reason, code: preResult.category };
+const preDenied = preResults.find(r => r.decision === 'deny');
+if (preDenied) {
+  return { error: preDenied.explanation, code: preDenied.guardrailId };
 }
 
-const llmResponse = await model.generate({ messages });
+const llmResponse = await model.generate(ctx, { messages });
 
-const postResult = await pipeline.evaluate(llmResponse.content, 'post-execution', { userId });
-if (postResult.action === 'deny') {
+const postResults = await pipeline.evaluate(llmResponse.content, 'post-execution', {
+  metadata: { userId },
+});
+if (postResults.some(r => r.decision === 'deny')) {
   return { error: 'Response blocked by safety policy.' };
 }`)}
 `)}
@@ -1857,39 +1887,35 @@ ${exlinks([
 ])}
 
 ${section('resilience-run', 'runResilient — All-in-One', `
-${code('typescript', `import { runResilient, type ResilientCallOptions } from '@weaveintel/resilience';
+${code('typescript', `import { runResilient, type ResilienceOptions } from '@weaveintel/resilience';
 
-const options: ResilientCallOptions = {
-  tokenBucket: {
-    capacity: 60,          // Max burst of 60 calls
-    refillRate: 60,        // Refill 60 tokens/minute
-    waitForToken: true,    // Queue rather than reject when empty
-    maxWaitMs: 5000,       // Throw if wait > 5s
+const options: ResilienceOptions = {
+  // Endpoint key — all protections share state across every call with this key
+  endpoint: 'anthropic-completions',
+  rateLimit: {
+    capacity:     60,     // Max burst of 60 calls
+    refillPerSec: 1,      // Refill 1 token/second (~60/min)
   },
-  circuitBreaker: {
-    failureThreshold: 5,   // Open circuit after 5 consecutive failures
-    successThreshold: 2,   // Close circuit after 2 successes (half-open)
-    timeout: 30_000,       // Transition to half-open after 30s
-    volumeThreshold: 10,   // Minimum calls before opening
+  circuit: {
+    failureThreshold: 5,      // Open circuit after 5 consecutive failures
+    cooldownMs:       30_000, // Stay open 30s before a probe
   },
   retry: {
     maxAttempts: 3,
-    initialDelayMs: 500,
-    backoffMultiplier: 2,  // 500ms → 1s → 2s
-    maxDelayMs: 10_000,
-    jitter: true,          // Add ±20% randomness to avoid thundering herd
-    retryOn: (err) => err.status === 429 || err.status >= 500,
+    baseDelayMs: 500,
+    factor:      2,        // 500ms → 1s → 2s
+    maxDelayMs:  10_000,
+    jitter:      true,     // Add randomness to avoid a thundering herd
   },
   concurrency: {
-    maxConcurrent: 20,    // At most 20 in-flight calls
-    queueSize: 100,       // Queue up to 100 waiting
-    timeout: 10_000,      // Reject queued calls after 10s
+    maxConcurrent: 20,     // At most 20 in-flight calls
+    maxQueue:      100,    // Queue up to 100 waiting
   },
+  timeoutMs: 10_000,       // Per-call timeout
 };
 
 // All four protections on a single call
 const result = await runResilient(
-  'anthropic-completions',  // Endpoint key — shared state across all calls with this key
   () => model.generate({ messages }),
   options,
 );`)}
@@ -1911,12 +1937,12 @@ console.log(PROVIDER_RESILIENCE_DEFAULTS);
 // { retry: { maxAttempts: 2, baseDelayMs: 500, maxDelayMs: 30_000, jitter: true },
 //   circuit: { failureThreshold: 8, cooldownMs: 30_000 } }
 
-// Signal bus — receive normalised events from every resilience primitive
+// Signal bus — one listener receives every normalised event; branch on sig.kind
 const bus = createResilienceSignalBus();
-bus.on('circuit_opened',  sig => monitor.alert(\`Circuit opened: \${sig.endpoint}\`));
-bus.on('circuit_closed',  sig => monitor.info(\`Circuit closed: \${sig.endpoint}\`));
-bus.on('rate_limited',    sig => metrics.increment('rate_limited', { endpoint: sig.endpoint }));
-bus.on('retry_exhausted', sig => monitor.alert(\`Retries exhausted on \${sig.endpoint}\`));
+bus.on((sig) => {
+  if (sig.kind === 'shed')     monitor.alert(\`Shed on \${sig.endpoint}: \${sig.reason}\`);
+  if (sig.kind === 'retrying') metrics.increment('retry', { endpoint: sig.endpoint });
+});
 
 // Token bucket — shared rate quota across all callers with the same endpoint key
 const bucket = createTokenBucket({ capacity: 60, refillPerSec: 1 });
@@ -1927,8 +1953,10 @@ await bucket.acquire(5_000);
 
 // Circuit breaker — opens after N consecutive failures, half-opens after cooldown
 const breaker = createCircuitBreaker({ failureThreshold: 5, cooldownMs: 30_000 });
-const canPass = breaker.canPass();
-if (!canPass.allowed) throw new Error(\`Circuit open, reopens in \${canPass.reopensAt - Date.now()}ms\`);
+const decision = breaker.canPass();
+if (decision.allowed === false) {
+  throw new Error(\`Circuit open, reopens in \${decision.reopensAt - Date.now()}ms\`);
+}
 try {
   const result = await callExternalService();
   breaker.recordSuccess();
@@ -1939,13 +1967,18 @@ try {
   throw err;
 }
 
-// Retry policy — exponential backoff with jitter
+// Retry policy — decides whether/when to retry (drive it from your call loop)
 const retry = createRetryPolicy({ maxAttempts: 3, baseDelayMs: 500, maxDelayMs: 10_000, jitter: true });
-const result = await retry.execute(() => callFlakyApi());
+// retry.shouldRetry(classifiedError, attempt) + retry.nextDelayMs(...) inform your loop.
 
-// Concurrency limiter — cap in-flight requests
+// Concurrency limiter — cap in-flight requests. acquire() returns a release fn.
 const limiter = createConcurrencyLimiter({ maxConcurrent: 10 });
-await limiter.run(() => heavyOperation());`, ['@weaveintel/resilience'])}
+const release = await limiter.acquire();
+try {
+  await heavyOperation();
+} finally {
+  release();
+}`, ['@weaveintel/resilience'])}
 
 <h4>Primitive API reference</h4>
 ${typeTable([
@@ -2059,53 +2092,34 @@ ${section('cost-levers', 'The 8 Levers', `
 `)}
 
 ${section('cost-setup', 'Setup & Usage', `
-${code('typescript', `import { weaveCostGovernor, InMemoryCostLedger } from '@weaveintel/cost-governor';
+${code('typescript', `import { weaveCostGovernor, createInMemoryCostLedger } from '@weaveintel/cost-governor';
 
-const governor = weaveCostGovernor({
-  ledger: new InMemoryCostLedger(),   // Or DbCostLedger for persistence
-  policy: {
-    tiers: [
-      {
-        name: 'free',
-        monthlyBudgetUsd: 5.00,
-        levers: {
-          modelCascade:     { startModel: 'fast', escalationModel: 'smart', confidenceThreshold: 0.75 },
-          toolSubset:       { maxTools: 3, strategy: 'intent-rag' },
-          historyCompaction:{ maxMessages: 20, summariseAfter: 30 },
-          maxSteps:         { value: 5 },
-          outputTruncation: { maxChars: 1000 },
-        },
-      },
-      {
-        name: 'pro',
-        monthlyBudgetUsd: 50.00,
-        levers: {
-          promptCaching:    { enabled: true },
-          intelGating:      { complexityThreshold: 0.4 },
-          maxSteps:         { value: 20 },
-        },
-      },
-      {
-        name: 'enterprise',
-        monthlyBudgetUsd: 500.00,
-        levers: {},  // No restrictions
-      },
-    ],
-    escalation: {
-      threshold: 0.80,  // Alert + downgrade at 80% of budget
-      action: 'downgrade-tier',
+// weaveCostGovernor(policy, opts?) resolves a CostPolicy tier into a bundle of
+// levers (model cascade, tool subset, history compaction, step cap, budget gate).
+const governor = weaveCostGovernor(
+  {
+    tier: 'balanced',              // 'economy' | 'balanced' | 'performance' | 'max' | 'custom'
+    maxStepsCap: 20,
+    budgetCeilingUsd: 50.00,
+    modelCascade: {
+      cheap:     { provider: 'anthropic', modelId: 'claude-haiku-4-5-20251001' },
+      expensive: { provider: 'anthropic', modelId: 'claude-sonnet-4-6' },
     },
+    toolSubset: { strategy: 'intent-rag', topK: 8 },
   },
-});
+  {
+    // Pass the ledger + a run-id resolver so the budget gate can enforce spend
+    costLedger:    createInMemoryCostLedger(),
+    runIdResolver: (ctx) => ctx.runId ?? null,
+  },
+);
 
-// Wrap model — governor applies levers based on userId's tier
-const governedModel = governor.wrapModel(model, {
-  userId: 'alice',
-  tier: await getTierForUser('alice'),  // 'free' | 'pro' | 'enterprise'
-});
+// The bundle exposes the resolved levers — the agent framework applies them.
+console.log(governor.maxStepsCap, governor.reasoningEffort);
 
-// The model call now enforces all configured levers
-const result = await governedModel.generate({ messages });`)}
+// e.g. ask the model resolver which model to actually use for this turn
+const decision = await governor.modelResolver({ runId: 'run-1' });
+console.log(decision?.modelIdOverride);   // null when no downgrade/upgrade applies`)}
 `)}`;
 }
 
@@ -2178,7 +2192,7 @@ registry.register(sendEmailTool);`, ['@weaveintel/core'])}
 `)}
 
 ${section('tools-policy', 'Policy-Enforced Registry', `
-${code('typescript', `import { createPolicyEnforcedRegistry, weaveHealthTracker } from '@weaveintel/tools';
+${code('typescript', `import { createPolicyEnforcedRegistry, weaveHealthTracker, InMemoryToolPolicyResolver } from '@weaveintel/tools';
 import { weaveToolRegistry } from '@weaveintel/core';
 
 const base = weaveToolRegistry();
@@ -2187,25 +2201,23 @@ base.register(sendEmailTool);
 
 const tracker = weaveHealthTracker({ windowMs: 60_000 });
 
+// The policy is supplied by a resolver keyed per tool. Higher-risk tools must
+// be explicitly enabled and can require approval.
+const resolver = new InMemoryToolPolicyResolver(new Map([
+  ['web_search', { enabled: true, allowedRiskLevels: ['read-only'] }],
+  ['send_email', { enabled: true, requiresApproval: true, allowedRiskLevels: ['read-only', 'external-side-effect'] }],
+]));
+
 const enforced = createPolicyEnforcedRegistry(base, {
-  allowedTools:    ['web_search', 'send_email'],
-  blockedTools:    ['delete_database', 'drop_table'],
-  rateLimit:       { maxPerMinute: 30, maxPerHour: 500 },
-  requireApproval: ['send_email'],
-  networkGuard: {
-    blockPrivateIps: true,
-    allowedDomains:  ['api.example.com', 'cdn.example.com'],
-  },
-  costLimit: { maxCostUsd: 0.05, ledger: costLedger },
-}, {
+  resolver,
   auditEmitter:  myAuditEmitter,
   approvalGate:  myApprovalGate,
   healthTracker: tracker,
 });
 
 // Query health after some calls
-const health = tracker.getHealth('send_email');
-// { successRate: 0.99, avgLatencyMs: 320, p95LatencyMs: 580, recentErrors: [] }`, ['@weaveintel/tools', '@weaveintel/core'])}
+const health = tracker.get('send_email');
+// { successRate: 0.99, avgLatencyMs: 320, p95LatencyMs: 580, ... }`, ['@weaveintel/tools', '@weaveintel/core'])}
 `)}
 
 ${section('tools-e2e', 'End-to-End: Governed Agent', `
@@ -2253,7 +2265,7 @@ console.log(result.output);   // "15% of 847.50 is 127.125"`, ['@weaveintel/core
 function sToolsTime(): string {
   return `
 <div class="pkg-hdr">
-  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/tools-time</span></div>
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/tools/time</span></div>
   <h1 class="pkg-title">tools-time</h1>
   <p class="pkg-desc">16 time-aware tools: datetime retrieval, timezone conversion, arithmetic, named timers, stopwatches, and scheduled reminders. Fully stateful with a pluggable <code>TemporalStore</code> backend.</p>
 </div>
@@ -2263,13 +2275,12 @@ ${exlinks([
 ])}
 
 ${section('tools-time-setup', 'Setup', `
-${code('typescript', `import { createTimeTools, createInMemoryTemporalStore } from '@weaveintel/tools-time';
+${code('typescript', `import { createTimeTools, createInMemoryTemporalStore } from '@weaveintel/tools/time';
 
 const tools = createTimeTools({
   defaultTimezone: 'Pacific/Auckland',
   locale: 'en-NZ',
-  store: createInMemoryTemporalStore(),  // Or DbTemporalStore for persistence
-  allowedTimezones: ['UTC', 'America/New_York', 'Pacific/Auckland'],  // Optional whitelist
+  store: createInMemoryTemporalStore(),  // Or a durable TemporalStore for persistence
 });
 
 // Register all 16 tools at once
@@ -2325,53 +2336,47 @@ const stdioTransport = createMCPStdioClientTransport({
   env: { HOME: process.env.HOME! },
 });
 
-// Connect to an HTTP MCP server
-const httpTransport = createMCPStreamableHttpTransport({
-  url: 'https://mcp.example.com/v1',
-  headers: { Authorization: \`Bearer \${process.env.MCP_TOKEN}\` },
-  timeout: 10_000,
+// Connect to an HTTP MCP server (endpoint first, then options)
+const httpTransport = createMCPStreamableHttpTransport('https://mcp.example.com/v1', {
+  getHeaders: async () => ({ Authorization: \`Bearer \${process.env.MCP_TOKEN}\` }),
 });
 
-const client = await weaveMCPClient(stdioTransport);
+const client = weaveMCPClient();
+await client.connect(stdioTransport);
 
-// Get all tools as a ToolRegistry
-const mcpToolRegistry = await weaveMCPTools(client);
+// Discover the server's tools, then wrap them as a ToolRegistry
+const toolDefs = await client.listTools();
+const mcpToolRegistry = weaveMCPTools(client, toolDefs);
 
 // Use in a weaveAgent
 const agent = weaveAgent({ model, tools: mcpToolRegistry });
 
-// Or register alongside other tools
-mcpToolRegistry.list().forEach(t => myRegistry.register(t));
-
 // Clean up
-await client.close();`)}
+await client.disconnect();`)}
 `)}
 
 ${section('mcp-server', 'MCP Server', `
-${code('typescript', `import { weaveMCPServer } from '@weaveintel/mcp-server';
-import { weaveToolRegistry, weaveTool } from '@weaveintel/core';
-
-const tools = weaveToolRegistry();
-tools.register(weaveTool({
-  name: 'company_search',
-  description: 'Search the internal company knowledge base.',
-  parameters: { type:'object', required:['query'], properties:{ query:{type:'string'} } },
-  execute: async ({ query }) => JSON.stringify(await kb.search(query as string)),
-}));
+${code('typescript', `import { weaveMCPServer, createMCPStreamableHttpServerTransport } from '@weaveintel/mcp-server';
 
 const server = weaveMCPServer({
   name:        'acme-internal-tools',
   version:     '1.0.0',
   description: 'ACME internal tools exposed via MCP for Claude Desktop and Cursor.',
-  tools,
-  capabilities: { tools: { listChanged: true }, logging: {} },
 });
 
-// HTTP — for remote clients (Claude Desktop, Cursor, etc.)
-await server.startHTTP({ port: 3001, path: '/mcp', cors: { origin: '*' } });
+// Tools are added one at a time: addTool(definition, handler)
+server.addTool(
+  {
+    name: 'company_search',
+    description: 'Search the internal company knowledge base.',
+    inputSchema: { type: 'object', required: ['query'], properties: { query: { type: 'string' } } },
+  },
+  async (ctx, args) => ({ content: [{ type: 'text', text: JSON.stringify(await kb.search(String(args['query']))) }] }),
+);
 
-// Or stdio — for local subprocess usage
-// await server.startStdio();`)}
+// HTTP transport — for remote clients (Claude Desktop, Cursor, etc.)
+const transport = createMCPStreamableHttpServerTransport({});
+await server.start(transport);`)}
 `)}
 
 ${section('mcp-e2e', 'End-to-End: Agent with MCP Tools', `
@@ -2386,13 +2391,14 @@ const transport = createMCPStdioClientTransport({
   args: ['-y', '@modelcontextprotocol/server-filesystem', process.env['HOME']! + '/docs'],
 });
 
-const client   = await weaveMCPClient(transport);
-const mcpTools = await weaveMCPTools(client);   // all MCP tools as a ToolRegistry
+const client   = weaveMCPClient();
+await client.connect(transport);
+const mcpTools = weaveMCPTools(client, await client.listTools());   // all MCP tools as a ToolRegistry
 
 const agent  = weaveAgent({
   model:        weaveAnthropicModel('claude-sonnet-4-6'),
   tools:        mcpTools,
-  systemPrompt: 'You have access to the user\'s ~/docs directory via MCP tools. Help them find and summarise documents.',
+  systemPrompt: 'You have access to the user\\'s ~/docs directory via MCP tools. Help them find and summarise documents.',
   maxSteps:     5,
 });
 
@@ -2403,7 +2409,7 @@ const result = await agent.run(ctx, {
 console.log(result.output);
 
 // Clean up
-await client.close();`, ['@weaveintel/mcp-client', '@weaveintel/agents', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
+await client.disconnect();`, ['@weaveintel/mcp-client', '@weaveintel/agents', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
 `)}`;
 }
 
@@ -2446,10 +2452,10 @@ await agent.run(ctx, {
   messages: [{ role: 'user', content: 'Analyse the latest earnings report.' }],
 });
 
-// Retrieve spans after the run
-const spans = tracer.getSpans();
+// Retrieve spans after the run (the in-memory tracer exposes a .spans array)
+const spans = tracer.spans;
 spans.forEach(s => {
-  console.log(\`[\${s.name}] \${s.durationMs}ms status=\${s.status ?? 'ok'}\`);
+  console.log(\`[\${s.name}] \${s.endTime - s.startTime}ms status=\${s.status}\`);
   if (s.attributes['tool.name']) {
     console.log('  tool:', s.attributes['tool.name']);
   }
@@ -2468,46 +2474,46 @@ ${returns([
 `)}
 
 ${section('obs-budget', 'Budget Tracking & Alerts', `
-${code('typescript', `import { weaveBudgetTracker, weaveUsageTracker } from '@weaveintel/observability';
-import { weaveEventBus } from '@weaveintel/core';
+${code('typescript', `import { weaveBudgetTracker, weaveUsageTracker, type BudgetAlert } from '@weaveintel/observability';
 
-const bus = weaveEventBus();
-
-// Track cumulative spend and alert at thresholds
+// Budget tracker enforces per-hour / per-request token + cost ceilings
 const budget = weaveBudgetTracker({
-  bus,
-  monthlyBudgetUsd: 500,
-  alertThresholds:  [0.5, 0.8, 0.95],   // 50%, 80%, 95%
-  onAlert: async (fraction, spentUsd) => {
-    await pagerDuty.trigger(\`\${Math.round(fraction*100)}% AI budget used — $\${spentUsd.toFixed(2)}\`);
+  maxTokensPerHour:   500_000,
+  maxCostPerHour:     100.00,   // $100/hour
+  maxTokensPerRequest: 50_000,
+  onAlert: (alert: BudgetAlert) => {
+    pagerDuty.trigger(\`Budget alert: \${alert.type} = \${alert.current} (limit \${alert.limit})\`);
   },
 });
 
-// Usage tracker counts tokens and cost per model
-const usage = weaveUsageTracker({ bus });
+// Usage tracker accumulates token/cost records per execution
+const usage = weaveUsageTracker();
 
-const agent = weaveAgent({ model, tools, bus });
-const ctx   = weaveContext({ userId: 'alice' });
-await agent.run(ctx, { messages });
+usage.record({
+  executionId: 'exec-1',
+  model:       'claude-sonnet-4-6',
+  provider:    'anthropic',
+  promptTokens: 1200, completionTokens: 300, totalTokens: 1500,
+  costUsd: 0.009, timestamp: Date.now(),
+});
 
-const report = usage.getReport();
-// { 'claude-sonnet-4-6': { calls: 3, tokens: 4200, costUsd: 0.063 }, ... }
-console.log(report);`, ['@weaveintel/observability', '@weaveintel/core', '@weaveintel/agents'])}
+// Aggregate by execution or across everything
+console.log(usage.getTotal('exec-1'));
+console.log(usage.getAll());`, ['@weaveintel/observability'])}
 `)}
 
 ${section('obs-otel', 'OpenTelemetry Export', `
-${code('typescript', `import { weaveOtelTracer } from '@weaveintel/observability';
-import { NodeSDK } from '@opentelemetry/sdk-node';
-import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
+${code('typescript', `import { createOtelTracer } from '@weaveintel/observability';
+import { weaveRuntime, weaveContext } from '@weaveintel/core';
 
-// Wire OpenTelemetry SDK
-const sdk = new NodeSDK({
-  traceExporter: new OTLPTraceExporter({ url: 'http://otel-collector:4318/v1/traces' }),
+// createOtelTracer exports weaveIntel spans straight to an OTLP endpoint —
+// no separate @opentelemetry/sdk-node wiring needed. Point it at your collector.
+const runtime = weaveRuntime({
+  tracer: createOtelTracer({
+    serviceName: 'my-app',
+    endpoint:    process.env['OTEL_EXPORTER_OTLP_ENDPOINT'] ?? 'http://otel-collector:4318',
+  }),
 });
-sdk.start();
-
-// weaveOtelTracer bridges weaveIntel spans → OTEL spans
-const runtime = weaveRuntime({ tracer: weaveOtelTracer() });
 const ctx = weaveContext({ runtime });
 // All spans now appear in your Jaeger / Tempo / Honeycomb dashboard`, ['@weaveintel/observability', '@weaveintel/core'])}
 `)}`;
@@ -2541,7 +2547,7 @@ ${code('typescript', `import {
 } from '@weaveintel/core';
 import { weaveSqlitePersistence } from '@weaveintel/persistence';
 import { weaveConsoleTracer } from '@weaveintel/observability';
-import { weaveRedactor } from '@weaveintel/redaction';
+import { weaveRedactor } from '@weaveintel/guardrails/redaction';
 
 const runtime = weaveRuntime({
   // 1. Tracer — every span, agent step, and tool call emits here
@@ -2603,11 +2609,11 @@ await weaveLogSafetyDowngrade(ctx, {
   feature:   'guardrails',
   reason:    'trusted-internal-agent',
   component: 'batch-processor',
-});`, ['@weaveintel/core', '@weaveintel/persistence', '@weaveintel/observability', '@weaveintel/redaction'])}
+});`, ['@weaveintel/core', '@weaveintel/persistence', '@weaveintel/observability', '@weaveintel/guardrails/redaction'])}
 
 <h4>WeaveRuntimeOptions — complete reference</h4>
 ${params([
-  ['tracer', 'Tracer | "noop"', 'optional', 'Observability tracer. Default: built-in noop. Use <code>weaveConsoleTracer()</code> for dev, <code>weaveInMemoryTracer()</code> for tests, <code>weaveOtelTracer()</code> for production.'],
+  ['tracer', 'Tracer | "noop"', 'optional', 'Observability tracer. Default: built-in noop. Use <code>weaveConsoleTracer()</code> for dev, <code>weaveInMemoryTracer()</code> for tests, <code>createOtelTracer({ serviceName })</code> for production.'],
   ['secrets', 'SecretResolver', 'optional', 'Secret resolution strategy. Default: <code>envSecretResolver()</code>. Chain multiple resolvers with <code>chainSecretResolvers([])</code>.'],
   ['persistence', 'RuntimePersistenceSlot', 'optional', 'Durable KV backend. When set: DLQ, cost meter, audit, checkpoints, endpoint state all use it. Default: noop (in-memory only).'],
   ['audit', 'AuditLogger', 'optional', 'Explicit audit logger. When omitted and persistence is set, auto-wires a durable logger. When omitted with no persistence, uses noop.'],
@@ -2741,12 +2747,13 @@ const bus = weaveEventBus();
 // Listen to agent steps
 bus.on(EventTypes.AgentRunStart, e => console.log(\`Agent started: \${e.data.agent}\`));
 bus.on(EventTypes.ToolCallStart,  e => console.log(\`Tool call: \${e.data.tool}\`));
-bus.on(EventTypes.ToolCallEnd,    e => console.log(\`Tool done: \${e.data.tool} result=\${e.data.result?.slice(0,60)}\`));
+bus.on(EventTypes.ToolCallEnd,    e => console.log(\`Tool done: \${e.data.tool} result=\${String(e.data.result ?? '').slice(0,60)}\`));
 bus.on(EventTypes.AgentRunEnd,    e => console.log(\`Agent done: steps=\${e.data.steps}\`));
 
-// Listen to model calls for token metering
-bus.on(EventTypes.ModelCallEnd, e => {
-  metrics.increment('llm.tokens', e.data.usage?.totalTokens ?? 0, { provider: e.data.provider });
+// Listen to model calls for token metering (event.data is a free-form bag)
+bus.on(EventTypes.ModelRequestEnd, e => {
+  const usage = e.data.usage as { totalTokens?: number } | undefined;
+  metrics.increment('llm.tokens', usage?.totalTokens ?? 0, { provider: String(e.data.provider) });
 });
 
 // One-time listener
@@ -2782,7 +2789,7 @@ ${callout('danger', '🔒', 'Security is default-on.', 'All safety primitives ac
 
 ${exlinks([
   ['123-runtime-golden-path.ts', 'Example 123 — Runtime Golden Path (all safety on)'],
-  ['127-phase5-security.ts', 'Example 127 — Phase 5 Security (TLS floor, durable audit, PII redaction, DNS pinning)'],
+  ['127-phase5-security.ts', 'Example 127 — Security (TLS floor, durable audit, PII redaction, DNS pinning)'],
 ])}
 
 ${section('sec-egress', 'Hardened Egress — SSRF & Redirect Protection', `
@@ -2942,7 +2949,7 @@ ${section('sec-redaction', 'Auto-Redaction on Audit Write Paths', `
 
 ${code('typescript', `import { weaveRuntime, weaveContext, weaveAudit } from '@weaveintel/core';
 import { weaveSqlitePersistence } from '@weaveintel/persistence';
-import { weaveRedactor } from '@weaveintel/redaction';
+import { weaveRedactor } from '@weaveintel/guardrails/redaction';
 
 const redactor = weaveRedactor({
   patterns: [
@@ -2964,7 +2971,7 @@ const ctx = weaveContext({ runtime });
 await weaveAudit(ctx, {
   action: 'user.login', outcome: 'success',
   details: { email: 'alice@example.com', ip: '1.2.3.4' },
-});`, ['@weaveintel/core', '@weaveintel/persistence', '@weaveintel/redaction'])}
+});`, ['@weaveintel/core', '@weaveintel/persistence', '@weaveintel/guardrails/redaction'])}
 
 <h4>Wrap any logger manually</h4>
 ${code('typescript', `import { createRedactingAuditLogger } from '@weaveintel/core';
@@ -3031,43 +3038,56 @@ ${callout('info', '💡', 'Graceful by construction.', 'A missing <code>guardrai
 ${section('sec-sandbox-egress', 'Sandbox Egress Allowlist', `
 <p>The code-execution sandbox (<code>@weaveintel/sandbox</code>) runs containers with <code>--network=none</code> by default. Enabling outbound network access requires an explicit <code>networkAllowlist</code> — without one, <code>networkAccess: true</code> has no effect and the container stays isolated.</p>
 
-${code('typescript', `import { createCSEProvider } from '@weaveintel/sandbox';
+${code('typescript', `import { createSandbox } from '@weaveintel/sandbox';
+import type { SandboxPolicy } from '@weaveintel/core';
 
-const provider = createCSEProvider({
-  networkAccess: true,                       // necessary but not sufficient
-  networkAllowlist: [                        // ← required to open bridge
-    'pypi.org',
-    'files.pythonhosted.org',
-    'api.openai.com',
-  ],
-});
+const sandbox = createSandbox();
 
-// Without networkAllowlist, the above would still use --network=none.
-// With the allowlist, Docker bridge mode is enabled.
-// Full per-host filtering requires CNI-based egress (road-mapped).`, ['@weaveintel/sandbox'])}
+// networkAccess: false by default → the container runs with --network=none.
+// Opening egress is an explicit, per-policy decision.
+const policy: SandboxPolicy = {
+  id: 'python-net',
+  name: 'Python with limited egress',
+  networkAccess: true,                       // explicit opt-in
+  allowedModules: ['requests', 'json'],      // only these modules may be imported
+  fileSystemAccess: 'none',
+  limits: { maxDurationMs: 30_000, maxMemoryMb: 512 },
+  enabled: true,
+};
+
+const result = await sandbox.execute('import requests; print(requests.__version__)', policy);
+// Full per-host filtering requires CNI-based egress (road-mapped).`, ['@weaveintel/sandbox', '@weaveintel/core'])}
 `)}
 
 ${section('sec-runtime-secrets', 'Secret Resolution — Never Read process.env Directly', `
 <p>Provider API keys and other secrets MUST flow through <code>runtime.secrets</code> rather than being read from <code>process.env</code> at call sites. This lets vault, KMS, or per-tenant override resolvers plug in without touching business logic.</p>
 
-${code('typescript', `import { weaveRuntime, weaveContext, envSecretResolver, chainSecretResolvers, requireSecret } from '@weaveintel/core';
+${code('typescript', `import { weaveRuntime, weaveContext, envSecretResolver, chainSecretResolvers, inMemorySecretResolver, requireSecret } from '@weaveintel/core';
+import type { SecretResolver } from '@weaveintel/core';
 
 // Default: reads from process.env (fine for development)
 const runtime = weaveRuntime();
 const ctx = weaveContext({ runtime });
 const apiKey = await requireSecret(ctx.runtime!.secrets, 'OPENAI_API_KEY');
 
+// A SecretResolver is just { resolve(key): Promise<string | undefined> }.
+// Implement one for your secret store (Vault, AWS Secrets Manager, ...).
+const vaultSecretResolver = (opts: { path: string }): SecretResolver => ({
+  async resolve(key) {
+    const res = await vaultClient.read(\`\${opts.path}/\${key}\`);
+    return res?.data?.value;
+  },
+});
+
 // Production: chain resolvers — Vault first, fall back to env
-import { vaultSecretResolver } from './vault-resolver';
 const chainedRuntime = weaveRuntime({
-  secrets: chainSecretResolvers([
+  secrets: chainSecretResolvers(
     vaultSecretResolver({ path: 'secret/data/myapp' }),
     envSecretResolver(),  // fallback
-  ]),
+  ),
 });
 
 // Provide secrets in-memory (for testing)
-import { inMemorySecretResolver } from '@weaveintel/core';
 const testRuntime = weaveRuntime({
   secrets: inMemorySecretResolver({ OPENAI_API_KEY: 'sk-test-...' }),
 });`, ['@weaveintel/core'])}
@@ -3201,9 +3221,9 @@ const resp = await llama.generate(ctx, {
 ${section('prov-llamacpp', 'llama.cpp — GGUF Local Models', `
 ${code('typescript', `// 1. Start llama.cpp server:
 //    ./server -m model.gguf --port 8080 --host 0.0.0.0
-import { weaveLlamacppModel } from '@weaveintel/provider-llamacpp';
+import { weaveLlamaCppModel } from '@weaveintel/provider-llamacpp';
 
-const model = weaveLlamacppModel('local-gguf', {
+const model = weaveLlamaCppModel('local-gguf', {
   baseUrl: 'http://localhost:8080',
 });
 
@@ -3225,7 +3245,7 @@ console.log(PROVIDER_RESILIENCE_DEFAULTS);
 // }
 
 // Custom providers should reuse these defaults:
-import { createResilientCallable, PROVIDER_RESILIENCE_DEFAULTS } from '@weaveintel/resilience';
+import { createResilientCallable } from '@weaveintel/resilience';
 
 const myCallable = createResilientCallable(myFetchFn, {
   endpoint: 'my-provider:rest',
@@ -3261,99 +3281,100 @@ ${exlinks([
 ])}
 
 ${section('sandbox-setup', 'Setup & Configuration', `
-${code('typescript', `import { createLocalCSEProvider } from '@weaveintel/sandbox';
+${code('typescript', `import { createSandbox, createSimulatedSandbox } from '@weaveintel/sandbox';
+import type { SandboxPolicy } from '@weaveintel/core';
 
-const sandbox = createLocalCSEProvider({
-  executionImage: 'python:3.12-slim',   // default
-  browserImage:   'mcr.microsoft.com/playwright:v1.44.0-jammy',
-  timeoutMs:      30_000,              // per-execution wall-clock limit
-  memoryMb:       512,
-  cpuCount:       1,
-  sessionTtlMs:   600_000,            // 10 min idle before container stops
-  maxSessions:    20,
+// Production: createSandbox() declines execution until a real isolated executor
+// (ContainerExecutor) is wired in — it never silently pretends to run code.
+const sandbox = createSandbox();
 
-  // Egress — both required to enable network
-  networkAccess:    false,             // default: isolated
-  networkAllowlist: [],               // must be non-empty to open bridge
-});
+// Dev / tests only: an in-process simulator (NOT real isolation).
+const devSandbox = createSimulatedSandbox();
 
-// Health check (checks Docker daemon connectivity)
-const health = await sandbox.health();
-console.log(health.status); // 'healthy' | 'degraded' | 'unavailable'`, ['@weaveintel/sandbox'])}
+// Isolation is expressed per-run via a SandboxPolicy — CPU/memory/time limits,
+// module allow/deny lists, filesystem + network posture.
+const policy: SandboxPolicy = {
+  id: 'python-default',
+  name: 'Python (isolated)',
+  networkAccess:    false,             // default: isolated (--network=none)
+  fileSystemAccess: 'none',
+  limits: { maxDurationMs: 30_000, maxMemoryMb: 512, maxCpuMs: 30_000 },
+  enabled: true,
+};
+
+const result = await devSandbox.execute('print(2 + 2)', policy);
+console.log(result.status); // 'success' | 'error' | 'timeout' | 'killed'`, ['@weaveintel/sandbox', '@weaveintel/core'])}
 `)}
 
 ${section('sandbox-ephemeral', 'Ephemeral Execution', `
 <p>Each call starts a fresh container, runs the code, captures stdout/stderr + output files, then destroys the container. Suitable for stateless code snippets.</p>
 
-${code('typescript', `import { createLocalCSEProvider } from '@weaveintel/sandbox';
+${code('typescript', `import { createSimulatedSandbox } from '@weaveintel/sandbox';
+import type { SandboxPolicy } from '@weaveintel/core';
 
-const sandbox = createLocalCSEProvider({ memoryMb: 512 });
+const sandbox = createSimulatedSandbox();
 
-const result = await sandbox.execute({
-  code: \`
+const policy: SandboxPolicy = {
+  id: 'py-ephemeral',
+  name: 'Ephemeral Python',
+  networkAccess:    false,
+  fileSystemAccess: 'none',
+  allowedModules:   ['json', 'math'],   // only these imports are permitted
+  limits: { maxDurationMs: 10_000, maxMemoryMb: 512 },
+  enabled: true,
+};
+
+const result = await sandbox.execute(\`
 import json, math
 data = [1, 2, 3, 4, 5]
-print(json.dumps({ "mean": sum(data)/len(data), "std": math.sqrt(sum((x - sum(data)/len(data))**2 for x in data)/len(data)) }))
-\`,
-  language: 'python',
-  timeoutMs: 10_000,
+mean = sum(data) / len(data)
+print(json.dumps({ "mean": mean, "std": math.sqrt(sum((x - mean)**2 for x in data) / len(data)) }))
+\`, policy);
 
-  // Inject input files into /workspace
-  files: [
-    { name: 'data.csv', content: 'a,b\\n1,2\\n3,4', binary: false },
-  ],
-
-  // Environment variables (no secrets — container is ephemeral but logs exist)
-  env: { MY_VAR: 'value' },
-});
-
-if (result.exitCode === 0) {
-  console.log(result.output);         // parsed stdout (JSON if valid, else string)
-  console.log(result.artifacts);      // files written to /workspace/output/
+if (result.status === 'success') {
+  console.log(result.output);         // captured stdout
+  console.log(result.artifacts);      // files written under the workspace
 } else {
-  console.error(result.error);        // stderr (first 2 KB)
+  console.error(result.error);        // stderr / failure reason
 }
-console.log(\`Ran in \${result.durationMs} ms\`);`, ['@weaveintel/sandbox'])}
+console.log(\`Ran in \${result.resourceUsage.durationMs} ms\`);`, ['@weaveintel/sandbox', '@weaveintel/core'])}
 
 ${params([
-  ['code', 'string', 'required', 'Source code to execute.'],
-  ['language', '"python" | "javascript" | "typescript" | "bash" | "shell"', 'optional', 'Defaults to <code>"python"</code>.'],
-  ['timeoutMs', 'number', 'optional', 'Per-execution timeout override. Falls back to <code>CSEConfig.timeoutMs</code>.'],
-  ['files', 'FileInput[]', 'optional', 'Files injected into <code>/workspace</code> before execution. Binary files as base-64.'],
-  ['env', 'Record&lt;string,string&gt;', 'optional', 'Extra container env vars. Do not pass secrets — use a secrets manager instead.'],
-  ['networkAccess', 'boolean', 'optional', 'Request network access. Only opens bridge if provider-level <code>networkAllowlist</code> is also set.'],
-  ['withBrowser', 'boolean', 'optional', 'Use the Playwright-enabled image instead of the execution image.'],
+  ['code', 'string', 'required', 'Source code to execute (first argument to <code>execute</code>).'],
+  ['policy.limits', 'ExecutionLimits', 'required', 'CPU/memory/wall-clock/output caps enforced on the run.'],
+  ['policy.allowedModules', 'string[]', 'optional', 'Import allowlist. Anything not listed is denied.'],
+  ['policy.deniedModules', 'string[]', 'optional', 'Explicit import denylist.'],
+  ['policy.networkAccess', 'boolean', 'required', 'Whether the container may reach the network. Default posture is isolated.'],
+  ['policy.fileSystemAccess', '"none" | "read-only" | "read-write"', 'required', 'Filesystem posture for the run.'],
 ])}
 `)}
 
-${section('sandbox-session', 'Session-Based REPL', `
-<p>Sessions keep a container alive so state (variables, installed packages, loaded files) persists across multiple code executions in the same conversation.</p>
+${section('sandbox-policy', 'Reusing an Execution Policy', `
+<p>A <code>SandboxPolicy</code> is a plain, reusable object — define it once and pass it to every <code>execute</code> call that should run under the same limits and module allowlist.</p>
 
-${code('typescript', `import { createLocalCSEProvider } from '@weaveintel/sandbox';
+${code('typescript', `import { createSimulatedSandbox } from '@weaveintel/sandbox';
+import type { SandboxPolicy } from '@weaveintel/core';
 
-const sandbox = createLocalCSEProvider({ memoryMb: 1024, sessionTtlMs: 300_000 });
+const sandbox = createSimulatedSandbox();
 
-// Create a session (one per chatId)
-const session = await sandbox.createSession('chat-abc123', {}, false);
+const dataSciencePolicy: SandboxPolicy = {
+  id: 'py-datasci',
+  name: 'Data-science Python',
+  networkAccess:    false,
+  fileSystemAccess: 'read-write',
+  allowedModules:   ['pandas', 'numpy', 'json'],
+  limits: { maxDurationMs: 30_000, maxMemoryMb: 1024 },
+  enabled: true,
+};
 
-// First turn — install a package and define a function
-await sandbox.executeInSession(session.id, {
-  code: \`
-!pip install pandas -q
+const first = await sandbox.execute(\`
 import pandas as pd
 df = pd.DataFrame({'x': [1,2,3], 'y': [4,5,6]})
 print(df.head())
-\`,
-});
+\`, dataSciencePolicy);
 
-// Second turn — the dataframe is still in memory
-const result = await sandbox.executeInSession(session.id, {
-  code: 'print(df.describe())',   // df from previous turn
-});
-console.log(result.output);
-
-// Destroy session when done
-await sandbox.destroySession(session.id);`, ['@weaveintel/sandbox'])}
+const second = await sandbox.execute('import pandas as pd; print(pd.__version__)', dataSciencePolicy);
+console.log(first.status, second.status);`, ['@weaveintel/sandbox', '@weaveintel/core'])}
 `)}
 
 ${section('sandbox-agent', 'End-to-End: Code-Interpreter Agent', `
@@ -3362,9 +3383,16 @@ ${section('sandbox-agent', 'End-to-End: Code-Interpreter Agent', `
 ${code('typescript', `import { weaveAgent } from '@weaveintel/agents';
 import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
 import { weaveContext, weaveTool, weaveToolRegistry } from '@weaveintel/core';
-import { createLocalCSEProvider } from '@weaveintel/sandbox';
+import type { SandboxPolicy } from '@weaveintel/core';
+import { createSimulatedSandbox } from '@weaveintel/sandbox';
 
-const sandbox = createLocalCSEProvider({ memoryMb: 512, timeoutMs: 30_000 });
+const sandbox = createSimulatedSandbox();
+const pyPolicy: SandboxPolicy = {
+  id: 'run-python', name: 'run_python',
+  networkAccess: false, fileSystemAccess: 'none',
+  limits: { maxDurationMs: 30_000, maxMemoryMb: 512 },
+  enabled: true,
+};
 
 const tools = weaveToolRegistry();
 tools.register(weaveTool({
@@ -3378,8 +3406,8 @@ tools.register(weaveTool({
   },
   riskLevel: 'write',
   execute: async ({ code }) => {
-    const result = await sandbox.execute({ code: code as string, language: 'python' });
-    return result.exitCode === 0
+    const result = await sandbox.execute(code as string, pyPolicy);
+    return result.status === 'success'
       ? JSON.stringify({ output: result.output })
       : JSON.stringify({ error: result.error });
   },
@@ -3427,7 +3455,7 @@ const researchServer: A2AServer = {
     description: 'Researches topics via web search',
     version: '1.0.0',
     skills: [{ id: 'web-search', name: 'Web Search', description: 'Search and summarise' }],
-    capabilities: { streaming: true },
+    capabilities: { streaming: true, pushNotifications: false, extendedAgentCard: false, stateTransitionHistory: false },
     supportedInterfaces: [{ url: 'http://localhost/api/a2a', protocolBinding: 'JSONRPC', protocolVersion: '1.0' }],
   },
   async handleMessage(ctx, params): Promise<A2ATask> {
@@ -3469,6 +3497,8 @@ ${section('a2a-http', 'Distributed A2A over HTTP (JSON-RPC 2.0)', `
 ${code('typescript', `import { weaveA2AClient, createA2ADispatcher, createInMemoryA2ATaskStore, createInMemoryPushNotificationStore } from '@weaveintel/a2a';
 import { weaveContext } from '@weaveintel/core';
 
+const ctx = weaveContext({ userId: 'u1' });
+
 // ── Server side: wire a JSON-RPC 2.0 dispatcher ─────────────────────────────
 const taskStore = createInMemoryA2ATaskStore();
 const pushStore = createInMemoryPushNotificationStore();
@@ -3487,7 +3517,6 @@ if (result.kind === 'json') {
 
 // ── Client side: connect to any A2A v1.0 agent ──────────────────────────────
 const client = weaveA2AClient();
-const ctx    = weaveContext({ userId: 'u1' });
 
 // Discover and send a message
 const card    = await client.discover('https://research-agent.example.com');
@@ -3552,7 +3581,7 @@ const documentAgent: AgentCard = {
       tags: ['etl', 'pandas', 'sql', 'transform'],
     },
   ],
-  capabilities: { streaming: true, pushNotifications: false },
+  capabilities: { streaming: true, pushNotifications: false, extendedAgentCard: false, stateTransitionHistory: false },
   supportedInterfaces: [
     { url: 'https://agents.example.com/doc-processor', protocolBinding: 'JSONRPC', protocolVersion: '1.0' },
   ],
@@ -3635,30 +3664,23 @@ import { weaveInMemoryStateStore } from '@weaveintel/live-agents';
 
 const store = weaveInMemoryStateStore();
 
-// Provision a mesh with two agent roles
-const mesh = await provisionMesh({
-  store,
-  mesh: { id: 'equity-mesh', name: 'Equity Analysis Mesh', status: 'active' },
-  agents: [
-    {
-      id: 'agent-researcher', meshId: 'equity-mesh',
-      roleKey: 'equity.researcher', name: 'Researcher',
-      status: 'active', attentionPolicyKey: null,
-    },
-    {
-      id: 'agent-writer', meshId: 'equity-mesh',
-      roleKey: 'equity.writer', name: 'Report Writer',
-      status: 'active', attentionPolicyKey: null,
-    },
-  ],
+// provisionMesh(db, opts) instantiates a mesh from a stored blueprint.
+// 'db' reads the mesh + agent DEFINITIONS; the runtime rows are written for you.
+const mesh = await provisionMesh(db, {
+  meshDefId:    'equity-mesh',        // or meshDefKey to look up by key
+  tenantId:     'acme',
+  ownerHumanId: 'user-alice',
+  store,                              // same StateStore the supervisor uses
 });
-console.log(mesh.agents.map(a => a.id));`, ['@weaveintel/live-agents-runtime', '@weaveintel/live-agents'])}
+
+// The result reports the ids that were created
+console.log(mesh.meshId, mesh.agentIds);`, ['@weaveintel/live-agents-runtime', '@weaveintel/live-agents'])}
 `)}
 
 ${section('la-supervisor', 'Starting the Heartbeat Supervisor', `
 <p>The supervisor manages N parallel workers that each call <code>heartbeat.tick()</code> on every interval. It auto-rebuilds workers when new roles appear in the DB.</p>
 
-${code('typescript', `import { createHeartbeatSupervisor, HandlerRegistry } from '@weaveintel/live-agents-runtime';
+${code('typescript', `import { createHeartbeatSupervisor, createDefaultHandlerRegistry } from '@weaveintel/live-agents-runtime';
 import { weaveInMemoryStateStore } from '@weaveintel/live-agents';
 import { weaveRuntime, weaveContext } from '@weaveintel/core';
 import { weaveSqlitePersistence } from '@weaveintel/persistence';
@@ -3669,11 +3691,9 @@ const runtime = weaveRuntime({
 
 const store = weaveInMemoryStateStore();
 
-const handlerRegistry = new HandlerRegistry();
-// Handlers resolve per-tick: modelFactory returns the model to use
-handlerRegistry.registerBuiltins({
-  modelFactory: async () => yourModel,
-});
+// createDefaultHandlerRegistry() ships with the built-in handler kinds
+// (agentic.react etc.) already registered.
+const handlerRegistry = createDefaultHandlerRegistry();
 
 // db must implement SupervisorDb (list meshes, agents, handler bindings)
 const supervisor = await createHeartbeatSupervisor({
@@ -3712,17 +3732,18 @@ ${code('typescript', `import {
   weaveDynamoDbStateStore,
 } from '@weaveintel/live-agents';
 
-// Development — in-memory, lost on restart
+// Development — in-memory, lost on restart (synchronous)
 const devStore = weaveInMemoryStateStore();
 
+// Durable stores are async factories (they open a connection/pool):
 // SQLite — single-process durable
-const sqliteStore = weaveSqliteStateStore({ path: './live-agents.db' });
+const sqliteStore = await weaveSqliteStateStore({ path: './live-agents.db' });
 
 // Postgres — multi-process, horizontal scale
-const pgStore = weavePostgresStateStore({ connectionString: process.env['DATABASE_URL']! });
+const pgStore = await weavePostgresStateStore({ url: process.env['DATABASE_URL']! });
 
 // Redis — low-latency, TTL-aware
-const redisStore = weaveRedisStateStore({ url: process.env['REDIS_URL']! });`, ['@weaveintel/live-agents'])}
+const redisStore = await weaveRedisStateStore({ url: process.env['REDIS_URL']! });`, ['@weaveintel/live-agents'])}
 `)}
 
 ${section('la-db-boot', 'DB-Backed Boot (Production Entry Points)', `
@@ -3731,27 +3752,20 @@ ${section('la-db-boot', 'DB-Backed Boot (Production Entry Points)', `
 ${code('typescript', `import { weaveLiveMeshFromDb, weaveLiveAgentFromDb } from '@weaveintel/live-agents-runtime';
 import { weaveSqliteStateStore } from '@weaveintel/live-agents';
 
-const store = weaveSqliteStateStore({ path: './live-agents.db' });
+const store = await weaveSqliteStateStore({ path: './live-agents.db' });
 
-// Boot an entire mesh from the database
+// Boot an entire mesh from the database — weaveLiveMeshFromDb(db, opts)
 // db must have live_meshes + live_agents + live_agent_handler_bindings rows
-const mesh = await weaveLiveMeshFromDb({
-  db,
-  meshId:          'equity-mesh',
+const mesh = await weaveLiveMeshFromDb(db, {
   store,
-  handlerRegistry: myHandlerRegistry,
-  modelFactory:    async () => weaveAnthropicModel('claude-sonnet-4-6'),
-  policy:          weaveDbLiveAgentPolicy({ db }),
-  toolCatalog:     resolveAgentToolCatalog({ db, registry: myToolRegistry }),
+  modelFactory: async () => weaveAnthropicModel('claude-sonnet-4-6'),
+  policy:       weaveDbLiveAgentPolicy({ db }),
 });
 
-// Boot a single agent from its DB record
-const agent = await weaveLiveAgentFromDb({
-  db,
-  agentId:         'agent-researcher',
+// Boot a single agent from its DB record — weaveLiveAgentFromDb(db, agentId, opts?)
+const agent = await weaveLiveAgentFromDb(db, 'agent-researcher', {
   store,
-  handlerRegistry: myHandlerRegistry,
-  modelFactory:    async () => weaveAnthropicModel('claude-haiku-4-5-20251001'),
+  model: weaveAnthropicModel('claude-haiku-4-5-20251001'),
 });
 
 // Start ticking
@@ -3760,7 +3774,7 @@ const supervisor = await createHeartbeatSupervisor({ db, store, handlerRegistry:
 `)}
 
 ${section('la-e2e', 'End-to-End: Full Production Setup', `
-${code('typescript', `import { createHeartbeatSupervisor, HandlerRegistry, provisionMesh } from '@weaveintel/live-agents-runtime';
+${code('typescript', `import { createHeartbeatSupervisor, createDefaultHandlerRegistry, provisionMesh } from '@weaveintel/live-agents-runtime';
 import { weaveSqliteStateStore } from '@weaveintel/live-agents';
 import { weaveRuntime, weaveContext } from '@weaveintel/core';
 import { weaveSqlitePersistence } from '@weaveintel/persistence';
@@ -3771,25 +3785,18 @@ const runtime = weaveRuntime({
   persistence: weaveSqlitePersistence({ path: './app.db' }),
 });
 
-// 2. State store — separate file or DB table for agent state
-const store = weaveSqliteStateStore({ path: './agents.db' });
+// 2. State store — async factory; separate file/table for agent state
+const store = await weaveSqliteStateStore({ path: './agents.db' });
 
-// 3. Handler registry — maps handler kind → implementation
-const handlerRegistry = new HandlerRegistry();
-handlerRegistry.registerBuiltins({
-  modelFactory: async () => weaveAnthropicModel('claude-sonnet-4-6'),
-});
+// 3. Handler registry — built-in handler kinds pre-registered
+const handlerRegistry = createDefaultHandlerRegistry();
 
-// 4. Provision the initial mesh (idempotent — safe to re-run)
-await provisionMesh({
+// 4. Provision the initial mesh from its stored blueprint (idempotent)
+await provisionMesh(yourDb, {
+  meshDefId:    'equity-mesh',
+  tenantId:     'acme',
+  ownerHumanId: 'user-alice',
   store,
-  mesh:   { id: 'equity-mesh', name: 'Equity Analysis', status: 'active' },
-  agents: [
-    { id: 'researcher', meshId: 'equity-mesh', roleKey: 'equity.researcher',
-      name: 'Researcher', status: 'active', attentionPolicyKey: null },
-    { id: 'writer', meshId: 'equity-mesh', roleKey: 'equity.writer',
-      name: 'Report Writer', status: 'active', attentionPolicyKey: null },
-  ],
 });
 
 // 5. Start the supervisor — agents tick every intervalMs
@@ -3852,12 +3859,12 @@ ${exlinks([
 function sDurability(): string {
   return `
 <div class="pkg-hdr">
-  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/durability</span></div>
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/resilience</span></div>
   <h1 class="pkg-title">Durability</h1>
   <p class="pkg-desc">Operational durability primitives: idempotency keys, dead-letter queue, retry budgets, health checks, and backpressure. All are runtime-aware — pass a <code>WeaveRuntime</code> with a persistence slot and every primitive automatically uses durable KV storage. Without a runtime, the zero-config in-memory path is the default.</p>
 </div>
 
-${callout('info', '💾', 'Canonical import.', 'Import from <code>@weaveintel/durability</code> — it is the renamed canonical package that re-exports everything from <code>@weaveintel/reliability</code>. New code should not import from reliability directly.')}
+${callout('info', '💾', 'One home for resilience.', 'These operational-durability primitives (idempotency, dead-letter queue, retry budgets, health checks, backpressure) now live in <code>@weaveintel/resilience</code>, alongside the live per-call guards (circuit breaker, rate limiter, retry policy). They used to be split across three tiny packages — <code>reliability</code>, <code>durability</code> and <code>resilience</code> — which was more names than concepts. Same behaviour, one import.')}
 
 ${featureCards([
   ['Dead-letter queue', 'Captures failed operations for manual retry or investigation. Durable variant survives process restart.'],
@@ -3875,7 +3882,7 @@ ${exlinks([
 ${section('dur-dlq', 'Dead-Letter Queue', `
 <p>The DLQ captures failed operations. The durable variant persists records to <code>runtime.persistence.kv</code> so entries survive restarts. Both sync and async interfaces are available.</p>
 
-${code('typescript', `import { createDurableDeadLetterQueue } from '@weaveintel/durability';
+${code('typescript', `import { createDurableDeadLetterQueue } from '@weaveintel/resilience';
 import { weaveRuntime } from '@weaveintel/core';
 import { weaveSqlitePersistence } from '@weaveintel/persistence';
 
@@ -3905,7 +3912,7 @@ const ok = await dlq.retry(record.id, async (payload) => {
 
 // Clear resolved records
 const removed = await dlq.clear();
-console.log(\`Cleared \${removed} resolved records\`);`, ['@weaveintel/durability', '@weaveintel/core', '@weaveintel/persistence'])}
+console.log(\`Cleared \${removed} resolved records\`);`, ['@weaveintel/resilience', '@weaveintel/core', '@weaveintel/persistence'])}
 
 ${params([
   ['runtime', 'WeaveRuntime', 'optional', 'When supplied and persistence is configured, records survive restarts. Falls back to in-memory.'],
@@ -3914,33 +3921,32 @@ ${params([
 `)}
 
 ${section('dur-idempotency', 'Idempotency Keys', `
-${code('typescript', `import { createIdempotencyStore, createDurableIdempotencyStore } from '@weaveintel/durability';
+${code('typescript', `import { createIdempotencyStore, createDurableIdempotencyStore } from '@weaveintel/resilience';
 
-// In-memory (test / dev)
-const store = createIdempotencyStore();
+// In-memory (test / dev) — takes an IdempotencyPolicy
+const store = createIdempotencyStore({ ttlMs: 60 * 60 * 1000, maxEntries: 10_000 });
 
-// Durable (production)
-const durableStore = createDurableIdempotencyStore({
-  runtime,
-  namespace: 'payments',
-  ttlMs:     24 * 60 * 60 * 1000,   // 24 h — keys expire after this
-});
+// Durable (production) — policy + a DurableIdempotencyRepository (KV-backed)
+const durableStore = createDurableIdempotencyStore(
+  { ttlMs: 24 * 60 * 60 * 1000 },   // 24 h — keys expire after this
+  paymentsRepository,
+);
 
 // Use before any state-mutating operation
 const key = 'charge:ORD-001:attempt-3';
-const existing = await durableStore.get(key);
-if (existing) {
-  return existing.result;   // replay cached result — no duplicate charge
+const existing = await durableStore.check(key);
+if (existing.isDuplicate) {
+  return existing.previousResult;   // replay cached result — no duplicate charge
 }
 
 const result = await stripe.charge(orderId, amount);
-await durableStore.set(key, { result, completedAt: new Date().toISOString() });`, ['@weaveintel/durability'])}
+await durableStore.record(key, result);`, ['@weaveintel/resilience'])}
 `)}
 
 ${section('dur-retry-budget', 'Retry Budget', `
 <p>A shared retry budget prevents a single hot code path from burning all retry capacity. Unlike per-call retry policies, the budget is a process-wide counter.</p>
 
-${code('typescript', `import { createRetryBudget } from '@weaveintel/durability';
+${code('typescript', `import { createRetryBudget } from '@weaveintel/resilience';
 
 // Shared across all callers that import this instance
 const budget = createRetryBudget({
@@ -3953,30 +3959,30 @@ const budget = createRetryBudget({
 // Every caller uses the same budget — once exhausted, retries stop
 const result = await budget.execute(async () => {
   return fetch('https://api.example.com/data');
-});`, ['@weaveintel/durability'])}
+});`, ['@weaveintel/resilience'])}
 `)}
 
 ${section('dur-health', 'Health Checks', `
-${code('typescript', `import { createHealthRegistry, createHealthCheck } from '@weaveintel/durability';
+${code('typescript', `import { createHealthChecker } from '@weaveintel/resilience';
 
-const health = createHealthRegistry();
+const health = createHealthChecker('api');
 
-health.register(createHealthCheck('database', async () => {
+health.addCheck('database', async () => {
   await db.query('SELECT 1');
-  return { status: 'healthy' };
-}));
+  return { ok: true };
+});
 
-health.register(createHealthCheck('redis', async () => {
+health.addCheck('redis', async () => {
   const pong = await redis.ping();
-  return { status: pong === 'PONG' ? 'healthy' : 'degraded', detail: pong };
-}));
+  return { ok: pong === 'PONG', message: pong };
+});
 
 // Express / Hono liveness endpoint
 app.get('/health', async (req, res) => {
-  const result = await health.check();
-  res.status(result.status === 'healthy' ? 200 : 503).json(result);
+  const result = await health.run();
+  res.status(result.healthy ? 200 : 503).json(result);
 });
-// { status: 'healthy', checks: { database: 'healthy', redis: 'healthy' } }`, ['@weaveintel/durability'])}
+// { service: 'api', healthy: true, checks: [{ name: 'database', ok: true, durationMs: 2 }, ...] }`, ['@weaveintel/resilience'])}
 `)}`;
 }
 
@@ -4060,22 +4066,22 @@ ${section('pers-adapters', 'High-Level Adapters (Workflow Stores)', `
 <p>Workflow stores (checkpoints, run repository, audit log, etc.) use typed adapters with CRUD operations on top of the underlying DB driver. These differ from the KV slot — they manage workflow-specific schemas and queries.</p>
 
 ${code('typescript', `import {
-  SqliteCheckpointStore,
-  SqliteWorkflowRunRepository,
-  SqliteAuditLog,
-  SqliteStepLockStore,
-  SqliteIdempotencyStore,
+  weaveSqliteCheckpointStore,
+  weaveSqliteWorkflowRunRepository,
+  weaveSqliteAuditLog,
+  weaveSqliteStepLockStore,
+  weaveSqliteIdempotencyStore,
 } from '@weaveintel/workflows';
 
 // All SQLite-backed workflow stores share one file
-const dbPath = './workflows.db';
+const databasePath = './workflows.db';
 
 const engine = new DefaultWorkflowEngine({
-  checkpointStore: new SqliteCheckpointStore(dbPath),
-  runRepository:   new SqliteWorkflowRunRepository(dbPath),
-  auditLog:        new SqliteAuditLog(dbPath),
-  stepLockStore:   new SqliteStepLockStore(dbPath),
-  idempotencyStore: new SqliteIdempotencyStore(dbPath),
+  checkpointStore: weaveSqliteCheckpointStore({ databasePath }),
+  runRepository:   weaveSqliteWorkflowRunRepository({ databasePath }),
+  auditLog:        weaveSqliteAuditLog({ databasePath }),
+  stepLockStore:   weaveSqliteStepLockStore({ databasePath }),
+  idempotencyStore: weaveSqliteIdempotencyStore({ databasePath }),
 });`, ['@weaveintel/workflows'])}
 `)}`;
 }
@@ -4102,30 +4108,30 @@ ${featureCards([
 ])}
 
 ${section('enc-setup', 'Setup', `
-${code('typescript', `import { weaveTenantKeyManager, KmsProviderRegistry } from '@weaveintel/encryption';
+${code('typescript', `import { weaveTenantKeyManager, createKmsProviderRegistry } from '@weaveintel/encryption';
 
-// 1. Register KMS providers
-const kmsRegistry = new KmsProviderRegistry();
-kmsRegistry.register('local',   localKmsProvider({ masterKey: process.env['WEAVE_ENCRYPTION_MASTER_KEY']! }));
-kmsRegistry.register('aws-kms', awsKmsProvider({ keyArn: process.env['AWS_KMS_KEY_ARN']! }));
+// 1. Register KMS providers via the factory. register() takes one
+//    KmsProviderRegistration: { id, factory }.
+const kmsRegistry = createKmsProviderRegistry();
+kmsRegistry.register({ id: 'local',   factory: async () => localKmsProvider({ masterKey: process.env['WEAVE_ENCRYPTION_MASTER_KEY']! }) });
+kmsRegistry.register({ id: 'aws-kms', factory: async () => awsKmsProvider({ keyArn: process.env['AWS_KMS_KEY_ARN']! }) });
 
-// 2. Create a key manager (one per tenant, cached by the resolver)
+// 2. Create a key manager. tenantId is passed per-operation, not here.
 const manager = weaveTenantKeyManager({
-  tenantId: 'acme',
-  kmsRegistry,
-  db,             // DB adapter for storing DEKs, KEKs, policy
+  store: db,                                  // stores DEKs, KEKs, policy
+  kms:   await kmsRegistry.build('local', {}), // or pass kmsResolver for per-tenant routing
 });
 
-// 3. Encrypt / decrypt a field value
-const ciphertext = await manager.encrypt('alice@example.com', {
-  table:  'users',
-  column: 'email',
-  rowId:  'user-001',
+// 3. Encrypt / decrypt a field value — one options object per call
+const ciphertext = await manager.encrypt({
+  tenantId: 'acme', table: 'users', column: 'email', rowId: 'user-001',
+  plaintext: 'alice@example.com',
 });
 // → "enc:v1:1234567890:iv_base64:ciphertext_base64"
 
-const plaintext = await manager.decrypt(ciphertext, {
-  table: 'users', column: 'email', rowId: 'user-001',
+const plaintext = await manager.decrypt({
+  tenantId: 'acme', table: 'users', column: 'email', rowId: 'user-001',
+  value: ciphertext,
 });
 // → "alice@example.com"`, ['@weaveintel/encryption'])}
 `)}
@@ -4133,29 +4139,22 @@ const plaintext = await manager.decrypt(ciphertext, {
 ${section('enc-proxy', 'Multi-Table Encrypted DB Proxy', `
 <p>The proxy wraps any DB adapter and transparently encrypts/decrypts specified columns on every read and write. Use this instead of calling encrypt/decrypt at each call site.</p>
 
-${code('typescript', `import { withTenantEncryptedDb } from '@weaveintel/encryption';
+${code('typescript', `import { withTenantEncryptedDb } from '../../src/encryption/db-encrypted-adapter.js';
 
-const encryptedDb = withTenantEncryptedDb({
-  db,
-  getManager: () => tenantKeyManager,   // live-binding getter
-  specs: [
-    { table: 'users',    column: 'email',   rowIdColumn: 'id' },
-    { table: 'users',    column: 'phone',   rowIdColumn: 'id' },
-    { table: 'messages', column: 'content', rowIdColumn: 'id' },
-  ],
-});
+// Wrap the raw DB adapter. The second arg is a live-binding accessor that
+// returns the bootstrapped TenantKeyManager. The column specs (which fields on
+// which tables are encrypted) are built in per method.
+const encryptedDb = withTenantEncryptedDb(db, () => tenantKeyManager);
 
-// All reads/writes through encryptedDb are automatically encrypted
-const user = await encryptedDb.users.findById('user-001');
-console.log(user.email); // "alice@example.com" — already decrypted`, ['@weaveintel/encryption'])}
+// All reads/writes through encryptedDb are automatically encrypted/decrypted
+const user = await encryptedDb.getUserById('user-001');
+console.log(user?.email); // already decrypted`, [])}
 `)}
 
 ${section('enc-blind-index', 'Blind Indexes — Equality Search', `
-${code('typescript', `import { computeBlindIndex } from '@weaveintel/encryption';
-
-// Compute the index value to search with
-const bidx = await computeBlindIndex({
-  manager,
+${code('typescript', `// computeBlindIndex is a method on the TenantKeyManager (see Setup above)
+const bidx = await manager.computeBlindIndex({
+  tenantId: 'acme',
   table:  'users',
   column: 'email',
   value:  'alice@example.com',
@@ -4165,7 +4164,7 @@ const bidx = await computeBlindIndex({
 const user = await db.query(
   'SELECT * FROM users WHERE email_bidx = ?',
   [bidx],
-);`, ['@weaveintel/encryption'])}
+);`, [])}
 `)}`;
 }
 
@@ -4174,7 +4173,7 @@ const user = await db.query(
 function sTenancy(): string {
   return `
 <div class="pkg-hdr">
-  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/tenancy</span></div>
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/identity/tenancy</span></div>
   <h1 class="pkg-title">Tenancy</h1>
   <p class="pkg-desc">Multi-tenant isolation for agents, models, and capabilities. Each tenant gets independent context propagation, budget enforcement, capability bindings, and optionally field-level encryption. Tenancy is ambient — set <code>tenantId</code> on the <code>ExecutionContext</code> and every subsystem picks it up.</p>
 </div>
@@ -4218,7 +4217,7 @@ const result = await agent.run(ctx, { messages });`, ['@weaveintel/core', '@weav
 `)}
 
 ${section('ten-budget', 'Per-Tenant Budget Enforcement', `
-${code('typescript', `import { createDurableBudgetEnforcer } from '@weaveintel/tenancy';
+${code('typescript', `import { createDurableBudgetEnforcer } from '@weaveintel/identity/tenancy';
 import { weaveRuntime } from '@weaveintel/core';
 import { weaveSqlitePersistence } from '@weaveintel/persistence';
 
@@ -4226,31 +4225,31 @@ const runtime = weaveRuntime({
   persistence: weaveSqlitePersistence({ path: './budgets.db' }),
 });
 
-// One enforcer per tenant (or create on demand per request)
-const enforcer = createDurableBudgetEnforcer({
-  runtime,
-  tenantId:         'acme',
-  monthlyBudgetUsd: 50.00,
-  namespace:        'tenant-budget',   // KV prefix
+// One enforcer per deployment (manages the KV store for all tenants)
+const enforcer = createDurableBudgetEnforcer({ runtime, namespace: 'tenant-budget' });
+
+// Define the tenant's daily + monthly caps once
+await enforcer.setBudget({
+  tenantId: 'acme',
+  daily:    { maxTokens: 1_000_000,  maxCostUsd: 100.00 },
+  monthly:  { maxTokens: 30_000_000, maxCostUsd: 50.00 },
 });
 
 // Check before a model call
-const check = await enforcer.check();
+const check = await enforcer.checkBudget('acme');
 if (!check.allowed) {
-  return { error: \`Monthly budget exceeded. Spent: $\${check.spentUsd.toFixed(2)} / $\${check.budgetUsd.toFixed(2)}\` };
+  return { error: \`Budget exceeded: \${check.reason}\` };
 }
 
-// Record spend after a model call (in USD)
-await enforcer.record(0.0042);   // $0.0042 for this call
+// Record spend after a model call: (tenantId, tokens, costUsd, steps)
+await enforcer.recordUsage('acme', 1500, 0.0042, 1);
 
-// Get current usage summary
-const summary = await enforcer.summary();
-console.log(\`\${summary.tenantId}: $\${summary.spentUsd.toFixed(4)} / $\${summary.budgetUsd.toFixed(2)} (\${Math.round(summary.fractionUsed * 100)}%)\`);`, ['@weaveintel/tenancy', '@weaveintel/core', '@weaveintel/persistence'])}
+// Get current usage for a period
+const usage = await enforcer.getUsage('acme', 'monthly');
+if (usage) console.log(\`acme (monthly): $\${usage.costUsd.toFixed(4)} across \${usage.tokens} tokens\`);`, ['@weaveintel/identity/tenancy', '@weaveintel/core', '@weaveintel/persistence'])}
 
 ${params([
-  ['runtime', 'WeaveRuntime', 'required', 'Runtime with a persistence slot. Spend is stored under <code>namespace:tenantId:*</code> keys.'],
-  ['tenantId', 'string', 'required', 'Tenant identifier. Matches <code>ExecutionContext.tenantId</code>.'],
-  ['monthlyBudgetUsd', 'number', 'required', 'Monthly spend cap in USD. Stored in microUSD internally to avoid float drift.'],
+  ['runtime', 'WeaveRuntime', 'optional', 'Runtime with a persistence slot. Spend is stored under <code>namespace:tenantId:*</code> keys.'],
   ['namespace', 'string', 'optional', 'KV key prefix. Default: <code>"tenant-budget"</code>.'],
 ])}
 `)}
@@ -4258,26 +4257,20 @@ ${params([
 ${section('ten-caps', 'Capability Bindings', `
 <p>Capability policy bindings determine which tools, models, and prompts each tenant (and each agent or mesh within a tenant) can access. Resolved at runtime with precedence: agent=100 > mesh=50 > workflow=10 > tenant=5 > package_default.</p>
 
-${code('typescript', `import { resolveCapabilityBinding } from '@weaveintel/capability-packs';
+${code('typescript', `import { resolveCapabilityBinding } from '@weaveintel/core';
 
-// Resolve the effective tool policy for this agent+tenant combination
-const policy = await resolveCapabilityBinding({
-  db,
-  bindingKind:  'agent',
-  policyKind:   'tool_policy',
-  agentId:      'agent-analyst',
-  tenantId:     'acme',
-});
-// policy.allowedTools, policy.blockedTools, policy.maxCallsPerMin
+// Load the tenant/agent's bindings from your DB, then resolve by precedence.
+// resolveCapabilityBinding is a pure function: (bindings, bindingKind, bindingRef, policyKind)
+const bindings = await db.listCapabilityBindings('acme');
 
-// Check whether the tenant has a feature flag / pack installed
-const hasPremiumSearch = await resolveCapabilityBinding({
-  db,
-  bindingKind: 'tenant',
-  policyKind:  'capability_pack',
-  tenantId:    'acme',
-  packKey:     'premium.search',
-});`, ['@weaveintel/capability-packs'])}
+const toolBinding = resolveCapabilityBinding(bindings, 'agent', 'agent-analyst', 'tool_policy');
+if (toolBinding) {
+  console.log(toolBinding.policyRef);   // → look up the referenced tool_policy row
+}
+
+// Check the tenant-level cost policy binding
+const costBinding = resolveCapabilityBinding(bindings, 'tenant', 'acme', 'cost_policy');
+const costPolicyRef = costBinding?.policyRef;`, ['@weaveintel/core'])}
 `)}`;
 }
 
@@ -4286,7 +4279,7 @@ const hasPremiumSearch = await resolveCapabilityBinding({
 function sRedaction(): string {
   return `
 <div class="pkg-hdr">
-  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/redaction</span></div>
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/guardrails/redaction</span></div>
   <h1 class="pkg-title">Redaction</h1>
   <p class="pkg-desc">PII detection and redaction middleware. Runs as a model-call interceptor so LLMs never see raw sensitive data. Supports built-in patterns (email, phone, SSN, credit card, IPv4), custom regex, allowlists, and optionally reversible tokenisation so the original value can be restored after the model response.</p>
 </div>
@@ -4299,7 +4292,7 @@ ${exlinks([
 ])}
 
 ${section('red-setup', 'Basic Setup', `
-${code('typescript', `import { weaveRedactor } from '@weaveintel/redaction';
+${code('typescript', `import { weaveRedactor } from '@weaveintel/guardrails/redaction';
 import { weaveContext } from '@weaveintel/core';
 
 const redactor = weaveRedactor({
@@ -4330,16 +4323,16 @@ const response = await model.generate({
   messages: [{ role: 'user', content: redacted }],
 });
 
-// Restore originals in the response (reversible mode)
-const restored = await redactor.restore!(ctx, response.content, detections);`, ['@weaveintel/redaction', '@weaveintel/core'])}
+// Restore originals in the response (reversible mode).
+// detections is a readonly array — spread into a mutable copy for restore().
+const restored = await redactor.restore!(ctx, response.content, [...detections]);`, ['@weaveintel/guardrails/redaction', '@weaveintel/core'])}
 `)}
 
 ${section('red-model-middleware', 'Model Middleware (Recommended)', `
 <p>Wrap the model with a redaction middleware so every <code>model.generate()</code> call transparently redacts + de-redacts without any call-site changes.</p>
 
-${code('typescript', `import { weaveRedactor, createRedactingModel } from '@weaveintel/redaction';
+${code('typescript', `import { weaveRedactor } from '@weaveintel/guardrails/redaction';
 import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
-import { weaveAgent } from '@weaveintel/agents';
 import { weaveContext } from '@weaveintel/core';
 
 const redactor = weaveRedactor({
@@ -4350,24 +4343,18 @@ const redactor = weaveRedactor({
   reversible: true,
 });
 
-// Wraps the model — redacts before generate(), de-redacts after
-const safeModel = createRedactingModel(
-  weaveAnthropicModel('claude-sonnet-4-6'),
-  redactor,
-);
+const model = weaveAnthropicModel('claude-sonnet-4-6');
+const ctx   = weaveContext({ userId: 'alice' });
 
-// The agent uses the safe model — PII never reaches Anthropic's servers
-const agent = weaveAgent({
-  model:        safeModel,
-  systemPrompt: 'Help users with their account inquiries.',
-  tools,
-});
+// Redact → generate → restore, so PII never reaches Anthropic's servers.
+async function safeGenerate(userText: string): Promise<string> {
+  const { redacted, detections } = await redactor.redact(ctx, userText);
+  const response = await model.generate(ctx, { messages: [{ role: 'user', content: redacted }] });
+  // The model sees "[PHONE_1]"; restore de-redacts it back in the response.
+  return redactor.restore!(ctx, response.content, [...detections]);
+}
 
-const ctx    = weaveContext({ userId: 'alice' });
-const result = await agent.run(ctx, {
-  messages: [{ role: 'user', content: 'My phone is 555-867-5309. Can you update my profile?' }],
-});
-// The model sees "[PHONE_1]" — the response with "[PHONE_1]" is de-redacted back to "555-867-5309"`, ['@weaveintel/redaction', '@weaveintel/provider-anthropic', '@weaveintel/agents', '@weaveintel/core'])}
+const answer = await safeGenerate('My phone is 555-867-5309. Can you update my profile?');`, ['@weaveintel/guardrails/redaction', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
 `)}
 
 ${section('red-audit', 'Auto-Redaction on Audit Writes', `
@@ -4375,7 +4362,7 @@ ${section('red-audit', 'Auto-Redaction on Audit Writes', `
 
 ${code('typescript', `import { weaveRuntime, weaveContext, weaveAudit } from '@weaveintel/core';
 import { weaveSqlitePersistence } from '@weaveintel/persistence';
-import { weaveRedactor } from '@weaveintel/redaction';
+import { weaveRedactor } from '@weaveintel/guardrails/redaction';
 
 const runtime = weaveRuntime({
   persistence: weaveSqlitePersistence({ path: './audit.db' }),
@@ -4395,7 +4382,7 @@ await weaveAudit(ctx, {
   outcome:  'success',
   resource: 'users/alice',
   details:  { email: 'alice@example.com', newPlan: 'pro' },
-});`, ['@weaveintel/core', '@weaveintel/persistence', '@weaveintel/redaction'])}
+});`, ['@weaveintel/core', '@weaveintel/persistence', '@weaveintel/guardrails/redaction'])}
 
 ${params([
   ['patterns', 'RedactionPattern[]', 'required', 'Array of patterns to detect. Each has <code>name</code>, <code>type</code> (builtin|regex|model), and optional <code>replacement</code>.'],
@@ -4410,7 +4397,7 @@ ${params([
 function sCompliance(): string {
   return `
 <div class="pkg-hdr">
-  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/compliance</span></div>
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/guardrails/compliance</span></div>
   <h1 class="pkg-title">Compliance</h1>
   <p class="pkg-desc">Data governance primitives for regulated environments: legal hold, consent management, data residency enforcement, retention policies with scheduled deletion, audit export, and GDPR-compliant user deletion. All six stores are runtime-aware — pass a persistence slot to make them restart-safe.</p>
 </div>
@@ -4430,7 +4417,7 @@ ${code('typescript', `import {
   createDurableConsentManager,
   createDurableRetentionEngine,
   createDurableDeletionManager,
-} from '@weaveintel/compliance';
+} from '@weaveintel/guardrails/compliance';
 import { weaveSqlitePersistence } from '@weaveintel/persistence';
 import { weaveRuntime } from '@weaveintel/core';
 
@@ -4442,61 +4429,56 @@ const runtime = weaveRuntime({
 const holds     = createDurableLegalHoldManager({ runtime, namespace: 'legal-hold' });
 const consent   = createDurableConsentManager({ runtime, namespace: 'consent' });
 const retention = createDurableRetentionEngine({ runtime, namespace: 'retention' });
-const deletion  = createDurableDeletionManager({ runtime, namespace: 'deletion' });`, ['@weaveintel/compliance', '@weaveintel/persistence', '@weaveintel/core'])}
+const deletion  = createDurableDeletionManager({ runtime, namespace: 'deletion' });`, ['@weaveintel/guardrails/compliance', '@weaveintel/persistence', '@weaveintel/core'])}
 `)}
 
 ${section('comp-consent', 'Consent Management', `
-${code('typescript', `import { createDurableConsentManager } from '@weaveintel/compliance';
+${code('typescript', `import { createDurableConsentManager } from '@weaveintel/guardrails/compliance';
 
 const consent = createDurableConsentManager({ runtime });
 
-// Record user consent
-await consent.grant({
-  subjectId: 'user-alice',
-  purpose:   'marketing-emails',
-  version:   'v2025-01',
-  grantedAt: new Date().toISOString(),
-  expiresAt: new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString(),
-});
+// Record user consent — grant(subjectId, purpose, source, expiresAt?)
+await consent.grant(
+  'user-alice',
+  'marketing',
+  'signup-form',
+  Date.now() + 365 * 24 * 3600 * 1000,
+);
 
-// Check consent before sending
-const allowed = await consent.check({ subjectId: 'user-alice', purpose: 'marketing-emails' });
-if (!allowed.granted) {
-  console.log('No consent for marketing emails:', allowed.reason);
+// Check consent before sending — isGranted returns a boolean
+const allowed = await consent.isGranted('user-alice', 'marketing');
+if (!allowed) {
+  console.log('No consent for marketing emails');
 }
 
 // Revoke consent
-await consent.revoke({ subjectId: 'user-alice', purpose: 'marketing-emails' });`, ['@weaveintel/compliance'])}
+await consent.revoke('user-alice', 'marketing');`, ['@weaveintel/guardrails/compliance'])}
 `)}
 
 ${section('comp-gdpr', 'GDPR Deletion (Right to Erasure)', `
-${code('typescript', `import { createDurableDeletionManager } from '@weaveintel/compliance';
-import { createDurableLegalHoldManager } from '@weaveintel/compliance';
+${code('typescript', `import { createDurableDeletionManager } from '@weaveintel/guardrails/compliance';
+import { createDurableLegalHoldManager } from '@weaveintel/guardrails/compliance';
 
 const deletion = createDurableDeletionManager({ runtime });
 const holds    = createDurableLegalHoldManager({ runtime });
 
-// Step 1: Receive a deletion request
-const req = await deletion.request({
-  subjectId:   'user-alice',
-  requestedAt: new Date().toISOString(),
-  requestedBy: 'alice@example.com',
-  reason:      'gdpr-erasure',
-});
+// Step 1: Create a deletion request — create(subjectId, requestedBy, reason, dataCategories)
+const req = await deletion.create(
+  'user-alice',
+  'gdpr-officer',
+  'GDPR Article 17 erasure request',
+  ['profile', 'messages'],
+);
 
-// Step 2: Check for active legal holds before executing
-const holdStatus = await holds.check({ subjectId: 'user-alice' });
-if (holdStatus.held) {
-  console.log('Deletion deferred — active legal hold:', holdStatus.holdId);
+// Step 2: Check for active legal holds before executing — isHeld returns a boolean
+const held = await holds.isHeld('user-alice', 'profile');
+if (held) {
+  console.log('Deletion deferred — active legal hold');
 } else {
-  // Step 3: Execute deletion and record completion
+  // Step 3: Execute deletion and mark the request complete
   await yourDb.deleteUserData('user-alice');
-  await deletion.complete({
-    requestId:   req.id,
-    completedAt: new Date().toISOString(),
-    deletedAt:   new Date().toISOString(),
-  });
-}`, ['@weaveintel/compliance'])}
+  await deletion.complete(req.id);
+}`, ['@weaveintel/guardrails/compliance'])}
 `)}`;
 }
 
@@ -4519,17 +4501,16 @@ ${featureCards([
 ])}
 
 ${section('trig-setup', 'Defining a Trigger', `
-${code('typescript', `import { TriggerDispatcher, TriggerStore } from '@weaveintel/triggers';
-import { InMemoryTriggerStore } from '@weaveintel/triggers';
+${code('typescript', `import { createTriggerDispatcher, InMemoryTriggerStore } from '@weaveintel/triggers';
 import type { Trigger } from '@weaveintel/triggers';
 
 const store      = new InMemoryTriggerStore();
-const dispatcher = new TriggerDispatcher({ store, workflowEngine: engine });
+const dispatcher = createTriggerDispatcher({ store, targetAdapters: [workflowTargetAdapter] });
 
 // Cron trigger — run a report workflow every day at 09:00 UTC
 const trigger: Trigger = {
   id:     'daily-report',
-  name:   'Daily Revenue Report',
+  key:    'daily-report',        // human-readable key (Trigger uses 'key', not 'name')
   enabled: true,
   source: {
     kind:   'cron',
@@ -4543,12 +4524,12 @@ const trigger: Trigger = {
 };
 
 await store.save(trigger);
-dispatcher.reload();  // always call after store changes
+await dispatcher.reload();  // always call after store changes
 
 // Webhook trigger — route incoming GitHub push events to a CI workflow
 const webhookTrigger: Trigger = {
   id:     'github-push',
-  name:   'GitHub Push → CI',
+  key:    'github-push',
   enabled: true,
   source: {
     kind:   'webhook',
@@ -4561,7 +4542,7 @@ const webhookTrigger: Trigger = {
   },
 };
 await store.save(webhookTrigger);
-dispatcher.reload();`, ['@weaveintel/triggers'])}
+await dispatcher.reload();`, ['@weaveintel/triggers'])}
 `)}
 
 ${section('trig-fire', 'Firing & Monitoring', `
@@ -4605,25 +4586,18 @@ ${featureCards([
 ])}
 
 ${section('browser-setup', 'Setup', `
-${code('typescript', `import { createBrowserToolRegistry } from '@weaveintel/tools-browser';
+${code('typescript', `import { createBrowserTools } from '@weaveintel/tools-browser';
 import { weaveAgent } from '@weaveintel/agents';
 import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
-import { weaveContext } from '@weaveintel/core';
+import { weaveContext, weaveToolRegistry } from '@weaveintel/core';
 
-// Creates a registry with all browser tools pre-registered
-const browserTools = createBrowserToolRegistry({
-  // Optional: only include specific tools
-  include: ['fetch_page', 'extract_content', 'scrape_structured'],
-  fetchOptions: {
-    timeoutMs: 15_000,
-    maxBytes:  5 * 1024 * 1024,  // 5 MiB
-    userAgent: 'WeaveIntel/1.0 (Research Bot)',
-  },
-});
+// createBrowserTools() returns the browser Tool[] — register them in a registry
+const tools = weaveToolRegistry();
+for (const t of createBrowserTools()) tools.register(t);
 
 const agent = weaveAgent({
   model:        weaveAnthropicModel('claude-sonnet-4-6'),
-  tools:        browserTools,
+  tools,
   systemPrompt: 'You are a research assistant. Use browser tools to find and extract information from the web.',
   maxSteps:     6,
 });
@@ -4638,20 +4612,16 @@ console.log(result.output);`, ['@weaveintel/tools-browser', '@weaveintel/agents'
 ${section('browser-playwright', 'Playwright Automation', `
 <p>Playwright tools require the sandbox with a browser-enabled image. Use them for dynamic pages that require JavaScript execution.</p>
 
-${code('typescript', `import { createPlaywrightToolRegistry } from '@weaveintel/tools-browser';
-import { createLocalCSEProvider } from '@weaveintel/sandbox';
+${code('typescript', `import { createAutomationTools } from '@weaveintel/tools-browser';
+import { weaveToolRegistry } from '@weaveintel/core';
 
-const sandbox = createLocalCSEProvider({
-  networkAccess:    true,
-  networkAllowlist: ['github.com', 'api.github.com'],
-});
-
-// Playwright tools run code inside a browser-enabled sandbox container
-const playwrightTools = createPlaywrightToolRegistry({ sandbox });
+// Browser-automation tools drive a real browser (Playwright) — register them
+const tools = weaveToolRegistry();
+for (const t of createAutomationTools()) tools.register(t);
 
 const agent = weaveAgent({
   model: weaveAnthropicModel('claude-sonnet-4-6'),
-  tools: playwrightTools,
+  tools,
   systemPrompt: 'You can control a browser. Take screenshots and interact with web pages.',
 });
 
@@ -4666,7 +4636,7 @@ const result = await agent.run(ctx, {
 function sToolsSearch(): string {
   return `
 <div class="pkg-hdr">
-  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/tools-search</span></div>
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/tools/search</span></div>
   <h1 class="pkg-title">Search Tools</h1>
   <p class="pkg-desc">Multi-provider web search with automatic failover. 9 search providers supported. A single <code>web_search</code> tool tries providers in order and returns results from the first that succeeds — no call-site changes needed to swap providers.</p>
 </div>
@@ -4679,25 +4649,27 @@ ${featureCards([
 ])}
 
 ${section('search-setup', 'Setup', `
-${code('typescript', `import { createSearchToolRegistry } from '@weaveintel/tools-search';
+${code('typescript', `import { createSearchTools, createSearchRouter } from '@weaveintel/tools/search';
 import { weaveAgent } from '@weaveintel/agents';
 import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
-import { weaveContext } from '@weaveintel/core';
+import { weaveContext, weaveToolRegistry } from '@weaveintel/core';
 
-const searchTools = createSearchToolRegistry({
-  providers: [
-    { kind: 'tavily', apiKey: process.env['TAVILY_API_KEY']! },
-    { kind: 'brave',  apiKey: process.env['BRAVE_API_KEY']! },
-    { kind: 'bing',   apiKey: process.env['BING_API_KEY']! },
-  ],
-  maxResults:  5,      // results per call
-  timeoutMs:   8_000,  // per provider timeout
-  includeRaw:  false,  // exclude raw HTML from results
+// A router tries its providers in priority order (lower priority = tried first)
+const router = createSearchRouter({
+  configs: {
+    tavily: { name: 'tavily', enabled: true, apiKey: process.env['TAVILY_API_KEY']!, priority: 10 },
+    brave:  { name: 'brave',  enabled: true, apiKey: process.env['BRAVE_API_KEY']!,  priority: 20 },
+    bing:   { name: 'bing',   enabled: true, apiKey: process.env['BING_API_KEY']!,   priority: 30 },
+  },
 });
+
+// createSearchTools(router) returns the search Tool[] — register them
+const tools = weaveToolRegistry();
+for (const t of createSearchTools(router)) tools.register(t);
 
 const agent = weaveAgent({
   model:        weaveAnthropicModel('claude-sonnet-4-6'),
-  tools:        searchTools,
+  tools,
   systemPrompt: 'You are a research assistant with web search capability.',
   maxSteps:     4,
 });
@@ -4706,31 +4678,31 @@ const ctx    = weaveContext();
 const result = await agent.run(ctx, {
   messages: [{ role: 'user', content: 'What are the top 3 AI safety papers published in 2025?' }],
 });
-console.log(result.output);`, ['@weaveintel/tools-search', '@weaveintel/agents', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
+console.log(result.output);`, ['@weaveintel/tools/search', '@weaveintel/agents', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
 
 ${params([
-  ['providers', '{ kind, apiKey }[]', 'required', 'Ordered list of providers to try. First available is used; others are failovers.'],
-  ['maxResults', 'number', 'optional', 'Max results to return per search. Default: 5.'],
-  ['timeoutMs', 'number', 'optional', 'Per-provider request timeout in ms. Default: 8000.'],
-  ['includeRaw', 'boolean', 'optional', 'Include raw HTML in results. Default: false. Increases token consumption significantly.'],
+  ['configs', 'Record<string, SearchProviderConfig>', 'required', 'Per-provider config keyed by provider name: { name, enabled, apiKey?, priority? }. Lower priority is tried first; others are failovers.'],
+  ['providers', 'SearchProvider[]', 'optional', 'Custom provider instances, merged with the built-ins.'],
+  ['fallback', 'boolean', 'optional', 'Fall through to the next provider when one fails.'],
 ])}
 `)}
 
 ${section('search-e2e', 'End-to-End: Research Agent', `
-${code('typescript', `import { createSearchToolRegistry } from '@weaveintel/tools-search';
-import { createBrowserToolRegistry } from '@weaveintel/tools-browser';
+${code('typescript', `import { createSearchTools, createSearchRouter } from '@weaveintel/tools/search';
+import { createBrowserTools } from '@weaveintel/tools-browser';
 import { weaveAgent } from '@weaveintel/agents';
 import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
 import { weaveContext, weaveToolRegistry } from '@weaveintel/core';
 
 // Combine search + browser tools for deep research
 const tools = weaveToolRegistry();
-const searchTools  = createSearchToolRegistry({ providers: [{ kind: 'tavily', apiKey: process.env['TAVILY_API_KEY']! }] });
-const browserTools = createBrowserToolRegistry({ include: ['extract_content'] });
+const router = createSearchRouter({
+  configs: { tavily: { name: 'tavily', enabled: true, apiKey: process.env['TAVILY_API_KEY']! } },
+});
 
-// Merge both registries
-searchTools.list().forEach(t => tools.register(t));
-browserTools.list().forEach(t => tools.register(t));
+// Merge both tool sets into one registry
+for (const t of createSearchTools(router)) tools.register(t);
+for (const t of createBrowserTools()) tools.register(t);
 
 const agent = weaveAgent({
   model:        weaveAnthropicModel('claude-opus-4-8'),
@@ -4747,11 +4719,11 @@ const ctx    = weaveContext();
 const result = await agent.run(ctx, {
   messages: [{ role: 'user', content: 'Research the current state of multi-modal AI models.' }],
 });
-console.log(result.output);`, ['@weaveintel/tools-search', '@weaveintel/tools-browser', '@weaveintel/agents', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
+console.log(result.output);`, ['@weaveintel/tools/search', '@weaveintel/tools-browser', '@weaveintel/agents', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
 `)}`;
 }
 
-// Phase 5 / new sections
+// new sections
 (DOCS_SECTIONS as Record<string, () => string>)['security']     = sSecurity;
 (DOCS_SECTIONS as Record<string, () => string>)['providers']    = sProviders;
 (DOCS_SECTIONS as Record<string, () => string>)['sandbox']      = sSandbox;
@@ -4774,51 +4746,53 @@ function sSkills(): string {
 ${callout('info', '🎯', 'Skills vs Prompts vs Tools.', 'A <strong>prompt</strong> is model instructions. A <strong>tool</strong> is a capability. A <strong>skill</strong> is a named bundle that activates both — it defines which tools are available, what the system prompt says, and how the agent should behave for a specific task type.')}
 
 ${section('skills-define', 'Defining Skills', `
-${code('typescript', `import { weaveSkill, weaveSkillRegistry } from '@weaveintel/skills';
-import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
+${code('typescript', `import { defineSkill, createSkillRegistry } from '@weaveintel/skills';
 
-const registry = weaveSkillRegistry();
+const registry = createSkillRegistry();
 
-// Register a named skill bundle
-registry.register(weaveSkill({
-  key:  'web-research',
+// A skill is a declarative playbook the runtime injects into the prompt and
+// uses to gate tools — query-aware, so only relevant skills are activated.
+registry.register(defineSkill({
+  id:   'web-research',
   name: 'Web Research',
-  description: 'Search the web, extract content, and synthesise findings into a structured report.',
-  systemPrompt: \`You are a thorough research assistant.
-For every research task:
+  category: 'research',
+  summary: 'Search the web, extract content, and synthesise findings into a structured report.',
+  reasoningGuidance: \`For every research task:
 1. Search for the topic to get an overview.
 2. Extract full content from the 2 most relevant results.
 3. Synthesise findings into a structured bullet-point report with citations.\`,
-  tools:    ['web_search', 'extract_content'],   // Tool keys to activate
-  model:    weaveAnthropicModel('claude-sonnet-4-6'),
-  maxSteps: 8,
-  metadata: { category: 'research', tier: 'pro' },
+  toolNames:       ['web_search', 'extract_content'],   // tools this skill may use
+  triggerPatterns: ['research', 'find out about', 'look up'],
 }));
 
-registry.register(weaveSkill({
-  key:  'code-review',
+registry.register(defineSkill({
+  id:   'code-review',
   name: 'Code Review',
-  description: 'Review code for correctness, security, and style.',
-  systemPrompt: 'You are a senior engineer. Review the provided code for bugs, security issues, and style violations. Output findings as a structured list.',
-  tools:    [],   // No external tools — pure model reasoning
-  model:    weaveAnthropicModel('claude-opus-4-8'),
-  maxSteps: 3,
-}));`, ['@weaveintel/skills', '@weaveintel/provider-anthropic'])}
+  category: 'code',
+  summary: 'Review code for correctness, security, and style.',
+  reasoningGuidance: 'Review the provided code for bugs, security issues, and style violations. Output findings as a structured list.',
+  toolNames:       [],   // no external tools — pure model reasoning
+  triggerPatterns: ['review this code', 'code review'],
+}));`, ['@weaveintel/skills'])}
 `)}
 
 ${section('skills-invoke', 'Invoking a Skill', `
-${code('typescript', `import { weaveSkillRegistry } from '@weaveintel/skills';
-import { weaveContext } from '@weaveintel/core';
+${code('typescript', `import { createSkillRegistry, buildSkillSystemPrompt } from '@weaveintel/skills';
 
-const ctx  = weaveContext({ userId: 'alice' });
-const skill = registry.get('web-research');
+const registry = createSkillRegistry();
+// ...register skills as above...
 
-// Build an agent from the skill definition
-const agent = skill.toAgent({ tools: myToolRegistry });
-const result = await agent.run(ctx, {
-  messages: [{ role: 'user', content: 'Research the latest advances in quantum error correction.' }],
-});
-console.log(result.output);`, ['@weaveintel/skills', '@weaveintel/core'])}
+// Query-aware activation: the registry picks the skills relevant to the input
+// and reports which were selected (and which were rejected, and why).
+const activation = await registry.activate(
+  'Research the latest advances in quantum error correction.',
+);
+
+console.log(activation.selected.map((m) => m.skill.name));
+
+// Build the augmented system prompt to feed into your agent's model call
+const systemPrompt = buildSkillSystemPrompt([...activation.selected]);
+console.log(systemPrompt);`, ['@weaveintel/skills'])}
 `)}`;
 }
 
@@ -4835,56 +4809,36 @@ function sRouting(): string {
 ${callout('info', '🔀', 'Prefer routing over hardcoded model IDs.', 'Hardcoding a model ID means a single failing model breaks the feature. The router selects from a pool and tracks health — a degraded model is skipped automatically.')}
 
 ${section('routing-setup', 'Setup & Usage', `
-${code('typescript', `import { SmartModelRouter, ModelHealthTracker } from '@weaveintel/routing';
-import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
-import { weaveOpenAIModel } from '@weaveintel/provider-openai';
-import { weaveOllamaModel } from '@weaveintel/provider-ollama';
-import { weaveAgent } from '@weaveintel/agents';
-import { weaveContext } from '@weaveintel/core';
+${code('typescript', `import { SmartModelRouter } from '@weaveintel/routing';
 
-const tracker = new ModelHealthTracker();
-const router  = new SmartModelRouter({
-  healthTracker: tracker,
-  models: [
-    {
-      key:          'fast',
-      model:        weaveAnthropicModel('claude-haiku-4-5-20251001'),
-      capabilities: ['text', 'tool_calling'],
-      costPerMToken: 0.25,
-      priority:      1,       // try first (lowest cost)
-    },
-    {
-      key:          'smart',
-      model:        weaveAnthropicModel('claude-sonnet-4-6'),
-      capabilities: ['text', 'tool_calling', 'vision', 'long_context'],
-      costPerMToken: 3.00,
-      priority:      2,
-    },
-    {
-      key:          'local',
-      model:        weaveOllamaModel('llama3.2'),
-      capabilities: ['text'],
-      costPerMToken: 0,
-      priority:      0,       // free — use when no capabilities needed
-    },
+// Declare the candidate pool + cost table. The router tracks health internally.
+const router = new SmartModelRouter({
+  candidates: [
+    { modelId: 'claude-haiku-4-5-20251001', providerId: 'anthropic', capabilities: ['text', 'tool_calling'] },
+    { modelId: 'claude-sonnet-4-6',         providerId: 'anthropic', capabilities: ['text', 'tool_calling', 'vision', 'long_context'] },
+    { modelId: 'llama3.2',                  providerId: 'ollama',    capabilities: ['text'] },
+  ],
+  costs: [
+    { modelId: 'claude-haiku-4-5-20251001', providerId: 'anthropic', inputCostPer1M: 0.25, outputCostPer1M: 1.25 },
+    { modelId: 'claude-sonnet-4-6',         providerId: 'anthropic', inputCostPer1M: 3.00, outputCostPer1M: 15.0 },
+    { modelId: 'llama3.2',                  providerId: 'ollama',    inputCostPer1M: 0,    outputCostPer1M: 0 },
   ],
 });
 
-// Route by declared capability requirements
-const chatModel   = router.select({ requiredCapabilities: ['text'] });                  // → local (free, lowest priority)
-const agentModel  = router.select({ requiredCapabilities: ['text', 'tool_calling'] });  // → fast (cheapest with tools)
-const visionModel = router.select({ requiredCapabilities: ['text', 'vision'] });        // → smart (only one with vision)
-const budgetModel = router.select({ requiredCapabilities: ['text'], maxCostPerMToken: 1.0 }); // → fast ($0.25 < $1.00)
+// route(request, policy) returns a RoutingDecision (modelId + providerId + reason).
+const base = { strategy: 'cost-optimized' as const, enabled: true };
+const chat   = await router.route({ prompt: 'Say hi.' },        { ...base, id: 'chat',   name: 'chat',   constraints: { requiredCapabilities: ['text'] } });
+const agent  = await router.route({ prompt: 'Use a tool.' },    { ...base, id: 'agent',  name: 'agent',  constraints: { requiredCapabilities: ['text', 'tool_calling'] } });
+const vision = await router.route({ prompt: 'Describe image.' },{ ...base, id: 'vision', name: 'vision', constraints: { requiredCapabilities: ['text', 'vision'] } });
+const budget = await router.route({ prompt: 'Cheap task.' },    { ...base, id: 'budget', name: 'budget', constraints: { requiredCapabilities: ['text'], maxCostPerRequest: 1.0 } });
 
-// Use the selected model in an agent
-const agent = weaveAgent({ model: agentModel, tools });
-const ctx   = weaveContext();
-const result = await agent.run(ctx, { messages });`, ['@weaveintel/routing', '@weaveintel/provider-anthropic', '@weaveintel/provider-openai', '@weaveintel/provider-ollama', '@weaveintel/agents', '@weaveintel/core'])}
+// The decision names the model + provider to instantiate for this request
+console.log(agent.modelId, agent.providerId, agent.reason);`, ['@weaveintel/routing'])}
 
 ${params([
-  ['requiredCapabilities', 'string[]', 'required', 'Capabilities the selected model must have. Available: <code>text</code>, <code>tool_calling</code>, <code>vision</code>, <code>long_context</code>, <code>embedding</code>.'],
-  ['maxCostPerMToken', 'number', 'optional', 'Maximum cost per million tokens in USD. Models over this threshold are excluded.'],
-  ['excludeKeys', 'string[]', 'optional', 'Model keys to skip for this request (e.g. when a model has circuit-opened).'],
+  ['constraints.requiredCapabilities', 'string[]', 'optional', 'Capabilities the selected model must have. Available: <code>text</code>, <code>tool_calling</code>, <code>vision</code>, <code>long_context</code>, <code>embedding</code>.'],
+  ['constraints.maxCostPerRequest', 'number', 'optional', 'Maximum estimated cost per request in USD. Models over this threshold are excluded.'],
+  ['constraints.excludeModels', 'string[]', 'optional', 'Model IDs to skip for this request (e.g. when a model has circuit-opened).'],
 ])}
 `)}`;
 }
@@ -4894,7 +4848,7 @@ ${params([
 function sContracts(): string {
   return `
 <div class="pkg-hdr">
-  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/contracts</span></div>
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/core/contracts</span></div>
   <h1 class="pkg-title">Contracts</h1>
   <p class="pkg-desc">Evidence ledger for agent decisions. Every significant model output — a claim, a verdict, a recommendation — is recorded as a signed, append-only contract entry. Contracts are queryable, replayable, and provide the audit trail that makes AI decisions explainable after the fact.</p>
 </div>
@@ -4908,57 +4862,58 @@ ${featureCards([
 
 ${section('contracts-emit', 'Emitting Contracts from Workflows', `
 ${code('typescript', `import { DefaultWorkflowEngine } from '@weaveintel/workflows';
-import { DbContractEmitter } from '@weaveintel/contracts';
+import type { ContractEmitter } from '@weaveintel/workflows';
+import type { WorkflowDefinition } from '@weaveintel/core';
 
-// Wire a contract emitter into the workflow engine
+// ContractEmitter is a small interface: emit(contract) — back it with your DB.
+const contractEmitter: ContractEmitter = {
+  async emit(contract) {
+    await db.insertContract(contract);   // writes to the evidence ledger
+  },
+};
+
 const engine = new DefaultWorkflowEngine({
   resolverRegistry: myResolvers,
-  contractEmitter:  new DbContractEmitter({ db }),   // writes to the evidence ledger
+  contractEmitter,
 });
 
-// In your workflow definition, declare an outputContract
-const def = {
+// In your workflow definition, declare an outputContract (kind + body/evidence map)
+const def: WorkflowDefinition = {
   id: 'equity-analysis',
   name: 'Equity Analysis',
+  version: '1.0.0',
+  entryStepId: 'analyse',
+  steps: [/* ...your WorkflowStep[] ... */],
   outputContract: {
-    kind:   'recommendation',
-    fields: ['ticker', 'action', 'confidence', 'reasoning'],
-    schema: {
-      type: 'object', required: ['ticker', 'action', 'confidence'],
-      properties: {
-        ticker:     { type: 'string' },
-        action:     { type: 'string', enum: ['buy', 'sell', 'hold'] },
-        confidence: { type: 'number', minimum: 0, maximum: 1 },
-        reasoning:  { type: 'string' },
-      },
-    },
+    kind: 'recommendation',
+    bodyMap: { ticker: 'ticker', action: 'action', confidence: 'confidence', reasoning: 'reasoning' },
+    evidence: { fromHistory: true },
   },
-  steps: [/* ...your analysis steps... */],
 };
 
 await engine.createDefinition(def);
 const run = await engine.startRun('equity-analysis', { ticker: 'AAPL' });
-// After completion, a signed contract entry is appended to the evidence ledger.
-// run.metadata.__outputContract contains the emitted contract id.`, ['@weaveintel/workflows', '@weaveintel/contracts'])}
+// After completion, a signed contract entry is appended to the evidence ledger.`, ['@weaveintel/workflows', '@weaveintel/core'])}
 `)}
 
-${section('contracts-query', 'Querying the Evidence Ledger', `
-${code('typescript', `import { ContractLedger } from '@weaveintel/contracts';
+${section('contracts-query', 'Recording Completion Evidence', `
+${code('typescript', `import { createEvidenceBundle, evidence, createCompletionReport } from '@weaveintel/core/contracts';
 
-const ledger = new ContractLedger({ db });
+// Attach the evidence gathered while fulfilling the contract
+const bundle = createEvidenceBundle(
+  evidence.text('summary', 'Extracted 42 line items from the invoice.'),
+  evidence.metric('confidence', 0.94),
+  evidence.url('source', 'https://example.com/invoice/123'),
+);
 
-// List all contracts for a specific workflow run
-const entries = await ledger.list({ runId: run.id });
+// Roll the validator results + evidence into an auditable completion report
+const report = createCompletionReport(contract.id, validationResults, bundle);
 
-for (const entry of entries) {
-  console.log(entry.kind, entry.confidence, entry.payloadHash);
-  const payload = JSON.parse(entry.payload);
-  console.log(payload.action, payload.reasoning);
-}
-
-// Verify the chain integrity — detects tampering
-const valid = await ledger.verifyChain({ runId: run.id });
-console.log('Chain intact:', valid);`, ['@weaveintel/contracts'])}
+console.log(report.status);      // 'fulfilled' | 'partial' | 'failed'
+console.log(report.confidence);  // aggregate score across acceptance criteria
+for (const item of report.evidence.items) {
+  console.log(item.type, item.label);
+}`, ['@weaveintel/core/contracts'])}
 `)}`;
 }
 
@@ -5018,8 +4973,8 @@ const updated = await store.update(artifact.id, { data: newSvgMarkup }, 'Refresh
 const all = await store.list({ sessionId: 'chat-abc', scope: 'session' });`, ['@weaveintel/artifacts', '@weaveintel/core'])}
 `)}
 
-${section('artifacts-types', 'Phase 2: Extended Type System (18 Types)', `
-<p>Phase 2 expands the artifact type system to 18 types with smart MIME detection, code-language inference, image magic-byte detection, and per-tenant type allowlists.</p>
+${section('artifacts-types', 'Extended Type System (18 Types)', `
+<p>This expands the artifact type system to 18 types with smart MIME detection, code-language inference, image magic-byte detection, and per-tenant type allowlists.</p>
 
 <h4>All 18 Artifact Types</h4>
 ${code('typescript', `import { inferMimeType, inferCodeMime, detectImageMime } from '@weaveintel/artifacts';
@@ -5068,11 +5023,11 @@ inferMimeType('custom')      // → 'application/octet-stream'`, ['@weaveintel/a
 <p>Operators configure per-tenant allowlists via the Admin Panel → Knowledge → Type Settings.
 The <code>emit_artifact</code> tool enforces these constraints at runtime before persisting.</p>
 
-${code('typescript', `// Phase 2: Tenant artifact settings are resolved by the ChatEngine
+${code('typescript', `// Tenant artifact settings are resolved by the ChatEngine
 // and passed into createToolRegistry() as resolvedArtifactSettings.
 // You can pass them manually in custom agent setups:
 
-import { createToolRegistry } from '@weaveintel/geneweave';
+import { createToolRegistry } from '@weaveintel/geneweave-api';
 
 const registry = await createToolRegistry(['emit_artifact'], [], {
   actorPersona: 'tenant_user',
@@ -5088,7 +5043,7 @@ const registry = await createToolRegistry(['emit_artifact'], [], {
 
 // If emit_enabled=false, or the type is not in allowed_types, or the data
 // exceeds max_size_bytes, the tool returns { ok: false, error: "..." }
-// without writing to the database.`, ['@weaveintel/geneweave'])}
+// without writing to the database.`, ['@weaveintel/geneweave-api'])}
 
 <h4>Chat UI: Type-Aware Cards & Preview Panel</h4>
 <p>The geneWeave chat UI automatically renders type-aware artifact cards after each agent turn.
@@ -5105,11 +5060,11 @@ Previewable types (<code>text, markdown, json, csv, code, html, svg, mermaid, re
 <p>Code artifacts display a language badge (e.g. <code>python</code>) on the card when the <code>language</code> parameter was passed to <code>emit_artifact</code>.</p>
 `)}
 
-${section('artifacts-phase3', 'Phase 3: DB Persistence, Admin API & Versioning', `
-<p>Phase 3 wires artifact storage into the geneWeave database (SQLite, m77 migration), exposes a full admin REST API, and adds artifact version history. Every artifact emitted by an agent is persisted across server restarts, browsable in the admin panel, and downloadable on demand.</p>
+${section('artifacts-phase3', 'DB Persistence, Admin API & Versioning', `
+<p>This wires artifact storage into the geneWeave database (SQLite, m77 migration), exposes a full admin REST API, and adds artifact version history. Every artifact emitted by an agent is persisted across server restarts, browsable in the admin panel, and downloadable on demand.</p>
 
 <h4>DB Adapter methods (m77)</h4>
-${code('typescript', `import { SQLiteAdapter } from '@weaveintel/geneweave';
+${code('typescript', `import { SQLiteAdapter } from '@weaveintel/geneweave-api';
 
 const db = new SQLiteAdapter('./geneweave.db');
 await db.initialize();  // runs all migrations including m77
@@ -5152,11 +5107,11 @@ const v1 = await db.getArtifactVersion!(row.id, 1);
 await db.deleteArtifact!(row.id);
 
 // Run retention — deletes artifacts past their policy's retention_days
-const deletedCount = await db.expireArtifacts!();`, ['@weaveintel/geneweave'])}
+const deletedCount = await db.expireArtifacts!();`, ['@weaveintel/geneweave-api'])}
 
 <h4>Admin REST API (/api/admin/artifacts)</h4>
 <p>All six admin endpoints are registered by <code>registerArtifactRoutes()</code> in <code>server-admin.ts</code>. Endpoints require authentication (<code>platform_admin</code> or <code>tenant_admin</code> persona).</p>
-${code('typescript', `// GET  /api/admin/artifacts                        — list with filters
+${code('http', `# GET  /api/admin/artifacts                        — list with filters
 // GET  /api/admin/artifacts/:id                    — get single artifact
 // GET  /api/admin/artifacts/:id/versions           — full version history
 // GET  /api/admin/artifacts/:id/versions/:n        — specific version
@@ -5194,11 +5149,11 @@ ${code('typescript', `// GET  /api/admin/artifacts                        — li
 }`)}
 
 <h4>Artifact Retention Job</h4>
-${code('typescript', `import { startArtifactRetentionJob } from '@weaveintel/geneweave/artifact-retention-job';
+${code('typescript', `import { startArtifactRetentionJob } from '../../src/artifact-retention-job.js';
 
-// Runs expireArtifacts() once on startup and then every retentionIntervalMs (default 24h).
+// Runs expireArtifacts() once on startup and then every 24h (fixed interval).
 // Any artifact whose policy.retention_days has elapsed is deleted along with its versions.
-const handle = startArtifactRetentionJob(db, { retentionIntervalMs: 24 * 60 * 60 * 1000 });
+const handle = startArtifactRetentionJob(db);
 
 // Stop when server shuts down
 process.on('SIGTERM', () => handle.stop());`)}
@@ -5226,7 +5181,7 @@ ${code('typescript', `// In geneWeave, agents call emit_artifact to persist type
 
 // To use @weaveintel/artifacts directly in your own agent:
 import { createArtifactStore, inferMimeType } from '@weaveintel/artifacts';
-import { weaveTool, weaveToolRegistry } from '@weaveintel/core';
+import { weaveTool, weaveToolRegistry, weaveContext } from '@weaveintel/core';
 import { weaveAgent } from '@weaveintel/agents';
 import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
 
@@ -5267,14 +5222,14 @@ const agent = weaveAgent({
   systemPrompt: 'Generate SVG charts for data analysis tasks and save them as artifacts.',
 });
 
-const result = await agent.run({ userId: 'alice' }, {
+const result = await agent.run(weaveContext({ userId: 'alice' }), {
   messages: [{ role: 'user', content: 'Create a bar chart of FAANG stock returns in 2024.' }],
 });
 console.log(result.output);  // "Chart saved as artifact 01JP..., version 1"`, ['@weaveintel/artifacts', '@weaveintel/core', '@weaveintel/agents', '@weaveintel/provider-anthropic'])}
 `)}
 
-${section('artifacts-streaming', 'Phase 4: Streaming Lifecycle', `
-<p>Phase 4 adds real-time artifact generation with progressive SSE delivery. Large reports, live data feeds, or multi-step analysis can stream partial content to the client while the agent is still generating — providing instant feedback rather than a long wait before the full result appears.</p>
+${section('artifacts-streaming', 'Streaming Lifecycle', `
+<p>This adds real-time artifact generation with progressive SSE delivery. Large reports, live data feeds, or multi-step analysis can stream partial content to the client while the agent is still generating — providing instant feedback rather than a long wait before the full result appears.</p>
 
 <h4>Core concepts</h4>
 <ul>
@@ -5368,19 +5323,19 @@ ${code('typescript', `// Server-Sent Events format:
 // Client-side (browser or Node.js):
 const evtSource = new EventSource(\`/api/artifacts/\${artifactId}/stream\`);
 
-evtSource.addEventListener('update', (e) => {
+evtSource.addEventListener('update', (e: MessageEvent) => {
   const ev = JSON.parse(e.data);
   progressBar.style.width = \`\${ev.progress * 100}%\`;
   previewPane.textContent = ev.data ?? '';
 });
 
-evtSource.addEventListener('complete', (e) => {
+evtSource.addEventListener('complete', (e: MessageEvent) => {
   const ev = JSON.parse(e.data);
   console.log('Done! Final version:', ev.version);
   evtSource.close();
 });
 
-evtSource.addEventListener('error', (e) => {
+evtSource.addEventListener('error', (e: MessageEvent) => {
   console.error('Streaming failed:', JSON.parse(e.data).message);
   evtSource.close();
 });
@@ -5395,7 +5350,7 @@ ${code('typescript', `import {
   onArtifactStreamEvent,
   offArtifactStreamEvent,
   hasArtifactStreamListeners,
-} from './lib/artifact-stream-bus.js';
+} from '../../src/lib/artifact-stream-bus.js';
 
 // Subscribe (SSE endpoint does this internally):
 onArtifactStreamEvent(artifactId, (event) => {
@@ -5433,8 +5388,8 @@ CREATE INDEX IF NOT EXISTS idx_artifacts_streaming
 <p>See <code>apps/geneweave/src/migrations/m79-artifact-streaming.ts</code> and the retention job (<code>artifact-retention-job.ts</code>) which expires orphaned <code>streaming_status='streaming'</code> rows left by crashed sessions.</p>
 `)}
 
-${section('artifacts-rendering', 'Phase 5: Sandboxed Rendering', `
-<p>Phase 5 adds a server-side <strong>sandboxed render endpoint</strong> that converts any stored artifact into a self-contained HTML document — optimized for each artifact type. The rendered HTML is served in an iframe with strict CSP headers, keeping arbitrary agent-generated content fully isolated from the host application.</p>
+${section('artifacts-rendering', 'Sandboxed Rendering', `
+<p>This adds a server-side <strong>sandboxed render endpoint</strong> that converts any stored artifact into a self-contained HTML document — optimized for each artifact type. The rendered HTML is served in an iframe with strict CSP headers, keeping arbitrary agent-generated content fully isolated from the host application.</p>
 
 <h4>GET /api/artifacts/:id/render</h4>
 <p>Returns a <code>text/html</code> document tailored to the artifact type. The response headers restrict the iframe from interacting with the parent:</p>
@@ -5498,8 +5453,8 @@ window.open(
 <p>See <code>examples/119-artifact-sandbox-rendering.ts</code> for a self-contained demo covering all 9 types, CSP headers, auth guards, admin endpoint, and a live <code>weaveAgent</code> emit-then-render round-trip.</p>
 `)}
 
-${section('artifacts-live', 'Phase 6: Live Artifacts & MCP Connectivity', `
-<p>Phase 6 makes artifacts <strong>dynamic</strong>: any artifact can be backed by a <code>refreshFn</code> callback that re-fetches the underlying data on demand. The rendered iframe gets an injected LIVE toolbar with a Refresh button and an optional auto-refresh timer, and the live config is managed per-artifact via a dedicated admin CRUD API.</p>
+${section('artifacts-live', 'Live Artifacts & MCP Connectivity', `
+<p>This makes artifacts <strong>dynamic</strong>: any artifact can be backed by a <code>refreshFn</code> callback that re-fetches the underlying data on demand. The rendered iframe gets an injected LIVE toolbar with a Refresh button and an optional auto-refresh timer, and the live config is managed per-artifact via a dedicated admin CRUD API.</p>
 
 <h4>Architecture overview</h4>
 <table>
@@ -5534,8 +5489,8 @@ Content-Type: application/json
 }`)}
 
 <h4>Registering a refreshFn</h4>
-${code('typescript', `import { registerArtifactRoutes } from './routes/artifacts.js';
-import type { ArtifactRow } from './db-types/artifacts.js';
+${code('typescript', `import { registerArtifactRoutes } from '../../src/routes/artifacts.js';
+import type { ArtifactRow } from '../../src/db-types/artifacts.js';
 
 registerArtifactRoutes(router, db, {
   refreshFn: async (artifact: ArtifactRow, args: Record<string, unknown>) => {
@@ -5551,15 +5506,15 @@ registerArtifactRoutes(router, db, {
 
 <h4>injectLiveToolbar(html, live)</h4>
 <p>Injects a floating toolbar into any artifact render HTML just before <code>&lt;/body&gt;&lt;/html&gt;</code>. When a live config exists, the render endpoint calls this automatically and adds <code>connect-src 'self'</code> to the CSP so the Refresh button can call <code>fetch()</code> back to the server:</p>
-${code('typescript', `import { injectLiveToolbar } from './routes/artifacts.js';
+${code('typescript', `import { injectLiveToolbar } from '../../src/routes/artifacts.js';
 
 // Manually inject a toolbar (useful for admin preview or custom routes):
 const liveHtml = injectLiveToolbar(renderedHtml, {
   artifactId: 'abc-123',
   refreshIntervalSeconds: 30,
-  cacheTtlSeconds: 5,
   refreshCount: 4,
   lastRefreshedAt: '2026-06-23T14:00:00Z',
+  refreshEndpoint: '/api/artifacts/abc-123/refresh',
 });
 // → html with a dark toolbar: LIVE badge | Refreshed: 4× | [Refresh] | [Auto-refresh: 30s]`)}
 
@@ -5602,23 +5557,23 @@ POST   /api/admin/artifacts/:id/live-refresh
 function sReplay(): string {
   return `
 <div class="pkg-hdr">
-  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/replay</span></div>
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/observability/replay</span></div>
   <h1 class="pkg-title">Replay</h1>
   <p class="pkg-desc">Deterministic re-execution of workflow runs from a saved snapshot. Replay uses the same definition, inputs, and tool outputs from the original run — so you can reproduce exact model behaviour, debug failures, or run evals against historical data without hitting live APIs.</p>
 </div>
 
-${callout('info', '🔁', 'Reproducibility is always @weaveintel/replay.', 'Never invent a bespoke bundle format for reproducing runs. The replay package handles definition snapshots, step-level output recording, and ordinal-strict re-execution.')}
+${callout('info', '🔁', 'Reproducibility is always @weaveintel/observability/replay.', 'Never invent a bespoke bundle format for reproducing runs. The replay package handles definition snapshots, step-level output recording, and ordinal-strict re-execution.')}
 
 ${section('replay-record', 'Recording a Run for Replay', `
 <p>Every workflow run automatically records step outputs when a checkpoint store and run repository are configured. No extra wiring is needed — runs are replayable by default when persistence is on.</p>
 
 ${code('typescript', `import { DefaultWorkflowEngine } from '@weaveintel/workflows';
-import { SqliteWorkflowRunRepository, SqliteCheckpointStore } from '@weaveintel/workflows';
+import { weaveSqliteWorkflowRunRepository, weaveSqliteCheckpointStore } from '@weaveintel/workflows';
 
 // Configure durable stores — this enables replay automatically
 const engine = new DefaultWorkflowEngine({
-  runRepository:   new SqliteWorkflowRunRepository('./workflows.db'),
-  checkpointStore: new SqliteCheckpointStore('./workflows.db'),
+  runRepository:   weaveSqliteWorkflowRunRepository({ databasePath: './workflows.db' }),
+  checkpointStore: weaveSqliteCheckpointStore({ databasePath: './workflows.db' }),
   resolverRegistry: myResolvers,
 });
 
@@ -5661,7 +5616,7 @@ ${params([
 function sLiveAgentsTraceTools(): string {
   return `
 <div class="pkg-hdr">
-  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/live-agents-trace-tools</span></div>
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/live-agents/trace-tools</span></div>
   <h1 class="pkg-title">Live Agents Trace Tools</h1>
   <p class="pkg-desc">A thin tool pack that exposes live-agent mesh state as agent-callable tools. Attach these to any agent so it can inspect running meshes, read agent contracts, and trace the history of an agent's decisions — useful for supervisor agents and for admin/debugging interfaces.</p>
 </div>
@@ -5671,17 +5626,17 @@ ${exlinks([
 ])}
 
 ${section('trace-tools-setup', 'Setup', `
-${code('typescript', `import { createLiveAgentTraceToolRegistry } from '@weaveintel/live-agents-trace-tools';
+${code('typescript', `import { createLiveTraceTools } from '@weaveintel/live-agents/trace-tools';
 import { weaveAgent } from '@weaveintel/agents';
 import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
 import { weaveContext } from '@weaveintel/core';
 
-// Create a registry of live-agent trace tools
-// These tools read from the live-agents state store and contract ledger
-const traceTools = createLiveAgentTraceToolRegistry({
-  store:  liveAgentStateStore,    // the same StateStore the mesh uses
-  ledger: contractLedger,         // optional — enables contract queries
-  db:     geneWeaveDb,            // optional — enables run event queries
+// Create the live-agent trace tools. They are scoped to a single runId and
+// read from event/step/cost readers you provide.
+const traceTools = createLiveTraceTools({
+  runId:       'mesh-run-123',    // the ONLY run these tools may read
+  eventReader: liveRunEventReader, // required
+  stepReader:  liveRunStepReader,  // optional
 });
 
 // Attach to a supervisor agent that monitors the mesh
@@ -5700,7 +5655,7 @@ const ctx    = weaveContext({ userId: 'admin' });
 const result = await monitorAgent.run(ctx, {
   messages: [{ role: 'user', content: 'Which agents are currently active and what did they produce in the last 30 minutes?' }],
 });
-console.log(result.output);`, ['@weaveintel/live-agents-trace-tools', '@weaveintel/agents', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
+console.log(result.output);`, ['@weaveintel/live-agents/trace-tools', '@weaveintel/agents', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
 `)}
 
 ${section('trace-tools-list', 'Available Tools', `
@@ -5721,7 +5676,7 @@ ${section('trace-tools-list', 'Available Tools', `
 function sOAuth(): string {
   return `
 <div class="pkg-hdr">
-  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/oauth</span></div>
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/identity/oauth</span></div>
   <h1 class="pkg-title">OAuth</h1>
   <p class="pkg-desc">OAuth 2.0 Authorization Code flow for agent tools that need per-user credentials — Google Calendar, Gmail, Dropbox, OneDrive, Slack, and any OAuth 2.0 provider. Flow state is durable (survives restarts via <code>runtime.persistence.kv</code>) and PKCE is applied by default.</p>
 </div>
@@ -5734,50 +5689,43 @@ ${featureCards([
 ])}
 
 ${section('oauth-setup', 'Setup & Flow', `
-${code('typescript', `import { createOAuthFlow, createDurableOAuthStateStore } from '@weaveintel/oauth';
-import { weaveRuntime } from '@weaveintel/core';
-import { weaveSqlitePersistence } from '@weaveintel/persistence';
+${code('typescript', `import { OAuthClient, createOAuthProvider, InMemoryOAuthStateStore } from '@weaveintel/identity/oauth';
+import { randomUUID } from 'node:crypto';
 
-const runtime = weaveRuntime({
-  persistence: weaveSqlitePersistence({ path: './oauth.db' }),
-});
+// Configure a provider (clientId, clientSecret, redirectUri)
+const google = createOAuthProvider(
+  'google',
+  process.env['GOOGLE_CLIENT_ID']!,
+  process.env['GOOGLE_CLIENT_SECRET']!,
+  'https://myapp.example.com/oauth/callback',
+);
 
-// Durable state store — flow state survives restarts
-const stateStore = createDurableOAuthStateStore({ runtime, namespace: 'oauth-flow' });
-
-// Configure an OAuth flow for Google Calendar
-const googleFlow = createOAuthFlow({
-  provider:     'google',
-  clientId:     process.env['GOOGLE_CLIENT_ID']!,
-  clientSecret: process.env['GOOGLE_CLIENT_SECRET']!,
-  redirectUri:  'https://myapp.example.com/oauth/callback',
-  scopes:       ['https://www.googleapis.com/auth/calendar.readonly'],
-  stateStore,
-});
+// The client holds the state store (swap in a durable one for production)
+const oauth = new OAuthClient(new InMemoryOAuthStateStore());
 
 // Step 1: Generate the authorization URL (redirect user here)
-const { url, state } = await googleFlow.authorize({ userId: 'alice', tenantId: 'acme' });
-// Redirect the user to: url
+const state = randomUUID();
+const { authUrl, codeVerifier } = await oauth.generateAuthorizationUrl(google, state);
+// Redirect the user to: authUrl (persist codeVerifier + state for the callback)
 
 // Step 2: Handle the callback (after user grants permission)
 app.get('/oauth/callback', async (req, res) => {
   const { code, state } = req.query as { code: string; state: string };
-  const tokens = await googleFlow.exchange({ code, state });
-  // tokens.accessToken, tokens.refreshToken, tokens.expiresAt
-  await tokenStore.save({ userId: 'alice', provider: 'google', ...tokens });
+  const { token } = await oauth.exchangeCodeForToken(google, code, state);
+  // token.access_token, token.refresh_token, token.expires_in
+  await tokenStore.save({ userId: 'alice', provider: 'google', token });
   res.redirect('/app');
 });
 
-// Step 3: Use the token in a tool call (auto-refreshed)
-const validToken = await googleFlow.getValidToken({ userId: 'alice', tenantId: 'acme', tokenStore });
-const events     = await gcal.listEvents(validToken.accessToken);`, ['@weaveintel/oauth', '@weaveintel/core', '@weaveintel/persistence'])}
+// Step 3: Read the user's profile with the token
+const profile = await oauth.getUserProfile(google, savedToken);`, ['@weaveintel/identity/oauth'])}
 `)}
 
 ${section('oauth-tool', 'OAuth as an Agent Tool', `
-${code('typescript', `import { createOAuthFlow, createDurableOAuthStateStore } from '@weaveintel/oauth';
-import { weaveTool, weaveToolRegistry } from '@weaveintel/core';
+${code('typescript', `import { weaveTool, weaveToolRegistry } from '@weaveintel/core';
 import { weaveAgent } from '@weaveintel/agents';
 
+// googleFlow here is your app's OAuth helper around OAuthClient (see Setup above).
 const tools = weaveToolRegistry();
 
 // Tool that checks if the user has granted Google Calendar access
@@ -5807,7 +5755,7 @@ tools.register(weaveTool({
   },
 }));
 
-const agent = weaveAgent({ model, tools, maxSteps: 4 });`, ['@weaveintel/oauth', '@weaveintel/core', '@weaveintel/agents'])}
+const agent = weaveAgent({ model, tools, maxSteps: 4 });`, ['@weaveintel/identity/oauth', '@weaveintel/core', '@weaveintel/agents'])}
 `)}`;
 }
 
@@ -5833,115 +5781,107 @@ ${exlinks([
   ['113-extraction-pipeline.ts', 'Example 113 — Document Extraction Pipeline'],
 ])}
 
-${section('extraction-schema', 'Schema-Driven Extraction', `
-${code('typescript', `import { weaveExtractor } from '@weaveintel/extraction';
+${section('extraction-schema', 'Knowledge-Graph Extraction', `
+${code('typescript', `import { extractKnowledgeGraph } from '@weaveintel/extraction';
 import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
 import { weaveContext } from '@weaveintel/core';
 
-const extractor = weaveExtractor({
-  model: weaveAnthropicModel('claude-haiku-4-5-20251001'),
-  schema: {
-    type: 'object',
-    required: ['companyName', 'foundingYear', 'headcount'],
-    properties: {
-      companyName:  { type: 'string',  description: 'Legal name of the company.' },
-      foundingYear: { type: 'number',  description: 'Year the company was founded.' },
-      headcount:    { type: 'number',  description: 'Approximate number of employees.' },
-      ceo:          { type: 'string',  description: 'Name of the current CEO, if mentioned.' },
-      revenue:      { type: 'number',  description: 'Annual revenue in USD millions, if mentioned.' },
-      isPublic:     { type: 'boolean', description: 'Whether the company is publicly traded.' },
-    },
+const model = weaveAnthropicModel('claude-haiku-4-5-20251001');
+const ctx   = weaveContext({ userId: 'alice' });
+
+// extractKnowledgeGraph is model-agnostic: pass a text→text \`generate\` callback.
+const graph = await extractKnowledgeGraph(
+  \`Anthropic, founded in 2021, is an AI safety company based in San Francisco.
+   The company employs approximately 800 people and is led by CEO Dario Amodei.\`,
+  async ({ system, user, temperature, maxTokens }) => {
+    const res = await model.generate(ctx, {
+      messages: [
+        ...(system ? [{ role: 'system' as const, content: system }] : []),
+        { role: 'user' as const, content: user },
+      ],
+      temperature,
+      maxTokens,
+    });
+    return res.content;
   },
-  repair:       true,   // attempt auto-repair on malformed output
-  confidence:   true,   // add a confidence score per field
-  maxRetries:   2,
-});
+  { maxItems: 24, maxChars: 6000 },
+);
 
-const ctx = weaveContext({ userId: 'alice' });
+console.log(graph.entities);
+// [{ name: 'Anthropic', type: 'organization' }, { name: 'Dario Amodei', type: 'person' }, ...]
 
-const result = await extractor.extract(ctx, \`
-  Anthropic, founded in 2021, is an AI safety company based in San Francisco.
-  The company employs approximately 800 people and is led by CEO Dario Amodei.
-  It remains privately held and does not disclose revenue figures.
-\`);
-
-console.log(result.data);
-// { companyName: 'Anthropic', foundingYear: 2021, headcount: 800,
-//   ceo: 'Dario Amodei', revenue: null, isPublic: false }
-
-console.log(result.confidence);
-// { companyName: 0.99, foundingYear: 0.98, headcount: 0.87,
-//   ceo: 0.99, revenue: null, isPublic: 0.97 }
-
-console.log(result.flagged);  // fields with confidence < threshold`, ['@weaveintel/extraction', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
+console.log(graph.relations);
+// [{ subject: 'Dario Amodei', predicate: 'is CEO of', object: 'Anthropic' }, ...]`, ['@weaveintel/extraction', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
 `)}
 
 ${section('extraction-batch', 'Batch Extraction from Documents', `
-${code('typescript', `import { weaveExtractor, weaveBatchExtractor } from '@weaveintel/extraction';
+${code('typescript', `import { autofillProperty } from '@weaveintel/extraction';
 import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
 import { weaveContext } from '@weaveintel/core';
 
-const extractor = weaveExtractor({
-  model:  weaveAnthropicModel('claude-haiku-4-5-20251001'),
-  schema: companySchema,
+const model = weaveAnthropicModel('claude-haiku-4-5-20251001');
+const ctx   = weaveContext();
+
+const generate = async ({ system, user, temperature, maxTokens }) => {
+  const res = await model.generate(ctx, {
+    messages: [
+      ...(system ? [{ role: 'system' as const, content: system }] : []),
+      { role: 'user' as const, content: user },
+    ],
+    temperature,
+    maxTokens,
+  });
+  return res.content;
+};
+
+// Fill a whole column across many rows in one batched pass — each cell is
+// grounded in that row's context and returns the source ids it used.
+const cells = await autofillProperty({
+  property: { name: 'foundingYear', type: 'number', instruction: 'Year the company was founded.' },
+  rows: [
+    { rowId: 'anthropic', title: 'Anthropic', context: 'Anthropic, founded in 2021, is an AI safety company. [src-1]', sourceIds: ['src-1'] },
+    { rowId: 'openai',    title: 'OpenAI',    context: 'OpenAI was founded in December 2015. [src-2]',              sourceIds: ['src-2'] },
+  ],
+  generate,
 });
 
-const batchExtractor = weaveBatchExtractor({
-  extractor,
-  concurrency: 10,   // 10 parallel extraction calls
-  onProgress: (done, total) => console.log(\`\${done}/\${total}\`),
-  onError:    (doc, err)   => console.error(\`Failed on \${doc.id}:\`, err.message),
-});
-
-const ctx  = weaveContext();
-const docs = await loadDocuments('./data/companies/*.txt');
-
-const results = await batchExtractor.extractBatch(ctx, docs);
-
-// results[i] = { documentId, data, confidence, flagged, durationMs }
-const successful = results.filter(r => !r.error);
-console.log(\`Extracted: \${successful.length}/\${docs.length}\`);
-
-// Export to CSV
-const csv = results.map(r =>
-  [r.documentId, r.data.companyName, r.data.foundingYear, r.data.revenue ?? ''].join(',')
-).join('\n');`, ['@weaveintel/extraction', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
+for (const cell of cells) {
+  console.log(cell.rowId, cell.value, cell.citations);
+  // 'anthropic' 2021 ['src-1']
+}`, ['@weaveintel/extraction', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
 `)}
 
 ${section('extraction-e2e', 'End-to-End: Research → Extract → Store', `
-${code('typescript', `import { weaveExtractor } from '@weaveintel/extraction';
+${code('typescript', `import { extractKnowledgeGraph } from '@weaveintel/extraction';
 import { weaveAgent } from '@weaveintel/agents';
-import { createBrowserToolRegistry } from '@weaveintel/tools-browser';
+import { createBrowserTools } from '@weaveintel/tools-browser';
 import { weaveTool, weaveToolRegistry, weaveContext } from '@weaveintel/core';
 import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
 
-const extractor = weaveExtractor({
-  model: weaveAnthropicModel('claude-haiku-4-5-20251001'),
-  schema: {
-    type: 'object', required: ['name', 'ticker', 'sector', 'peRatio'],
-    properties: {
-      name:    { type: 'string', description: 'Company name.' },
-      ticker:  { type: 'string', description: 'Stock ticker symbol.' },
-      sector:  { type: 'string', description: 'Industry sector.' },
-      peRatio: { type: 'number', description: 'Price-to-earnings ratio.' },
-      revenue: { type: 'number', description: 'Annual revenue in USD billions.' },
-    },
-  },
-});
+const extractModel = weaveAnthropicModel('claude-haiku-4-5-20251001');
 
-// Tool that fetches a URL and extracts structured company data
+// Tool that fetches a URL and extracts a structured knowledge graph
 const tools = weaveToolRegistry();
-const browserTools = createBrowserToolRegistry({ include: ['extract_content'] });
-browserTools.list().forEach(t => tools.register(t));
+for (const t of createBrowserTools()) tools.register(t);
 
 tools.register(weaveTool({
   name: 'extract_company_data',
-  description: 'Extract structured company financial data from a URL.',
+  description: 'Extract structured company facts (entities + relations) from a URL.',
   parameters: { type:'object', required:['url'], properties:{ url:{type:'string'} } },
   execute: async ({ url }, ctx) => {
-    const { content } = await fetch(url as string).then(r => r.text()).then(html => ({ content: html }));
-    const result = await extractor.extract(ctx, content);
-    return JSON.stringify(result.data);
+    const content = await fetch(url as string).then(r => r.text());
+    const graph = await extractKnowledgeGraph(content, async ({ system, user, temperature, maxTokens }) => {
+      const res = await extractModel.generate(ctx, {
+        messages: [
+          ...(system ? [{ role: 'system' as const, content: system }] : []),
+          { role: 'user' as const, content: user },
+        ],
+        temperature,
+        maxTokens,
+      });
+      return res.content;
+    });
+    return JSON.stringify(graph);
   },
 }));
 
@@ -6115,7 +6055,7 @@ export function getDocsHTML(): string {
     // Contracts
     'contracts-emit':'Emitting Contracts','contracts-query':'Querying Evidence',
     // Artifacts
-    'artifacts-store':'Storing & Retrieving','artifacts-types':'Phase 2: Extended Types','artifacts-phase3':'Phase 3: DB & Admin API','artifacts-agent':'Agent Tool','artifacts-streaming':'Phase 4: Streaming','artifacts-rendering':'Phase 5: Rendering','artifacts-live':'Phase 6: Live Artifacts',
+    'artifacts-store':'Storing & Retrieving','artifacts-types':'Extended Types','artifacts-phase3':'DB & Admin API','artifacts-agent':'Agent Tool','artifacts-streaming':'Streaming','artifacts-rendering':'Rendering','artifacts-live':'Live Artifacts',
     // Replay
     'replay-record':'Recording a Run','replay-replay':'Re-executing',
     // Redaction
@@ -6718,12 +6658,12 @@ var SEARCH_IDX = [
   {s:'contracts',  t:'Querying the Evidence Ledger', k:'contract query ledger list verify chain integrity', sub:'contracts-query'},
   // Artifacts
   {s:'artifacts',  t:'Storing & Retrieving Artifacts',             k:'artifact file blob storage versioned s3 gcs local', sub:'artifacts-store'},
-  {s:'artifacts',  t:'Phase 2: Extended Type System (18 Types)',  k:'artifact type mermaid react svg audio video spreadsheet interactive mime detect', sub:'artifacts-types'},
-  {s:'artifacts',  t:'Phase 3: DB Persistence, Admin API & Versioning', k:'artifact sqlite admin api version history retention expire download delete', sub:'artifacts-phase3'},
+  {s:'artifacts',  t:'Extended Type System (18 Types)',  k:'artifact type mermaid react svg audio video spreadsheet interactive mime detect', sub:'artifacts-types'},
+  {s:'artifacts',  t:'DB Persistence, Admin API & Versioning', k:'artifact sqlite admin api version history retention expire download delete', sub:'artifacts-phase3'},
   {s:'artifacts',  t:'Agent Artifact Tool',                       k:'artifact agent tool save chart svg pdf generated output emit', sub:'artifacts-agent'},
-  {s:'artifacts',  t:'Phase 4: Streaming Lifecycle (SSE)',        k:'artifact streaming sse progress handle streamArtifact update complete error bus m79 real-time', sub:'artifacts-streaming'},
-  {s:'artifacts',  t:'Phase 5: Sandboxed Rendering',             k:'artifact render iframe csp sandbox html markdown code json csv mermaid react svg admin preview buildArtifactRenderHtml xss', sub:'artifacts-rendering'},
-  {s:'artifacts',  t:'Phase 6: Live Artifacts & MCP Connectivity', k:'artifact live refresh toolbar injectLiveToolbar refreshFn cache ttl m80 live-artifact-configs badge auto-refresh postMessage connect-src csp mcp connectivity 120', sub:'artifacts-live'},
+  {s:'artifacts',  t:'Streaming Lifecycle (SSE)',        k:'artifact streaming sse progress handle streamArtifact update complete error bus m79 real-time', sub:'artifacts-streaming'},
+  {s:'artifacts',  t:'Sandboxed Rendering',             k:'artifact render iframe csp sandbox html markdown code json csv mermaid react svg admin preview buildArtifactRenderHtml xss', sub:'artifacts-rendering'},
+  {s:'artifacts',  t:'Live Artifacts & MCP Connectivity', k:'artifact live refresh toolbar injectLiveToolbar refreshFn cache ttl m80 live-artifact-configs badge auto-refresh postMessage connect-src csp mcp connectivity 120', sub:'artifacts-live'},
   // Replay
   {s:'replay',     t:'Recording a Run for Replay',   k:'replay record workflow run durable checkpoint reproducible', sub:'replay-record'},
   {s:'replay',     t:'Re-executing a Workflow Run',   k:'replay rerun from step override deterministic reproduce eval', sub:'replay-replay'},

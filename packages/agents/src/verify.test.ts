@@ -5,7 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import { weaveRubricVerifier } from './verify.js';
 import { makeCtx, stubAdapter } from './test-helpers.js';
-import type { RubricCriterion } from '@weaveintel/evals';
+import type { RubricCriterion } from '@weaveintel/testing/evals';
 
 const CRITERIA: RubricCriterion[] = [
   { id: 'relevance', description: 'Directly answers the question', weight: 1 },

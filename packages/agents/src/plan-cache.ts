@@ -1,5 +1,5 @@
 /**
- * @weaveintel/agents — Agentic Plan Caching (Phase 8, G‑10; arXiv:2506.14852).
+ * @weaveintel/agents — Agentic Plan Caching.
  *
  * Repetitive agent/supervisor tasks tend to follow the SAME structural plan
  * (decompose → delegate/tool → synthesize). Re-deriving that plan from scratch

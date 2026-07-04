@@ -13,8 +13,8 @@
  *   @weaveintel/core         — ExecutionContext, EventBus, Model/ToolRegistry types
  *   @weaveintel/agents       — weaveAgent (ReAct loop, with optional supervisor mode)
  *   @weaveintel/observability — weaveInMemoryTracer, weaveUsageTracker for spans
- *   @weaveintel/redaction     — weaveRedactor for PII scrubbing before/after LLM
- *   @weaveintel/evals         — weaveEvalRunner for response quality assertions
+ *   @weaveintel/guardrails/redaction     — weaveRedactor for PII scrubbing before/after LLM
+ *   @weaveintel/testing/evals         — weaveEvalRunner for response quality assertions
  *   @weaveintel/guardrails    — createGuardrailPipeline, risk classification
  *   @weaveintel/human-tasks   — PolicyEvaluator for automatic human-review triggers
  *   @weaveintel/prompts       — shared prompt record parsing + variable-substituted rendering
@@ -23,7 +23,7 @@
  */
 
 import { newUUIDv7, createLogger } from '@weaveintel/core';
-import type { DurableConsentManager } from '@weaveintel/compliance';
+import type { DurableConsentManager } from '@weaveintel/guardrails/compliance';
 
 const log = createLogger('chat');
 import type { ServerResponse } from 'node:http';
@@ -54,11 +54,33 @@ import { DbToolPolicyResolver, DbToolRateLimiter, consoleAuditEmitter } from './
 import { DbToolAuditEmitter } from './tool-audit-emitter.js';
 import { DbToolApprovalGate } from './tool-approval-gate.js';
 import { createTemporalStore } from './temporal-store.js';
+import { createNoteAiService, createModelTextGenerator, agentCreateNote, agentNewFromTemplate, agentRecentNotes, agentExportNote } from './note-ai-sql.js';
+import { createColorizeTools } from './note-colorize-sql.js';
+import { createCreativeTools, createModelImageGenerator, createModelVisionVerifier } from './note-creative-sql.js';
+import { createStudyTool } from './note-study-sql.js';
+import { createTranslateTool } from './note-translate-sql.js';
+import { createScheduledAgentTool } from './note-scheduled-agent-sql.js';
+import { withAiPresence } from './note-ai-presence.js';
+import { createNotePublishService } from './note-publish-sql.js';
+import { createNoteGraphService } from './note-graph-sql.js';
+import { createNoteDbService } from './note-db-sql.js';
+import { createNoteCaptureService } from './note-capture-sql.js';
+import { createNoteMeetingService } from './note-meeting-sql.js';
+import { createNoteMemoryService } from './note-memory-sql.js';
+import { createTenantAppearanceService } from './tenant-appearance-sql.js';
+import { createAccountService } from './account-sql.js';
+import { createAnswerFeedbackService } from './answer-feedback-sql.js';
+import { createChatCitationsService } from './chat-citations-sql.js';
+import { createWorkspaceAccessService } from './workspace-access-sql.js';
+import { createTranslateUiTool } from './i18n-sql.js';
+import { createSuggestPromptsTool } from './suggested-prompts-sql.js';
+import { createNoteWorkspaceService } from './note-workspace-sql.js';
+import { createNoteSettingsService } from './note-settings-sql.js';
 import {
   applySkillsToPrompt,
   type SkillMatch,
 } from '@weaveintel/skills';
-import { createContract, DefaultCompletionValidator } from '@weaveintel/contracts';
+import { createContract, DefaultCompletionValidator } from '@weaveintel/core/contracts';
 import { ModelHealthTracker, createRuntimeRoutingAdapter } from '@weaveintel/routing';
 import type { RuntimeRoutingSlot } from '@weaveintel/core';
 import {
@@ -92,7 +114,7 @@ import { getActiveGuardrailEmbeddingModel } from './guardrail-judge.js';
 import { triggerConsolidationForUser } from './memory-consolidation.js';
 import { createSQLiteGraphMemoryStore } from './chat-graph-store.js';
 import { SQLiteAdapter } from './db-sqlite.js';
-import { createGraphMemoryStore } from '@weaveintel/graph';
+import { createGraphMemoryStore } from '@weaveintel/memory';
 import { normalizePersona } from './rbac.js';
 import {
   TEMPORAL_TOOL_POLICY,
@@ -381,6 +403,143 @@ export class ChatEngine {
           return { id: row.id, version: row.version };
         },
       } : {}),
+      // weaveNotes Phase 3: wire the `note_edit` tool so the agent can co-author the
+      // user's notes (direct or as a suggestion). Shares the engine's model config for
+      // generation; resolves the user's note access itself (no privilege escalation).
+      noteEdit: (a: { userId: string; noteId: string; markdown: string; mode: 'direct' | 'suggest' }) =>
+        withAiPresence(db, a.noteId, () => createNoteAiService(db, createModelTextGenerator(config)).agentEdit(a)),
+      // weaveNotes: wire the `restructure_note` tool so the agent can reorganise a whole note
+      // (reorder/group sections, fix hierarchy) and stage it as one suggestion. Resolves access itself.
+      noteRestructure: (a: { userId: string; noteId: string; outline?: string }) =>
+        withAiPresence(db, a.noteId, () => createNoteAiService(db, createModelTextGenerator(config)).agentRestructure(a)),
+      // weaveNotes Phase 4: wire the `note_publish` tool so the agent can publish a note
+      // as an artifact (privately — never auto-public). Resolves the user's note access +
+      // the sensitivity gate itself (no privilege escalation; restricted refused).
+      notePublish: (a: { userId: string; noteId: string; format?: 'markdown' | 'html' }) =>
+        createNotePublishService(db).agentPublish(a),
+      // weaveNotes Phase 3.1: wire the `create_note` tool so the agent can create a new
+      // note and fill it with content it produced (research / summary / plan / to-dos).
+      createNote: (a: { userId: string; tenantId?: string | null; title: string; markdown?: string }) =>
+        agentCreateNote(db, a),
+      // weaveNotes Phase 6: wire the `new_from_template` tool — start a note from a ready-made template.
+      noteNewFromTemplate: (a: { userId: string; tenantId?: string | null; templateKey: string; title?: string }) =>
+        agentNewFromTemplate(db, a),
+      // weaveNotes Phase 8: wire the `recent_notes` tool — what has the user recently worked on.
+      noteRecentNotes: (a: { userId: string; tenantId?: string | null; limit?: number }) =>
+        agentRecentNotes(db, a),
+      // weaveNotes Phase 10: wire the `export_note` tool — export a note (Markdown/HTML/Word/JSON).
+      // Records an AI-actor activity entry on success, so the note's history shows the assistant
+      // exported it (and the change is understandable to later tools like read_note_activity).
+      noteExport: async (a: { userId: string; tenantId?: string | null; noteId: string; format?: string }) => {
+        const r = await agentExportNote(db, a);
+        if (r.ok) void createNoteSettingsService(db).recordActivity({ noteId: a.noteId, userId: a.userId, tenantId: a.tenantId ?? null, action: 'updated', actor: 'ai', summary: `Exported as ${r.format} (assistant)` });
+        return r;
+      },
+      // Answer feedback (m137): wire the `review_answer_feedback` tool — an aggregate, privacy-safe
+      // read-out of how the assistant's answers have been rated, so it can understand where it falls short.
+      reviewAnswerFeedback: (a: { tenantId: string | null; limit?: number }) =>
+        createAnswerFeedbackService(db).agentReviewFeedback(a),
+      // Answer citations (m138): wire the `cite_sources` tool — a grounded, verified-citation answer over
+      // the user's own workspace, so the assistant can back a claim with a real, checkable source.
+      citeSources: (a: { userId: string; tenantId?: string | null; question: string; limit?: number }) =>
+        createChatCitationsService(db, { aiGenerate: createModelTextGenerator(config) }).agentCiteSources(a),
+      // Workspace roles (m143): wire the `list_workspace_members` tool — a read-only, tenant-scoped team
+      // read-out so the assistant can answer "who's on my team / who are the admins?".
+      listWorkspaceMembers: (a: { userId: string; tenantId?: string | null; persona?: string | null }) =>
+        createWorkspaceAccessService(db).agentListMembers(a),
+      // Internationalisation (m145): wire the `translate_ui` tool — translate the whole app UI into a new
+      // language (an AI locale pack), reusing the notes faithful-translation engine.
+      translateUi: (a: { targetLanguage: string; tenantId?: string | null; userId?: string }) =>
+        createTranslateUiTool(db, createModelTextGenerator(config)).translateUi(a),
+      // Suggested/starter prompts (m146): wire the `suggest_prompts` tool — generate personalised conversation
+      // starters from the user's own recent notes + chats and cache them for the empty chat.
+      suggestPrompts: (a: { userId: string; tenantId?: string | null; count?: number }) =>
+        createSuggestPromptsTool(db, createModelTextGenerator(config)).suggestPrompts(a),
+      // weaveNotes Phase 5: wire the `find_related_notes` tool (semantic note search).
+      notesSearch: (a: { userId: string; tenantId?: string | null; query: string; limit?: number }) =>
+        createNoteGraphService(db).searchNotes({ userId: a.userId, tenantId: a.tenantId ?? null }, a.query, a.limit ?? 5),
+      // geneWeave UI rebuild: wire the `set_workspace_appearance` tool (white-label branding). Admin-gated:
+      // only a workspace admin (tenant/platform admin persona) may change the workspace look.
+      setWorkspaceAppearance: async (a: { userId: string; tenantId?: string | null; colorScheme?: string; variant?: string; accent?: string; cornerStyle?: string; density?: string }) => {
+        const persona = (await db.getUserById?.(a.userId))?.persona ?? '';
+        if (!['tenant_admin', 'platform_admin'].includes(persona)) return { ok: false, error: 'Only a workspace admin can change the workspace appearance.' };
+        return createTenantAppearanceService(db).agentSetAppearance({ tenantId: a.tenantId ?? '', ...(a.colorScheme ? { colorScheme: a.colorScheme } : {}), ...(a.variant ? { variant: a.variant } : {}), ...(a.accent ? { accent: a.accent } : {}), ...(a.cornerStyle ? { cornerStyle: a.cornerStyle } : {}), ...(a.density ? { density: a.density } : {}) });
+      },
+      // geneWeave UI rebuild: wire the `update_account_profile` tool. Always scoped to the signed-in user
+      // (userId comes from the session) — the assistant can never change another person's account.
+      updateAccountProfile: (a: { userId: string; profile?: Record<string, unknown>; notification?: { event: string; in_app?: boolean; email?: boolean; push?: boolean } }) =>
+        createAccountService(db).agentUpdateAccount(a),
+      // weaveNotes Phase 5: wire the `recall_second_brain` tool — temporally-aware memory recall.
+      notesRecallMemory: async (a: { userId: string; tenantId?: string | null; query: string; limit?: number }) => {
+        const cfg = await createNoteSettingsService(db).getConfig();
+        if (!cfg.backgroundMemoryEnabled) return { ok: true, count: 0, memories: [] };
+        return createNoteMemoryService(db, {
+          generate: createModelTextGenerator(config),
+          config: async () => ({ enabled: cfg.backgroundMemoryEnabled, importanceThreshold: cfg.memoryImportanceThreshold, maxPerNote: cfg.memoryMaxPerNote, recallCount: cfg.memoryRecallCount, decayHalfLifeDays: cfg.memoryDecayHalfLifeDays }),
+        }).agentRecall(a);
+      },
+      // weaveNotes Phase 4: wire the `summarize_meeting` tool — pasted transcript → structured note.
+      notesSummarizeMeeting: async (a: { userId: string; tenantId?: string | null; transcript: string; title?: string }) => {
+        const cfg = await createNoteSettingsService(db).getConfig();
+        if (!cfg.voiceCaptureEnabled) return { ok: false, error: 'Voice capture is disabled' };
+        return createNoteMeetingService(db, { generate: createModelTextGenerator(config) }).agentSummarizeMeeting(a);
+      },
+      // weaveNotes Phase 3: wire the `suggest_links` tool (proactive linking) — gated by the Builder dial.
+      notesLinkSuggest: async (a: { userId: string; tenantId?: string | null; noteId: string; apply?: string; max?: number }) => {
+        const cfg = await createNoteSettingsService(db).getConfig();
+        if (!cfg.proactiveLinkingEnabled) return { applied: { ok: false, error: 'Proactive linking is disabled' }, suggestions: [] };
+        const graph = createNoteGraphService(db);
+        const access = { noteId: a.noteId, ownerId: a.userId, tenantId: a.tenantId ?? null, role: 'owner' as const };
+        if (a.apply) return { applied: await graph.applyLink(a.noteId, access, a.apply) };
+        return { suggestions: await graph.linkSuggestions(a.noteId, access, { max: a.max ?? 8 }) };
+      },
+      // weaveNotes Phase 6: wire the `autofill_database` tool (AI fills a table column w/ citations).
+      dbAutofill: (a: { userId: string; tenantId?: string | null; databaseId: string; propertyKey: string; useWeb?: boolean }) =>
+        createNoteDbService(db, { generate: createModelTextGenerator(config) }).agentAutofill(a),
+      // weaveNotes Phase 7: wire the `capture_web_page` tool (clip a public page → structured note).
+      captureWeb: (a: { userId: string; tenantId?: string | null; url: string }) =>
+        createNoteCaptureService(db).agentCaptureWeb(a),
+      // weaveNotes Phase 8: wire the `workspace_search` tool (cited RAG over the user's notes + runs).
+      workspaceSearch: (a: { userId: string; tenantId?: string | null; query: string; limit?: number }) =>
+        createNoteWorkspaceService(db).agentWorkspaceSearch(a),
+      // weaveNotes Phase 0: wire the `read_note_activity` tool (recent change history → AI awareness).
+      readNoteActivity: (a: { userId: string; tenantId?: string | null; noteId: string; limit?: number }) =>
+        createNoteSettingsService(db).agentReadActivity(a),
+      // weaveNotes Phase 2: wire the AI selection card's colour tools. Each stages a
+      // track-changes suggestion (never a silent repaint); the AI picks a semantic label and
+      // the code maps it to a pre-validated WCAG-AA colour. Resolves note access itself.
+      noteApplyHighlight: (a: { userId: string; noteId: string; phrase: string; color?: string }) =>
+        createColorizeTools(db, createModelTextGenerator(config)).applyHighlight(a),
+      noteApplyTextColor: (a: { userId: string; noteId: string; phrase: string; color?: string }) =>
+        createColorizeTools(db, createModelTextGenerator(config)).applyTextColor(a),
+      noteColorize: (a: { userId: string; noteId: string; scheme: string; instruction?: string }) =>
+        createColorizeTools(db, createModelTextGenerator(config)).colorizeSemantic(a),
+      // weaveNotes Phase 4: wire the AI creative tools (diagram + ink). Each emits native,
+      // editable content as a track-changes suggestion + mirrors its SVG to an artifact.
+      noteCreateDiagram: (a: { userId: string; noteId: string; instruction: string }) =>
+        createCreativeTools(db, createModelTextGenerator(config), { generateImage: createModelImageGenerator(config) }).createDiagram(a),
+      noteDrawInk: (a: { userId: string; noteId: string; instruction: string }) =>
+        createCreativeTools(db, createModelTextGenerator(config), { generateImage: createModelImageGenerator(config) }).drawInk(a),
+      // weaveNotes Phase 4 (creative expansion): illustrations, generated images, and the
+      // one-stop auto-routing visual tool — so the agent can make ANY kind of picture.
+      noteCreateIllustration: (a: { userId: string; noteId: string; instruction: string }) =>
+        createCreativeTools(db, createModelTextGenerator(config), { generateImage: createModelImageGenerator(config) }).createIllustration(a),
+      noteGenerateImage: (a: { userId: string; noteId: string; instruction: string }) =>
+        createCreativeTools(db, createModelTextGenerator(config), { generateImage: createModelImageGenerator(config) }).generateImage(a),
+      noteCreateVisual: (a: { userId: string; noteId: string; instruction: string; kind?: string }) =>
+        createCreativeTools(db, createModelTextGenerator(config), { generateImage: createModelImageGenerator(config) }).createVisual(a as { userId: string; noteId: string; instruction: string; kind?: 'auto' | 'diagram' | 'ink' | 'illustration' | 'image' }),
+      // weaveNotes: wire the find_image tool — source a real, free-to-use image from the web (hardened fetch).
+      noteFindImage: (a: { userId: string; noteId: string; query: string }) =>
+        createCreativeTools(db, createModelTextGenerator(config), { generateImage: createModelImageGenerator(config), verifyVision: createModelVisionVerifier(config) }).findImage(a),
+      // weaveNotes Phase 5: wire the make_flashcards tool — turn a note into a spaced-repetition deck.
+      noteMakeFlashcards: (a: { userId: string; noteId: string; count?: number }) =>
+        createStudyTool(db, createModelTextGenerator(config)).makeFlashcards(a),
+      // weaveNotes Phase 2: wire the translate_note tool — translate a note into another language (new note).
+      noteTranslate: (a: { userId: string; noteId: string; targetLanguage: string; formality?: 'default' | 'formal' | 'informal'; glossary?: string[] }) =>
+        createTranslateTool(db, createModelTextGenerator(config)).translateNote(a),
+      // weaveNotes Phase 3: wire the manage_scheduled_agent tool — set up / run a recurring note task.
+      noteScheduledAgent: (a: { userId: string; op: 'create' | 'list' | 'run'; agentId?: string; name?: string; recipe?: string; cron?: string; timezone?: string; scope?: string; taskPrompt?: string }) =>
+        createScheduledAgentTool(db, createModelTextGenerator(config)).manageScheduledAgent(a),
     };
   }
 
@@ -1082,7 +1241,7 @@ export class ChatEngine {
   ): ToolRegistryOptions {
     // P4-3: Build graph store when graph tools are enabled.
     // Use SQLite-backed store when persist is enabled and raw DB is accessible.
-    let graphStore: import('@weaveintel/graph').GraphMemoryStore | undefined;
+    let graphStore: import('@weaveintel/memory').GraphMemoryStore | undefined;
     if (settings.graphEnabled) {
       if (settings.graphPersistEnabled && this.db instanceof SQLiteAdapter) {
         graphStore = createSQLiteGraphMemoryStore(this.db.rawDb, chatId, userId);
@@ -1095,6 +1254,8 @@ export class ChatEngine {
       ...this.toolOptions,
       defaultTimezone: settings.timezone,
       currentUserId: userId,
+      ...(tenantId != null ? { currentTenantId: tenantId } : {}),
+      ...(userPersona ? { currentPersona: userPersona } : {}),
       currentChatId: chatId,
       // Phase 3: run-scope artifacts produced via /api/me/runs (the executor
       // stamps ctx.metadata.runId) so `artifacts.run_id` is populated.

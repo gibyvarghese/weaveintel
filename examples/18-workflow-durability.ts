@@ -518,7 +518,7 @@ if (!process.env['ANTHROPIC_API_KEY']) {
   }));
 
   // Agent tools for workflow control
-  const tools: import('@anthropic-ai/sdk').Tool[] = [
+  const tools: import('@anthropic-ai/sdk').default.Tool[] = [
     {
       name: 'run_workflow',
       description: 'Execute a workflow by ID and return run ID and status.',
@@ -562,7 +562,7 @@ if (!process.env['ANTHROPIC_API_KEY']) {
     return JSON.stringify({ error: 'Unknown tool' });
   }
 
-  const messages: import('@anthropic-ai/sdk').MessageParam[] = [
+  const messages: import('@anthropic-ai/sdk').default.MessageParam[] = [
     {
       role: 'user',
       content: 'Run the "agent-pipeline" workflow with no input, then check the audit trail for the run. Tell me how many audit events were recorded and what types they are.',
@@ -580,7 +580,7 @@ if (!process.env['ANTHROPIC_API_KEY']) {
   // Agentic loop
   while (response.stop_reason === 'tool_use') {
     const toolUseBlocks = response.content.filter(b => b.type === 'tool_use');
-    const results: import('@anthropic-ai/sdk').MessageParam['content'] = [];
+    const results: import('@anthropic-ai/sdk').default.MessageParam['content'] = [];
 
     for (const block of toolUseBlocks) {
       if (block.type !== 'tool_use') continue;

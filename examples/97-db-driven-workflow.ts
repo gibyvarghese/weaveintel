@@ -115,7 +115,7 @@ async function main() {
   for (const [k, v] of Object.entries(run.state.variables)) {
     console.log(`  ${k} = ${JSON.stringify(v)}`);
   }
-  console.log('Steps executed:', run.state.completedSteps);
+  console.log('Steps executed:', run.state.history.map((s) => s.stepId));
 }
 
 main().catch((err) => {

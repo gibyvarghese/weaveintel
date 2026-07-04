@@ -1,5 +1,5 @@
 /**
- * @weaveintel/guardrails — pipeline-conditions.test.ts  (Phase 2)
+ * @weaveintel/guardrails — pipeline-conditions.test.ts
  *
  * Integration tests for conditionContext wiring in DefaultGuardrailPipeline.
  * Verifies: skipping, audit completeness, shortCircuitOnDeny interaction,

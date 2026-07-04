@@ -19,7 +19,7 @@
 import { weaveContext, weaveRuntime } from '@weaveintel/core';
 import type { ExecutionContext } from '@weaveintel/core';
 import { weaveAgent } from '@weaveintel/agents';
-import { createMockModel } from '@weaveintel/devtools';
+import { weaveFakeModel } from '@weaveintel/testing';
 
 const runtime = weaveRuntime({});
 
@@ -35,9 +35,9 @@ async function scenario1PersonalizedContext() {
   const retrieveCallLog: string[] = [];
 
   const agent = weaveAgent({
-    model: createMockModel([
+    model: weaveFakeModel({ responses: [
       { content: 'Based on what I know about you: you enjoy coffee and prefer dark mode. How can I help?' },
-    ]),
+    ] }),
     name: 'personalised-agent',
     systemPrompt: 'You are a helpful assistant.',
     maxSteps: 3,
@@ -74,9 +74,9 @@ async function scenario2ContextTrimming() {
   const HUGE_CONTEXT = 'Important memory: '.repeat(500); // ~9000 chars
 
   const agent = weaveAgent({
-    model: createMockModel([
+    model: weaveFakeModel({ responses: [
       { content: 'I will use the relevant parts of your memory context.' },
-    ]),
+    ] }),
     name: 'trim-agent',
     systemPrompt: 'You are a concise assistant.',
     maxSteps: 3,
@@ -102,9 +102,9 @@ async function scenario3RetrieveThrows() {
   console.log('\n── Scenario 3: retrieve() throws — agent continues gracefully ──');
 
   const agent = weaveAgent({
-    model: createMockModel([
+    model: weaveFakeModel({ responses: [
       { content: 'I could not access memory context but I am happy to help!' },
-    ]),
+    ] }),
     name: 'resilient-agent',
     systemPrompt: 'You are a helpful assistant.',
     maxSteps: 3,
@@ -133,10 +133,10 @@ async function scenario4MultiStepContextRefresh() {
   let callCount = 0;
 
   const agent = weaveAgent({
-    model: createMockModel([
-      { toolCalls: [{ id: 'tc1', name: 'non_existent_tool', arguments: '{}' }] },
+    model: weaveFakeModel({ responses: [
+      { content: '', toolCalls: [{ id: 'tc1', function: { name: 'non_existent_tool', arguments: '{}' } }] },
       { content: 'Task complete after using context on both steps.' },
-    ]),
+    ] }),
     name: 'multi-step-agent',
     maxSteps: 5,
     memoryContext: {

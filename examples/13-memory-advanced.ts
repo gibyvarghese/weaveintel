@@ -30,7 +30,7 @@ import {
   applyApprovedProcedural,
   runProceduralCurator,
 } from '@weaveintel/memory';
-import { createGraphMemoryStore, createEntityLinker, createGraphRetriever } from '@weaveintel/graph';
+import { createGraphMemoryStore, createEntityLinker, createGraphRetriever } from '@weaveintel/memory';
 import { InMemoryHumanTaskRepository } from '@weaveintel/human-tasks';
 import { weaveFakeEmbedding } from '@weaveintel/testing';
 import type { MemoryEntry } from '@weaveintel/core';

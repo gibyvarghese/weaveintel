@@ -38,6 +38,7 @@ import type * as net from 'node:net';
 import * as crypto from 'node:crypto';
 import * as dotenv from 'dotenv';
 import { weaveAgent } from '@weaveintel/agents';
+import { weaveOpenAIModel } from '@weaveintel/provider-openai';
 import {
   weaveAgentAsA2AServer,
   weaveA2AClient,
@@ -118,9 +119,8 @@ async function createA2AHttpServer(agentName: string, agentUrl?: string): Promis
 
   const agent = weaveAgent({
     name: agentName,
-    model: 'openai/gpt-4o-mini',
-    apiKey: OPENAI_API_KEY!,
-    instructions: 'You are a concise test agent. Always answer in ≤ 2 sentences.',
+    model: weaveOpenAIModel('gpt-4o-mini', { apiKey: OPENAI_API_KEY! }),
+    systemPrompt: 'You are a concise test agent. Always answer in ≤ 2 sentences.',
   });
 
   const a2aImpl = weaveAgentAsA2AServer({
@@ -346,12 +346,12 @@ async function path3_jwtAuthGate() {
 
   const agent = weaveAgent({
     name: 'jwt-test-agent',
-    model: 'openai/gpt-4o-mini',
-    apiKey: OPENAI_API_KEY!,
-    instructions: 'Concise test agent.',
+    model: weaveOpenAIModel('gpt-4o-mini', { apiKey: OPENAI_API_KEY! }),
+    systemPrompt: 'Concise test agent.',
   });
 
-  const a2aImpl = weaveAgentAsA2AServer(agent, {
+  const a2aImpl = weaveAgentAsA2AServer({
+    agent,
     card: {
       name: 'jwt-test-agent',
       description: 'JWT test',

@@ -29,6 +29,8 @@ import type { AccessTokenResolver } from '@weaveintel/core';
 import { weaveContext } from '@weaveintel/core';
 import { weaveMCPServer } from '@weaveintel/mcp-server';
 import { weaveFakeTransport } from '@weaveintel/testing';
+import { weaveWorkingMemory } from '@weaveintel/memory';
+import { createMockModel } from '@weaveintel/devtools';
 import {
   createActionExecutor,
   createCompressionMaintainer,
@@ -669,7 +671,7 @@ async function main() {
     provider: 'cse',
     accountIdentifier: 'workspace://weaveintel-main',
     description: 'CSE workspace bound to the weaveintel main repo.',
-    mcpServerRef: { type: 'http', url: 'fixture://cse', version: '1.0.0' },
+    mcpServerRef: { url: 'fixture://cse', serverType: 'HTTP', discoveryHint: null },
     credentialVaultRef: 'vault://cse/fixture',
     upstreamScopesDescription: 'read/write repo, run tests, open PRs',
     ownerHumanId: 'human:giby',
@@ -684,8 +686,8 @@ async function main() {
     id: 'binding-coder-cse',
     agentId: coder.id,
     accountId: cseAccount.id,
-    purposeProse: 'Cody needs CSE workspace access to implement and test features.',
-    scopeProse: 'Write to feature branches, run tests, open PRs against main.',
+    purpose: 'Cody needs CSE workspace access to implement and test features.',
+    constraints: 'Write to feature branches, run tests, open PRs against main.',
     grantedByHumanId: 'human:giby',
     grantedAt: T0,
     expiresAt: null,
@@ -942,14 +944,15 @@ async function main() {
 
   banner('11. Compression maintainer runs — working memory snapshots');
 
-  const maintainer = createCompressionMaintainer({ stateStore: store, runOnce: true });
+  const workingMemory = weaveWorkingMemory();
+  const maintainer = createCompressionMaintainer({ stateStore: store, workingMemory, runOnce: true });
   await maintainer.run(ctx);
   console.log('  Compression pass completed.');
 
   // Inspect the coder's working memory after compression.
-  const coderMemory = await store.loadWorkingMemory?.(coder.id);
+  const coderMemory = await workingMemory.getCurrent(ctx, coder.id);
   if (coderMemory) {
-    const entries = (coderMemory as { artefacts?: unknown[] }).artefacts ?? [];
+    const entries = (coderMemory.content as { artefacts?: unknown[] }).artefacts ?? [];
     console.log(`  Coder working-memory artefacts: ${entries.length}`);
   }
 
@@ -1033,6 +1036,7 @@ async function main() {
     stateStore: store,
     workerId: 'worker-coding-1',
     concurrency: 4,
+    model: createMockModel({ responses: ['ack'] }),
     attentionPolicy,
     actionExecutor: executor,
     now: () => T5,

@@ -1,5 +1,5 @@
 /**
- * @weaveintel/artifacts — Phase 4: Streaming Artifact Lifecycle
+ * @weaveintel/artifacts — Streaming Artifact Lifecycle
  *
  * Provides `ArtifactStreamHandle<T>` and `streamArtifact<T>()` for
  * progressive, real-time artifact generation (large reports, live data).

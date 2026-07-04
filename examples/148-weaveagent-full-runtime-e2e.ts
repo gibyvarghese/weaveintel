@@ -77,7 +77,7 @@ import {
   createRuntimeMemoryAdapter,
 } from '@weaveintel/memory';
 
-import { createRuntimeComplianceAdapter } from '@weaveintel/compliance';
+import { createRuntimeComplianceAdapter } from '@weaveintel/guardrails/compliance';
 import { createRuntimeIdentityAdapter } from '@weaveintel/identity';
 
 import {
@@ -150,7 +150,7 @@ setDefaultSignalBus(signalBus);
 const resilienceAdapter = createRuntimeResilienceAdapter(signalBus);
 
 // Listen for any signal emission so we can see it in the output.
-signalBus.on('http_call', (sig) => {
+signalBus.on((sig) => {
   info('  resilience signal received', `${sig.kind} @ ${sig.endpoint}`);
 });
 
@@ -479,7 +479,7 @@ runtime.routing!.recordOutcome('gpt-4o-mini', 'openai', 95,  true);
 const healthList = runtime.routing!.listHealth();
 info('health records', healthList.length);
 for (const h of healthList) {
-  info(`  ${h.modelId}`, `p50=${h.latencyP50?.toFixed(0) ?? '—'}ms  healthy=${h.healthy}`);
+  info(`  ${h.modelId}`, `p50=${h.p50LatencyMs?.toFixed(0) ?? '—'}ms  healthy=${h.available}`);
 }
 check('supportsMultiModal', runtime.routing!.supportsMultiModal?.() === true);
 
@@ -542,7 +542,8 @@ const runtimeInspectTool = weaveTool({
   },
 });
 
-const tools = weaveToolRegistry({ tools: [runtimeInspectTool] });
+const tools = weaveToolRegistry();
+tools.register(runtimeInspectTool);
 
 // gpt-4o is used here because gpt-4o-mini sometimes describes tool calls
 // as text rather than invoking them. For a production scenario where

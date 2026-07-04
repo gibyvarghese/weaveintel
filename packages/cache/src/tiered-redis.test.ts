@@ -1,5 +1,5 @@
 /**
- * @weaveintel/cache — Phase 1 tests: distributed L2 (Redis) + tiered store.
+ * @weaveintel/cache — tests: distributed L2 (Redis) + tiered store.
  *
  * Uses a faithful in-memory fake of the RedisLikeClient (TTL via PX, glob KEYS)
  * for deterministic positive/negative/stress/security coverage, plus an

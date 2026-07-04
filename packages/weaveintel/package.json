@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/weaveintel",
-  "version": "0.0.1",
+  "version": "0.1.1",
   "description": "Meta-package: the curated entry point most adopters need. Re-exports the eight packages that make up the weaveIntel ambient runtime.",
   "type": "module",
   "main": "./dist/index.js",
@@ -13,7 +13,9 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*"
   ],
   "scripts": {
     "build": "tsc -b",
@@ -22,15 +24,17 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@weaveintel/agents": "*",
-    "@weaveintel/core": "*",
-    "@weaveintel/observability": "*",
-    "@weaveintel/persistence": "*",
-    "@weaveintel/reliability": "*",
-    "@weaveintel/resilience": "*",
-    "@weaveintel/tools": "*"
+    "@weaveintel/agents": "^0.1.1",
+    "@weaveintel/core": "^0.1.1",
+    "@weaveintel/observability": "^0.1.1",
+    "@weaveintel/persistence": "^0.1.1",
+    "@weaveintel/resilience": "^0.1.1",
+    "@weaveintel/tools": "^0.1.1"
   },
   "devDependencies": {
     "typescript": "^5.4.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

@@ -1,7 +1,7 @@
 /**
  * GeneWeave — chat-scope-guard.ts
  *
- * GeneWeave-specific integration of @weaveintel/scope.
+ * GeneWeave-specific integration of @weaveintel/identity/scope.
  *
  * This module bridges the generic scope enforcement package with geneweave's
  * database adapter, skill discovery pipeline, and live agent mesh activation.
@@ -41,7 +41,7 @@ import {
   type CrossScopeToken,
   type AgentScope,
   type ScopeCrossPolicy,
-} from '@weaveintel/scope';
+} from '@weaveintel/identity/scope';
 import type { SkillMatch } from '@weaveintel/skills';
 import type { ScopesAdapterMethods } from './db-types/adapter-scopes.js';
 
@@ -214,7 +214,7 @@ export class ChatScopeGuard {
 
   /**
    * Derives a child context after a cross-scope delegation is authorized.
-   * Wraps deriveScopeContext() from @weaveintel/scope.
+   * Wraps deriveScopeContext() from @weaveintel/identity/scope.
    */
   deriveContext(
     parent: ScopeContext,

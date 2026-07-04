@@ -3,25 +3,25 @@
  *
  * Per docs/KAGGLE_AGENT_DESIGN.md §3 and §6:
  *   - Every Kaggle work product (submission, validator pass, ideation cycle) is
- *     a first-class @weaveintel/contracts AgentContract with an evidence
+ *     a first-class @weaveintel/core/contracts AgentContract with an evidence
  *     bundle: { kernelRef, kernelOutputUrl, submissionCsvSha256, leaderboardJson,
  *     validatorReport }.
- *   - Every run is reproducible via a @weaveintel/replay RunLog so the operator
+ *   - Every run is reproducible via a @weaveintel/observability/replay RunLog so the operator
  *     can re-execute the exact tool sequence deterministically.
  *
  * `materializeKaggleRun()` is the ONE entry point that:
  *   1. Builds the EvidenceBundle from raw submission outputs
- *   2. Creates the AgentContract + CompletionReport via @weaveintel/contracts
+ *   2. Creates the AgentContract + CompletionReport via @weaveintel/core/contracts
  *   3. Writes (or upserts) the kaggle_runs projection row
  *   4. Stores the contract report JSON + replay run-log JSON in
  *      kaggle_run_artifacts so admin UI + replay endpoint can reconstruct.
  *
  * `replayKaggleRun()` loads the stored RunLog and runs the deterministic
- * @weaveintel/replay engine. CI uses this for round-trip testing.
+ * @weaveintel/observability/replay engine. CI uses this for round-trip testing.
  */
 import { newUUIDv7 } from '@weaveintel/core';
-import { createContract, createCompletionReport, createEvidenceBundle, evidence } from '@weaveintel/contracts';
-import { ReplayEngine, type ReplayResult, type ReplayOptions } from '@weaveintel/replay';
+import { createContract, createCompletionReport, createEvidenceBundle, evidence } from '@weaveintel/core/contracts';
+import { ReplayEngine, type ReplayResult, type ReplayOptions } from '@weaveintel/observability/replay';
 import type { ExecutionContext, RunLog, EvidenceBundle, CompletionReport } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../db.js';
 import type { KaggleRunRow, KaggleRunArtifactRow } from '../db-types.js';
@@ -46,7 +46,7 @@ export interface MaterializeKaggleRunInput {
   submissionId?: string | null;
   status?: string;                // default 'submitted'
   evidenceInput: KaggleEvidenceInput;
-  runLog: RunLog;                 // the @weaveintel/replay trace to persist
+  runLog: RunLog;                 // the @weaveintel/observability/replay trace to persist
 }
 
 export interface MaterializeKaggleRunResult {

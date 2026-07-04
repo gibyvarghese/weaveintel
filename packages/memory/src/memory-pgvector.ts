@@ -13,7 +13,7 @@
  */
 
 import type { MemoryEntry, MemoryType, MemoryQuery, ExecutionContext } from '@weaveintel/core';
-import type { GraphRetriever } from '@weaveintel/graph';
+import type { GraphRetriever } from './index.js';
 import { Pool } from 'pg';
 import { type DurableMemoryStore, computeImportance } from './memory-internal.js';
 

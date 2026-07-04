@@ -57,8 +57,8 @@ async function scenario1PerStepCheckpoint() {
 
   const usage = { promptTokens: 10, completionTokens: 5, totalTokens: 15 };
   const model = makeToolCallingModel([
-    { id: '1', model: 'stub', content: '', toolCalls: [{ id: 'tc1', name: 'increment', arguments: '{"value":0}' }], finishReason: 'tool_use', usage },
-    { id: '2', model: 'stub', content: '', toolCalls: [{ id: 'tc2', name: 'increment', arguments: '{"value":1}' }], finishReason: 'tool_use', usage },
+    { id: '1', model: 'stub', content: '', toolCalls: [{ id: 'tc1', name: 'increment', arguments: '{"value":0}' }], finishReason: 'tool_calls', usage },
+    { id: '2', model: 'stub', content: '', toolCalls: [{ id: 'tc2', name: 'increment', arguments: '{"value":1}' }], finishReason: 'tool_calls', usage },
     { id: '3', model: 'stub', content: 'Counter reached 2. Done.', toolCalls: [], finishReason: 'stop', usage },
   ]);
 
@@ -98,7 +98,7 @@ async function scenario2BudgetExceededCheckpoint() {
   const usage = { promptTokens: 600, completionTokens: 500, totalTokens: 1100 };
 
   const model = makeToolCallingModel([
-    { id: '1', model: 'stub', content: '', toolCalls: [{ id: 'tc1', name: 'noop', arguments: '{}' }], finishReason: 'tool_use', usage },
+    { id: '1', model: 'stub', content: '', toolCalls: [{ id: 'tc1', name: 'noop', arguments: '{}' }], finishReason: 'tool_calls', usage },
     { id: '2', model: 'stub', content: 'done', toolCalls: [], finishReason: 'stop', usage },
   ]);
 

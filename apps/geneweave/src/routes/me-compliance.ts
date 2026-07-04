@@ -3,7 +3,7 @@
  *
  *   DELETE /api/me/account
  *     Initiates account deletion. Creates a durable compliance audit record via
- *     @weaveintel/compliance, then immediately deletes all user data through
+ *     @weaveintel/guardrails/compliance, then immediately deletes all user data through
  *     the existing db.deleteUser() path. Returns 202 Accepted so callers can
  *     handle async semantics if a durable backend is added later.
  *
@@ -22,7 +22,7 @@ import type { WeaveRuntime } from '@weaveintel/core';
 import {
   createDurableDeletionManager,
   createDurableAuditExportManager,
-} from '@weaveintel/compliance';
+} from '@weaveintel/guardrails/compliance';
 
 export function registerMeComplianceRoutes(
   router: Router,

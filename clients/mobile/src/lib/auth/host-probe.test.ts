@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import type { GeneweaveClient } from '@geneweave/api-client';
-import { AuthExpiredError } from '@geneweave/api-client';
+import type { GeneweaveClient } from '@weaveintel/api-client';
+import { AuthExpiredError } from '@weaveintel/api-client';
 import { createCatalogHostProbe } from './host-probe.js';
 
 function clientWithCatalog(impl: () => Promise<{ surfaceId: string }>): GeneweaveClient {

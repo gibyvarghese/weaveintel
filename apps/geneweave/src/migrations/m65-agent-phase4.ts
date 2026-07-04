@@ -36,7 +36,7 @@ export function applyM65AgentPhase4(db: BetterSqlite3.Database): void {
       -- Scope
       chat_id         TEXT NOT NULL,
       user_id         TEXT NOT NULL,
-      -- Entity fields (mirror @weaveintel/graph EntityNode)
+      -- Entity fields (mirror @weaveintel/memory EntityNode)
       entity_id       TEXT NOT NULL,     -- application-level ID (e.g. "person:alice")
       entity_type     TEXT NOT NULL,
       entity_name     TEXT NOT NULL,
@@ -68,7 +68,7 @@ export function applyM65AgentPhase4(db: BetterSqlite3.Database): void {
       -- Scope
       chat_id         TEXT NOT NULL,
       user_id         TEXT NOT NULL,
-      -- Edge fields (mirror @weaveintel/graph RelationshipEdge)
+      -- Edge fields (mirror @weaveintel/memory RelationshipEdge)
       source_entity_id TEXT NOT NULL,    -- references agent_graph_nodes.entity_id
       target_entity_id TEXT NOT NULL,
       relationship_type TEXT NOT NULL,

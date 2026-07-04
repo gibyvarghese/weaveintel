@@ -1,5 +1,5 @@
 /**
- * @weaveintel/cache — Phase 0 hardening tests
+ * @weaveintel/cache — hardening tests
  *
  * Covers bounded store + eviction, salted/hashed keys, scope isolation,
  * determinism gating, and response-side bypass. Includes positive, negative,

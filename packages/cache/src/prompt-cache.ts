@@ -1,5 +1,5 @@
 /**
- * @weaveintel/cache — Provider-native prompt-cache planning (Phase 2).
+ * @weaveintel/cache — Provider-native prompt-cache planning.
  *
  * Provider prompt caching (Anthropic explicit `cache_control`, OpenAI/Gemini
  * implicit) discounts the *stable prefix* of a request — the system prompt plus

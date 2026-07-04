@@ -1,5 +1,5 @@
 /**
- * spacing.ts — geneWeave spacing, radii, and elevation scales.
+ * spacing.ts — spacing, radii, and elevation scales.
  *
  * Spacing is a strict 4-pt grid. Elevation shadow specs are theme-dependent
  * (dark surfaces use deeper black shadows), so the elevation ramps are keyed

@@ -7,6 +7,42 @@ and this project adheres to [Fabric Versioning](VERSIONING.md).
 
 ---
 
+## [0.1.1] — The open-core restructure
+
+A repo-wide restructure that consolidated **~87 tiny packages down to 46 focused, MIT-licensed
+`@weaveintel/*` framework packages**, cleanly separated from the geneWeave community-edition apps. Every
+surviving package is released together at **0.1.1**. See [`MIGRATION.md`](MIGRATION.md) for the full
+old→new map and per-package import-rewrite examples, and [`ROADMAP.md`](ROADMAP.md) for what's next.
+
+### Consolidated
+
+- **`@weaveintel/collab`** merges the former `coedit` + `collaboration` — one presence model, a `CoeditDoc`
+  port (RGA is the zero-dependency reference adapter; a Yjs adapter is documented, no Yjs dependency added).
+- **`@weaveintel/tools`** absorbs ~20 `tools-*` packages behind **tree-shakeable subpath imports**
+  (`@weaveintel/tools/gmail`, `/slack`, `/marketdata`, …). `sideEffects: false` + a lean root barrel mean
+  importing `/gmail` never pulls `/marketdata`. `tools-browser` (Playwright) and `tools-enterprise` stay
+  separate.
+- Further merges: `resilience` (← reliability + durability); `guardrails` (+`/redaction`, `/compliance`,
+  `/spotlighting`); `identity` (+`/oauth`, `/tenancy`, `/scope`); `core` (+`/models`, `/contracts`,
+  `/plugins`, `/capability-packs`, `/i18n`); `testing` (+`/evals`); `observability` (+`/replay`); `agents`
+  (+`/recipes`); `live-agents` (+`/trace-tools`); `memory` (← graph); `client` (+`/react`).
+
+### Changed
+
+- **`@weaveintel/tokens`** is now a brand-neutral theming *engine* that takes your palette as input (schema
+  + colour maths + a configurable CSS-variable transform + per-tenant white-label). The geneWeave brand
+  values moved into the app.
+- **`@weaveintel/notes`** is now a slim, brand-free "structured notes as a capability" layer (port +
+  contract test + doc model); product features live in the apps.
+- Every published package ships a README following a plain-language what / why / when / how structure.
+
+### Migrating
+
+- Update imports per [`MIGRATION.md`](MIGRATION.md) (e.g. `@weaveintel/tools-gmail` →
+  `@weaveintel/tools/gmail`, `@weaveintel/reliability` → `@weaveintel/resilience`).
+- Retired package names are **deprecated on npm** with a message naming their replacement — nothing is
+  unpublished, so existing installs keep working while you migrate.
+
 ## [Unreleased]
 
 ### Live-Agents — DB-Driven Runtime Phase 3.5: Per-Agent Model Routing

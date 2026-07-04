@@ -1,5 +1,5 @@
 /**
- * errors.ts — typed error hierarchy for @geneweave/api-client.
+ * errors.ts — typed error hierarchy for @weaveintel/api-client.
  *
  * Every non-2xx response that a typed method cannot turn into a meaningful
  * result surfaces as a `GeneweaveApiError` (or a subclass). Callers (the mobile

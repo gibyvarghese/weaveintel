@@ -1,11 +1,36 @@
 {
   "name": "@weaveintel/artifacts",
-  "version": "0.0.1",
+  "version": "0.1.1",
   "type": "module",
-  "exports": { ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "scripts": { "build": "tsc -b", "typecheck": "tsc --noEmit", "test": "vitest run", "clean": "rm -rf dist" },
-  "dependencies": { "@weaveintel/core": "*" },
-  "devDependencies": { "typescript": "^5.7.0", "vitest": "^3.2.6" }
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@weaveintel/core": "^0.1.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.6"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*"
+  ],
+  "description": "Generated shareable artifacts with redaction and sensitivity gating."
 }

@@ -21,6 +21,12 @@ export {
   createTokenBucket,
 } from './token-bucket.js';
 export {
+  type KeyedRateLimiter,
+  type KeyedRateLimiterOptions,
+  type RateDecision,
+  createKeyedRateLimiter,
+} from './keyed-rate-limiter.js';
+export {
   type CircuitBreaker,
   type CircuitBreakerOptions,
   type CircuitState,
@@ -84,6 +90,20 @@ export {
   type RuntimeResilienceAdapter,
   createRuntimeResilienceAdapter,
 } from './runtime-adapter.js';
+
+/**
+ * Operational DURABILITY primitives — merged in from the former `@weaveintel/reliability`
+ * and `@weaveintel/durability` (Phase 4 consolidation). Live per-call guards (above) and
+ * operational durability (idempotency, dead-letter, retry budget, health, backpressure, and
+ * the queue-based durable concurrency limiter) are two sides of the same resilience concern,
+ * so they now ship as one package. `@weaveintel/durability` was only a re-export shim.
+ */
+export * from './idempotency.js';
+export * from './retry-budget.js';
+export * from './dead-letter.js';
+export * from './backpressure.js';
+export * from './health.js';
+export * from './durable-concurrency.js';
 
 /**
  * Canonical provider-level resilience defaults (Phase 5 — consolidation).

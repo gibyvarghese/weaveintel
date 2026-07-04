@@ -2,16 +2,16 @@ import { describe, it, expect } from 'vitest';
 import {
   TOKENS_SCHEMA_VERSION,
   SPACING_BASE_UNIT,
-  themes,
+  neutralThemes,
   spacing,
   radii,
   typography,
   motion,
-  darkColors,
-  lightColors,
+  neutralDark,
+  neutralLight,
 } from './index.js';
 
-describe('@geneweave/tokens barrel', () => {
+describe('@weaveintel/tokens barrel', () => {
   it('exports a stable schema version', () => {
     expect(TOKENS_SCHEMA_VERSION).toBe(1);
   });
@@ -22,11 +22,11 @@ describe('@geneweave/tokens barrel', () => {
     expect(spacing.md).toBe(12);
   });
 
-  it('exposes assembled dark and light themes with all token groups', () => {
+  it('exposes assembled dark and light neutralThemes with all token groups', () => {
     for (const name of ['dark', 'light'] as const) {
-      const t = themes[name];
+      const t = neutralThemes[name];
       expect(t.name).toBe(name);
-      expect(t.colors).toBe(name === 'dark' ? darkColors : lightColors);
+      expect(t.colors).toBe(name === 'dark' ? neutralDark : neutralLight);
       expect(t.typography).toBe(typography);
       expect(t.spacing).toBe(spacing);
       expect(t.radii).toBe(radii);
@@ -34,11 +34,12 @@ describe('@geneweave/tokens barrel', () => {
     }
   });
 
-  it('defines the three brand font families', () => {
+  it('defines NEUTRAL default font families (apps override with their own brand fonts)', () => {
     expect(typography.families).toEqual({
-      display: 'Fraunces',
-      body: 'Plus Jakarta Sans',
-      mono: 'DM Mono',
+      display: 'system-ui',
+      body: 'system-ui',
+      mono: 'ui-monospace',
+      hand: 'cursive',
     });
   });
 

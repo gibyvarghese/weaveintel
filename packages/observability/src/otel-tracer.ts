@@ -1,5 +1,5 @@
 /**
- * @weaveintel/observability — OTel GenAI-compatible tracer (Phase 1)
+ * @weaveintel/observability — OTel GenAI-compatible tracer
  *
  * Implements the WeaveIntel `Tracer` interface while emitting spans
  * to an OTLP HTTP/JSON endpoint (Grafana Cloud, Honeycomb, Jaeger, etc.)
@@ -10,7 +10,7 @@
  *
  * Usage:
  *   import { createOtelTracer } from '@weaveintel/observability';
- *   const tracer = createOtelTracer({ serviceName: 'geneweave', endpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT });
+ *   const tracer = createOtelTracer({ serviceName: 'my-app', endpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT });
  *   // Falls back to console tracer when endpoint is falsy.
  *
  * OTLP endpoint convention:
@@ -244,7 +244,13 @@ export interface OtelTracerOptions {
    *  When falsy, the tracer falls back to a no-op / console-compatible sink
    *  so the same code runs in dev without an OTel collector. */
   endpoint?: string | null;
-  /** Service name (default: 'geneweave'). */
+  /**
+   * The `service.name` resource attribute stamped on every span (default:
+   * `'weaveintel'`). Set this to YOUR application's name. Per the OpenTelemetry
+   * spec an unset service name should read `unknown_service`; we default to the
+   * framework name instead so traces are attributable out of the box, but you
+   * should always pass your own so your service is identifiable in the backend.
+   */
   serviceName?: string;
   serviceVersion?: string;
   /** Extra resource attributes forwarded to every span. */
@@ -320,7 +326,7 @@ function createSpanImpl(
  * @example
  * ```ts
  * const tracer = createOtelTracer({
- *   serviceName: 'geneweave',
+ *   serviceName: 'my-app',
  *   endpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
  * });
  * ```
@@ -329,7 +335,8 @@ export function createOtelTracer(opts: OtelTracerOptions): Tracer & { sink: Trac
   const sink: TraceSink = opts.endpoint
     ? weaveOtlpSink({
         endpoint: opts.endpoint,
-        serviceName: opts.serviceName ?? 'geneweave',
+        // Brand-neutral framework default; consuming apps pass their own name.
+        serviceName: opts.serviceName ?? 'weaveintel',
         serviceVersion: opts.serviceVersion,
         resourceAttributes: opts.resourceAttributes,
         apiKey: opts.apiKey,

@@ -2,7 +2,7 @@
  * @weaveintel/agents — P4-3: Knowledge graph memory tools
  *
  * `createGraphMemoryToolSet(store)` exposes 4 tools backed by a
- * `GraphMemoryStore` (from @weaveintel/graph):
+ * `GraphMemoryStore` (from @weaveintel/memory):
  *
  *   graph_entity_add         — add/upsert an entity node
  *   graph_entity_search      — full-text search across nodes
@@ -14,7 +14,7 @@
  *
  * Usage:
  * ```ts
- * import { createGraphMemoryStore } from '@weaveintel/graph';
+ * import { createGraphMemoryStore } from '@weaveintel/memory';
  * import { createGraphMemoryToolSet } from '@weaveintel/agents';
  *
  * const store = createGraphMemoryStore();
@@ -25,8 +25,8 @@
 
 import { weaveTool, weaveToolRegistry } from '@weaveintel/core';
 import type { Tool, ToolRegistry } from '@weaveintel/core';
-import type { GraphMemoryStore } from '@weaveintel/graph';
-import { createEntityNode, createRelationshipEdge } from '@weaveintel/graph';
+import type { GraphMemoryStore } from '@weaveintel/memory';
+import { createEntityNode, createRelationshipEdge } from '@weaveintel/memory';
 
 export type { GraphMemoryStore };
 

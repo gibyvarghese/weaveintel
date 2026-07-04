@@ -56,6 +56,12 @@ export interface NoteListItem {
   favorite: number;
   created_at: string;
   updated_at: string;
+  /** weaveNotes Phase 6: archive/trash timestamp (NULL = active). Present on list rows. */
+  archived_at?: string | null;
+  /** weaveNotes Phase 6: gallery metadata, only on the /templates response (joined from the package). */
+  key?: string | null;
+  category?: string;
+  description?: string;
 }
 
 /** Full note with document content */
@@ -104,6 +110,16 @@ export const state: any = {
   recentChatsExpanded: true,
   sidebarCollapsed: false,
   sidebarScrollTop: 0,
+  // Set true while render() programmatically restores the sidebar scroll, so the nav's scroll listener
+  // doesn't persist the transient/clamped scrollTop that the restore itself triggers (which would degrade
+  // the saved position across a render burst). See render() in ui-client.ts.
+  suppressSidebarScrollPersist: false,
+  // Round 3 — transcript scroll retention/respect during streaming (same pattern as the sidebar).
+  transcriptScrollTop: 0,
+  transcriptAtBottom: true,
+  suppressTranscriptScrollPersist: false,
+  // Round 3 — files rejected on upload (with a reason), surfaced to the user instead of silently dropped.
+  uploadRejections: [] as Array<{ name: string; reason: string }>,
 
   // Calendar (widget)
   calendarTab: 'meetings',
@@ -130,9 +146,22 @@ export const state: any = {
   notesSearch: '' as string,
   currentNoteId: null as string | null,
   currentNote: null as NoteDoc | null,
-  notesView: 'list' as string,               // 'list' | 'editor' | 'templates'
+  notesView: 'list' as string,               // 'list' | 'editor' | 'templates' | 'databases' | 'archive'
+  notesTheme: 'pro' as 'pro' | 'creative',   // design Pro/Creative page theme (Notes editor)
   noteTemplates: [] as NoteListItem[],
+  notesArchived: [] as NoteListItem[],        // weaveNotes Phase 6: the archived/trash list
   noteDatabases: [] as any[],
+  currentDatabaseId: null as string | null,  // weaveNotes Phase 6: the open database
+
+  // Account settings surface (geneWeave UI rebuild — "GeneWeave Account.dc.html")
+  accountSection: 'profile' as string,
+  account: null as any,          // the loaded AccountView (profile + preferences + notifications)
+  accountDraft: null as any,     // working copy for dirty-tracked Profile/Preferences edits
+  accountLoaded: false,
+  accountLoading: false,
+  accountError: false,
+  accountPeople: null as any,    // { people[], canManage }
+  accountSaving: false,
 
   // Admin
   adminTab: 'prompts',

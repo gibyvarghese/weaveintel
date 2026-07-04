@@ -1,5 +1,5 @@
 /**
- * @weaveintel/a2a — Agent-to-Agent protocol implementation (v1.0, Phase 2)
+ * @weaveintel/a2a — Agent-to-Agent protocol implementation
  *
  * Phase 2 changes from Phase 1:
  *   - Wire format: JSON-RPC 2.0 over a single endpoint (all methods POST to agentUrl)

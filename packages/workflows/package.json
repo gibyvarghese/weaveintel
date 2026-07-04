@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/workflows",
-  "version": "0.0.1",
+  "version": "0.1.1",
   "description": "Workflow engine — definition builder, step execution, scheduling, compensation, checkpointing",
   "type": "module",
   "exports": {
@@ -21,8 +21,9 @@
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.810.0",
     "@aws-sdk/lib-dynamodb": "^3.810.0",
-    "@weaveintel/core": "*",
-    "@weaveintel/human-tasks": "*",
+    "@weaveintel/core": "^0.1.1",
+    "@weaveintel/human-tasks": "^0.1.1",
+    "@weaveintel/observability": "^0.1.1",
     "better-sqlite3": "^11.10.0",
     "mongodb": "^6.16.0",
     "pg": "^8.13.1",
@@ -33,5 +34,13 @@
     "@types/pg": "^8.11.10",
     "typescript": "^5.7.0",
     "vitest": "^3.2.6"
-  }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*"
+  ]
 }

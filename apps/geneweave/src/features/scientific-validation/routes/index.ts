@@ -17,7 +17,7 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { newUUIDv7 } from '@weaveintel/core';
-import { createDurableIdempotencyStore, type DurableIdempotencyEntry } from '@weaveintel/durability';
+import { createDurableIdempotencyStore, type DurableIdempotencyEntry } from '@weaveintel/resilience';
 import type { DatabaseAdapter } from '../../../db.js';
 import type { SVChatBridge, SVRunInput } from '../chat-bridge.js';
 

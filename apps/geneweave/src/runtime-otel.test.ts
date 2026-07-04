@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { weaveContext, weaveRuntime, weaveAudit, createRedactingAuditLogger, type AuditEntry } from '@weaveintel/core';
 import { createOtelTracer, GEN_AI } from '@weaveintel/observability';
-import { weaveRedactor } from '@weaveintel/redaction';
+import { weaveRedactor } from '@weaveintel/guardrails/redaction';
 import { createGeneWeave, type GeneWeaveApp } from './index.js';
 import { withLLMSpan } from './chat-trace-utils.js';
 

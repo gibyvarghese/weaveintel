@@ -91,3 +91,33 @@ export type {
   CuratorOptions,
   CuratorResult,
 } from './procedural.js';
+
+// ── Knowledge graph (merged from @weaveintel/graph, Phase 4) ─────────────────
+// Entity/relationship graph, in-memory store, document→entity linker, timeline
+// ordering, and graph-assisted retrieval. Folded in because the knowledge graph
+// is a memory store consumed by memory + agents, not a separate package.
+export {
+  type EntityNode,
+  type RelationshipEdge,
+  createEntityNode,
+  createRelationshipEdge,
+} from './entity.js';
+export {
+  type GraphMemoryStore,
+  createGraphMemoryStore,
+} from './store.js';
+export {
+  type LinkResult,
+  type EntityLinker,
+  createEntityLinker,
+} from './linker.js';
+export {
+  type TimelineEntry,
+  type TimelineGraph,
+  createTimelineGraph,
+} from './timeline.js';
+export {
+  type GraphRetrievalResult,
+  type GraphRetriever,
+  createGraphRetriever,
+} from './retriever.js';

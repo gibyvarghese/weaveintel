@@ -11,29 +11,37 @@
 
 import { weaveA2ASupervisor, createInMemoryA2ATaskStore } from '@weaveintel/agents';
 import type { ExecutionContext, A2ATaskSendParams } from '@weaveintel/core';
-import { a2aPartsText, newUUIDv7 } from '@weaveintel/core';
+import { a2aPartsText, newUUIDv7, weaveContext } from '@weaveintel/core';
 
 import type { Model } from '@weaveintel/core';
 
 // Stub model that responds to research + summary tasks
-const model: Model = {
+const model = {
+  info: { id: 'stub-supervisor', provider: 'stub', family: 'stub' },
   async generate(_ctx, req) {
-    const lastUser = req.messages.findLast((m) => m.role === 'user');
+    const userMsgs = req.messages.filter((m) => m.role === 'user');
+    const lastUser = userMsgs[userMsgs.length - 1];
     const text = typeof lastUser?.content === 'string' ? lastUser.content : '';
     if (/research|find|look/i.test(text)) {
       return {
+        id: 'stub-1',
         content: 'Research complete: Found 3 relevant papers on quantum computing published in 2024.',
         toolCalls: [],
+        finishReason: 'stop',
         usage: { promptTokens: 20, completionTokens: 25, totalTokens: 45 },
+        model: 'stub-supervisor',
       };
     }
     return {
+      id: 'stub-2',
       content: 'Summary: Task completed successfully with all sub-goals achieved.',
       toolCalls: [],
+      finishReason: 'stop',
       usage: { promptTokens: 15, completionTokens: 20, totalTokens: 35 },
+      model: 'stub-supervisor',
     };
   },
-};
+} as unknown as Model;
 
 // ── Create the supervisor ─────────────────────────────────────
 
@@ -41,7 +49,7 @@ const taskStore = createInMemoryA2ATaskStore();
 
 const supervisor = weaveA2ASupervisor({
   name: 'research-orchestrator',
-  description: 'Orchestrates research tasks across specialist agents',
+  systemPrompt: 'Orchestrates research tasks across specialist agents',
   model,
   taskStore,
   serverUrl: 'https://agents.example.com/research-orchestrator',
@@ -67,7 +75,7 @@ const supervisor = weaveA2ASupervisor({
 });
 
 async function main(): Promise<void> {
-  const ctx = { userId: 'demo-user', sessionId: 'a2a-demo' } as ExecutionContext;
+  const ctx: ExecutionContext = weaveContext({ userId: 'demo-user' });
 
   // 1. Discover — inspect Agent Card
   console.log('=== Agent Card ===');
@@ -121,7 +129,11 @@ async function main(): Promise<void> {
   let finalState = '';
   for await (const event of supervisor.handleStreamMessage(ctx, streamParams)) {
     eventCount++;
-    finalState = event.task.status.state;
+    if ('task' in event) {
+      finalState = event.task.status.state;
+    } else if ('statusUpdate' in event) {
+      finalState = event.statusUpdate.status.state;
+    }
   }
   console.log('Stream events received:', eventCount);
   console.log('Final task state:', finalState);

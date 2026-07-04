@@ -10,7 +10,7 @@ import {
   clearAuthCookie,
 } from '../auth.js';
 import { isValidPersona, personaPermissions } from '../rbac.js';
-import type { OAuthProviderName } from '@weaveintel/oauth';
+import type { OAuthProviderName } from '@weaveintel/identity/oauth';
 import {
   readBody,
   json,

@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/live-agents",
-  "version": "0.0.1",
+  "version": "0.1.1",
   "description": "Persistent autonomous agent primitives for weaveIntel",
   "type": "module",
   "main": "./dist/index.js",
@@ -10,9 +10,18 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./trace-tools": {
+      "import": "./dist/trace-tools/index.js",
+      "types": "./dist/trace-tools/index.d.ts",
+      "default": "./dist/trace-tools/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*"
+  ],
   "scripts": {
     "build": "tsc -b",
     "test": "vitest run",
@@ -22,14 +31,13 @@
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.810.0",
     "@aws-sdk/lib-dynamodb": "^3.810.0",
-    "@weaveintel/agents": "*",
-    "@weaveintel/core": "*",
-    "@weaveintel/observability": "*",
-    "@weaveintel/replay": "*",
-    "@weaveintel/memory": "*",
-    "@weaveintel/mcp-client": "*",
-    "@weaveintel/identity": "*",
-    "@weaveintel/tools": "*",
+    "@weaveintel/agents": "^0.1.1",
+    "@weaveintel/core": "^0.1.1",
+    "@weaveintel/identity": "^0.1.1",
+    "@weaveintel/mcp-client": "^0.1.1",
+    "@weaveintel/memory": "^0.1.1",
+    "@weaveintel/observability": "^0.1.1",
+    "@weaveintel/tools": "^0.1.1",
     "better-sqlite3": "^11.10.0",
     "mongodb": "^6.16.0",
     "pg": "^8.13.1",
@@ -38,5 +46,8 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  }
 }

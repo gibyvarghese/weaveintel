@@ -1,5 +1,5 @@
 /**
- * @weaveintel/encryption — Compliance attestation (Phase 10).
+ * @weaveintel/encryption — Compliance attestation.
  *
  * Builds and signs JSON attestations the customer's auditor can verify
  * end-to-end without trusting weaveintel. Each attestation contains:

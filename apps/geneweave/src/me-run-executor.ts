@@ -24,7 +24,7 @@
  * Vocabulary: no "chat", "conversation", "message" (HTTP sense), "turn".
  */
 
-import { newUUIDv7, createLogger, weaveContext } from '@weaveintel/core';
+import { newUUIDv7, createLogger, weaveContext, formatSseFrame } from '@weaveintel/core';
 import type { ExecutionContext, RunEventEnvelope, RunStep, RunUsage, RunCitation, RunArtifactRef, RunFilePart } from '@weaveintel/core';
 
 const logger = createLogger('me-run-executor');
@@ -128,9 +128,33 @@ class SseSubscriber {
   #buffering = true;
   #pending: RunEventEnvelope[] = [];
   #closed = false;
+  /**
+   * The authenticated user this live stream belongs to. Recorded so access can
+   * be REVOKED mid-stream (CVE-2026-53843): an SSE read is authorized once at
+   * connect, but a long-lived stream must be force-closed when the viewer is
+   * later removed from the run's shared session. Identity is server-derived
+   * (from auth), never client-supplied.
+   */
+  readonly userId: string;
 
-  constructor(private readonly res: ServerResponse, afterSequence: number) {
+  constructor(private readonly res: ServerResponse, afterSequence: number, userId: string) {
     this.#lastSeq = afterSequence;
+    this.userId = userId;
+  }
+
+  /**
+   * Force-close this stream because the viewer lost access (was removed from the
+   * shared session, or the session was ended). Emits a final `access.revoked`
+   * ephemeral event so the client can show "you no longer have access" and stop
+   * retrying, then ends the socket. CVE-2026-53843 remediation.
+   */
+  revoke(reason: string): void {
+    if (this.#closed || this.res.writableEnded) { this.#closed = true; return; }
+    try {
+      this.res.write(formatSseFrame({ data: { runId: '', sequence: -1, kind: 'access.revoked', payload: { reason }, timestamp: Date.now() } }));
+    } catch { /* best-effort */ }
+    this.#closed = true;
+    try { if (!this.res.writableEnded) this.res.end(); } catch { /* broken pipe */ }
   }
 
   /** Write a replayed (catch-up) envelope immediately. */
@@ -157,11 +181,21 @@ class SseSubscriber {
   }
 
   #emit(env: RunEventEnvelope): void {
-    if (env.sequence <= this.#lastSeq) return; // dedup / monotonic guard
-    this.#lastSeq = env.sequence;
+    // Ephemeral events (Collaboration Phase 1 presence) carry `sequence: -1` —
+    // they are not journaled and must bypass the monotonic dedup (which would
+    // always drop a negative sequence). Pass them through without advancing the
+    // resume cursor.
+    if (env.sequence >= 0) {
+      if (env.sequence <= this.#lastSeq) return; // dedup / monotonic guard
+      this.#lastSeq = env.sequence;
+    }
     try {
       if (!this.res.writableEnded) {
-        this.res.write(`data: ${JSON.stringify(env)}\n\n`);
+        // Collaboration Phase 6 — emit a resumable SSE frame via the canonical
+        // core writer. Journaled events carry `id: <sequence>` so a browser
+        // EventSource auto-resumes from `Last-Event-ID` after a drop; ephemeral
+        // events (sequence < 0) carry no id (they must not move the resume cursor).
+        this.res.write(formatSseFrame(env.sequence >= 0 ? { id: env.sequence, data: env } : { data: env }));
       }
       if (TERMINAL_EVENT_KINDS.has(env.kind) && !this.res.writableEnded) {
         this.#closed = true;
@@ -183,11 +217,20 @@ export interface MeRunExecutorOptions {
    * capability and `start()` immediately completes runs with no output.
    */
   runAgent?: MeRunAgent;
+  /**
+   * Collaboration Phase 3 — called once per run the moment it reaches a terminal
+   * state (a NEW terminal event was just persisted). The host wires this to the
+   * durable notification outbox (enqueue subscribers + kick the relay). Fired
+   * fire-and-forget AFTER the terminal event is committed, so a slow/failing
+   * notification path can never stall or break the run itself.
+   */
+  onTerminal?: (runId: string) => void;
 }
 
 export class MeRunExecutor {
   readonly #db: DatabaseAdapter;
   readonly #runAgent: MeRunAgent | undefined;
+  readonly #onTerminal: ((runId: string) => void) | undefined;
   /** Active run controllers keyed by runId — used for cooperative cancel. */
   readonly #active = new Map<string, AbortController>();
   /** Per-run append serialization (gap-free, monotonic sequences). */
@@ -198,6 +241,7 @@ export class MeRunExecutor {
   constructor(opts: MeRunExecutorOptions) {
     this.#db = opts.db;
     this.#runAgent = opts.runAgent;
+    this.#onTerminal = opts.onTerminal;
   }
 
   /** True when a producing agent is wired (runs actually generate output). */
@@ -218,11 +262,11 @@ export class MeRunExecutor {
    * for replaying historical events through the returned subscriber, then
    * calling `activate()`. Returns a detach function.
    */
-  subscribe(runId: string, res: ServerResponse, afterSequence: number): {
+  subscribe(runId: string, res: ServerResponse, afterSequence: number, userId: string): {
     subscriber: SseSubscriber;
     detach: () => void;
   } {
-    const subscriber = new SseSubscriber(res, afterSequence);
+    const subscriber = new SseSubscriber(res, afterSequence, userId);
     let set = this.#subscribers.get(runId);
     if (!set) { set = new Set(); this.#subscribers.set(runId, set); }
     set.add(subscriber);
@@ -235,6 +279,28 @@ export class MeRunExecutor {
     return { subscriber, detach };
   }
 
+  /**
+   * Force-close every live SSE stream on `runId` belonging to a user for whom
+   * `stillHasAccess(userId)` returns false. Called after an access mutation
+   * (member removed, session ended, token revoked-with-kick) so a viewer cannot
+   * keep watching a stream that was authorized only at connect time
+   * (CVE-2026-53843). Returns the number of streams closed. Owner streams (and
+   * any still-authorized viewer) are never touched.
+   */
+  disconnectUnauthorized(runId: string, stillHasAccess: (userId: string) => boolean, reason = 'access revoked'): number {
+    const set = this.#subscribers.get(runId);
+    if (!set || set.size === 0) return 0;
+    let closed = 0;
+    for (const sub of [...set]) {
+      if (stillHasAccess(sub.userId)) continue;
+      sub.revoke(reason);
+      set.delete(sub);
+      closed++;
+    }
+    if (set.size === 0) this.#subscribers.delete(runId);
+    return closed;
+  }
+
   #broadcast(env: RunEventEnvelope): void {
     const set = this.#subscribers.get(env.runId);
     if (!set || set.size === 0) return;
@@ -243,6 +309,18 @@ export class MeRunExecutor {
       if (sub.closed) set.delete(sub);
     }
     if (set.size === 0) this.#subscribers.delete(env.runId);
+  }
+
+  /**
+   * Broadcast an EPHEMERAL event to a run's live subscribers WITHOUT writing it
+   * to the journal (Collaboration Phase 1). Used for presence (`presence.update`),
+   * which is high-churn, last-write-wins, and disposable — it only ever means
+   * "current", so journaling it would bloat the durable log with zero replay
+   * value. Ephemeral events carry `sequence: -1` so the client reducer applies
+   * them without participating in the journal's sequence dedup.
+   */
+  broadcastEphemeral(runId: string, kind: string, payload: Record<string, unknown>): void {
+    this.#broadcast({ runId, sequence: -1, kind, payload, timestamp: Date.now() });
   }
 
   // ── Append + serialization ───────────────────────────────────────────────
@@ -269,6 +347,11 @@ export class MeRunExecutor {
         payload: JSON.stringify(payload),
       });
       this.#broadcast({ runId, sequence, kind, payload, timestamp: Date.now() });
+      // Collaboration Phase 3 — a NEW terminal event just committed: hand off to
+      // the durable notification outbox (fire-and-forget; never blocks the run).
+      if (TERMINAL_EVENT_KINDS.has(kind) && this.#onTerminal) {
+        try { this.#onTerminal(runId); } catch { /* notification path must not break the run */ }
+      }
       return sequence;
     });
   }

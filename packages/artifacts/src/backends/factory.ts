@@ -39,7 +39,7 @@ export type ArtifactStoreOptions =
  * @example
  * // SQLite (production — requires better-sqlite3)
  * import Database from 'better-sqlite3';
- * const rawDb = new Database('./geneweave.db');
+ * const rawDb = new Database('./app.db');
  * const store = await createArtifactStore({ backend: 'sqlite', db: rawDb });
  *
  * @example

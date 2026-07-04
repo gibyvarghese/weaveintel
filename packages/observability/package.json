@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/observability",
-  "version": "0.0.1",
+  "version": "0.1.1",
   "description": "Tracing, cost tracking, and run logging implementations",
   "type": "module",
   "exports": {
@@ -8,6 +8,11 @@
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./replay": {
+      "import": "./dist/replay/index.js",
+      "types": "./dist/replay/index.d.ts",
+      "default": "./dist/replay/index.js"
     }
   },
   "main": "./dist/index.js",
@@ -19,10 +24,18 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@weaveintel/core": "*"
+    "@weaveintel/core": "^0.1.1"
   },
   "devDependencies": {
     "typescript": "^5.7.0",
     "vitest": "^3.2.6"
-  }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*"
+  ]
 }

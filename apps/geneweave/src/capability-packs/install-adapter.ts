@@ -1,7 +1,7 @@
 /**
  * @weaveintel/geneweave — Capability Pack install adapter (Phase 6)
  *
- * Bridges the package-level `PackInstallAdapter` from `@weaveintel/capability-packs`
+ * Bridges the package-level `PackInstallAdapter` from `@weaveintel/core/capability-packs`
  * onto `DatabaseAdapter`. Each supported `kind` in a pack's `contents` maps to one
  * SQLite table via the upserter map below. Adding a new bucket is one entry here;
  * the package contract stays opaque about row shape.
@@ -10,7 +10,7 @@
 import type {
   PackInstallAdapter,
   PackPreconditions,
-} from '@weaveintel/capability-packs';
+} from '@weaveintel/core/capability-packs';
 import type { DatabaseAdapter } from '../db.js';
 
 type Upserter = (

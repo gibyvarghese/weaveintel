@@ -143,6 +143,13 @@ function buildDb(): DatabaseAdapter & {
       const row = runs.get(id);
       return row && row.user_id === userId ? row : null;
     },
+    // Shared-session run access: this suite only exercises owner-scoped and
+    // not-found paths, so no run belongs to a live shared session. resolveRunAccess()
+    // calls this after the owner lookup misses; returning null yields the expected 404.
+    // (The real adapter implements this against the shared_sessions table.)
+    async getSharedSessionByRun(_runId: string) {
+      return null;
+    },
     async listUserRuns(userId: string, filter?: { status?: UserRunRow['status']; limit?: number; offset?: number }) {
       let result = [...runs.values()].filter((r) => r.user_id === userId);
       if (filter?.status) result = result.filter((r) => r.status === filter.status);

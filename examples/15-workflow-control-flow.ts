@@ -380,21 +380,36 @@ if (process.env['ANTHROPIC_API_KEY']) {
 
   try {
     // Dynamically import to avoid failing when package unavailable
-    const { ReActAgent } = await import('@weaveintel/agents');
-    const { AnthropicProvider } = await import('@weaveintel/provider-anthropic');
+    const { weaveAgent } = await import('@weaveintel/agents');
+    const { weaveAnthropicModel } = await import('@weaveintel/provider-anthropic');
+    const { weaveToolRegistry, weaveTool, weaveContext } = await import('@weaveintel/core');
 
-    const provider = new AnthropicProvider({ apiKey: process.env['ANTHROPIC_API_KEY'] });
-    const agent = new ReActAgent({
-      model: { provider: 'anthropic', id: 'claude-haiku-4-5-20251001' },
+    const model = weaveAnthropicModel('claude-haiku-4-5-20251001', {
+      apiKey: process.env['ANTHROPIC_API_KEY'],
+    });
+    const tools = weaveToolRegistry();
+    tools.register(weaveTool({
+      name: runWorkflowTool.name,
+      description: runWorkflowTool.description,
+      parameters: runWorkflowTool.parameters,
+      execute: async (args) => {
+        const out = await runWorkflowTool.execute(args as { workflowId: string; input: Record<string, unknown> });
+        return { content: JSON.stringify(out), metadata: out };
+      },
+    }));
+
+    const agent = weaveAgent({
+      name: 'order-processor',
+      model,
+      tools,
       systemPrompt: 'You are an order processing assistant. Use the run_workflow tool to process orders.',
-      tools: [runWorkflowTool],
-      provider,
     });
 
-    const response = await agent.run(
-      'Process order ORD-LLM-001: type=digital, items=[ebook-js], suppressEmail=false',
-    );
-    ok(`Agent completed: ${response.content?.slice(0, 100)}...`);
+    const response = await agent.run(weaveContext({}), {
+      goal: 'Process order ORD-LLM-001',
+      messages: [{ role: 'user', content: 'Process order ORD-LLM-001: type=digital, items=[ebook-js], suppressEmail=false' }],
+    });
+    ok(`Agent completed: ${response.output?.slice(0, 100)}...`);
   } catch (e) {
     info(`Agent demo skipped: ${(e as Error).message}`);
   }

@@ -29,6 +29,9 @@ jobs:
       - name: Public API Boundary Check
         run: npm run check:api-boundaries
 
+      - name: No app-brand leaks in the framework
+        run: npm run check:no-app-brand
+
       - name: Unit + Integration tests
         run: npm run test
         env:

@@ -2,7 +2,7 @@
  * tenant-theme.ts — resolve the active theme from a user preference, the OS
  * color scheme, and an optional per-tenant brand override.
  *
- * Thin, pure composition over `@geneweave/tokens`: it picks `dark`/`light` from
+ * Thin, pure composition over `@weaveintel/tokens`: it picks `dark`/`light` from
  * a `'dark' | 'light' | 'system'` preference, then applies a tenant override
  * with WCAG-AA enforcement so a misconfigured brand degrades gracefully to the
  * accessible base theme. No React / RN / expo imports — the provider feeds in
@@ -10,12 +10,14 @@
  */
 
 import {
-  themes,
   applyTenantTheme,
   type Theme,
   type ThemeName,
   type TenantThemeOverride,
-} from '@geneweave/tokens';
+} from '@weaveintel/tokens';
+// The geneWeave BRAND themes are app-owned now (composed on the neutral engine above). In the private
+// commercial repo this is a shared `@geneweave/brand`; here the web app owns the single source of truth.
+import { geneweaveThemes as themes } from '@weaveintel/geneweave-ui/brand';
 
 /** The user-facing appearance preference. */
 export type ThemePreference = 'dark' | 'light' | 'system';

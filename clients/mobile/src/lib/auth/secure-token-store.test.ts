@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { KeyValueStore } from '@geneweave/api-client';
+import type { KeyValueStore } from '@weaveintel/api-client';
 import {
   tenantNamespace,
   createTenantTokenStore,

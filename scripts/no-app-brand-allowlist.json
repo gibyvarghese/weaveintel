@@ -1,0 +1,5 @@
+{
+  "_README": "Allowlist for scripts/check-no-app-brand.mjs. 'deferredPaths' are packages whose de-brand is scheduled for a LATER restructure phase (they still contain app-brand today, on purpose); each entry MUST name the phase that will empty it, and the entry is deleted when that phase lands. 'allowedExamples' are the few places a comment may cite an app by name as an EXAMPLE CONSUMER (never as the assumed reader) — permanent, but keep them rare.",
+  "deferredPaths": [],
+  "allowedExamples": []
+}

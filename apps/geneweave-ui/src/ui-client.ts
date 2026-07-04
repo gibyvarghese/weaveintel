@@ -11,6 +11,15 @@ import {
 } from './ui/state.js';
 import { h } from './ui/dom.js';
 import { STYLES } from './ui/styles.js';
+import { buildFeedbackControls, buildAiDisclosure, loadAiTransparency, loadChatFeedback } from './ui/answer-feedback.js';
+import { isCiteMode, sendCitedMessage, renderCitedAnswer, loadChatCitationsConfig } from './ui/chat-citations.js';
+import { buildVersionControls, loadAnswerVersionsConfig } from './ui/answer-versions.js';
+import { loadAccessibilityConfig, announceStreamStart, announceStreamDelta, announceStreamDone, announceStreamStopped } from './ui/stream-announce.js';
+import { captureFocus, restoreFocus, applyForceFocusRing } from './ui/focus.js';
+import { loadWorkspaceAccess } from './ui/workspace-access.js';
+import { t, loadI18n } from './ui/i18n.js';
+import { buildStarterCards, loadSuggestedPrompts } from './ui/suggested-prompts.js';
+import { captureScrollState, restoreScrollState } from './ui/scroll-preserve.js';
 import { 
   getUserAvatarUrl, 
   getAgentAvatarUrl,
@@ -112,6 +121,9 @@ import {
 } from './ui/workspace-shell.js';
 import { renderCalendarView } from './ui/calendar-view.js';
 import { renderNotesView, loadNotesList } from './ui/notes-view.js';
+import { renderDesignSystemView } from './ui/design-system-view.js';
+import { renderBuilderView } from './ui/builder-view.js';
+import { renderAccountView } from './ui/account-view.js';
 import { loadActionFeed } from './ui/action-feed.js';
 import { loadCalendarItems, loadCalendarCategories } from './ui/agenda-api.js';
 import {
@@ -131,6 +143,7 @@ import {
   renderSVVerdictView,
 } from './features/scientific-validation/ui/index.js';
 import { renderKaggleListView, renderKaggleFlowView } from './features/kaggle-competition/ui/index.js';
+import { noticeDialog, confirmDialog } from "./ui/dialog.js";
 
 
 // ============================================================================
@@ -165,7 +178,15 @@ async function sendMessage(text: string) {
   }
   const chatId = state.currentChatId;
   if (!chatId) return;
-  
+
+  // m138 — "Cite sources" mode: answer grounded in the user's own workspace with verified [n] citations
+  // (a distinct, non-streaming path). Attachments aren't part of a cited answer, so only plain text routes here.
+  if (isCiteMode() && content) {
+    state.pendingAttachments = [];
+    await sendCitedMessage(chatId, content, renderMessages);
+    return;
+  }
+
   state.messages.push({
     role: 'user',
     content,
@@ -174,6 +195,48 @@ async function sendMessage(text: string) {
     metadata: attachments.length ? JSON.stringify({ attachments }) : null,
   });
   state.pendingAttachments = [];
+  state.transcriptAtBottom = true; // sending → follow the new reply to the bottom (until the user scrolls up)
+  await runAssistantStream(chatId, content, attachments);
+}
+
+// The in-flight stream's AbortController, so the user's Stop control can cancel generation.
+let _streamAbort: AbortController | null = null;
+function stopStreaming() {
+  try { _streamAbort?.abort(); } catch { /* already done */ }
+}
+
+
+/**
+ * Turn a failed send into a HUMAN, DIFFERENTIATED message + the right recovery — never a raw technical
+ * error or a generic catch-all. A content-policy refusal is its own calm state (`refusal`), not a system
+ * error. Retryable failures get a "Try again"; an expired session gets "Sign in".
+ */
+function classifyFailure(opts: { threw?: boolean; status?: number; code?: string; serverMessage?: string }): {
+  refusal?: boolean; kind: string; text: string; retryable: boolean; signIn?: boolean;
+} {
+  const { threw, status, code, serverMessage } = opts;
+  if (threw) return { kind: 'network', text: 'Can’t reach geneWeave — check your internet connection and try again.', retryable: true };
+  if (status === 401 || status === 419) return { kind: 'auth', text: 'Your session has expired. Please sign in again to continue.', retryable: false, signIn: true };
+  if (status === 403 || status === 451 || code === 'content_policy' || code === 'guardrail' || code === 'blocked' || code === 'safety') {
+    return { refusal: true, kind: 'refusal', text: serverMessage || 'geneWeave declined this request under its safety policy. You can rephrase and try a different approach.', retryable: false };
+  }
+  if (status === 429 || code === 'rate_limited') return { kind: 'rate_limit', text: 'geneWeave is busy right now. Wait a few seconds and try again.', retryable: true };
+  if (status !== undefined && status >= 500) return { kind: 'server', text: 'Something went wrong on our end. Your message is safe — please try again.', retryable: true };
+  if (status === 413 || code === 'too_large') return { kind: 'too_large', text: 'That message (or its attachments) is too large to send.', retryable: false };
+  return { kind: 'request', text: serverMessage || 'That request couldn’t be completed. Please try again.', retryable: true };
+}
+
+/** Retry the last send: drop the failed/refused assistant reply and re-run the stream for the last user message. */
+async function retryLastSend() {
+  if (state.streaming || !state.currentChatId) return;
+  const last = state.messages[state.messages.length - 1] as any;
+  if (last && last.role === 'assistant' && (last.errorKind || last.refusal)) state.messages.pop();
+  const lastUser = [...state.messages].reverse().find((m: any) => m.role === 'user') as any;
+  if (!lastUser) return;
+  await runAssistantStream(state.currentChatId, String(lastUser.content || ''), lastUser.attachments || []);
+}
+
+async function runAssistantStream(chatId: string, content: string, attachments: any[]) {
   state.streaming = true;
   render();
   scrollMessages();
@@ -195,6 +258,7 @@ async function sendMessage(text: string) {
   let assistantMsg: any = null;
   let idleTimer: ReturnType<typeof setInterval> | null = null;
   let streamIdleTimedOut = false;
+  _streamAbort = new AbortController();
 
   try {
     const resp = await fetch(`/api/chats/${chatId}/messages`, {
@@ -202,9 +266,18 @@ async function sendMessage(text: string) {
       headers,
       body: JSON.stringify(body),
       credentials: 'same-origin',
+      signal: _streamAbort.signal,
     });
     if (!resp.ok || !resp.body) {
-      throw new Error(`Streaming request failed (${resp.status})`);
+      // Read the server's structured error (if any) and classify into a human, differentiated message.
+      let code: string | undefined; let serverMessage: string | undefined;
+      try { const j = await resp.json() as { error?: string; message?: string }; code = j?.error; serverMessage = j?.message; } catch { /* non-JSON body */ }
+      const f = classifyFailure({ status: resp.status, code, serverMessage });
+      const msg: any = { role: 'assistant', content: '', created_at: new Date().toISOString(), processState: 'error' };
+      if (f.refusal) { msg.refusal = true; msg.refusalText = f.text; }
+      else { msg.errorKind = f.kind; msg.errorText = f.text; msg.errorRetryable = f.retryable; msg.errorSignIn = f.signIn; }
+      state.messages.push(msg);
+      return; // handled — the `finally` still runs (clears streaming + re-renders)
     }
 
     const reader = resp.body.getReader();
@@ -232,6 +305,8 @@ async function sendMessage(text: string) {
     state.messages.push(assistantMsg);
     render();
     scrollMessages();
+    // H19 — one accessible live-region announcement that generation started (not a per-token transcript re-read).
+    announceStreamStart();
 
     let buf = '';
     let dataLines: string[] = [];
@@ -275,6 +350,12 @@ async function sendMessage(text: string) {
           assistantMsg.usage = d.usage;
           assistantMsg.cost = d.cost;
           assistantMsg.latency_ms = d.latencyMs;
+          // m137 — identity + routing snapshot so answer feedback (thumbs/reasons) can target this exact
+          // message and, when rated, feed the model's routing quality score.
+          if (d.messageId) (assistantMsg as any).id = d.messageId;
+          if (d.model) (assistantMsg as any).model = d.model;
+          if (d.provider) (assistantMsg as any).provider = d.provider;
+          if (d.taskKey) (assistantMsg as any).taskKey = d.taskKey;
           if (d.steps) assistantMsg.steps = d.steps;
           if (d.eval) assistantMsg.evalResult = d.eval;
           if (d.cognitive) assistantMsg.cognitive = d.cognitive;
@@ -338,42 +419,75 @@ async function sendMessage(text: string) {
         }
       }
 
-      render();
+      // H18/H19 — patch ONLY the streaming bubble's text in place per token; do NOT rebuild the transcript.
+      // Rebuilding (`renderMessages`) re-adds every message node each token, which (a) makes the `role="log"`
+      // region re-announce the whole conversation to a screen reader (spam) and (b) churns layout so controls
+      // shift. Instead we mutate one text node; a dedicated live region announces the answer accessibly, and
+      // the composer (outside `.messages`) never moves. Full markdown render happens once, at completion.
+      patchStreamingBubble(assistantMsg.content);
+      announceStreamDelta(assistantMsg.content);
       scrollMessages();
     }
 
     // Flush trailing event if stream ended without a trailing blank line.
     flushEvent();
   } catch (error: unknown) {
-    const errorMsg = error instanceof Error ? error.message : 'Request failed';
-    if (assistantMsg) {
-      assistantMsg.processState = 'error';
-      assistantMsg.content = assistantMsg.content || `Error: ${errorMsg}`;
+    if ((error as any)?.name === 'AbortError' || _streamAbort?.signal.aborted) {
+      // The USER stopped generation — not a failure. Keep whatever partial output arrived; mark it stopped.
+      if (assistantMsg) {
+        assistantMsg.processState = 'completed';
+        assistantMsg.stopped = true;
+        assistantMsg.latency_ms = assistantMsg.latency_ms || (Date.now() - startedAtMs);
+      }
     } else {
-      const errMessage: Message = {
-        role: 'assistant',
-        content: `Error: ${errorMsg}`,
-        created_at: new Date().toISOString(),
-      };
-      state.messages.push(errMessage);
+      // A thrown fetch/stream error is a CONNECTION failure (server never reached, or the stream dropped
+      // mid-flight). Classify as network and attach a human message + retry — never a raw "Failed to fetch".
+      const f = classifyFailure({ threw: true });
+      if (assistantMsg) {
+        assistantMsg.processState = 'error';
+        assistantMsg.errorKind = f.kind; assistantMsg.errorText = f.text; assistantMsg.errorRetryable = f.retryable;
+      } else {
+        state.messages.push({ role: 'assistant', content: '', created_at: new Date().toISOString(), processState: 'error', errorKind: f.kind, errorText: f.text, errorRetryable: f.retryable } as any);
+      }
     }
   } finally {
+    _streamAbort = null;
     if (idleTimer !== null) clearInterval(idleTimer);
     if (assistantMsg && assistantMsg.processState === 'running') {
       if (streamIdleTimedOut) {
-        assistantMsg.content =
-          (assistantMsg.content ? assistantMsg.content + '\n\n' : '') +
-          '_No response received for 45 s — the connection went idle. Please try sending your message again._';
+        // Idle timeout is its own differentiated, retryable failure (not a generic error).
         assistantMsg.processState = 'error';
+        assistantMsg.errorKind = 'timeout';
+        assistantMsg.errorText = 'No response for 45 seconds — the connection went idle. Please try again.';
+        assistantMsg.errorRetryable = true;
       } else {
         assistantMsg.processState = assistantMsg.content ? 'completed' : 'error';
+        if (assistantMsg.processState === 'error' && !assistantMsg.errorKind) {
+          assistantMsg.errorKind = 'empty'; assistantMsg.errorText = 'No response was returned. Please try again.'; assistantMsg.errorRetryable = true;
+        }
         assistantMsg.latency_ms = assistantMsg.latency_ms || (Date.now() - startedAtMs);
       }
     }
     state.streaming = false;
     render();
     scrollMessages();
+    // H19 — announce the outcome accessibly, once: the finished answer, or the "stopped" notice.
+    if (assistantMsg) {
+      if (assistantMsg.stopped) announceStreamStopped(assistantMsg.content || '');
+      else if (assistantMsg.content && assistantMsg.processState === 'completed') announceStreamDone(assistantMsg.content);
+    }
   }
+}
+
+/**
+ * H18/H19 — update ONLY the streaming assistant bubble's text in place (no transcript rebuild). Renders plain
+ * text while streaming (final markdown/code render happens on completion, in renderMessages). Falls back to a
+ * one-off renderMessages() if the bubble hasn't been created yet.
+ */
+function patchStreamingBubble(text: string): void {
+  const el = document.querySelector('.messages [data-streaming-bubble]') as HTMLElement | null;
+  if (el) { el.textContent = text; return; }
+  renderMessages();
 }
 
 function renderProcessDetailView(value: any) {
@@ -1132,7 +1246,7 @@ async function showArtifactPreview(ref: ArtifactRef): Promise<void> {
         const d = await r.json() as { url?: string };
         if (d.url) showShareDialog(ref.name, d.url, null);
       } else {
-        alert(`Failed to create share link: ${await r.text()}`);
+        void noticeDialog({ message: `Failed to create share link: ${await r.text()}` });
       }
     } finally {
       shareBtn.disabled = false;
@@ -1164,7 +1278,7 @@ async function showArtifactPreview(ref: ArtifactRef): Promise<void> {
           showShareDialog(ref.name, shareUrl, d.embedCode);
         }
       } else {
-        alert(`Failed to get embed code: ${await r.text()}`);
+        void noticeDialog({ message: `Failed to get embed code: ${await r.text()}` });
       }
     } finally {
       embedBtn.disabled = false;
@@ -1364,17 +1478,29 @@ function buildArtifactCards(refs: ArtifactRef[]): HTMLElement {
   return container;
 }
 
+const _feedbackLoadedChats = new Set<string>();
 function renderMessages() {
   const container = document.querySelector('.messages');
   if (!container) return;
-  
+
+  // m137 — hydrate my thumbs state for this chat once (so already-rated answers show as rated).
+  const cid = state.currentChatId as string | null;
+  if (cid && !_feedbackLoadedChats.has(cid)) {
+    _feedbackLoadedChats.add(cid);
+    void loadChatFeedback(cid).then(() => { if (state.currentChatId === cid) renderMessages(); });
+  }
+
   container.innerHTML = '';
   
   if (!state.messages.length) {
-    container.appendChild(h('div', {className:'empty-chat'},
-      h('div',null,'Start a conversation with geneWeave'),
-      h('div',null,'Choose a model above and type your message')
-    ));
+    const empty = h('div', {className:'empty-chat'},
+      h('div',null,t('chat.emptyTitle')),
+      h('div',null,t('chat.emptySubtitle'))
+    );
+    // m146: clickable conversation starters (curated + personalised). Picking one sends it straight away.
+    const cards = buildStarterCards((p) => { void sendMessage(p.prompt); });
+    if (cards) empty.appendChild(cards);
+    container.appendChild(empty);
     return;
   }
   
@@ -1419,7 +1545,23 @@ function renderMessages() {
 
     let bubbleEl: HTMLElement;
     let responseExportHtml = '';
-    if (!isUser && m.content) {
+    const citedCites = !isUser ? (Array.isArray(meta?.citations) ? meta!.citations : null) : null;
+    if (isStreamingCurrent) {
+      // H18/H19 — while streaming, render a PLAIN-text bubble we can patch in place per token (no transcript
+      // rebuild, no per-token markdown). Marked so patchStreamingBubble() can find it. Final markdown render
+      // happens once the stream completes (this branch stops matching, the markdown branch below takes over).
+      bubbleEl = h('div', { className: 'bubble' });
+      bubbleEl.setAttribute('data-streaming-bubble', '1');
+      bubbleEl.textContent = m.content || '';
+    } else if (!isUser && (m as any).citing) {
+      // m138 — a cited answer is being built (grounded, non-streaming).
+      bubbleEl = h('div', { className: 'bubble' }, h('span', { className: 'meta' }, '❝ Searching your workspace…'));
+    } else if (!isUser && (meta?.cited) && m.content) {
+      // m138 — a settled cited answer: inline [n] chips + verified source cards.
+      bubbleEl = h('div', { className: 'bubble' },
+        renderCitedAnswer(m.content, citedCites || [], meta!.grounded !== false, meta!.groundingNote));
+      responseExportHtml = mdToHtml(m.content);
+    } else if (!isUser && m.content) {
       const rendered = renderAssistantBubble(m.content);
       bubbleEl = rendered.element;
       responseExportHtml = rendered.exportHtml;
@@ -1483,8 +1625,21 @@ function renderMessages() {
       bar.appendChild(copyBtn);
       bar.appendChild(emailBtn);
       bar.appendChild(wordBtn);
+      // m137 — thumbs up/down + tiered reasons. Only on a settled (non-streaming) answer with an id.
+      if (!isStreamingCurrent) {
+        const fb = buildFeedbackControls(m, state.currentChatId as string, renderMessages);
+        if (fb) bar.appendChild(fb);
+        // m139 — Regenerate + version pager (‹ 2/3 ›). Cited answers keep their own sources, so skip them.
+        if (!meta?.cited) {
+          const ver = buildVersionControls(m, state.currentChatId as string, renderMessages);
+          if (ver) bar.appendChild(ver);
+        }
+      }
       return bar;
     })() : null;
+
+    // m137 — the "AI-generated" disclosure line (EU AI Act Art. 50), per-workspace configurable.
+    const disclosureEl = !isUser && m.content && !isStreamingCurrent ? buildAiDisclosure() : null;
 
     const usage = (m as any).usage;
     const metaBar = !isUser && usage ? h('div', { className: 'meta' },
@@ -1497,14 +1652,36 @@ function renderMessages() {
       ? h('div', { className: 'meta' }, 'Thinking...')
       : null;
 
+    // Differentiated failure UI (Round 2): a content-policy REFUSAL is a calm "declined" note; any other
+    // failure is a human, kind-specific error with a matching recovery (Try again / Sign in) — never a raw
+    // technical string. Rendered only on the message that failed.
+    const ma = m as any;
+    let failureEl: HTMLElement | null = null;
+    if (ma.refusal) {
+      failureEl = h('div', { className: 'msg-refusal', role: 'note' },
+        h('span', { className: 'msg-refusal-icon', 'aria-hidden': 'true' }, '⊘'),
+        h('div', { className: 'msg-refusal-text' }, ma.refusalText || 'geneWeave declined this request.'));
+    } else if (ma.errorKind) {
+      const actions: HTMLElement[] = [];
+      if (ma.errorRetryable) actions.push(h('button', { className: 'msg-retry', type: 'button', onClick: () => { void retryLastSend(); } }, 'Try again'));
+      if (ma.errorSignIn) actions.push(h('button', { className: 'msg-retry', type: 'button', onClick: () => { void doLogout(); } }, 'Sign in'));
+      failureEl = h('div', { className: `msg-error msg-error-${ma.errorKind}`, role: 'alert' },
+        h('span', { className: 'msg-error-icon', 'aria-hidden': 'true' }, '⚠'),
+        h('div', { className: 'msg-error-text' }, ma.errorText || 'Something went wrong. Please try again.'),
+        actions.length ? h('div', { className: 'msg-error-actions' }, ...actions) : null);
+    }
+
     const body = h('div', { className: 'msg-body' },
       corner,
       ...extras,
-      bubbleEl,
+      // Don't show the empty "..." placeholder bubble when the message is purely a failure/refusal.
+      (ma.errorKind || ma.refusal) && !m.content ? null : bubbleEl,
+      failureEl,
       attachmentsEl,
       screenshotsEl,
       artifactCardsEl,
       toolbar,
+      disclosureEl,
       metaBar,
       thinkingIndicator
     );
@@ -1541,6 +1718,13 @@ function renderMessages() {
     
     container.appendChild(msgEl);
   });
+
+  // Preserve transcript scroll across this rebuild (`.messages` element persists; only children changed).
+  // Follow to the bottom ONLY if the reader is already there; otherwise keep their exact position — so a
+  // per-token streaming re-render never yanks a user who scrolled up to read history. (H14/H16.)
+  state.suppressTranscriptScrollPersist = true;
+  (container as HTMLElement).scrollTop = state.transcriptAtBottom !== false ? container.scrollHeight : (state.transcriptScrollTop || 0);
+  requestAnimationFrame(() => { state.suppressTranscriptScrollPersist = false; });
 }
 
 function renderChatView() {
@@ -1548,6 +1732,7 @@ function renderChatView() {
     render,
     renderMessages,
     sendMessage,
+    stopStreaming,
   });
 }
 
@@ -1629,6 +1814,12 @@ function renderHomeWorkspace() {
   const settingsBtn = h('button', {
     className: 'nav-btn' + (state.showSettings ? ' active' : ''),
     title: 'AI Settings',
+    // H12 — announce this as a popup menu button + its open/closed state; keep a stable focus key so Esc/
+    // outside-click can return focus here after the re-render (see the Esc handler in initialize()).
+    'aria-haspopup': 'true',
+    'aria-expanded': state.showSettings ? 'true' : 'false',
+    'aria-label': 'AI settings',
+    'data-focus-key': 'chat-settings-trigger',
     style: 'font-size:12px;padding:7px 10px;line-height:1;',
     onClick: async (e: Event) => {
       e.stopPropagation();
@@ -1724,6 +1915,28 @@ function renderHomeWorkspace() {
 
 function renderApp() {
   const wrap = h('div', {className:'app'});
+  // weaveNotes (design handoff): the Notes app is a FULL-BLEED 3-column surface — its own
+  // notebooks rail is the primary nav (the brand logo returns to the rest of the app), so we
+  // skip the global workspace nav + top-card header to match the standalone design exactly.
+  if (state.view === 'notes') {
+    wrap.classList.add('app-fullbleed');
+    wrap.appendChild(renderNotesView(render));
+    return wrap;
+  }
+  // Builder — the full-bleed three-pane "configure the assistant" app (its own nav),
+  // recreated from "GeneWeave Builder.dc.html" as a Builder-styled skin over the WHOLE admin.
+  if (state.view === 'builder') {
+    wrap.classList.add('app-fullbleed');
+    wrap.appendChild(renderBuilderView(render, { loadAdmin }));
+    return wrap;
+  }
+  // Account — the full-bleed settings surface (its own 256px nav + sticky Save bar), recreated from
+  // "GeneWeave Account.dc.html". `preferences` is kept as an alias so old entry points still land here.
+  if (state.view === 'account' || state.view === 'preferences') {
+    wrap.classList.add('app-fullbleed');
+    wrap.appendChild(renderAccountView(render));
+    return wrap;
+  }
   wrap.appendChild(renderWorkspaceNav({
     render,
     openConnectorsView: () => { void openConnectorsView(render); },
@@ -1733,9 +1946,20 @@ function renderApp() {
     selectChat,
     deleteChat,
   }));
-  
+
+  // Responsive adaptive shell: on tablet/mobile the workspace nav is an off-canvas drawer. A backdrop
+  // (CSS-hidden on desktop) closes it on tap; a hamburger in the header opens it. 44px hit targets.
+  const backdrop = h('div', { className: 'nav-backdrop', 'aria-hidden': 'true', onClick: () => wrap.classList.remove('nav-open') }) as HTMLElement;
+  wrap.appendChild(backdrop);
+  const hamburger = h('button', {
+    className: 'gw-hamburger', type: 'button', 'aria-label': 'Open navigation menu', 'aria-expanded': 'false',
+    onClick: () => { const open = wrap.classList.toggle('nav-open'); (hamburger as HTMLElement).setAttribute('aria-expanded', String(open)); },
+    innerHTML: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>',
+  }) as HTMLElement;
+
   const main = h('div', {className:'main'});
   main.appendChild(h('div', { className: 'main-header' },
+    hamburger,
     renderWorkspaceTopCard({
       render,
       createChat,
@@ -1782,6 +2006,8 @@ function renderApp() {
     main.appendChild(renderCalendarView(render));
   } else if (state.view === 'notes') {
     main.appendChild(renderNotesView(render));
+  } else if (state.view === 'design') {
+    main.appendChild(renderDesignSystemView(render));
   } else {
     main.appendChild(renderHomeWorkspace());
   }
@@ -1799,7 +2025,7 @@ function restoreUiStateFromStorage() {
     const raw = window.localStorage.getItem(UI_STATE_KEY);
     if (!raw) return;
     const saved = JSON.parse(raw) as any;
-    const allowedViews = new Set(['chat', 'connectors', 'admin', 'dashboard', 'preferences', 'scientific-validation', 'kaggle-competition', 'calendar', 'notes']);
+    const allowedViews = new Set(['chat', 'connectors', 'admin', 'dashboard', 'preferences', 'scientific-validation', 'kaggle-competition', 'calendar', 'notes', 'design', 'builder']);
 
     if (typeof saved?.view === 'string' && allowedViews.has(saved.view)) {
       state.view = saved.view;
@@ -1871,27 +2097,51 @@ function render() {
   document.querySelectorAll('body > .dropdown').forEach((el) => el.remove());
   const root = document.getElementById('root');
   if (!root) return;
+  // Preserve the sidebar scroll across the full-DOM re-render. A single user action (e.g. selecting a
+  // chat) can trigger SEVERAL renders in quick succession; an intermediate render sees a DOM whose scroll
+  // was just reset to 0 by `innerHTML = ''`. Reading that 0 and overwriting the persisted position would
+  // lose the user's place — so take the MAX of the live DOM scroll and the value kept current by the nav's
+  // scroll listener (state.sidebarScrollTop). This makes scroll-retention robust to render bursts.
   const navBeforeRender = root.querySelector('.workspace-nav-scroll') as HTMLElement | null;
-  const previousSidebarScrollTop = navBeforeRender
-    ? navBeforeRender.scrollTop
-    : Math.max(0, state.sidebarScrollTop || 0);
-  if (navBeforeRender) {
-    state.sidebarScrollTop = navBeforeRender.scrollTop;
-  }
+  const domScroll = navBeforeRender ? navBeforeRender.scrollTop : 0;
+  const previousSidebarScrollTop = Math.max(domScroll, state.sidebarScrollTop || 0);
+  state.sidebarScrollTop = previousSidebarScrollTop;
   const thisRenderVersion = ++renderVersion;
-  
+  // H13 — capture keyboard focus (+ text caret) BEFORE the full-DOM rebuild wipes it, so a keyboard/
+  // screen-reader user isn't dumped to the top of the page after every action. Restored below.
+  const savedFocus = captureFocus();
+  // H14 — snapshot every [data-scroll-key] scroll container (notes list, admin tables, dashboard) before the
+  // wipe, so they don't jump to the top on re-render. Restored in the double-rAF below.
+  if (state.user) captureScrollState(root); // only the app branch has scroll containers + a restore pass
+
   if (!state.user) {
     root.innerHTML = '';
     root.appendChild(renderAuth());
+    restoreFocus(savedFocus, root);
   } else {
     root.innerHTML = '';
     root.appendChild(renderApp());
+    restoreFocus(savedFocus, root);
     // Double-rAF: first frame inserts DOM, second frame has computed layout
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         if (thisRenderVersion !== renderVersion) return;
+        // H14 — restore every generic [data-scroll-key] container (notes list, admin tables, dashboard).
+        restoreScrollState(root);
+        // Restore the chat transcript scroll: pin to the bottom only if the user was already there
+        // (so a streaming response keeps following), otherwise restore their exact position (so scrolling
+        // up to read history is never yanked back down). Round 3 / H14 — same pattern as the sidebar.
+        const msgsEl = root.querySelector('.messages') as HTMLElement | null;
+        if (msgsEl) {
+          state.suppressTranscriptScrollPersist = true;
+          msgsEl.scrollTop = state.transcriptAtBottom !== false ? msgsEl.scrollHeight : (state.transcriptScrollTop || 0);
+          requestAnimationFrame(() => { state.suppressTranscriptScrollPersist = false; });
+        }
         const navScrollEl = root.querySelector('.workspace-nav-scroll') as HTMLElement | null;
         if (!navScrollEl) return;
+        // Suppress scroll-listener persistence while we restore, so the restore's own (possibly clamped)
+        // scroll event can't degrade the saved position. Cleared on the next frame.
+        state.suppressSidebarScrollPersist = true;
         navScrollEl.scrollTop = previousSidebarScrollTop;
         const activeSubTab = navScrollEl.querySelector('.admin-subtab.active') as HTMLElement | null;
         if (activeSubTab) {
@@ -1904,7 +2154,11 @@ function render() {
             navScrollEl.scrollTop += elRect.bottom - containerRect.bottom + 12;
           }
         }
-        state.sidebarScrollTop = navScrollEl.scrollTop;
+        // Do NOT re-persist state.sidebarScrollTop from this readback: during a render burst (e.g. the chat
+        // list is momentarily empty while selectChat reloads), the target scroll clamps to a small value,
+        // and persisting that clamped 0 would lose the user's place forever. The nav's own scroll listener
+        // keeps state.sidebarScrollTop authoritative for real user scrolls, so a later render restores it.
+        requestAnimationFrame(() => { state.suppressSidebarScrollPersist = false; });
       });
     });
   }
@@ -1914,7 +2168,57 @@ function render() {
 // INITIALIZATION
 // ============================================================================
 
+/**
+ * geneWeave UI rebuild — apply this workspace's per-tenant Appearance / branding at runtime. Fetches the
+ * caller's own resolved (accessibility-safe) brand and applies it as CSS custom properties + data-*
+ * attributes, so the whole app re-brands with no flash. AI-agency colours (mint/emerald) are never
+ * re-branded. Best-effort — a workspace with no branding just keeps the defaults.
+ */
+async function applyTenantAppearance(): Promise<void> {
+  try {
+    const res = await api.get('/api/me/appearance');
+    if (!res || !(res as Response).ok) return;
+    const a = await (res as Response).json() as {
+      enabled?: boolean; colorScheme?: string; variant?: string; density?: string;
+      brandName?: string | null; logoSvg?: string | null;
+      vars?: { light?: Record<string, string>; dark?: Record<string, string> };
+    };
+    if (!a || a.enabled === false) return;
+    const rootEl = document.documentElement;
+    // Colour scheme — 'system' respects the OS; else force light/dark.
+    let scheme = a.colorScheme || 'system';
+    if (scheme === 'system') scheme = window.matchMedia?.('(prefers-color-scheme: dark)')?.matches ? 'dark' : 'light';
+    if (scheme === 'dark' || scheme === 'light') { rootEl.setAttribute('data-theme', scheme); (state as { theme?: string }).theme = scheme; }
+    // Pro / Creative default look.
+    if (a.variant === 'creative') rootEl.setAttribute('data-variant', 'creative'); else rootEl.removeAttribute('data-variant');
+    // Density.
+    rootEl.setAttribute('data-density', a.density || 'comfortable');
+    // Brand variables for the active scheme (legacy --accent etc. the shipped stylesheet consumes).
+    const vars = (scheme === 'dark' ? a.vars?.dark : a.vars?.light) || {};
+    for (const [k, v] of Object.entries(vars)) { if (/^--[\w-]+$/.test(k)) rootEl.style.setProperty(k, String(v).replace(/[;{}<>]/g, '')); }
+    // Brand name + logo — exposed for the shell wordmark to pick up.
+    if (a.brandName) (window as unknown as Record<string, unknown>)['__gwBrandName'] = a.brandName;
+    if (a.logoSvg) (window as unknown as Record<string, unknown>)['__gwBrandLogo'] = a.logoSvg;
+  } catch { /* keep defaults */ }
+}
+
 export function initialize() {
+  // Responsive shell: Escape closes the mobile nav / rail drawers (keyboard accessibility).
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    // Light-dismiss the global-state overlays (profile / notifications / settings) on Esc, and return
+    // focus to whichever trigger opened them (WCAG 2.4.3 focus order / 2.1.2 no keyboard trap).
+    if (state.showProfile || state.showNotifications || state.showSettings) {
+      // H12 — return focus to the trigger that opened the overlay (profile avatar or the AI-settings button).
+      const returnSel = state.showProfile ? '.profile-avatar' : state.showSettings ? '[data-focus-key="chat-settings-trigger"]' : null;
+      const returnTo = returnSel ? document.querySelector<HTMLElement>(returnSel) : null;
+      state.showProfile = false; state.showNotifications = false; state.showSettings = false;
+      render();
+      returnTo?.focus();
+      return;
+    }
+    document.querySelector('.app')?.classList.remove('nav-open', 'rail-open');
+  });
   document.addEventListener('click', () => {
     if (state.showSettings || state.showProfile || state.showNotifications) {
       state.showSettings = false;
@@ -1943,6 +2247,47 @@ export function initialize() {
         if (d.authenticated) {
         state.user = d.user;
         state.csrfToken = d.csrfToken;
+        // geneWeave UI rebuild: apply this workspace's per-tenant branding before first render (no flash).
+        await applyTenantAppearance();
+        // m137: load this workspace's AI-transparency config (AI-generated label + whether feedback is on).
+        await loadAiTransparency();
+        // m138: load the answer-citations config (whether the composer offers "Cite sources").
+        await loadChatCitationsConfig();
+        // m139: load the answer-versions config (whether answers offer Regenerate + a version pager).
+        await loadAnswerVersionsConfig();
+        // m140: load accessibility defaults (screen-reader announce mode + reduced motion).
+        await loadAccessibilityConfig();
+        // m143: load which UI areas this user may see (RBAC surface parity) before the first render.
+        await loadWorkspaceAccess();
+        // m145: load the interface-language message pack for this reader (their saved language, else the
+        // workspace default) before the first render, so the UI renders already-translated (no flash).
+        await loadI18n();
+        // m146: load the empty-chat conversation starters (curated + personalised) so they're ready to show.
+        await loadSuggestedPrompts();
+        // weaveNotes Phase 8 (desktop): wire the global quick-capture shortcut (⌘/Ctrl+Shift+K, or the
+        // Tauri OS-global hotkey). Capturing jumps into the new note. Wired once per session.
+        try {
+          const { wireQuickCapture } = await import('./ui/notes-quick-capture.js');
+          wireQuickCapture(async (noteId: string) => {
+            state.view = 'notes';
+            (state as { notesView?: string }).notesView = 'editor';
+            const { loadNote } = await import('./ui/notes-view.js');
+            await loadNote(noteId);
+            render();
+          });
+        } catch { /* non-fatal */ }
+        // weaveNotes Phase 2: if we arrived via a note share link, redeem it and
+        // jump straight into that note's collaborative editor.
+        try {
+          const { maybeJoinNoteFromUrl } = await import('./ui/notes-coedit.js');
+          const joinedNoteId = await maybeJoinNoteFromUrl();
+          if (joinedNoteId) {
+            state.view = 'notes';
+            (state as { notesView?: string }).notesView = 'editor';
+            const { loadNote } = await import('./ui/notes-view.js');
+            await loadNote(joinedNoteId);
+          }
+        } catch { /* non-fatal */ }
         await loadChats();
         await Promise.all([loadModels(), loadActiveRoutingPolicy(), loadTools(), loadUserPreferences()]);
         // Load action feed + calendar data eagerly (they populate the right rail widgets)
@@ -1956,6 +2301,10 @@ export function initialize() {
           await loadCalendarItems();
         } else if (state.view === 'notes') {
           await loadNotesList();
+          // weaveNotes Phase 8 (desktop): launch straight into the note you last had open.
+          if (!state.currentNoteId && (state as { notesView?: string }).notesView !== 'editor') {
+            try { const { openLastNote } = await import('./ui/notes-view.js'); await openLastNote(render); } catch { /* */ }
+          }
         } else if (state.view === 'connectors') {
           await openConnectorsView(render);
         } else if (state.view === 'admin') {
@@ -1985,8 +2334,12 @@ export function initialize() {
 // Make functions globally available
 (globalThis as any).render = render;
 (globalThis as any).sendMessage = sendMessage;
+(globalThis as any).stopStreaming = stopStreaming;
+(globalThis as any).renderMessages = renderMessages;
 (globalThis as any).createChat = createChat;
 (globalThis as any).selectChat = selectChat;
 (globalThis as any).doLogout = doLogout;
 (globalThis as any).initialize = initialize;
 (globalThis as any).state = state;
+(globalThis as any).loadI18n = loadI18n;
+(globalThis as any).loadSuggestedPrompts = loadSuggestedPrompts;

@@ -1,5 +1,5 @@
 /**
- * @weaveintel/agents — Phase 6 comprehensive tests
+ * @weaveintel/agents — comprehensive tests
  *
  * Tests for:
  *   P6-1: Multi-tier evaluation pipeline

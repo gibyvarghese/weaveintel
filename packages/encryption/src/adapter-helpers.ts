@@ -4,7 +4,7 @@
  * Reusable, app-agnostic glue for wiring `TenantKeyManager` into any
  * database adapter / ORM / repository layer. The helpers are intentionally
  * thin: they encode the "skip null / already-encrypted / disabled" pass-through
- * rules so consumers (geneweave, future apps) don't reinvent them.
+ * rules so consumers (the reference app, future apps) don't reinvent them.
  *
  * AAD ownership stays inside `TenantKeyManager.encrypt/decrypt`. Consumers
  * supply `tenantId`, `table`, `column`, and `rowId` only.

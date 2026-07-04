@@ -36,3 +36,9 @@ export {
   ReminderBusTargetAdapter,
   type CreateReminderTriggerInput,
 } from './reminders.js';
+
+// ── Cron schedule evaluator (timezone-aware, Vixie/POSIX semantics) ──
+export { isValidCron, isValidTimezone, cronMatches, cronNextRun } from './cron-schedule.js';
+
+// ── Run budget: anti-runaway token + step ceiling for autonomous/scheduled runs ──
+export { newRunBudget, chargeBudget, budgetExhausted, budgetRemaining, type RunBudget } from './run-budget.js';

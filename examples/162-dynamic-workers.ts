@@ -21,7 +21,6 @@ import { weaveContext, weaveRuntime } from '@weaveintel/core';
 import type { Model, ModelResponse } from '@weaveintel/core';
 import { Capabilities } from '@weaveintel/core';
 import { weaveAgent, createWorkerRegistry } from '@weaveintel/agents';
-import { createMockModel } from '@weaveintel/devtools';
 
 const runtime = weaveRuntime({});
 const makeCtx = () => weaveContext({ runtime });
@@ -66,11 +65,11 @@ async function scenario1BasicRegistry() {
   console.log('Workers:', workerRegistry.list().map(w => w.name).join(', '));
 
   const supervisor = weaveAgent({
-    model: createMockModel([
-      { toolCalls: [{ id: 'tc1', name: 'think', arguments: JSON.stringify({ thought: 'I need to research then write.' }) }] },
-      { toolCalls: [{ id: 'tc2', name: 'delegate_to_worker', arguments: JSON.stringify({ worker: 'researcher', goal: 'Research AI in software' }) }] },
-      { toolCalls: [{ id: 'tc3', name: 'delegate_to_worker', arguments: JSON.stringify({ worker: 'writer', goal: 'Write a brief on the research' }) }] },
-      { content: 'Complete: AI brief written by the writer based on research.' },
+    model: stubModel([
+      { id: 'sup1', model: 'stub', content: '', toolCalls: [{ id: 'tc1', name: 'think', arguments: JSON.stringify({ thought: 'I need to research then write.' }) }], finishReason: 'tool_calls', usage },
+      { id: 'sup2', model: 'stub', content: '', toolCalls: [{ id: 'tc2', name: 'delegate_to_worker', arguments: JSON.stringify({ worker: 'researcher', goal: 'Research AI in software' }) }], finishReason: 'tool_calls', usage },
+      { id: 'sup3', model: 'stub', content: '', toolCalls: [{ id: 'tc3', name: 'delegate_to_worker', arguments: JSON.stringify({ worker: 'writer', goal: 'Write a brief on the research' }) }], finishReason: 'tool_calls', usage },
+      { id: 'sup4', model: 'stub', content: 'Complete: AI brief written by the writer based on research.', toolCalls: [], finishReason: 'stop', usage },
     ]),
     workerRegistry,
     name: 'content-supervisor',
@@ -108,7 +107,7 @@ async function scenario2UnregisterWorker() {
 
   const supervisor = weaveAgent({
     model: stubModel([
-      { id: 's1', model: 'stub', content: '', toolCalls: [{ id: 'tc1', name: 'delegate_to_worker', arguments: JSON.stringify({ worker: 'analyst', goal: 'Analyse data' }) }], finishReason: 'tool_use', usage },
+      { id: 's1', model: 'stub', content: '', toolCalls: [{ id: 'tc1', name: 'delegate_to_worker', arguments: JSON.stringify({ worker: 'analyst', goal: 'Analyse data' }) }], finishReason: 'tool_calls', usage },
       { id: 's2', model: 'stub', content: 'Worker was unavailable so I completed the analysis myself.', toolCalls: [], finishReason: 'stop', usage },
     ]),
     workerRegistry,

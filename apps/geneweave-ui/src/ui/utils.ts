@@ -1,6 +1,7 @@
 // Common utility functions for UI
 import { state, toYMD } from './state.js';
 import { api } from './api.js';
+import { noticeDialog } from './dialog.js';
 
 /* Theme Management */
 export function normalizeTheme(val: any): 'light' | 'dark' {
@@ -166,12 +167,20 @@ export function toBase64(str: string): string {
 }
 
 /* File handling */
+export const MAX_ATTACH_BYTES = 10 * 1024 * 1024;
+export const MAX_ATTACH_COUNT = 8;
+
 export async function queueFiles(files: File[]) {
-  const MAX_FILE_SIZE = 10 * 1024 * 1024;
-  const selected = files.slice(0, 8);
+  // Collect rejections WITH A REASON so the UI can tell the user why a file didn't attach — never a silent
+  // drop (Round 3 / H20). Reasons: too large, too many at once, or unreadable.
+  const rejects: Array<{ name: string; reason: string }> = [];
+  const room = Math.max(0, MAX_ATTACH_COUNT - (state.pendingAttachments?.length || 0));
+  const selected = files.slice(0, room);
+  for (const extra of files.slice(room)) rejects.push({ name: extra.name, reason: `only ${MAX_ATTACH_COUNT} files at a time` });
+
   const encoded = await Promise.all(selected.map((file) => new Promise<any>((resolve) => {
-    if (file.size > MAX_FILE_SIZE) {
-      console.warn('Skipping large file:', file.name);
+    if (file.size > MAX_ATTACH_BYTES) {
+      rejects.push({ name: file.name, reason: 'too large (max 10 MB)' });
       resolve(null);
       return;
     }
@@ -179,22 +188,15 @@ export async function queueFiles(files: File[]) {
     reader.onload = (e) => {
       const raw = e.target?.result;
       const base64 = typeof raw === 'string' ? raw.split(',')[1] : null;
-      if (!base64) {
-        resolve(null);
-        return;
-      }
-      resolve({
-        name: file.name,
-        mimeType: file.type || 'application/octet-stream',
-        size: file.size,
-        dataBase64: base64,
-      });
+      if (!base64) { rejects.push({ name: file.name, reason: 'couldn’t read the file' }); resolve(null); return; }
+      resolve({ name: file.name, mimeType: file.type || 'application/octet-stream', size: file.size, dataBase64: base64 });
     };
-    reader.onerror = () => resolve(null);
+    reader.onerror = () => { rejects.push({ name: file.name, reason: 'couldn’t read the file' }); resolve(null); };
     reader.readAsDataURL(file);
   })));
 
   state.pendingAttachments.push(...encoded.filter(Boolean));
+  (state as any).uploadRejections = rejects; // replace — cleared on the next attach/dismiss
   const rerender = (globalThis as any).render;
   if (typeof rerender === 'function') rerender();
 }
@@ -244,7 +246,7 @@ export async function toggleAudioRecording() {
     (globalThis as any).SpeechRecognition || (globalThis as any).webkitSpeechRecognition;
   if (!SpeechRecognitionCtor) {
     console.error('Speech recognition is not supported in this browser.');
-    alert('Voice input is not supported in this browser. Try Chrome or Edge.');
+    void noticeDialog({ title: 'Voice input unavailable', message: 'Voice input is not supported in this browser. Try Chrome or Edge.' });
     return;
   }
 
@@ -398,13 +400,18 @@ export function mdToHtml(markdown: string): string {
 }
 
 /* Scroll helper */
-export function scrollMessages() {
-  const container = document.querySelector('.messages');
-  if (container) {
-    setTimeout(() => {
-      container.scrollTop = container.scrollHeight;
-    }, 0);
-  }
+export function scrollMessages(force = false) {
+  const container = document.querySelector('.messages') as HTMLElement | null;
+  if (!container) return;
+  if (force) state.transcriptAtBottom = true;
+  // Respect the reader: only auto-scroll when they're already at the bottom (or we're forcing, e.g. on send).
+  if (state.transcriptAtBottom === false) return;
+  setTimeout(() => {
+    state.suppressTranscriptScrollPersist = true;
+    container.scrollTop = container.scrollHeight;
+    state.transcriptScrollTop = container.scrollTop;
+    requestAnimationFrame(() => { state.suppressTranscriptScrollPersist = false; });
+  }, 0);
 }
 
 /* Render helper (for when render() is called globally) */

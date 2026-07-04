@@ -67,6 +67,9 @@ class RunIdCapturingRepo implements WorkflowRunRepository {
   async save(run: WorkflowRun): Promise<void> { if (!this.firstId) this.firstId = run.id; return this.inner.save(run); }
   get(id: string) { return this.inner.get(id); }
   list(workflowId?: string) { return this.inner.list(workflowId); }
+  listByParent(parentRunId: string) { return this.inner.listByParent(parentRunId); }
+  listFiltered(opts: Parameters<WorkflowRunRepository['listFiltered']>[0]) { return this.inner.listFiltered(opts); }
+  countActive(workflowId: string) { return this.inner.countActive(workflowId); }
   delete(id: string) { return this.inner.delete(id); }
 }
 
@@ -130,6 +133,9 @@ class CapturingRepo implements WorkflowRunRepository {
   async save(run: WorkflowRun) { if (!this.runId) this.runId = run.id; return this.inner.save(run); }
   get(id: string) { return this.inner.get(id); }
   list(workflowId?: string) { return this.inner.list(workflowId); }
+  listByParent(parentRunId: string) { return this.inner.listByParent(parentRunId); }
+  listFiltered(opts: Parameters<WorkflowRunRepository['listFiltered']>[0]) { return this.inner.listFiltered(opts); }
+  countActive(workflowId: string) { return this.inner.countActive(workflowId); }
   delete(id: string) { return this.inner.delete(id); }
 }
 const captureRepo = new CapturingRepo();
@@ -147,8 +153,8 @@ for (const r of reg3.list()) {
             stepId: ctx.step.id,
             handler: ctx.step.handler ?? ctx.step.id,
             kind: r.kind,
-            ...(cfg !== undefined ? { config: cfg } : {}),
-            variables: vars,
+            config: (cfg as Record<string, unknown> | undefined) ?? {},
+            variables: vars as Record<string, unknown>,
             output: out,
           });
         }

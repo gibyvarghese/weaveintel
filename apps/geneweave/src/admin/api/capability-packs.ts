@@ -3,7 +3,7 @@
  *
  * Operator CRUD over `capability_packs`, plus install/uninstall actions and
  * a readonly view of the installation ledger. Pack manifests are validated
- * via `@weaveintel/capability-packs` before save.
+ * via `@weaveintel/core/capability-packs` before save.
  */
 
 import { newUUIDv7 } from '@weaveintel/core';
@@ -13,7 +13,7 @@ import {
   uninstallPack,
   type CapabilityPack,
   type PackInstallationLedger,
-} from '@weaveintel/capability-packs';
+} from '@weaveintel/core/capability-packs';
 import type { DatabaseAdapter, CapabilityPackStatus } from '../../db.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 import { createGeneweavePackInstallAdapter } from '../../capability-packs/install-adapter.js';

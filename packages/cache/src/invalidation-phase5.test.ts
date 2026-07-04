@@ -1,5 +1,5 @@
 /**
- * @weaveintel/cache — Phase 5 invalidation + scoped-key tests.
+ * @weaveintel/cache — invalidation + scoped-key tests.
  * Positive, negative, scope/security, and stress.
  */
 import { describe, it, expect } from 'vitest';

@@ -3,10 +3,10 @@
  *
  * Mirrors live-agents per-agent backlog/inbox state into the
  * `live_run_steps` + `live_run_events` ledger so admin dashboards reflect
- * real-time pipeline progress. This is the generic equivalent of
- * `bridgeRunState()` in `apps/geneweave/src/live-agents/kaggle/heartbeat-runner.ts`
+ * real-time pipeline progress. This is the generic equivalent of an
+ * app-specific `bridgeRunState()` heartbeat runner
  * — same algorithm, but keyed on `live_runs.mesh_id` + `live_run_steps.role_key`
- * instead of the Kaggle-specific `kgl_*` ledger.
+ * instead of a domain-specific ledger.
  *
  * Algorithm per RUNNING run:
  *   For each pre-existing step row (matched by `role_key` to a runtime
@@ -26,7 +26,7 @@
 import type { StateStore } from '@weaveintel/live-agents';
 import { newUUIDv7 } from '@weaveintel/core';
 
-// ─── Lightweight DB row shapes (mirror geneweave) ────────────
+// ─── Lightweight DB row shapes (mirror the host application) ────────────
 
 export interface LiveRunRowLike {
   id: string;

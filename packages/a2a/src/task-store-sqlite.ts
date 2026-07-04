@@ -3,7 +3,7 @@
  *
  * Uses a minimal duck-typed interface for the SQLite DB so that the
  * @weaveintel/a2a package itself does not depend on better-sqlite3.
- * The caller (geneWeave or any SQLite app) passes in the live db handle.
+ * The caller (the host application or any SQLite app) passes in the live db handle.
  *
  * Table: a2a_tasks — DDL exported as A2A_TASKS_DDL for use in migrations.
  *
@@ -30,7 +30,7 @@ export interface SqliteDb {
   exec(sql: string): void;
 }
 
-// ─── DDL — exported so geneWeave migrations can include the same schema ──────
+// ─── DDL — exported so host-application migrations can include the same schema ──────
 
 export const A2A_TASKS_DDL = `
 CREATE TABLE IF NOT EXISTS a2a_tasks (

@@ -1,0 +1,50 @@
+---
+"@weaveintel/a11y": minor
+"@weaveintel/a2a": minor
+"@weaveintel/agents": minor
+"@weaveintel/api-client": minor
+"@weaveintel/artifacts": minor
+"@weaveintel/cache": minor
+"@weaveintel/client": minor
+"@weaveintel/collab": minor
+"@weaveintel/core": minor
+"@weaveintel/cost-governor": minor
+"@weaveintel/devtools": minor
+"@weaveintel/encryption": minor
+"@weaveintel/extraction": minor
+"@weaveintel/guardrails": minor
+"@weaveintel/human-tasks": minor
+"@weaveintel/identity": minor
+"@weaveintel/live-agents": minor
+"@weaveintel/live-agents-runtime": minor
+"@weaveintel/mcp-client": minor
+"@weaveintel/mcp-server": minor
+"@weaveintel/memory": minor
+"@weaveintel/notes": minor
+"@weaveintel/notifications": minor
+"@weaveintel/observability": minor
+"@weaveintel/persistence": minor
+"@weaveintel/prompts": minor
+"@weaveintel/provider-anthropic": minor
+"@weaveintel/provider-google": minor
+"@weaveintel/provider-llamacpp": minor
+"@weaveintel/provider-ollama": minor
+"@weaveintel/provider-openai": minor
+"@weaveintel/resilience": minor
+"@weaveintel/retrieval": minor
+"@weaveintel/routing": minor
+"@weaveintel/sandbox": minor
+"@weaveintel/skills": minor
+"@weaveintel/testing": minor
+"@weaveintel/tokens": minor
+"@weaveintel/tools": minor
+"@weaveintel/tools-browser": minor
+"@weaveintel/tools-enterprise": minor
+"@weaveintel/triggers": minor
+"@weaveintel/ui-primitives": minor
+"@weaveintel/voice": minor
+"@weaveintel/weaveintel": minor
+"@weaveintel/workflows": minor
+---
+
+The open-core restructure: ~87 packages consolidated to 46 focused @weaveintel/* framework packages, cleanly split from the geneWeave apps. New @weaveintel/collab and consolidated @weaveintel/tools (tree-shakeable subpaths); brand-neutral @weaveintel/tokens engine; slim @weaveintel/notes. Retired names deprecated with replacement pointers. See MIGRATION.md.

@@ -2,7 +2,7 @@
  * Playwright E2E — Phase 5 (client UX primitives), live server + real LLM.
  *
  * Drives the REAL `createRunSession` controller from `@weaveintel/client`
- * (the framework-agnostic UX primitive that `@weaveintel/react-client`'s
+ * (the framework-agnostic UX primitive that `@weaveintel/client/react`'s
  * `useRun` and the mobile session both build on) against the live geneweave
  * Run API, end-to-end, with a real OpenAI model — exercising the lifecycle
  * state machine (idle → submitted → streaming → ready), `stop()` (cancel),

@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Caveat:wght@600;700&display=swap" rel="stylesheet">
+<style>
+  body { margin: 0; background: #F6F8F7; overflow: hidden; }
+  * { box-sizing: border-box; }
+  .gw-scroll::-webkit-scrollbar { width: 9px; }
+  .gw-scroll::-webkit-scrollbar-thumb { background: #E1E8E5; border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+  input[type=range].gw { -webkit-appearance: none; appearance: none; height: 4px; border-radius: 999px; background: #E7ECEA; outline: none; }
+  input[type=range].gw::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; border-radius: 50%; background: #0E9A6E; cursor: pointer; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(20,32,27,.2); }
+</style>
+</helmet>
+
+<div style="font-family: 'Inter', sans-serif; color: #14201B; height: 100vh; display: flex; overflow: hidden; background: #F6F8F7;">
+
+  <!-- ============ LEFT RAIL ============ -->
+  <nav style="width: 230px; flex: none; background: #FFFFFF; border-right: 1px solid #E7ECEA; display: flex; flex-direction: column;">
+    <div style="display:flex;align-items:center;gap:10px;padding:16px 16px 14px;border-bottom:1px solid #E7ECEA;">
+      <svg width="24" height="24" viewBox="0 0 34 34" fill="none"><path d="M7 11 C 13 11, 13 23, 19 23 C 25 23, 25 11, 31 11" stroke="#0E9A6E" stroke-width="3.4" stroke-linecap="round"/><path d="M3 23 C 9 23, 9 11, 15 11 C 21 11, 21 23, 27 23" stroke="#14201B" stroke-width="3.4" stroke-linecap="round" opacity="0.9"/></svg>
+      <div style="display:flex;flex-direction:column;line-height:1.1;">
+        <div style="font-family:'Plus Jakarta Sans',sans-serif;font-size:15px;font-weight:700;letter-spacing:-0.02em;"><span style="color:#5E6E67;font-weight:600;">gene</span>Weave</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.12em;color:#0E9A6E;margin-top:2px;">SOCIETY · SETUP</div>
+      </div>
+    </div>
+
+    <div class="gw-scroll" style="flex:1;overflow-y:auto;padding:16px 14px;display:flex;flex-direction:column;gap:18px;">
+      <div style="display:flex;flex-direction:column;gap:9px;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.1em;color:#9aa7a1;">ONE ENGINE</div>
+        <div style="font-size:12.5px;line-height:1.55;color:#5E6E67;">Every template runs the same simulation underneath. A template just renames its parts to match a world.</div>
+        <div style="display:flex;flex-direction:column;gap:7px;margin-top:4px;">
+          <div style="display:flex;align-items:center;gap:9px;font-size:12px;color:#5E6E67;"><span style="width:8px;height:8px;border-radius:50%;background:#0E9A6E;flex:none;"></span>Residents who act &amp; learn</div>
+          <div style="display:flex;align-items:center;gap:9px;font-size:12px;color:#5E6E67;"><span style="width:8px;height:8px;border-radius:50%;background:#2F6E5B;flex:none;"></span>A constitution they live by</div>
+          <div style="display:flex;align-items:center;gap:9px;font-size:12px;color:#5E6E67;"><span style="width:8px;height:8px;border-radius:50%;background:#243B33;flex:none;"></span>Guardians who enforce it</div>
+          <div style="display:flex;align-items:center;gap:9px;font-size:12px;color:#5E6E67;"><span style="width:8px;height:8px;border-radius:50%;background:#D85A30;flex:none;"></span>Dissidents who test it</div>
+          <div style="display:flex;align-items:center;gap:9px;font-size:12px;color:#5E6E67;"><span style="width:8px;height:8px;border-radius:50%;background:#C9942E;flex:none;"></span>An economy &amp; a budget</div>
+          <div style="display:flex;align-items:center;gap:9px;font-size:12px;color:#5E6E67;"><span style="width:8px;height:8px;border-radius:50%;background:#C2885A;flex:none;"></span>A capacity it can breach</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="border-top:1px solid #E7ECEA;padding:12px 16px;display:flex;align-items:center;gap:10px;">
+      <span style="width:24px;height:24px;border-radius:50%;background:#14201B;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;">G</span>
+      <span style="font-size:13px;color:#5E6E67;">Giby · Architect</span>
+    </div>
+  </nav>
+
+  <!-- ============ CENTRE: GALLERY ============ -->
+  <main class="gw-scroll" style="flex:1;min-width:0;overflow-y:auto;background:#F6F8F7;">
+    <div style="padding:34px 32px 80px;display:flex;flex-direction:column;gap:26px;">
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.1em;color:#0E9A6E;">NEW SOCIETY</div>
+        <h1 style="font-family:'Plus Jakarta Sans',sans-serif;font-size:30px;font-weight:800;letter-spacing:-0.025em;margin:0;">Start from a template</h1>
+        <p style="font-size:15px;line-height:1.6;color:#5E6E67;margin:0;max-width:620px;">Spin up a society modelled on anything in the world. Each template sets the roles, the constitution, the economy, and what it means to break the rules — then you tune it and watch it run.</p>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(232px,1fr));gap:16px;">
+        <sc-for list="{{ cards }}" as="t" hint-placeholder-count="8">
+          <div onClick="{{ t.onClick }}" style="{{ t.style }}">
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <div style="width:40px;height:40px;border-radius:11px;display:flex;align-items:center;justify-content:center;background:{{ t.tint }};color:{{ t.color }};">{{ t.icon }}</div>
+              <span style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.06em;color:#9aa7a1;">{{ t.tag }}</span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:5px;margin-top:13px;">
+              <div style="font-family:'Plus Jakarta Sans',sans-serif;font-size:16px;font-weight:700;letter-spacing:-0.01em;">{{ t.name }}</div>
+              <div style="font-size:12.5px;line-height:1.5;color:#5E6E67;">{{ t.blurb }}</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:13px;padding-top:12px;border-top:1px solid #F0F2F1;">
+              <span style="font-size:11px;color:#5E6E67;">Run by <span style="font-weight:600;color:#14201B;">{{ t.residents }}</span></span>
+              <span style="margin-left:auto;font-size:10.5px;color:#C2562B;background:#FBEFEA;border-radius:999px;padding:2px 8px;">{{ t.dissidents }}</span>
+            </div>
+          </div>
+        </sc-for>
+
+        <!-- blank -->
+        <div onClick="{{ selectBlank }}" style="{{ blankStyle }}">
+          <div style="width:40px;height:40px;border-radius:11px;display:flex;align-items:center;justify-content:center;border:1.5px dashed #C9D6D0;color:#9aa7a1;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:5px;margin-top:13px;">
+            <div style="font-family:'Plus Jakarta Sans',sans-serif;font-size:16px;font-weight:700;letter-spacing:-0.01em;">Blank canvas</div>
+            <div style="font-size:12.5px;line-height:1.5;color:#5E6E67;">Start with an empty world and write every role and rule yourself.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ============ RIGHT: CONFIG ============ -->
+  <aside class="gw-scroll" style="width:368px;flex:none;overflow-y:auto;background:#FFFFFF;border-left:1px solid #E7ECEA;">
+    <div style="padding:22px 20px 28px;display:flex;flex-direction:column;gap:22px;">
+      <!-- header -->
+      <div style="display:flex;gap:13px;align-items:flex-start;">
+        <div style="width:48px;height:48px;border-radius:13px;flex:none;display:flex;align-items:center;justify-content:center;background:{{ sel.tint }};color:{{ sel.color }};">{{ sel.icon }}</div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-family:'Plus Jakarta Sans',sans-serif;font-size:19px;font-weight:700;letter-spacing:-0.01em;">{{ sel.name }}</div>
+          <div style="font-size:12.5px;line-height:1.5;color:#5E6E67;margin-top:3px;">{{ sel.blurb }}</div>
+        </div>
+      </div>
+
+      <!-- mapping -->
+      <div style="display:flex;flex-direction:column;gap:11px;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.08em;color:#0E9A6E;">THE ENGINE, DRESSED AS THIS</div>
+        <div style="border:1px solid #E7ECEA;border-radius:12px;overflow:hidden;">
+          <sc-for list="{{ sel.mapping }}" as="m" hint-placeholder-count="6">
+            <div style="{{ m.rowStyle }}">
+              <span style="font-size:12px;color:#9aa7a1;flex:none;width:96px;">{{ m.concept }}</span>
+              <span style="color:#c2cec8;flex:none;">→</span>
+              <span style="font-size:13px;font-weight:500;color:#14201B;">{{ m.term }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+
+      <!-- what breaks the rules -->
+      <div style="display:flex;flex-direction:column;gap:7px;background:#FBEFEA;border:1px solid #F3DCCF;border-radius:12px;padding:13px 15px;">
+        <div style="font-size:11px;font-weight:700;color:#A8551F;font-family:'Plus Jakarta Sans',sans-serif;">What breaks the rules here</div>
+        <div style="font-size:12.5px;line-height:1.5;color:#9c6b4e;">{{ sel.adversaryNote }}</div>
+      </div>
+
+      <!-- parameters -->
+      <div style="display:flex;flex-direction:column;gap:18px;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.08em;color:#0E9A6E;">PARAMETERS</div>
+
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;"><span style="font-size:13px;color:#14201B;">{{ sel.popLabel }}</span><span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#0B7A57;">{{ pop }}</span></div>
+          <input type="range" class="gw" min="{{ popMin }}" max="{{ popMax }}" value="{{ pop }}" onInput="{{ onPop }}" style="width:100%;"/>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;"><span style="font-size:13px;color:#14201B;">{{ sel.budgetLabel }}</span><span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#0B7A57;">{{ budgetFmt }}</span></div>
+          <input type="range" class="gw" min="0" max="{{ budgetMax }}" step="{{ budgetStep }}" value="{{ budget }}" onInput="{{ onBudget }}" style="width:100%;"/>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;"><span style="font-size:13px;color:#14201B;">Constitution strictness</span><span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#0B7A57;">{{ strictnessLabel }}</span></div>
+          <input type="range" class="gw" min="0" max="100" value="{{ strictness }}" onInput="{{ onStrict }}" style="width:100%;"/>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;"><span style="font-size:13px;color:#14201B;">Openness to outsiders</span><span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#0B7A57;">{{ opennessLabel }}</span></div>
+          <input type="range" class="gw" min="0" max="100" value="{{ openness }}" onInput="{{ onOpen }}" style="width:100%;"/>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:9px;">
+          <span style="font-size:13px;color:#14201B;">Tempo</span>
+          <div style="display:flex;gap:6px;">
+            <button onClick="{{ tempo1 }}" style="{{ tempoStyle1 }}">Calm</button>
+            <button onClick="{{ tempo2 }}" style="{{ tempoStyle2 }}">Lively</button>
+            <button onClick="{{ tempo3 }}" style="{{ tempoStyle3 }}">Chaotic</button>
+          </div>
+        </div>
+
+        <div style="display:flex;align-items:center;justify-content:space-between;background:#F6F8F7;border:1px solid #E7ECEA;border-radius:12px;padding:13px 15px;">
+          <div style="display:flex;flex-direction:column;gap:2px;">
+            <span style="font-size:13px;font-weight:600;color:#14201B;">Allow dissidents</span>
+            <span style="font-size:11.5px;color:#5E6E67;">Residents who try to break the rules.</span>
+          </div>
+          <div onClick="{{ toggleAdv }}" style="{{ advTrack }}"><span style="{{ advKnob }}"></span></div>
+        </div>
+      </div>
+
+      <!-- preview + create -->
+      <div style="display:flex;flex-direction:column;gap:13px;border-top:1px solid #E7ECEA;padding-top:18px;">
+        <div style="font-size:12.5px;line-height:1.6;color:#5E6E67;">{{ previewText }}</div>
+        <button style="width:100%;font-size:14px;font-weight:600;color:#fff;background:#0E9A6E;border:none;border-radius:12px;padding:13px;cursor:pointer;">Create society →</button>
+        <button style="width:100%;font-size:13px;font-weight:600;color:#5E6E67;background:#fff;border:1px solid #E7ECEA;border-radius:12px;padding:11px;cursor:pointer;">Save as my template</button>
+      </div>
+    </div>
+  </aside>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:&quot;100%&quot;,&quot;height&quot;:&quot;100%&quot;}}">
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    const I = {
+      township:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M5 21V9l4-3 4 3M13 21V11l4-3 4 3v10"/><path d="M8 21v-4M17 21v-3"/></svg>',
+      company:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="1.5"/><path d="M9 8h2M13 8h2M9 12h2M13 12h2M9 16h6"/></svg>',
+      market:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5M4 19h16M8 16l3-4 3 3 5-7"/></svg>',
+      nation:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V4M5 4l9 2-2 4 2 4-9-2"/></svg>',
+      lab:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3"/><path d="M7.5 15h9"/></svg>',
+      network:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 1 1-3.5-6.6L21 4l-1 4"/><circle cx="9" cy="12" r="1"/><circle cx="13" cy="12" r="1"/><circle cx="17" cy="12" r="1"/></svg>',
+      oss:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M8.4 6.6c4 0 7.6.5 7.6 2.4M16 11c0 4-10 1-10 5"/></svg>',
+      bazaar:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h2l2.4 12.5a1.5 1.5 0 0 0 1.5 1.2h7.7a1.5 1.5 0 0 0 1.5-1.2L22 8H6"/><circle cx="10" cy="20" r="1"/><circle cx="18" cy="20" r="1"/></svg>',
+    };
+    const C = {
+      township:['#0E9A6E','#E8F5EE'], company:['#243B33','#EDF1EF'], market:['#2F6E5B','#E7F2EC'],
+      nation:['#0B7A57','#E8F5EE'], lab:['#3E6E8F','#E9F0F5'], network:['#7A5BC9','#EEEAF7'],
+      oss:['#C9742E','#FBF1E6'], bazaar:['#C9942E','#FAF3E3'],
+    };
+
+    this.templates = [
+      { id:'township', name:'Township', tag:'CIVIC', icon:I.township, color:C.township[0], tint:C.township[1],
+        blurb:'A small town under a written constitution — the world geneWeave began with.',
+        mapping:[ ['Residents','Townsfolk'],['Constitution','The town charter'],['Economy','Grain & labour'],['Guardians','Wardens & auditors'],['Dissidents','Forgers & hoarders'],['Capacity','Infrastructure'] ],
+        residents:'townsfolk', dissidents:'forgers',
+        adversaryNote:'Forgers alter records and hoarders conceal surplus — the wardens and auditor hunt them.',
+        popLabel:'Residents', budgetLabel:'Town treasury', budgetMax:200, budgetStep:5, popMin:6, popMax:60,
+        d:{ pop:10, budget:60, strictness:62, openness:55, adversaries:true, tempo:1 } },
+      { id:'company', name:'Company', tag:'ORGANIZATION', icon:I.company, color:C.company[0], tint:C.company[1],
+        blurb:'A firm run by its charter and policies, with departments chasing targets.',
+        mapping:[ ['Residents','Employees'],['Constitution','Charter & policies'],['Economy','Capital & revenue'],['Guardians','Compliance & audit'],['Dissidents','Fraud & sabotage'],['Capacity','Headcount budget'] ],
+        residents:'employees', dissidents:'fraud',
+        adversaryNote:'Some employees pad expenses, leak data, or game their targets — compliance and internal audit catch them.',
+        popLabel:'Headcount', budgetLabel:'Operating capital', budgetMax:2000, budgetStep:50, popMin:8, popMax:300,
+        d:{ pop:40, budget:600, strictness:70, openness:40, adversaries:true, tempo:2 } },
+      { id:'market', name:'Stock exchange', tag:'MARKETS', icon:I.market, color:C.market[0], tint:C.market[1],
+        blurb:'A trading floor governed by market rules; regulators against manipulators.',
+        mapping:[ ['Residents','Traders'],['Constitution','Trading rules'],['Economy','Capital flows'],['Guardians','Regulators'],['Dissidents','Insiders & manipulators'],['Capacity','Liquidity'] ],
+        residents:'traders', dissidents:'insiders',
+        adversaryNote:'Insiders trade on secrets and rings pump-and-dump thin stocks — regulators watch the tape for it.',
+        popLabel:'Traders', budgetLabel:'Market capital', budgetMax:10000, budgetStep:250, popMin:12, popMax:400,
+        d:{ pop:60, budget:4000, strictness:55, openness:80, adversaries:true, tempo:3 } },
+      { id:'nation', name:'Nation', tag:'GEOPOLITICS', icon:I.nation, color:C.nation[0], tint:C.nation[1],
+        blurb:'Provinces under one constitution, with borders and controlled migration.',
+        mapping:[ ['Residents','Citizens'],['Constitution','The constitution'],['Economy','GDP & treasury'],['Guardians','Government & courts'],['Dissidents','Rebels & smugglers'],['Capacity','Infrastructure'] ],
+        residents:'citizens', dissidents:'rebels',
+        adversaryNote:'Smugglers cross borders untaxed and factions defy the courts — the government and its courts respond.',
+        popLabel:'Citizens (×1k)', budgetLabel:'National treasury', budgetMax:5000, budgetStep:100, popMin:20, popMax:500,
+        d:{ pop:120, budget:1500, strictness:60, openness:50, adversaries:true, tempo:1 } },
+      { id:'lab', name:'Research lab', tag:'SCIENCE', icon:I.lab, color:C.lab[0], tint:C.lab[1],
+        blurb:'A scientific community bound by peer review and an ethics code.',
+        mapping:[ ['Residents','Researchers'],['Constitution','Ethics code & peer review'],['Economy','Grants & findings'],['Guardians','Reviewers & ethics board'],['Dissidents','Fabricators & plagiarists'],['Capacity','Lab funding'] ],
+        residents:'researchers', dissidents:'fabricators',
+        adversaryNote:'A few fabricate data or plagiarise to publish faster — reviewers and the ethics board catch it.',
+        popLabel:'Researchers', budgetLabel:'Grant pool', budgetMax:1000, budgetStep:20, popMin:6, popMax:120,
+        d:{ pop:24, budget:180, strictness:75, openness:60, adversaries:true, tempo:1 } },
+      { id:'network', name:'Online community', tag:'SOCIAL', icon:I.network, color:C.network[0], tint:C.network[1],
+        blurb:'A network living by its guidelines; moderators against bad actors.',
+        mapping:[ ['Residents','Members'],['Constitution','Community guidelines'],['Economy','Attention & reputation'],['Guardians','Moderators'],['Dissidents','Trolls & spammers'],['Capacity','Moderation bandwidth'] ],
+        residents:'members', dissidents:'trolls',
+        adversaryNote:'Trolls bait, spammers flood, and brigades coordinate — moderators and reputation systems push back.',
+        popLabel:'Members', budgetLabel:'Moderation budget', budgetMax:600, budgetStep:10, popMin:20, popMax:500,
+        d:{ pop:200, budget:120, strictness:50, openness:90, adversaries:true, tempo:3 } },
+      { id:'oss', name:'Open-source project', tag:'SOFTWARE', icon:I.oss, color:C.oss[0], tint:C.oss[1],
+        blurb:'Contributors under a governance model and a license.',
+        mapping:[ ['Residents','Contributors'],['Constitution','Governance & license'],['Economy','Commits & releases'],['Guardians','Maintainers'],['Dissidents','Bad-faith contributors'],['Capacity','Maintainer time'] ],
+        residents:'contributors', dissidents:'bad PRs',
+        adversaryNote:'Some open bad-faith PRs, sneak in licenses, or burn maintainer time — maintainers triage and gate merges.',
+        popLabel:'Contributors', budgetLabel:'Sponsorship', budgetMax:500, budgetStep:10, popMin:5, popMax:150,
+        d:{ pop:30, budget:80, strictness:58, openness:85, adversaries:true, tempo:2 } },
+      { id:'bazaar', name:'Marketplace', tag:'COMMERCE', icon:I.bazaar, color:C.bazaar[0], tint:C.bazaar[1],
+        blurb:'Buyers and sellers on a platform bound by its terms of service.',
+        mapping:[ ['Residents','Buyers & sellers'],['Constitution','Terms of service'],['Economy','Transactions'],['Guardians','Trust & safety'],['Dissidents','Scammers'],['Capacity','Platform load'] ],
+        residents:'sellers', dissidents:'scammers',
+        adversaryNote:'Scammers list fakes and fake reviews inflate trust — the trust & safety team detects and removes them.',
+        popLabel:'Accounts', budgetLabel:'Platform budget', budgetMax:1500, budgetStep:25, popMin:20, popMax:400,
+        d:{ pop:150, budget:300, strictness:52, openness:88, adversaries:true, tempo:3 } },
+    ];
+
+    const t0 = this.templates[0];
+    this.state = { selId:'township', ...t0.d };
+  }
+
+  select(id) {
+    const t = this.templates.find(x => x.id === id);
+    this.setState({ selId:id, ...t.d });
+  }
+
+  fmtMoney(n) { return n >= 1000 ? (n/1000).toFixed(n % 1000 === 0 ? 0 : 1) + 'k' : '' + n; }
+  scaleLabel(v) { return v >= 75 ? 'High' : v >= 45 ? 'Moderate' : v >= 20 ? 'Light' : 'Minimal'; }
+
+  renderVals() {
+    const s = this.state;
+    const sel = this.templates.find(t => t.id === s.selId);
+
+    const cardBase = 'border-radius:14px;padding:18px;cursor:pointer;display:flex;flex-direction:column;background:#fff;transition:all .15s;';
+    const svgEl = (svg) => React.createElement('span', { style:{display:'flex',alignItems:'center',justifyContent:'center'}, dangerouslySetInnerHTML:{ __html: svg } });
+    const cards = this.templates.map(t => ({
+      name:t.name, tag:t.tag, blurb:t.blurb, icon:svgEl(t.icon), color:t.color, tint:t.tint,
+      residents:t.residents, dissidents:t.dissidents,
+      onClick: () => this.select(t.id),
+      style: cardBase + (t.id === s.selId ? 'border:1.5px solid #0E9A6E;box-shadow:0 0 0 3px #E8F5EE;' : 'border:1px solid #E7ECEA;'),
+    }));
+
+    const mapping = sel.mapping.map((m, i) => ({
+      concept:m[0], term:m[1],
+      rowStyle:'display:flex;align-items:center;gap:10px;padding:10px 14px;' + (i < sel.mapping.length - 1 ? 'border-bottom:1px solid #F0F2F1;' : ''),
+    }));
+
+    const tempoBase = 'flex:1;font-size:12px;font-weight:600;border:none;border-radius:9px;padding:8px 0;cursor:pointer;';
+    const tempoOn = 'background:#E8F5EE;color:#0B7A57;box-shadow:inset 0 0 0 1.5px #0E9A6E;';
+    const tempoOff = 'background:#F6F8F7;color:#5E6E67;';
+
+    return {
+      cards,
+      selectBlank: () => this.setState({ selId:'township' }),
+      blankStyle:'border:1.5px dashed #D8DEDB;border-radius:14px;padding:18px;cursor:pointer;display:flex;flex-direction:column;background:#FBFCFB;',
+      sel: { name:sel.name, blurb:sel.blurb, icon:svgEl(sel.icon), color:sel.color, tint:sel.tint, mapping,
+        adversaryNote:sel.adversaries === false ? 'Adversaries are off — a society of only good-faith residents.' : sel.adversaryNote,
+        popLabel:sel.popLabel, budgetLabel:sel.budgetLabel },
+      pop:s.pop, popMin:sel.popMin, popMax:sel.popMax, onPop:(e)=>this.setState({pop:+e.target.value}),
+      budget:s.budget, budgetMax:sel.budgetMax, budgetStep:sel.budgetStep, budgetFmt:this.fmtMoney(s.budget),
+      onBudget:(e)=>this.setState({budget:+e.target.value}),
+      strictness:s.strictness, strictnessLabel:this.scaleLabel(s.strictness), onStrict:(e)=>this.setState({strictness:+e.target.value}),
+      openness:s.openness, opennessLabel:this.scaleLabel(s.openness), onOpen:(e)=>this.setState({openness:+e.target.value}),
+      tempo1:()=>this.setState({tempo:1}), tempo2:()=>this.setState({tempo:2}), tempo3:()=>this.setState({tempo:3}),
+      tempoStyle1:tempoBase + (s.tempo===1?tempoOn:tempoOff),
+      tempoStyle2:tempoBase + (s.tempo===2?tempoOn:tempoOff),
+      tempoStyle3:tempoBase + (s.tempo===3?tempoOn:tempoOff),
+      toggleAdv:()=>this.setState({adversaries:!s.adversaries}),
+      advTrack:'width:44px;height:26px;border-radius:999px;cursor:pointer;flex:none;position:relative;transition:background .18s;background:'+(s.adversaries?'#0E9A6E':'#D5DEDA')+';',
+      advKnob:'position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.2);transition:transform .18s;transform:translateX('+(s.adversaries?'18px':'0')+');',
+      previewText:'A '+sel.name.toLowerCase()+' of '+s.pop+' '+sel.residents+', '+this.scaleLabel(s.strictness).toLowerCase()+' rules, '+this.scaleLabel(s.openness).toLowerCase()+' openness'+(s.adversaries?', with dissidents testing the system.':', good-faith only.'),
+    };
+  }
+}
+</script>
+</body>
+</html>

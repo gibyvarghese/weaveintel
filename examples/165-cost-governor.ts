@@ -16,12 +16,22 @@ import type { Model } from '@weaveintel/core';
 // --- Stub model that simulates token costs ---
 
 const model: Model = {
+  info: {
+    provider: 'stub',
+    modelId: 'stub-model',
+    capabilities: new Set(),
+  },
+  capabilities: new Set(),
+  hasCapability: () => false,
   async generate(_ctx, req) {
     const lastMsg = req.messages.at(-1);
     const content = typeof lastMsg?.content === 'string' ? lastMsg.content : '';
     return {
+      id: 'stub-response',
       content: `Processed: ${content.slice(0, 50)}`,
+      model: 'stub-model',
       toolCalls: [],
+      finishReason: 'stop',
       usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150 },
     };
   },
@@ -46,7 +56,11 @@ const agent = weaveAgent({
 });
 
 async function main(): Promise<void> {
-  const ctx = { userId: 'cost-demo', sessionId: 'cost-governor-demo' } as ExecutionContext;
+  const ctx: ExecutionContext = {
+    executionId: 'cost-governor-demo',
+    userId: 'cost-demo',
+    metadata: {},
+  };
 
   // Run a multi-turn conversation
   console.log('=== Cost-Aware Agent Run ===');

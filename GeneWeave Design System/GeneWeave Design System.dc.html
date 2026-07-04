@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  body { margin: 0; background: #F6F8F7; }
+  * { box-sizing: border-box; }
+</style>
+</helmet>
+
+<div style="font-family: 'Inter', sans-serif; color: #14201B; background: #F6F8F7; min-height: 100%; padding: 72px 32px 120px;">
+<div style="max-width: 1040px; margin: 0 auto; display: flex; flex-direction: column; gap: 80px;">
+
+  <!-- ============ COVER ============ -->
+  <header style="display: flex; flex-direction: column; gap: 40px;">
+    <div style="display: flex; align-items: center; gap: 14px;">
+      <svg width="34" height="34" viewBox="0 0 34 34" fill="none" aria-hidden="true">
+        <path d="M7 11 C 13 11, 13 23, 19 23 C 25 23, 25 11, 31 11" stroke="#0E9A6E" stroke-width="3.4" stroke-linecap="round"/>
+        <path d="M3 23 C 9 23, 9 11, 15 11 C 21 11, 21 23, 27 23" stroke="#14201B" stroke-width="3.4" stroke-linecap="round" opacity="0.9"/>
+      </svg>
+      <div style="font-family: 'Plus Jakarta Sans', sans-serif; font-size: 22px; font-weight: 700; letter-spacing: -0.02em;">
+        <span style="color: #5E6E67; font-weight: 600;">gene</span><span style="color: #14201B;">Weave</span>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 24px; max-width: 760px;">
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 13px; color: #0E9A6E; letter-spacing: 0.08em; text-transform: uppercase;">Design System · v1.0</div>
+      <h1 style="font-family: 'Plus Jakarta Sans', sans-serif; font-size: 56px; line-height: 1.08; font-weight: 800; letter-spacing: -0.03em; margin: 0;">A calm surface you<br>inhabit all day.</h1>
+      <p style="font-size: 18px; line-height: 1.6; color: #5E6E67; margin: 0; max-width: 620px;">The visual language for an ambient, conversation-first AI assistant. Disciplined neutrals for what you own; a soft emerald-mint signal wherever the assistant has left its fingerprints.</p>
+    </div>
+
+    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+      <span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; padding: 7px 13px; border-radius: 999px; background: #FFFFFF; border: 1px solid #E7ECEA; color: #5E6E67;">Calm</span>
+      <span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; padding: 7px 13px; border-radius: 999px; background: #FFFFFF; border: 1px solid #E7ECEA; color: #5E6E67;">Spacious</span>
+      <span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; padding: 7px 13px; border-radius: 999px; background: #FFFFFF; border: 1px solid #E7ECEA; color: #5E6E67;">Alive</span>
+      <span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; padding: 7px 13px; border-radius: 999px; background: #E8F5EE; border: 1px solid #DCEFE5; color: #0B7A57;">Ambient AI</span>
+    </div>
+  </header>
+
+  <!-- ============ SIGNATURE PRINCIPLE ============ -->
+  <section style="display: flex; flex-direction: column; gap: 28px;">
+    <div style="display: flex; flex-direction: column; gap: 8px;">
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #0E9A6E; letter-spacing: 0.08em; text-transform: uppercase;">01 · Principle</div>
+      <h2 style="font-family: 'Plus Jakarta Sans', sans-serif; font-size: 30px; font-weight: 700; letter-spacing: -0.02em; margin: 0;">Color encodes agency</h2>
+    </div>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+      <div style="background: #FFFFFF; border: 1px solid #E7ECEA; border-radius: 12px; padding: 28px; display: flex; flex-direction: column; gap: 16px;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <div style="width: 28px; height: 28px; border-radius: 8px; background: #14201B;"></div>
+          <div style="font-family: 'Plus Jakarta Sans', sans-serif; font-weight: 600; font-size: 16px;">What you own</div>
+        </div>
+        <p style="margin: 0; font-size: 14px; line-height: 1.6; color: #5E6E67;">Your notes, your messages, your day — all rendered in calm neutrals. Paper-white surfaces, ink text, soft grey labels. Nothing competes for attention.</p>
+        <div style="margin-top: 4px; align-self: flex-start; background: #14201B; color: #fff; font-size: 14px; padding: 11px 16px; border-radius: 16px; max-width: 80%;">Move my 2pm to Thursday</div>
+      </div>
+      <div style="background: #FFFFFF; border: 1px solid #E7ECEA; border-radius: 12px; padding: 28px; display: flex; flex-direction: column; gap: 16px; position: relative; overflow: hidden;">
+        <div style="position: absolute; inset: 0 auto 0 0; width: 3px; background: #0E9A6E;"></div>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <div style="width: 28px; height: 28px; border-radius: 8px; background: #E8F5EE; display: flex; align-items: center; justify-content: center;">
+            <svg width="16" height="16" viewBox="0 0 34 34" fill="none"><path d="M7 11 C 13 11, 13 23, 19 23 C 25 23, 25 11, 31 11" stroke="#0E9A6E" stroke-width="3.6" stroke-linecap="round"/><path d="M3 23 C 9 23, 9 11, 15 11 C 21 11, 21 23, 27 23" stroke="#0B7A57" stroke-width="3.6" stroke-linecap="round" opacity="0.55"/></svg>
+          </div>
+          <div style="font-family: 'Plus Jakarta Sans', sans-serif; font-weight: 600; font-size: 16px; color: #0B7A57;">What the assistant touches</div>
+        </div>
+        <p style="margin: 0; font-size: 14px; line-height: 1.6; color: #5E6E67;">Agent messages, action cards, and any object the AI created wear a faint mint aura and a woven mark — so you can scan a screen and see the assistant's fingerprints on your day.</p>
+        <div style="margin-top: 4px; align-self: flex-start; background: #E8F5EE; color: #14201B; font-size: 14px; padding: 11px 16px; border-radius: 16px; max-width: 85%;">Done — moved to Thursday 2pm.</div>
+      </div>
+    </div>
+    <p style="margin: 0; font-size: 14px; line-height: 1.6; color: #5E6E67; max-width: 720px;"><span style="color: #14201B; font-weight: 600;">Spend the boldness here.</span> Emerald is reserved for AI presence and the single primary action in any view — never decoration. Everything else stays disciplined and quiet.</p>
+  </section>
+
+  <!-- ============ LOGO / WORDMARK ============ -->
+  <section style="display: flex; flex-direction: column; gap: 28px;">
+    <div style="display: flex; flex-direction: column; gap: 8px;">
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #0E9A6E; letter-spacing: 0.08em; text-transform: uppercase;">02 · Logo &amp; wordmark</div>
+      <h2 style="font-family: 'Plus Jakarta Sans', sans-serif; font-size: 30px; font-weight: 700; letter-spacing: -0.02em; margin: 0;">The woven mark</h2>
+    </div>
+    <p style="margin: 0; font-size: 15px; line-height: 1.6; color: #5E6E67; max-width: 680px;">Two strands interlace — one emerald (the assistant), one ink (you) — crossing over and under: the literal weave. The wordmark sets <span style="font-family:'Plus Jakarta Sans';font-weight:600;">gene</span> in muted weight and <span style="font-family:'Plus Jakarta Sans';font-weight:700;">Weave</span> in ink, always lowercase <em>g</em>.</p>
+
+    <div style="display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 20px;">
+      <!-- primary lockup -->
+      <div style="background: #FFFFFF; border: 1px solid #E7ECEA; border-radius: 12px; padding: 36px 28px; display: flex; flex-direction: column; gap: 24px; align-items: center; justify-content: center;">
+        <div style="display: flex; align-items: center; gap: 16px;">
+          <svg width="52" height="52" viewBox="0 0 34 34" fill="none"><path d="M7 11 C 13 11, 13 23, 19 23 C 25 23, 25 11, 31 11" stroke="#0E9A6E" stroke-width="3.4" stroke-linecap="round"/><path d="M3 23 C 9 23, 9 11, 15 11 C 21 11, 21 23, 27 23" stroke="#14201B" stroke-width="3.4" stroke-linecap="round" opacity="0.9"/></svg>
+          <div style="font-family: 'Plus Jakarta Sans', sans-serif; font-size: 32px; font-weight: 700; letter-spacing: -0.02em;"><span style="color: #5E6E67; font-weight: 600;">gene</span><span style="color: #14201B;">Weave</span></div>
+        </div>
+        <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #5E6E67; letter-spacing: 0.06em;">PRIMARY LOCKUP</div>
+      </div>
+      <!-- mark on mint -->
+      <div style="background: #E8F5EE; border: 1px solid #DCEFE5; border-radius: 12px; padding: 28px; display: flex; flex-direction: column; gap: 20px; align-items: center; justify-content: center;">
+        <svg width="56" height="56" viewBox="0 0 34 34" fill="none"><path d="M7 11 C 13 11, 13 23, 19 23 C 25 23, 25 11, 31 11" stroke="#0E9A6E" stroke-width="3.4" stroke-linecap="round"/><path d="M3 23 C 9 23, 9 11, 15 11 C 21 11, 21 23, 27 23" stroke="#0B7A57" stroke-width="3.4" stroke-linecap="round" opacity="0.6"/></svg>
+        <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #0B7A57; letter-spacing: 0.06em;">MARK · AI SURFACE</div>
+      </div>
+      <!-- mark on ink -->
+      <div style="background: #14201B; border-radius: 12px; padding: 28px; display: flex; flex-direction: column; gap: 20px; align-items: center; justify-content: center;">
+        <svg width="56" height="56" viewBox="0 0 34 34" fill="none"><path d="M7 11 C 13 11, 13 23, 19 23 C 25 23, 25 11, 31 11" stroke="#2FD39B" stroke-width="3.4" stroke-linecap="round"/><path d="M3 23 C 9 23, 9 11, 15 11 C 21 11, 21 23, 27 23" stroke="#E8EFEB" stroke-width="3.4" stroke-linecap="round" opacity="0.7"/></svg>
+        <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #8FA39A; letter-spacing: 0.06em;">MARK · REVERSED</div>
+      </div>
+    </div>
+
+    <div style="display: flex; gap: 20px; flex-wrap: wrap; font-size: 13px; color: #5E6E67; line-height: 1.6;">
+      <div style="flex: 1; min-width: 200px;"><span style="color:#14201B;font-weight:600;">Clear space</span><br>Keep padding equal to the height of the mark on all sides.</div>
+      <div style="flex: 1; min-width: 200px;"><span style="color:#14201B;font-weight:600;">Minimum size</span><br>Mark no smaller than 20px; wordmark no smaller than 16px cap height.</div>
+      <div style="flex: 1; min-width: 200px;"><span style="color:#14201B;font-weight:600;">Don't</span><br>Re-color the strands, add a third strand, or set the wordmark in all caps.</div>
+    </div>
+  </section>
+
+  <!-- ============ COLOR ============ -->
+  <section style="display: flex; flex-direction: column; gap: 28px;">
+    <div style="display: flex; flex-direction: column; gap: 8px;">
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #0E9A6E; letter-spacing: 0.08em; text-transform: uppercase;">03 · Color</div>
+      <h2 style="font-family: 'Plus Jakarta Sans', sans-serif; font-size: 30px; font-weight: 700; letter-spacing: -0.02em; margin: 0;">Tokens</h2>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 14px;">
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #5E6E67; letter-spacing: 0.06em;">NEUTRALS — what you own</div>
+      <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px;">
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <div style="height: 96px; border-radius: 12px; background: #F6F8F7; border: 1px solid #E7ECEA;"></div>
+          <div><div style="font-weight:600;font-size:13px;">canvas</div><div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#5E6E67;">#F6F8F7</div><div style="font-size:11px;color:#5E6E67;margin-top:3px;">App background</div></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <div style="height: 96px; border-radius: 12px; background: #FFFFFF; border: 1px solid #E7ECEA;"></div>
+          <div><div style="font-weight:600;font-size:13px;">surface</div><div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#5E6E67;">#FFFFFF</div><div style="font-size:11px;color:#5E6E67;margin-top:3px;">Cards, panels</div></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <div style="height: 96px; border-radius: 12px; background: #14201B;"></div>
+          <div><div style="font-weight:600;font-size:13px;">ink</div><div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#5E6E67;">#14201B</div><div style="font-size:11px;color:#5E6E67;margin-top:3px;">Primary text</div></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <div style="height: 96px; border-radius: 12px; background: #5E6E67;"></div>
+          <div><div style="font-weight:600;font-size:13px;">muted</div><div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#5E6E67;">#5E6E67</div><div style="font-size:11px;color:#5E6E67;margin-top:3px;">Secondary text</div></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <div style="height: 96px; border-radius: 12px; background: #FFFFFF; border: 1px solid #E7ECEA; position: relative;"><div style="position:absolute;left:0;right:0;top:50%;height:1px;background:#E7ECEA;"></div></div>
+          <div><div style="font-weight:600;font-size:13px;">hairline</div><div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#5E6E67;">#E7ECEA</div><div style="font-size:11px;color:#5E6E67;margin-top:3px;">Borders, dividers</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 14px;">
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #0E9A6E; letter-spacing: 0.06em;">SIGNAL — AI presence &amp; action</div>
+      <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px;">
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <div style="height: 96px; border-radius: 12px; background: #0E9A6E;"></div>
+          <div><div style="font-weight:600;font-size:13px;">emerald</div><div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#5E6E67;">#0E9A6E</div><div style="font-size:11px;color:#5E6E67;margin-top:3px;">Primary + AI</div></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <div style="height: 96px; border-radius: 12px; background: #0B7A57;"></div>
+          <div><div style="font-weight:600;font-size:13px;">emerald-press</div><div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#5E6E67;">#0B7A57</div><div style="font-size:11px;color:#5E6E67;margin-top:3px;">Pressed / active</div></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <div style="height: 96px; border-radius: 12px; background: #E8F5EE; border: 1px solid #DCEFE5;"></div>
+          <div><div style="font-weight:600;font-size:13px;">mint</div><div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#5E6E67;">#E8F5EE</div><div style="font-size:11px;color:#5E6E67;margin-top:3px;">AI surfaces</div></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <div style="height: 96px; border-radius: 12px; background: #DCEFE5; border: 1px solid #DCEFE5;"></div>
+          <div><div style="font-weight:600;font-size:13px;">mint-deep</div><div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#5E6E67;">#DCEFE5</div><div style="font-size:11px;color:#5E6E67;margin-top:3px;">Mint hover</div></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <div style="height: 96px; border-radius: 12px; background: #D98A3D;"></div>
+          <div><div style="font-weight:600;font-size:13px;">amber</div><div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#5E6E67;">#D98A3D</div><div style="font-size:11px;color:#5E6E67;margin-top:3px;">Attention only</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- dark mode strip -->
+    <div style="display: flex; flex-direction: column; gap: 14px;">
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #5E6E67; letter-spacing: 0.06em;">DARK MODE — optional, for power users</div>
+      <div style="display: flex; gap: 0; border-radius: 12px; overflow: hidden; border: 1px solid #1d2a25;">
+        <div style="flex:1;height:64px;background:#0E1714;display:flex;align-items:flex-end;padding:8px 10px;"><span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#8FA39A;">canvas #0E1714</span></div>
+        <div style="flex:1;height:64px;background:#15201C;display:flex;align-items:flex-end;padding:8px 10px;"><span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#8FA39A;">surface #15201C</span></div>
+        <div style="flex:1;height:64px;background:#0E9A6E;display:flex;align-items:flex-end;padding:8px 10px;"><span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#06281c;">emerald (kept)</span></div>
+        <div style="flex:1;height:64px;background:#15201C;display:flex;align-items:center;justify-content:center;"><span style="color:#E8EFEB;font-size:13px;">ink → #E8EFEB</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ TYPOGRAPHY ============ -->
+  <section style="display: flex; flex-direction: column; gap: 28px;">
+    <div style="display: flex; flex-direction: column; gap: 8px;">
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #0E9A6E; letter-spacing: 0.08em; text-transform: uppercase;">04 · Typography</div>
+      <h2 style="font-family: 'Plus Jakarta Sans', sans-serif; font-size: 30px; font-weight: 700; letter-spacing: -0.02em; margin: 0;">Three roles, sentence case</h2>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;">
+      <div style="background:#FFFFFF;border:1px solid #E7ECEA;border-radius:12px;padding:24px;display:flex;flex-direction:column;gap:8px;">
+        <div style="font-family:'Plus Jakarta Sans',sans-serif;font-size:40px;font-weight:800;letter-spacing:-0.02em;">Ag</div>
+        <div style="font-family:'Plus Jakarta Sans',sans-serif;font-weight:700;font-size:15px;">Plus Jakarta Sans</div>
+        <div style="font-size:12px;color:#5E6E67;line-height:1.5;">Display &amp; headings. Geometric, warm. Used with restraint, tracking slightly tightened.</div>
+      </div>
+      <div style="background:#FFFFFF;border:1px solid #E7ECEA;border-radius:12px;padding:24px;display:flex;flex-direction:column;gap:8px;">
+        <div style="font-family:'Inter',sans-serif;font-size:40px;font-weight:500;">Ag</div>
+        <div style="font-family:'Plus Jakarta Sans',sans-serif;font-weight:700;font-size:15px;">Inter</div>
+        <div style="font-size:12px;color:#5E6E67;line-height:1.5;">Body &amp; UI. Clean and legible at small sizes for dense interface text.</div>
+      </div>
+      <div style="background:#FFFFFF;border:1px solid #E7ECEA;border-radius:12px;padding:24px;display:flex;flex-direction:column;gap:8px;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:40px;font-weight:400;">Ag</div>
+        <div style="font-family:'Plus Jakarta Sans',sans-serif;font-weight:700;font-size:15px;">JetBrains Mono</div>
+        <div style="font-size:12px;color:#5E6E67;line-height:1.5;">Metadata only — timestamps, durations, IDs, code. Never body copy.</div>
+      </div>
+    </div>
+
+    <div style="background:#FFFFFF;border:1px solid #E7ECEA;border-radius:12px;padding:8px 32px;">
+      <div style="display:flex;align-items:baseline;gap:24px;padding:20px 0;border-bottom:1px solid #E7ECEA;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#5E6E67;width:120px;flex:none;">display · 28px</div>
+        <div style="font-family:'Plus Jakarta Sans',sans-serif;font-size:28px;font-weight:800;letter-spacing:-0.025em;line-height:1.2;">Good morning, Giby</div>
+      </div>
+      <div style="display:flex;align-items:baseline;gap:24px;padding:20px 0;border-bottom:1px solid #E7ECEA;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#5E6E67;width:120px;flex:none;">h1 · 22px</div>
+        <div style="font-family:'Plus Jakarta Sans',sans-serif;font-size:22px;font-weight:700;letter-spacing:-0.02em;line-height:1.2;">Your schedule today</div>
+      </div>
+      <div style="display:flex;align-items:baseline;gap:24px;padding:20px 0;border-bottom:1px solid #E7ECEA;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#5E6E67;width:120px;flex:none;">h2 · 18px</div>
+        <div style="font-family:'Plus Jakarta Sans',sans-serif;font-size:18px;font-weight:600;line-height:1.3;">Needs you</div>
+      </div>
+      <div style="display:flex;align-items:baseline;gap:24px;padding:20px 0;border-bottom:1px solid #E7ECEA;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#5E6E67;width:120px;flex:none;">body · 15px</div>
+        <div style="font-family:'Inter',sans-serif;font-size:15px;line-height:1.6;max-width:60ch;">I've moved your review to Thursday at 2pm and let the three attendees know. Want me to draft a short agenda?</div>
+      </div>
+      <div style="display:flex;align-items:baseline;gap:24px;padding:20px 0;border-bottom:1px solid #E7ECEA;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#5E6E67;width:120px;flex:none;">small · 13px</div>
+        <div style="font-family:'Inter',sans-serif;font-size:13px;color:#5E6E67;line-height:1.5;">Secondary labels, captions, and helper text.</div>
+      </div>
+      <div style="display:flex;align-items:baseline;gap:24px;padding:20px 0;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#5E6E67;width:120px;flex:none;">meta · 12px</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#5E6E67;">Done · 42.5s · view steps</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SPACING & RADIUS ============ -->
+  <section style="display: flex; flex-direction: column; gap: 28px;">
+    <div style="display: flex; flex-direction: column; gap: 8px;">
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #0E9A6E; letter-spacing: 0.08em; text-transform: uppercase;">05 · Spacing, shape &amp; depth</div>
+      <h2 style="font-family: 'Plus Jakarta Sans', sans-serif; font-size: 30px; font-weight: 700; letter-spacing: -0.02em; margin: 0;">An 8px grid, soft corners, almost no shadow</h2>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+      <!-- spacing scale -->
+      <div style="background:#FFFFFF;border:1px solid #E7ECEA;border-radius:12px;padding:28px;display:flex;flex-direction:column;gap:18px;">
+        <div style="font-family:'Plus Jakarta Sans',sans-serif;font-weight:600;font-size:15px;">Spacing · base 8</div>
+        <div style="display:flex;flex-direction:column;gap:12px;">
+          <div style="display:flex;align-items:center;gap:14px;"><div style="height:14px;width:8px;background:#0E9A6E;border-radius:3px;"></div><span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#5E6E67;">8 · inline gap</span></div>
+          <div style="display:flex;align-items:center;gap:14px;"><div style="height:14px;width:16px;background:#0E9A6E;border-radius:3px;"></div><span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#5E6E67;">16 · element gap</span></div>
+          <div style="display:flex;align-items:center;gap:14px;"><div style="height:14px;width:24px;background:#0E9A6E;border-radius:3px;"></div><span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#5E6E67;">24 · card padding</span></div>
+          <div style="display:flex;align-items:center;gap:14px;"><div style="height:14px;width:32px;background:#0E9A6E;border-radius:3px;"></div><span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#5E6E67;">32 · section padding</span></div>
+          <div style="display:flex;align-items:center;gap:14px;"><div style="height:14px;width:80px;background:#DCEFE5;border-radius:3px;"></div><span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#5E6E67;">80 · section rhythm</span></div>
+        </div>
+      </div>
+      <!-- radius -->
+      <div style="background:#FFFFFF;border:1px solid #E7ECEA;border-radius:12px;padding:28px;display:flex;flex-direction:column;gap:18px;">
+        <div style="font-family:'Plus Jakarta Sans',sans-serif;font-weight:600;font-size:15px;">Radius</div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;">
+          <div style="display:flex;flex-direction:column;gap:8px;align-items:center;"><div style="width:64px;height:48px;background:#F6F8F7;border:1px solid #E7ECEA;border-radius:12px;"></div><span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#5E6E67;">12 · cards</span></div>
+          <div style="display:flex;flex-direction:column;gap:8px;align-items:center;"><div style="width:64px;height:48px;background:#F6F8F7;border:1px solid #E7ECEA;border-radius:16px;"></div><span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#5E6E67;">16 · bubbles</span></div>
+          <div style="display:flex;flex-direction:column;gap:8px;align-items:center;"><div style="width:64px;height:48px;background:#F6F8F7;border:1px solid #E7ECEA;border-radius:999px;"></div><span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#5E6E67;">full · pills</span></div>
+        </div>
+        <div style="border-top:1px solid #E7ECEA;padding-top:18px;display:flex;flex-direction:column;gap:12px;">
+          <div style="font-family:'Plus Jakarta Sans',sans-serif;font-weight:600;font-size:15px;">Elevation</div>
+          <div style="display:flex;gap:16px;align-items:center;">
+            <div style="width:96px;height:48px;background:#fff;border:1px solid #E7ECEA;border-radius:10px;"></div>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#5E6E67;">hairline (default)</span>
+          </div>
+          <div style="display:flex;gap:16px;align-items:center;">
+            <div style="width:96px;height:48px;background:#fff;border-radius:10px;box-shadow:0 1px 3px rgba(20,32,27,0.06);"></div>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#5E6E67;">soft (one level max)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ BUTTONS & FORMS ============ -->
+  <section style="display: flex; flex-direction: column; gap: 28px;">
+    <div style="display: flex; flex-direction: column; gap: 8px;">
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #0E9A6E; letter-spacing: 0.08em; text-transform: uppercase;">06 · Buttons &amp; forms</div>
+      <h2 style="font-family: 'Plus Jakarta Sans', sans-serif; font-size: 30px; font-weight: 700; letter-spacing: -0.02em; margin: 0;">One filled action per view</h2>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+      <!-- buttons -->
+      <div style="background:#FFFFFF;border:1px solid #E7ECEA;border-radius:12px;padding:28px;display:flex;flex-direction:column;gap:18px;">
+        <div style="font-family:'Plus Jakarta Sans',sans-serif;font-weight:600;font-size:15px;">Buttons</div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
+          <button style="font-family:'Inter',sans-serif;font-size:14px;font-weight:600;color:#fff;background:#0E9A6E;border:none;border-radius:999px;padding:11px 20px;cursor:pointer;">Save changes</button>
+          <button style="font-family:'Inter',sans-serif;font-size:14px;font-weight:600;color:#0B7A57;background:#fff;border:1px solid #E7ECEA;border-radius:999px;padding:11px 20px;cursor:pointer;">Cancel</button>
+          <button style="font-family:'Inter',sans-serif;font-size:14px;font-weight:600;color:#5E6E67;background:transparent;border:none;border-radius:999px;padding:11px 14px;cursor:pointer;">Dismiss</button>
+        </div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
+          <button style="font-family:'Inter',sans-serif;font-size:14px;font-weight:600;color:#fff;background:#0B7A57;border:none;border-radius:999px;padding:11px 20px;cursor:pointer;">Pressed</button>
+          <button style="font-family:'Inter',sans-serif;font-size:14px;font-weight:600;color:#9aa7a1;background:#F2F4F3;border:1px solid #E7ECEA;border-radius:999px;padding:11px 20px;cursor:not-allowed;">Disabled</button>
+        </div>
+        <div style="font-size:12px;color:#5E6E67;line-height:1.5;border-top:1px solid #E7ECEA;padding-top:16px;">Only the primary action is filled emerald. Everything else is outline or ghost. Sentence-case verbs that name the result.</div>
+      </div>
+
+      <!-- inputs -->
+      <div style="background:#FFFFFF;border:1px solid #E7ECEA;border-radius:12px;padding:28px;display:flex;flex-direction:column;gap:16px;">
+        <div style="font-family:'Plus Jakarta Sans',sans-serif;font-weight:600;font-size:15px;">Fields</div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <label style="font-size:12px;color:#5E6E67;">Reminder name</label>
+          <div style="border:1px solid #E7ECEA;border-radius:12px;padding:11px 14px;font-size:14px;color:#14201B;">Pick up prescription</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <label style="font-size:12px;color:#0B7A57;">When</label>
+          <div style="border:1.5px solid #0E9A6E;border-radius:12px;padding:11px 14px;font-size:14px;color:#14201B;box-shadow:0 0 0 3px #E8F5EE;">Tomorrow, 9:00 am<span style="color:#9aa7a1;">|</span></div>
+          <span style="font-size:11px;color:#5E6E67;">Focused state — emerald ring on mint.</span>
+        </div>
+        <!-- styled attach control -->
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <label style="font-size:12px;color:#5E6E67;">Attachment</label>
+          <button style="display:flex;align-items:center;gap:10px;font-family:'Inter',sans-serif;font-size:13px;color:#5E6E67;background:#F6F8F7;border:1px dashed #C9D6D0;border-radius:12px;padding:12px 14px;cursor:pointer;width:100%;text-align:left;">
+            <span style="display:inline-flex;width:22px;height:22px;border-radius:7px;background:#E8F5EE;align-items:center;justify-content:center;color:#0E9A6E;font-size:14px;">+</span>
+            Drop a file or browse — never the OS default
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- composer -->
+    <div style="display:flex;flex-direction:column;gap:12px;">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#5E6E67;letter-spacing:0.06em;">THE COMPOSER — one pill, attach · voice · send</div>
+      <div style="background:#FFFFFF;border:1px solid #E7ECEA;border-radius:20px;padding:14px 14px 14px 20px;display:flex;align-items:center;gap:14px;box-shadow:0 1px 3px rgba(20,32,27,0.06);">
+        <span style="color:#9aa7a1;font-size:15px;display:inline-flex;width:22px;justify-content:center;">+</span>
+        <span style="flex:1;font-size:15px;color:#9aa7a1;">Ask or do anything…</span>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#9aa7a1;border:1px solid #E7ECEA;border-radius:6px;padding:3px 7px;">/</span>
+        <span style="display:inline-flex;width:38px;height:38px;border-radius:50%;background:#F6F8F7;align-items:center;justify-content:center;color:#5E6E67;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
+        </span>
+        <span style="display:inline-flex;width:38px;height:38px;border-radius:50%;background:#0E9A6E;align-items:center;justify-content:center;color:#fff;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="6 11 12 5 18 11"/></svg>
+        </span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ CARDS & DATA DISPLAY ============ -->
+  <section style="display: flex; flex-direction: column; gap: 28px;">
+    <div style="display: flex; flex-direction: column; gap: 8px;">
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #0E9A6E; letter-spacing: 0.08em; text-transform: uppercase;">07 · Cards &amp; data display</div>
+      <h2 style="font-family: 'Plus Jakarta Sans', sans-serif; font-size: 30px; font-weight: 700; letter-spacing: -0.02em; margin: 0;">The agent action card &amp; friends</h2>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1.2fr 1fr;gap:20px;align-items:start;">
+      <!-- signature action card + thread -->
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#5E6E67;letter-spacing:0.06em;">IN THE THREAD</div>
+        <!-- assistant bubble -->
+        <div style="display:flex;gap:10px;align-items:flex-start;">
+          <span style="flex:none;width:26px;height:26px;border-radius:50%;background:#E8F5EE;display:inline-flex;align-items:center;justify-content:center;">
+            <svg width="14" height="14" viewBox="0 0 34 34" fill="none"><path d="M7 11 C 13 11, 13 23, 19 23 C 25 23, 25 11, 31 11" stroke="#0E9A6E" stroke-width="3.6" stroke-linecap="round"/><path d="M3 23 C 9 23, 9 11, 15 11 C 21 11, 21 23, 27 23" stroke="#0B7A57" stroke-width="3.6" stroke-linecap="round" opacity="0.55"/></svg>
+          </span>
+          <div style="background:#E8F5EE;color:#14201B;font-size:14px;line-height:1.6;padding:12px 16px;border-radius:16px;border-top-left-radius:6px;max-width:80%;">Saved your research note and added it to today's recents.</div>
+        </div>
+        <!-- the action card -->
+        <div style="background:#FFFFFF;border:1px solid #E7ECEA;border-radius:12px;padding:16px 18px;display:flex;align-items:center;gap:14px;position:relative;overflow:hidden;box-shadow:0 1px 3px rgba(20,32,27,0.06);margin-left:36px;">
+          <div style="position:absolute;inset:0 auto 0 0;width:3px;background:#0E9A6E;"></div>
+          <span style="flex:none;width:36px;height:36px;border-radius:10px;background:#E8F5EE;display:inline-flex;align-items:center;justify-content:center;">
+            <svg width="18" height="18" viewBox="0 0 34 34" fill="none"><path d="M7 11 C 13 11, 13 23, 19 23 C 25 23, 25 11, 31 11" stroke="#0E9A6E" stroke-width="3.4" stroke-linecap="round"/><path d="M3 23 C 9 23, 9 11, 15 11 C 21 11, 21 23, 27 23" stroke="#0B7A57" stroke-width="3.4" stroke-linecap="round" opacity="0.55"/></svg>
+          </span>
+          <div style="flex:1;display:flex;flex-direction:column;gap:2px;">
+            <div style="font-family:'Plus Jakarta Sans',sans-serif;font-weight:600;font-size:14px;">Note created</div>
+            <div style="font-size:13px;color:#5E6E67;">Majorana qubits research</div>
+          </div>
+          <button style="font-family:'Inter',sans-serif;font-size:13px;font-weight:600;color:#0B7A57;background:#fff;border:1px solid #DCEFE5;border-radius:999px;padding:8px 16px;cursor:pointer;">Open</button>
+        </div>
+        <!-- collapsed process line -->
+        <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#5E6E67;margin-left:36px;display:flex;align-items:center;gap:8px;">Done · 42.5s · <span style="color:#0B7A57;">view steps ›</span></div>
+        <!-- user bubble -->
+        <div style="display:flex;justify-content:flex-end;">
+          <div style="background:#14201B;color:#fff;font-size:14px;line-height:1.6;padding:12px 16px;border-radius:16px;border-top-right-radius:6px;max-width:80%;">Thanks — file it under research</div>
+        </div>
+      </div>
+
+      <!-- right rail mirror -->
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#5E6E67;letter-spacing:0.06em;">…AND IN THE "TODAY" RAIL</div>
+        <div style="background:#FFFFFF;border:1px solid #E7ECEA;border-radius:12px;padding:20px;display:flex;flex-direction:column;gap:18px;">
+          <!-- schedule strip -->
+          <div style="display:flex;flex-direction:column;gap:10px;">
+            <div style="font-family:'Plus Jakarta Sans',sans-serif;font-weight:600;font-size:13px;color:#5E6E67;">Schedule</div>
+            <div style="display:flex;gap:6px;">
+              <div style="flex:1;text-align:center;font-size:11px;color:#5E6E67;padding:8px 0;border-radius:999px;">M</div>
+              <div style="flex:1;text-align:center;font-size:11px;color:#fff;background:#0E9A6E;padding:8px 0;border-radius:999px;font-weight:600;">T</div>
+              <div style="flex:1;text-align:center;font-size:11px;color:#5E6E67;padding:8px 0;border-radius:999px;">W</div>
+              <div style="flex:1;text-align:center;font-size:11px;color:#5E6E67;padding:8px 0;border-radius:999px;">T</div>
+              <div style="flex:1;text-align:center;font-size:11px;color:#5E6E67;padding:8px 0;border-radius:999px;">F</div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px;">
+              <div style="display:flex;gap:10px;align-items:center;font-size:13px;"><span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#5E6E67;width:42px;">09:00</span><span style="color:#14201B;">Standup</span></div>
+              <div style="display:flex;gap:10px;align-items:center;font-size:13px;"><span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#5E6E67;width:42px;">14:00</span><span style="color:#14201B;">Review</span></div>
+            </div>
+          </div>
+          <div style="height:1px;background:#E7ECEA;"></div>
+          <!-- needs you -->
+          <div style="display:flex;flex-direction:column;gap:10px;">
+            <div style="font-family:'Plus Jakarta Sans',sans-serif;font-weight:600;font-size:13px;color:#5E6E67;">Needs you</div>
+            <div style="display:flex;align-items:center;gap:10px;font-size:13px;"><span style="width:7px;height:7px;border-radius:50%;background:#D98A3D;flex:none;"></span>Confirm Thursday appointment</div>
+            <div style="display:flex;align-items:center;gap:10px;font-size:13px;"><span style="width:7px;height:7px;border-radius:50%;background:#0E9A6E;flex:none;"></span>Approve PR #482</div>
+          </div>
+          <div style="height:1px;background:#E7ECEA;"></div>
+          <!-- recent — the SAME action card, mirrored -->
+          <div style="display:flex;flex-direction:column;gap:10px;">
+            <div style="font-family:'Plus Jakarta Sans',sans-serif;font-weight:600;font-size:13px;color:#5E6E67;">Recent</div>
+            <div style="background:#FFFFFF;border:1px solid #E7ECEA;border-radius:10px;padding:12px;display:flex;align-items:center;gap:10px;position:relative;overflow:hidden;">
+              <div style="position:absolute;inset:0 auto 0 0;width:3px;background:#0E9A6E;"></div>
+              <span style="flex:none;width:28px;height:28px;border-radius:8px;background:#E8F5EE;display:inline-flex;align-items:center;justify-content:center;">
+                <svg width="15" height="15" viewBox="0 0 34 34" fill="none"><path d="M7 11 C 13 11, 13 23, 19 23 C 25 23, 25 11, 31 11" stroke="#0E9A6E" stroke-width="3.6" stroke-linecap="round"/><path d="M3 23 C 9 23, 9 11, 15 11 C 21 11, 21 23, 27 23" stroke="#0B7A57" stroke-width="3.6" stroke-linecap="round" opacity="0.55"/></svg>
+              </span>
+              <div style="flex:1;font-size:13px;"><div style="font-weight:600;">Majorana note</div><div style="color:#5E6E67;font-size:11px;">2 min ago</div></div>
+            </div>
+          </div>
+        </div>
+        <p style="margin:0;font-size:12px;color:#5E6E67;line-height:1.6;">The same object, two places — visually linked by the woven mark and emerald edge. That continuity is the weave.</p>
+      </div>
+    </div>
+
+    <!-- nav items -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+      <div style="background:#FFFFFF;border:1px solid #E7ECEA;border-radius:12px;padding:24px;display:flex;flex-direction:column;gap:14px;">
+        <div style="font-family:'Plus Jakarta Sans',sans-serif;font-weight:600;font-size:15px;">Left nav item</div>
+        <div style="display:flex;flex-direction:column;gap:6px;max-width:220px;">
+          <div style="display:flex;align-items:center;gap:12px;padding:9px 12px;border-radius:999px;background:#E8F5EE;">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#0E9A6E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+            <span style="font-size:14px;font-weight:600;color:#0B7A57;">Home</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;padding:9px 12px;border-radius:999px;">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#5E6E67" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            <span style="font-size:14px;color:#5E6E67;">Calendar</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;padding:9px 12px;border-radius:999px;">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#5E6E67" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="14" y2="13"/></svg>
+            <span style="font-size:14px;color:#5E6E67;">Notes</span>
+          </div>
+        </div>
+        <div style="font-size:12px;color:#5E6E67;line-height:1.5;border-top:1px solid #E7ECEA;padding-top:14px;">Active = soft mint pill, emerald icon + label. Resting = muted ink. Max ~4 in Daily mode.</div>
+      </div>
+
+      <!-- selection AI pill (notes fix) -->
+      <div style="background:#FFFFFF;border:1px solid #E7ECEA;border-radius:12px;padding:24px;display:flex;flex-direction:column;gap:14px;">
+        <div style="font-family:'Plus Jakarta Sans',sans-serif;font-weight:600;font-size:15px;">Notes AI menu — selection pill</div>
+        <div style="background:#F6F8F7;border-radius:12px;padding:18px;display:flex;flex-direction:column;gap:12px;">
+          <div style="font-size:13px;line-height:1.7;color:#14201B;">…the topological qubit remains <span style="background:#DCEFE5;border-radius:3px;padding:1px 2px;">stable against local perturbations</span>, which…</div>
+          <div style="display:flex;gap:4px;background:#14201B;border-radius:999px;padding:5px;align-self:flex-start;box-shadow:0 1px 3px rgba(20,32,27,0.2);">
+            <span style="font-size:12px;color:#fff;padding:6px 12px;border-radius:999px;display:flex;align-items:center;gap:6px;"><span style="color:#2FD39B;">✦</span>Continue</span>
+            <span style="font-size:12px;color:#cfe8dd;padding:6px 12px;border-radius:999px;">Rewrite</span>
+            <span style="font-size:12px;color:#cfe8dd;padding:6px 12px;border-radius:999px;">Summarize</span>
+            <span style="font-size:12px;color:#cfe8dd;padding:6px 12px;border-radius:999px;">Ask</span>
+          </div>
+        </div>
+        <div style="font-size:12px;color:#5E6E67;line-height:1.5;">Distinct, spaced, labelled items — replaces the run-on toolbar. Also reachable via <span style="font-family:'JetBrains Mono',monospace;">/</span>.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ PLAIN LANGUAGE ============ -->
+  <section style="display: flex; flex-direction: column; gap: 28px;">
+    <div style="display: flex; flex-direction: column; gap: 8px;">
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #0E9A6E; letter-spacing: 0.08em; text-transform: uppercase;">08 · Plain language</div>
+      <h2 style="font-family: 'Plus Jakarta Sans', sans-serif; font-size: 30px; font-weight: 700; letter-spacing: -0.02em; margin: 0;">Name things by what they do</h2>
+    </div>
+    <p style="margin: 0; font-size: 15px; line-height: 1.6; color: #5E6E67; max-width: 720px;">Every label a person reads — nav items, field names, buttons — is written in plain words, <span style="color:#14201B;font-weight:600;">even in the admin Builder</span>. System internals (the API name, the data type, the storage key) never surface as UI copy. Admins are people too; they shouldn't need the schema to read the screen.</p>
+
+    <div style="background:#FFFFFF;border:1px solid #E7ECEA;border-radius:12px;overflow:hidden;">
+      <div style="display:grid;grid-template-columns:1fr 28px 1fr;gap:0;align-items:center;padding:14px 22px;border-bottom:1px solid #E7ECEA;background:#F6F8F7;">
+        <span style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.06em;color:#9aa7a1;">SYSTEM INTERNAL — don't show</span>
+        <span></span>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.06em;color:#0B7A57;">WHAT THE USER SEES</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 28px 1fr;align-items:center;padding:15px 22px;border-bottom:1px solid #E7ECEA;">
+        <span style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#9aa7a1;text-decoration:line-through;">Prompt Fragment</span>
+        <span style="color:#c2cec8;text-align:center;">→</span>
+        <span style="font-size:14px;font-weight:500;color:#14201B;">Building block</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 28px 1fr;align-items:center;padding:15px 22px;border-bottom:1px solid #E7ECEA;">
+        <span style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#9aa7a1;text-decoration:line-through;">key</span>
+        <span style="color:#c2cec8;text-align:center;">→</span>
+        <span style="font-size:14px;font-weight:500;color:#14201B;">Shortcut</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 28px 1fr;align-items:center;padding:15px 22px;border-bottom:1px solid #E7ECEA;">
+        <span style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#9aa7a1;text-decoration:line-through;">Variables (JSON)</span>
+        <span style="color:#c2cec8;text-align:center;">→</span>
+        <span style="font-size:14px;font-weight:500;color:#14201B;">Fill-in values</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 28px 1fr;align-items:center;padding:15px 22px;border-bottom:1px solid #E7ECEA;">
+        <span style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#9aa7a1;text-decoration:line-through;">enabled: true</span>
+        <span style="color:#c2cec8;text-align:center;">→</span>
+        <span style="font-size:14px;font-weight:500;color:#14201B;">Active · On</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 28px 1fr;align-items:center;padding:15px 22px;border-bottom:1px solid #E7ECEA;">
+        <span style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#9aa7a1;text-decoration:line-through;">Orchestration</span>
+        <span style="color:#c2cec8;text-align:center;">→</span>
+        <span style="font-size:14px;font-weight:500;color:#14201B;">Workflows</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 28px 1fr;align-items:center;padding:15px 22px;border-bottom:1px solid #E7ECEA;">
+        <span style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#9aa7a1;text-decoration:line-through;">Routing</span>
+        <span style="color:#c2cec8;text-align:center;">→</span>
+        <span style="font-size:14px;font-weight:500;color:#14201B;">Request handling</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 28px 1fr;align-items:center;padding:15px 22px;border-bottom:1px solid #E7ECEA;">
+        <span style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#9aa7a1;text-decoration:line-through;">Governance</span>
+        <span style="color:#c2cec8;text-align:center;">→</span>
+        <span style="font-size:14px;font-weight:500;color:#14201B;">Rules &amp; limits</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 28px 1fr;align-items:center;padding:15px 22px;">
+        <span style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#9aa7a1;text-decoration:line-through;">webhook config</span>
+        <span style="color:#c2cec8;text-align:center;">→</span>
+        <span style="font-size:14px;font-weight:500;color:#14201B;">Connected apps</span>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:16px;flex-wrap:wrap;">
+      <div style="flex:1;min-width:240px;background:#FFFFFF;border:1px solid #E7ECEA;border-radius:12px;padding:20px 22px;display:flex;flex-direction:column;gap:8px;">
+        <div style="font-family:'Plus Jakarta Sans',sans-serif;font-weight:600;font-size:14px;color:#0B7A57;">Do</div>
+        <ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.7;color:#5E6E67;">
+          <li>Label fields by their purpose: "What it's for," "Fill-in values."</li>
+          <li>Buttons name the result: "Save," then a "Saved" toast.</li>
+          <li>Keep the technical token only where it's genuinely needed — as a quiet mono help line, never the label.</li>
+        </ul>
+      </div>
+      <div style="flex:1;min-width:240px;background:#FFFFFF;border:1px solid #E7ECEA;border-radius:12px;padding:20px 22px;display:flex;flex-direction:column;gap:8px;">
+        <div style="font-family:'Plus Jakarta Sans',sans-serif;font-weight:600;font-size:14px;color:#A8551F;">Don't</div>
+        <ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.7;color:#5E6E67;">
+          <li>Expose data types or storage keys as UI labels.</li>
+          <li>Use insider nouns like "fragment," "orchestration," "A2A protocol."</li>
+          <li>Show raw values (a bare <span style="font-family:'JetBrains Mono',monospace;">1</span>, an em-dash) where a word would read clearer.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- footer -->
+  <footer style="border-top:1px solid #E7ECEA;padding-top:32px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:16px;">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <svg width="20" height="20" viewBox="0 0 34 34" fill="none"><path d="M7 11 C 13 11, 13 23, 19 23 C 25 23, 25 11, 31 11" stroke="#0E9A6E" stroke-width="3.6" stroke-linecap="round"/><path d="M3 23 C 9 23, 9 11, 15 11 C 21 11, 21 23, 27 23" stroke="#14201B" stroke-width="3.6" stroke-linecap="round" opacity="0.85"/></svg>
+      <span style="font-family:'Plus Jakarta Sans',sans-serif;font-weight:600;font-size:14px;"><span style="color:#5E6E67;font-weight:500;">gene</span>Weave</span>
+    </div>
+    <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#9aa7a1;">Design system · sentence case · calm by default</div>
+  </footer>
+
+</div>
+</div>
+</x-dc>
+</body>
+</html>

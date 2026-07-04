@@ -1,5 +1,5 @@
 /**
- * @weaveintel/encryption — Blind-index helpers (Phase 8).
+ * @weaveintel/encryption — Blind-index helpers.
  *
  * A blind index is a deterministic, tenant-keyed HMAC of an encrypted column
  * value, stored alongside the ciphertext as `<column>_bidx`. It enables exact
@@ -13,8 +13,8 @@
  * then issue lookups against the bidx column.
  *
  * Reusability invariant: this module only depends on `TenantKeyManager` and
- * `FieldPolicy` — no app-specific code. GeneWeave wires the user-table bidx,
- * but any app can add its own `BlindIndexSpec` list (e.g. orders.email,
+ * `FieldPolicy` — no app-specific code. A host application wires the user-table
+ * bidx, but any app can add its own `BlindIndexSpec` list (e.g. orders.email,
  * customers.phone).
  */
 

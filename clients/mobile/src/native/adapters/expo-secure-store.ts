@@ -12,7 +12,7 @@
  * distinct logical keys can never map to the same physical key).
  */
 import * as SecureStore from 'expo-secure-store';
-import type { KeyValueStore } from '@geneweave/api-client';
+import type { KeyValueStore } from '@weaveintel/api-client';
 
 /** Escape a logical key into the SecureStore-allowed character set. */
 function safeKey(key: string): string {

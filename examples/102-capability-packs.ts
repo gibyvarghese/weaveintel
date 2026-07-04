@@ -22,7 +22,7 @@ import {
   resolveActivePackVersion,
   type CapabilityPack,
   type PackInstallAdapter,
-} from '@weaveintel/capability-packs';
+} from '@weaveintel/core/capability-packs';
 
 // ─── 1. Manifest ────────────────────────────────────────────────────
 const manifest: CapabilityPack = {
@@ -103,10 +103,10 @@ for (const [kind, bucket] of store) console.log(`    ${kind}: ${bucket.size === 
 
 // ─── 5. Version resolution ──────────────────────────────────────────
 const candidates = [
-  { version: '1.0.0', status: 'published' as const },
-  { version: '1.2.0', status: 'published' as const },
-  { version: '2.0.0', status: 'draft' as const },
-  { version: '1.1.0', status: 'retired' as const },
+  { packKey: 'demo-pack', version: '1.0.0', status: 'published' as const },
+  { packKey: 'demo-pack', version: '1.2.0', status: 'published' as const },
+  { packKey: 'demo-pack', version: '2.0.0', status: 'draft' as const },
+  { packKey: 'demo-pack', version: '1.1.0', status: 'retired' as const },
 ];
-const active = resolveActivePackVersion(candidates);
+const active = resolveActivePackVersion(candidates, 'demo-pack');
 console.log('✓ Active version (highest published):', active?.version);

@@ -26,7 +26,7 @@
  *
  * --- Boundary ---
  *
- * - This package never imports SQLite or geneweave's `DatabaseAdapter`.
+ * - This package never imports SQLite or the host application's `DatabaseAdapter`.
  *   Callers pass a thin `ProvisionMeshDb` that exposes only the rows we
  *   need to read/write.
  * - StateStore mirroring is best-effort — failures are logged and the DB
@@ -46,9 +46,9 @@ import type {
 } from '@weaveintel/live-agents';
 
 // ─── Lightweight DB row shapes ───────────────────────────────
-// Mirrors of geneweave's row interfaces. Only the columns this provisioner
-// actually reads/writes are listed. This keeps the package free of any
-// dependency on the geneweave app.
+// Mirrors of the host application's row interfaces. Only the columns this
+// provisioner actually reads/writes are listed. This keeps the package free
+// of any dependency on the consuming app.
 
 export interface MeshDefinitionRowLike {
   id: string;
@@ -237,7 +237,7 @@ export interface ProvisionMeshResult {
  *  deterministic and so the package stays free of an explicit uuid dep. */
 export type IdGenerator = () => string;
 
-/** Default id generator: RFC 9562 v4 fallback. Geneweave passes its v7 fn
+/** Default id generator: RFC 9562 v4 fallback. A consuming app passes its v7 fn
  *  for sortability. */
 const defaultIdGen: IdGenerator = () => {
   // newUUIDv7 from @weaveintel/core — time-ordered UUID v7.

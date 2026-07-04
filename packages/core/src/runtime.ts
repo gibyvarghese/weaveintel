@@ -70,7 +70,7 @@ export const RuntimeCapabilities = {
  * so every call site can reach them through `ctx.runtime?.compliance` without
  * constructing per-route or per-chat manager instances.
  *
- * Concrete adapters live in `@weaveintel/compliance`;
+ * Concrete adapters live in `@weaveintel/guardrails/compliance`;
  * `createRuntimeComplianceAdapter(opts)` builds one from the durable managers.
  *
  * `consent`   — grant / revoke / query per-user consent flags.
@@ -517,7 +517,7 @@ export interface WeaveRuntimeOptions {
   readonly memory?: RuntimeMemorySlot;
   /**
    * Phase 6 — compliance slot (consent, residency, deletion, GDPR helpers).
-   * Pass a `createRuntimeComplianceAdapter(opts)` instance from `@weaveintel/compliance`.
+   * Pass a `createRuntimeComplianceAdapter(opts)` instance from `@weaveintel/guardrails/compliance`.
    * When present, `RuntimeCapabilities.Compliance` is advertised automatically.
    */
   readonly compliance?: RuntimeComplianceSlot;
@@ -540,7 +540,7 @@ export interface WeaveRuntimeOptions {
    * `details` object is serialised → redacted → re-parsed before the entry
    * reaches the underlying logger. LLMs and audit stores never see raw PII.
    * The `Redactor` interface is structural; pass any `weaveRedactor(policy)`
-   * from `@weaveintel/redaction` or a custom implementation.
+   * from `@weaveintel/guardrails/redaction` or a custom implementation.
    */
   readonly redactor?: Redactor;
   readonly metadata?: Readonly<Record<string, unknown>>;
@@ -623,7 +623,7 @@ export function createDurableAuditLogger(opts: {
  * passes every entry's `details` through a `Redactor` before forwarding to
  * the inner logger, so PII is stripped from audit trails without any call-site
  * changes. Uses the structural `Redactor` interface — pass any implementation
- * from `@weaveintel/redaction` or a custom one.
+ * from `@weaveintel/guardrails/redaction` or a custom one.
  *
  * Auto-wired by `weaveRuntime` when a `redactor` is configured.
  */

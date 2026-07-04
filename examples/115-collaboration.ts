@@ -49,18 +49,13 @@ import {
   createSharedSessionManager,
   type SharedSession,
   type PresenceState,
-  // Collaboration events
-  createCollaborationEvent,
-  isPresenceEvent,
-  isHandoffEvent,
-  type CollaborationEventType,
   // Run subscriptions
   createRunSubscriptionManager,
   type RunStatus,
   // Handoff management
   createHandoffManager,
   type HandoffStatus,
-} from '@weaveintel/collaboration';
+} from '@weaveintel/collab';
 
 /* ─── Section header helpers ─────────────────────────────────────────────── */
 
@@ -175,83 +170,7 @@ async function demonstrateSession(): Promise<void> {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   SECTION 2 — CollaborationEvent: create, type guards
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-async function demonstrateEvents(): Promise<void> {
-  header('2. CollaborationEvent — Create & Type Guards');
-
-  // createCollaborationEvent() is a pure factory — no I/O.
-  // It stamps type, sessionId, userId, and a millisecond timestamp.
-  // The data field is an open Record<string,unknown> for event-specific payload.
-
-  // Build a presence-changed event (sent when a user's activity state updates).
-  const presenceEvent = createCollaborationEvent(
-    'presence:changed',             // CollaborationEventType
-    'sess-demo-001',                // sessionId
-    'user-alice',                   // userId who triggered the event
-    { from: 'online', to: 'idle' }, // application-defined data payload
-  );
-
-  info(`presence event type:      "${presenceEvent.type}"`);
-  info(`presence event sessionId: "${presenceEvent.sessionId}"`);
-  info(`presence event userId:    "${presenceEvent.userId}"`);
-  info(`presence event data:      ${JSON.stringify(presenceEvent.data)}`);
-  info(`presence event timestamp: ${presenceEvent.timestamp}`);
-  if (presenceEvent.type !== 'presence:changed') throw new Error('Wrong event type');
-  ok('createCollaborationEvent() created a presence:changed event');
-
-  // Build a handoff-requested event (sent when Agent A wants to pass to Agent B).
-  const handoffEvent = createCollaborationEvent(
-    'handoff:requested',
-    'sess-demo-001',
-    'agent-researcher',
-    { toAgent: 'agent-coder', reason: 'Code generation required for next step' },
-  );
-
-  info(`\nhandoff event type: "${handoffEvent.type}"`);
-  ok('createCollaborationEvent() created a handoff:requested event');
-
-  // Build a message event to round out the examples.
-  const messageEvent = createCollaborationEvent(
-    'message:sent',
-    'sess-demo-001',
-    'user-bob',
-    { text: 'The analysis is ready for review.' },
-  );
-
-  // --- isPresenceEvent() type guard ------------------------------------
-  // Returns true only for type === 'presence:changed'.
-  // Useful in event dispatch loops: if (isPresenceEvent(evt)) updateUI(evt).
-  const presenceCheck  = isPresenceEvent(presenceEvent);
-  const handoffCheck1  = isPresenceEvent(handoffEvent);
-  const messageCheck1  = isPresenceEvent(messageEvent);
-  info(`\nisPresenceEvent(presenceEvent): ${presenceCheck}  (expected true)`);
-  info(`isPresenceEvent(handoffEvent):  ${handoffCheck1}  (expected false)`);
-  info(`isPresenceEvent(messageEvent):  ${messageCheck1}  (expected false)`);
-  if (!presenceCheck)  throw new Error('isPresenceEvent should return true for presence:changed');
-  if (handoffCheck1)   throw new Error('isPresenceEvent should return false for handoff:requested');
-  if (messageCheck1)   throw new Error('isPresenceEvent should return false for message:sent');
-  ok('isPresenceEvent() correctly identifies presence:changed events');
-
-  // --- isHandoffEvent() type guard ------------------------------------
-  // Returns true for any event type that starts with 'handoff:'.
-  // Covers handoff:requested, handoff:accepted, handoff:rejected.
-  const allHandoffTypes: CollaborationEventType[] = ['handoff:requested', 'handoff:accepted', 'handoff:rejected'];
-  for (const evtType of allHandoffTypes) {
-    const evt = createCollaborationEvent(evtType, 'sess-demo-001', 'agent-x');
-    const result = isHandoffEvent(evt);
-    info(`isHandoffEvent("${evtType}"): ${result}`);
-    if (!result) throw new Error(`isHandoffEvent should return true for ${evtType}`);
-  }
-  // Non-handoff event should return false.
-  const nonHandoff = isHandoffEvent(messageEvent);
-  if (nonHandoff) throw new Error('isHandoffEvent should return false for message:sent');
-  ok('isHandoffEvent() correctly matches all handoff:* event types');
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   SECTION 3 — RunSubscriptionManager: subscribe, status updates, unsubscribe
+   SECTION 2 — RunSubscriptionManager: subscribe, status updates, unsubscribe
    ═══════════════════════════════════════════════════════════════════════════ */
 
 async function demonstrateSubscriptions(): Promise<void> {
@@ -427,13 +346,11 @@ async function main(): Promise<void> {
   console.log('Multi-agent collaboration: sessions, events, subscriptions, handoffs');
 
   await demonstrateSession();
-  await demonstrateEvents();
   await demonstrateSubscriptions();
   await demonstrateHandoff();
 
   header('All sections complete');
   console.log('  ✓ SharedSessionManager: create, join, presence, get, leave, list, close');
-  console.log('  ✓ CollaborationEvent: create all types, isPresenceEvent(), isHandoffEvent()');
   console.log('  ✓ RunSubscriptionManager: subscribe, updateStatus, list, unsubscribe');
   console.log('  ✓ HandoffManager: request, accept, complete, reject, cancel, get, list');
 }

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/cost-governor — Phase 1 surface.
+ * @weaveintel/cost-governor — surface.
  *
  * Public API:
  *   - Types:           CostLever, CostLedgerEntry, CostBreakdown,

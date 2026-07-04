@@ -20,7 +20,7 @@
  * follow up with `{ type: 'resume' }` then a new audio message.
  *
  * The handler is designed to plug into any Node.js `http.Server` that
- * delegates `upgrade` events to it.  GeneWeave wires this in server.ts
+ * delegates `upgrade` events to it.  The host application wires this in server.ts
  * for the path `/api/voice/sessions/:id/ws`.
  */
 

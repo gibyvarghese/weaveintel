@@ -5,6 +5,7 @@
  */
 
 import { weaveContext } from '@weaveintel/core';
+import type { Model, ModelRequest, ModelResponse, ExecutionContext, CapabilityId } from '@weaveintel/core';
 import {
   createHeartbeat,
   type AgentContract,
@@ -14,6 +15,26 @@ import {
   type Mesh,
   weaveInMemoryStateStore,
 } from '@weaveintel/live-agents';
+
+// createHeartbeat now requires a pinned model (live agents run for hours/days
+// against one model). This example's custom attention policy never calls it,
+// so a minimal stub satisfies the contract.
+const stubCaps = new Set<CapabilityId>();
+const stubModel: Model = {
+  info: { provider: 'stub', modelId: 'phase6-stub', capabilities: stubCaps },
+  capabilities: stubCaps,
+  hasCapability: () => false,
+  async generate(_ctx: ExecutionContext, _req: ModelRequest): Promise<ModelResponse> {
+    return {
+      id: 'stub-1',
+      model: 'phase6-stub',
+      content: '',
+      toolCalls: [],
+      finishReason: 'stop',
+      usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+    };
+  },
+};
 
 async function seedPhase6Data() {
   const store = weaveInMemoryStateStore();
@@ -142,6 +163,7 @@ async function main() {
     stateStore: store,
     workerId: 'worker-a',
     concurrency: 1,
+    model: stubModel,
     attentionPolicy,
     actionExecutor,
     now: () => '2025-01-01T00:01:00.000Z',
@@ -155,6 +177,7 @@ async function main() {
     stateStore: store,
     workerId: 'worker-b',
     concurrency: 1,
+    model: stubModel,
     attentionPolicy,
     actionExecutor,
     now: () => '2025-01-01T00:01:00.000Z',

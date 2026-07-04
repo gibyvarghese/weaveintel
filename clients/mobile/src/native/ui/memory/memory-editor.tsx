@@ -9,7 +9,7 @@
  */
 import { useEffect, useState } from 'react';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, Text, View } from 'react-native';
-import type { MemoryItem } from '@geneweave/api-client';
+import type { MemoryItem } from '@weaveintel/api-client';
 import { MEMORY_CONTENT_MAX, validateMemoryContent } from '../../../lib';
 import { useTheme } from '../../providers/theme-provider';
 import { Field, PrimaryButton, ErrorText } from '../primitives';

@@ -1,0 +1,38 @@
+{
+  "name": "@weaveintel/equity-scoring",
+  "version": "0.1.0",
+  "description": "Deterministic, pure-function equity factor scoring engine with cross-sectional z-scores",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@weaveintel/core": "^0.0.1",
+    "@weaveintel/tools-marketdata": "^0.1.0",
+    "@weaveintel/tools-news": "^0.1.0",
+    "@weaveintel/tools-altdata": "^0.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.6"
+  },
+  "license": "MIT",
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*"
+  ],
+  "private": true
+}

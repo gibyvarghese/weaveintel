@@ -175,11 +175,9 @@ function makeAgentCard(name: string, agentUrl: string): AgentCard {
 // ─── Main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const { OpenAI } = await import('openai');
-  const { createOpenAIModel } = await import('@weaveintel/agents');
+  const { weaveOpenAIModel } = await import('@weaveintel/provider-openai');
 
-  const openai = new OpenAI({ apiKey: OPENAI_API_KEY! });
-  const model = createOpenAIModel(openai, 'gpt-4o-mini');
+  const model = weaveOpenAIModel('gpt-4o-mini', { apiKey: OPENAI_API_KEY! });
   const client = weaveA2AClient();
   const rootCtx = weaveContext({ metadata: { runId: newUUIDv7() } });
 
@@ -201,7 +199,7 @@ async function main() {
   });
   const { url: geoUrl, server: geoServer } = await startA2AServer(geoServerA);
   // Patch card URL now that port is known
-  (geoServerA.card as Record<string, unknown>)['supportedInterfaces'] = [
+  (geoServerA.card as unknown as Record<string, unknown>)['supportedInterfaces'] = [
     { url: `${geoUrl}/api/a2a`, protocolBinding: 'JSONRPC', protocolVersion: '1.0' },
   ];
 

@@ -2,7 +2,7 @@
  * memory-list.test.ts — unit tests for the pure Memory presentation logic.
  */
 import { describe, expect, it } from 'vitest';
-import type { CreatedMemory, MemoryItem, Memories } from '@geneweave/api-client';
+import type { CreatedMemory, MemoryItem, Memories } from '@weaveintel/api-client';
 import {
   CLEAR_ALL_CONFIRM_PHRASE,
   MEMORY_CONTENT_MAX,

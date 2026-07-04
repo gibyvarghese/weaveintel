@@ -4,6 +4,7 @@ import type { DatabaseAdapter } from '../db.js';
 import type { ChatEngine, ChatAttachment } from '../chat.js';
 import { DashboardService } from '../dashboard.js';
 import { recordChatFeedbackSignal } from '../routing-feedback.js';
+import { sanitizeFeedbackCategories } from '@weaveintel/collab';
 import { json, html, readBody, LARGE_REQUEST_BODY_BYTES } from '../server-core.js';
 import type { Router } from '../server-core.js';
 import { createActionItem } from '@weaveintel/human-tasks';
@@ -218,6 +219,7 @@ export function registerChatRoutes(
     let body: {
       signal?: string;
       comment?: string | null;
+      categories?: unknown;
       modelId?: string;
       provider?: string;
       taskKey?: string;
@@ -229,21 +231,23 @@ export function registerChatRoutes(
       json(res, 400, { error: 'signal must be one of thumbs_up|thumbs_down|regenerate|copy' });
       return;
     }
-    if (!body.modelId || !body.provider || !body.taskKey) {
-      json(res, 400, { error: 'modelId, provider, and taskKey are required (snapshot from the resolved decision)' });
-      return;
-    }
+    // m137: a thumbs-down may carry a small fixed taxonomy of reasons (validated against the shared list),
+    // stored alongside the signal so down-votes become an actionable reason, not just free text. modelId/
+    // provider/taskKey stay OPTIONAL: when present the feedback also updates the model's routing quality
+    // score; when absent (message decision not snapshotted) the raw feedback is still recorded.
+    const categories = body.signal === 'thumbs_down' ? sanitizeFeedbackCategories(body.categories) : [];
     try {
       const result = await recordChatFeedbackSignal(db, {
         signal: body.signal,
         messageId,
-        modelId: body.modelId,
-        provider: body.provider,
-        taskKey: body.taskKey,
+        modelId: body.modelId ?? null,
+        provider: body.provider ?? null,
+        taskKey: body.taskKey ?? null,
         tenantId: auth.tenantId ?? null,
         chatId: body.chatId ?? null,
         userId: auth.userId,
         comment: body.comment ?? null,
+        categories,
       });
       json(res, 201, result);
     } catch (err) {

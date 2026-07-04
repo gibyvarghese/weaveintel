@@ -9,8 +9,8 @@
  * (`src/native/`) supplies real adapters; tests supply fakes.
  */
 
-import type { GeneweaveClient, MeUser, TokenStore, KeyValueStore } from '@geneweave/api-client';
-import { AuthExpiredError } from '@geneweave/api-client';
+import type { GeneweaveClient, MeUser, TokenStore, KeyValueStore } from '@weaveintel/api-client';
+import { AuthExpiredError } from '@weaveintel/api-client';
 import type { AuthStore } from './auth-store.js';
 import type { HostProbe, HostValidation } from './host.js';
 import { validateHost } from './host.js';

@@ -1,5 +1,5 @@
 /**
- * typography.ts — geneWeave type system.
+ * typography.ts — the type system.
  *
  * Font families are expressed as names only (no font files, no React Native
  * `expo-font` loading here — the mobile app loads them in M3). The type scale
@@ -7,20 +7,27 @@
  * each referencing one of the three families.
  */
 
-/** Font role -> family name. Mobile (M3) maps these to loaded `expo-font` faces. */
+/** Font role -> family name. An app supplies its own brand fonts with this shape. */
 export interface FontFamilies {
-  /** Display / headings — Fraunces (serif, expressive). */
+  /** Display / headings. */
   display: string;
-  /** Body / UI text — Plus Jakarta Sans. */
+  /** Body / UI text. */
   body: string;
-  /** Monospace — DM Mono (tool-call args, code). */
+  /** Metadata / code / keys / IDs. */
   mono: string;
+  /** Handwriting (e.g. a Notes "Creative" mode: titles, diagram labels, doodles). */
+  hand: string;
 }
 
+/**
+ * NEUTRAL default families — platform system-font stacks, so the engine renders sensibly with no
+ * brand fonts installed. Apps override with their own faces (see a consuming app's brand fonts).
+ */
 export const fontFamilies: FontFamilies = {
-  display: 'Fraunces',
-  body: 'Plus Jakarta Sans',
-  mono: 'DM Mono',
+  display: 'system-ui',
+  body: 'system-ui',
+  mono: 'ui-monospace',
+  hand: 'cursive',
 };
 
 /** Named font weights mapped to numeric values. */

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/cost-governor — Phase 3 (Shared Cost Slot)
+ * @weaveintel/cost-governor — (Shared Cost Slot)
  *
  * Bridges a `CostLedger` into the `RuntimeCostSlot` DI interface so the chat
  * path and the live-agent supervisor share a single per-entity spending counter

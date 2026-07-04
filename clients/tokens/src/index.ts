@@ -1,19 +1,22 @@
 /**
- * @geneweave/tokens — geneWeave mobile brand design system.
+ * @weaveintel/tokens — a brand-neutral theming ENGINE.
  *
- * Framework-agnostic, zero runtime dependencies (no React import, no DB, no
- * fetch). Exports the full brand system as typed constants:
+ * Framework-agnostic, zero runtime dependencies (no React import, no DB, no fetch). It provides the
+ * MACHINERY of a design-token system and TAKES A PALETTE AS INPUT — it is not tied to any brand:
  *
- *  - dark/light color palettes with WCAG-AA contrast verified for every
- *    text-on-surface pair (see {@link auditThemeContrast});
- *  - a typography scale (Fraunces / Plus Jakarta Sans / DM Mono);
- *  - a 4-pt spacing grid, radii, and per-theme elevation;
- *  - motion durations / easings and the weave-shimmer spec;
- *  - assembled {@link themes} (`dark` / `light`); and
- *  - per-tenant theming: {@link TenantThemeOverride}, {@link resolveTenantTheme},
- *    and {@link applyTenantTheme}, so a tenant can re-brand colors / fonts /
- *    corner style while accessibility is enforced (a failing override degrades
- *    gracefully to the base theme rather than shipping an inaccessible UI).
+ *  - the token schema/types ({@link ColorTokens}, {@link Theme}, {@link TenantThemeOverride}, …);
+ *  - colour maths: {@link contrastRatio} / {@link meetsAA} (WCAG-AA);
+ *  - the WEB transform {@link toCssVariables} (DTCG-shaped tokens → CSS custom properties, with a
+ *    configurable prefix so an app names its own `--brand-*` variables);
+ *  - per-tenant white-label functions ({@link resolveTenantTheme}, {@link applyTenantTheme},
+ *    {@link tenantThemeVars}) that enforce accessibility — a failing override degrades gracefully to
+ *    the base theme rather than shipping an inaccessible UI;
+ *  - generic scales (4-pt spacing grid, radii, type scale, motion, breakpoints, elevation); and
+ *  - NEUTRAL reference palettes/themes ({@link neutralDark} / {@link neutralLight} /
+ *    {@link neutralThemes} / {@link defaultTheme}) so the engine is self-contained and demonstrable.
+ *
+ * An app supplies its own palette + fonts + CSS prefix and composes them on this engine (a consuming
+ * app keeps its brand in its own `src/brand/`). Nothing about any product's brand lives here.
  */
 
 /**
@@ -35,8 +38,8 @@ export {
   type Rgb,
 } from './color.js';
 
-// Color palettes.
-export { darkColors, lightColors, type ColorTokens } from './palette.js';
+// Neutral reference palettes (the engine's brand-agnostic defaults; apps supply their own).
+export { neutralDark, neutralLight, type ColorTokens } from './palette.js';
 
 // Typography.
 export {
@@ -77,9 +80,31 @@ export {
   type MotionTokens,
 } from './motion.js';
 
-// Assembled themes + per-tenant theming + contrast audit.
+// Responsive breakpoints (adaptive shell: rails → drawers/sheets below tablet).
 export {
-  themes,
+  breakpoints,
+  mediaUp,
+  mediaBelow,
+  type Breakpoints,
+} from './breakpoints.js';
+
+// Web transform — CSS custom properties (`--<prefix>-*`, prefix configurable) so the web shares the
+// same source of truth as native, including per-tenant brand overrides (white-label), AA-enforced.
+export {
+  toCssVariables,
+  tenantThemeVars,
+  tenantThemeCss,
+  DEFAULT_CSS_PREFIX,
+  type CssVarsOptions,
+  type TenantThemeVars,
+  type TenantThemeOptions,
+  type BaseThemes,
+} from './css.js';
+
+// Neutral reference themes + per-tenant theming + contrast audit (engine functions work on ANY theme).
+export {
+  neutralThemes,
+  defaultTheme,
   resolveTenantTheme,
   applyTenantTheme,
   auditThemeContrast,

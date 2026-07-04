@@ -1,7 +1,7 @@
 /**
  * @weaveintel/prompts — Database record helpers
  *
- * GeneWeave and future apps persist prompts in their own databases. These
+ * A consuming app and future apps persist prompts in their own databases. These
  * helpers keep the parsing and normalization logic in the shared prompt layer
  * so app runtimes do not re-implement prompt decoding by hand.
  */

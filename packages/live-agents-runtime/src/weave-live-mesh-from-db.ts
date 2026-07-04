@@ -51,9 +51,9 @@
  *   - A `tenantId` + `ownerHumanId` if the function is also
  *     provisioning.
  *
- * Existing geneweave code should migrate from
+ * Existing app code should migrate from
  * `createHeartbeatSupervisor()` directly to this function as a single
- * call — see `apps/geneweave/src/live-agents/generic-supervisor-boot.ts`
+ * call — see the reference app's generic supervisor boot module
  * for the canonical pattern.
  */
 
@@ -150,8 +150,14 @@ export interface WeaveLiveMeshFromDbOptions {
   intervalMs?: number;
   /** Active-role refresh interval ms. Default 30000. */
   refreshMs?: number;
-  /** Worker id prefix. */
+  /** Worker id prefix. Default `'weaveintel-live-worker'`; pass your own. */
   workerIdPrefix?: string;
+  /**
+   * System principal (`userId`) attributed to background tick work.
+   * Default `'human:weaveintel-system'`; a consuming app should pass its own
+   * so its audit log names its product.
+   */
+  systemPrincipal?: string;
 
   /** Logger. */
   logger?: (msg: string) => void;
@@ -279,6 +285,7 @@ export async function weaveLiveMeshFromDb(
     ...(opts.intervalMs !== undefined ? { intervalMs: opts.intervalMs } : {}),
     ...(opts.refreshMs !== undefined ? { refreshMs: opts.refreshMs } : {}),
     ...(opts.workerIdPrefix ? { workerIdPrefix: opts.workerIdPrefix } : {}),
+    ...(opts.systemPrincipal ? { systemPrincipal: opts.systemPrincipal } : {}),
     ...(opts.runtime !== undefined ? { runtime: opts.runtime } : {}),
     ...(opts.onEvent ? { onEvent: opts.onEvent } : {}),
     logger: (m: string) => log(`[supervisor] ${m}`),

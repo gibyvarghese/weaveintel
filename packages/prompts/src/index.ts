@@ -188,3 +188,16 @@ export {
   createPromptCapabilityTelemetry,
   type PromptTelemetryOptions,
 } from './telemetry.js';
+
+// ── Translation: faithful, structure-preserving translate prompts + span protection ──
+export type { TargetLanguage, Formality, TranslateOptions, ProtectResult, TranslateVerification } from './translate.js';
+export {
+  TARGET_LANGUAGES,
+  resolveLanguage,
+  protectNonTranslatable,
+  restoreProtected,
+  countSentinels,
+  buildTranslatePrompt,
+  parseTranslation,
+  verifyTranslation,
+} from './translate.js';

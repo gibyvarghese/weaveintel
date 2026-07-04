@@ -19,6 +19,8 @@
  * within the same page lifetime reuse the same bundle.
  */
 
+import { promptDialog } from './dialog.js';
+
 // ── Bundle cache ──────────────────────────────────────────────────────────────
 
 type TiptapExtension = { configure?: (opts: Record<string, unknown>) => unknown; [k: string]: unknown };
@@ -32,6 +34,22 @@ type TiptapBundle = {
   TaskItem: TiptapExtension;
   Link: TiptapExtension;
   Underline: TiptapExtension;
+  // weaveNotes Phase 1 creative marks + nodes.
+  Highlight: TiptapExtension;
+  TextColor: TiptapExtension;
+  Callout: TiptapExtension;
+  Toggle: TiptapExtension;
+  ImageBlock: TiptapExtension;
+  Sticker: TiptapExtension;
+  WashiDivider: TiptapExtension;
+  // weaveNotes Phase 4 creative nodes.
+  DiagramNode: TiptapExtension;
+  InkCanvasNode: TiptapExtension;
+  // Tables (planner / Cornell / charting layouts).
+  Table: TiptapExtension;
+  TableRow: TiptapExtension;
+  TableHeader: TiptapExtension;
+  TableCell: TiptapExtension;
 };
 
 type TiptapEditor = {
@@ -56,24 +74,65 @@ async function loadBundle(): Promise<TiptapBundle> {
 
 // ── Bubble toolbar ────────────────────────────────────────────────────────────
 
-function buildBubbleToolbar(editor: TiptapEditor): HTMLElement {
-  const buttons: Array<{ label: string; action: () => void; isActive?: () => boolean }> = [
-    { label: 'B', action: () => { editor.chain().focus()['toggleBold']?.().run(); }, isActive: () => false },
-    { label: 'I', action: () => { editor.chain().focus()['toggleItalic']?.().run(); }, isActive: () => false },
-    { label: 'S̶', action: () => { editor.chain().focus()['toggleStrike']?.().run(); }, isActive: () => false },
-    { label: 'U', action: () => { editor.chain().focus()['toggleUnderline']?.().run(); }, isActive: () => false },
-    { label: '<>', action: () => { editor.chain().focus()['toggleCode']?.().run(); }, isActive: () => false },
-  ];
+/** The four highlighter swatches (spec §10.2) — kept in sync with @weaveintel/notes HIGHLIGHTER_SWATCHES. */
+const HIGHLIGHT_SWATCHES = [
+  { key: 'amber', color: '#FAC775' },
+  { key: 'pink', color: '#F4C0D1' },
+  { key: 'teal', color: '#9FE1CB' },
+  { key: 'blue', color: '#B5D4F4' },
+];
+/** A small palette of accessible text colours (excludes the AI-reserved emerald/mint). */
+const TEXT_COLORS = ['#14201B', '#D85A30', '#D98A3D', '#0B7A57', '#3B6FB0', '#8254C8'];
 
+function buildBubbleToolbar(editor: TiptapEditor): HTMLElement {
   const toolbar = document.createElement('div');
   toolbar.className = 'notes-bubble-toolbar';
-  for (const btn of buttons) {
+
+  const addBtn = (label: string, action: () => void, title?: string) => {
     const el = document.createElement('button');
     el.className = 'notes-bubble-btn';
-    el.textContent = btn.label;
-    el.onmousedown = (e) => { e.preventDefault(); btn.action(); };
+    el.textContent = label;
+    if (title) el.title = title;
+    el.onmousedown = (e) => { e.preventDefault(); action(); };
+    toolbar.appendChild(el);
+    return el;
+  };
+
+  addBtn('B', () => editor.chain().focus()['toggleBold']?.().run(), 'Bold');
+  addBtn('I', () => editor.chain().focus()['toggleItalic']?.().run(), 'Italic');
+  addBtn('S̶', () => editor.chain().focus()['toggleStrike']?.().run(), 'Strikethrough');
+  addBtn('U', () => editor.chain().focus()['toggleUnderline']?.().run(), 'Underline');
+  addBtn('<>', () => editor.chain().focus()['toggleCode']?.().run(), 'Inline code');
+
+  const sep = document.createElement('span'); sep.className = 'notes-bubble-sep'; toolbar.appendChild(sep);
+
+  // Highlighter swatches (multi-colour) + clear.
+  for (const sw of HIGHLIGHT_SWATCHES) {
+    const el = document.createElement('button');
+    el.className = 'notes-bubble-swatch';
+    el.title = `Highlight ${sw.key}`;
+    el.style.background = sw.color;
+    el.onmousedown = (e) => { e.preventDefault(); editor.chain().focus()['toggleHighlight']?.({ color: sw.color }).run(); };
     toolbar.appendChild(el);
   }
+  addBtn('⌫', () => editor.chain().focus()['unsetHighlight']?.().run(), 'Clear highlight');
+
+  const sep2 = document.createElement('span'); sep2.className = 'notes-bubble-sep'; toolbar.appendChild(sep2);
+
+  // Text colour: a little "A" that opens a colour row.
+  const colorWrap = document.createElement('span');
+  colorWrap.className = 'notes-bubble-colorwrap';
+  const aBtn = addBtn('A', () => { colorWrap.classList.toggle('open'); }, 'Text colour');
+  aBtn.classList.add('notes-bubble-color-a');
+  for (const c of TEXT_COLORS) {
+    const dot = document.createElement('button');
+    dot.className = 'notes-bubble-colordot';
+    dot.style.background = c;
+    dot.onmousedown = (e) => { e.preventDefault(); editor.chain().focus()['setTextColor']?.(c).run(); colorWrap.classList.remove('open'); };
+    colorWrap.appendChild(dot);
+  }
+  toolbar.appendChild(colorWrap);
+
   return toolbar;
 }
 
@@ -89,6 +148,18 @@ const SLASH_COMMANDS = [
   { label: '" Blockquote', icon: '"', action: (editor: TiptapEditor) => { editor.chain().focus()['toggleBlockquote']?.().run(); } },
   { label: '``` Code block', icon: '<>', action: (editor: TiptapEditor) => { editor.chain().focus()['toggleCodeBlock']?.().run(); } },
   { label: '── Divider', icon: '──', action: (editor: TiptapEditor) => { editor.chain().focus()['setHorizontalRule']?.().run(); } },
+  // weaveNotes Phase 1 creative blocks.
+  { label: 'Callout — note', icon: '📝', action: (editor: TiptapEditor) => { editor.chain().focus()['setCallout']?.({ tone: 'note' }).run(); } },
+  { label: 'Callout — tip', icon: '💡', action: (editor: TiptapEditor) => { editor.chain().focus()['setCallout']?.({ tone: 'tip' }).run(); } },
+  { label: 'Callout — warning', icon: '⚠️', action: (editor: TiptapEditor) => { editor.chain().focus()['setCallout']?.({ tone: 'warning' }).run(); } },
+  { label: 'Toggle list', icon: '▸', action: (editor: TiptapEditor) => { editor.chain().focus()['setToggle']?.({ summary: 'Details' }).run(); } },
+  { label: 'Table', icon: '▦', action: (editor: TiptapEditor) => { editor.chain().focus()['insertTable']?.({ rows: 3, cols: 3, withHeaderRow: true }).run(); } },
+  { label: 'Image embed', icon: '🖼', action: (editor: TiptapEditor) => { void (async () => { const src = await promptDialog({ title: 'Embed an image', message: 'Paste an image URL (https:// or data:image).', placeholder: 'https://…', required: true, confirmLabel: 'Embed' }); if (src) editor.chain().focus()['setImage']?.({ src, alt: '' }).run(); })(); } },
+  { label: 'Sticker ✨', icon: '✨', action: (editor: TiptapEditor) => { editor.chain().focus()['setSticker']?.({ emoji: '✨' }).run(); } },
+  { label: 'Washi divider', icon: '🎀', action: (editor: TiptapEditor) => { editor.chain().focus()['setWashiDivider']?.({ pattern: 'tape' }).run(); } },
+  // weaveNotes Phase 4 creative blocks.
+  { label: 'Ink canvas', icon: '✏️', action: (editor: TiptapEditor) => { editor.chain().focus()['setInkCanvas']?.({ strokes: [], author: 'user' }).run(); } },
+  { label: 'Diagram', icon: '🔗', action: (editor: TiptapEditor) => { editor.chain().focus()['setDiagram']?.({ scene: { kind: 'flow', nodes: [{ id: 'a', label: 'Start' }, { id: 'b', label: 'Next' }], edges: [{ from: 'a', to: 'b' }] }, kind: 'flow' }).run(); } },
 ];
 
 function buildSlashMenu(editor: TiptapEditor, query: string, onClose: () => void): HTMLElement {
@@ -127,6 +198,18 @@ function buildSlashMenu(editor: TiptapEditor, query: string, onClose: () => void
 export interface EditorInstance {
   destroy(): void;
   getJSON(): unknown;
+  /**
+   * Run a TipTap command by name against the editor, re-focusing first so the stored selection is
+   * restored (a toolbar button steals DOM focus; `.focus()` puts the caret/selection back before the
+   * command applies). Powers the main formatting tool strip. e.g. cmd('toggleBold'), cmd('setHeading', {level:2}).
+   */
+  cmd(name: string, arg?: unknown): void;
+  /** weaveNotes Phase 3: the local caret/selection as ProseMirror positions (for live cursors). */
+  getSelection(): { anchor: number; head: number; empty: boolean } | null;
+  /** weaveNotes Phase 3: screen coordinates of a ProseMirror position (to draw a remote caret). */
+  coordsAtPos(pos: number): { left: number; top: number; bottom: number } | null;
+  /** weaveNotes Phase 3: the document size, to clamp a remote position that moved. */
+  docSize(): number;
 }
 
 export async function mountNotesEditor(opts: {
@@ -135,6 +218,12 @@ export async function mountNotesEditor(opts: {
   onSave: (docJson: string) => Promise<void>;
   placeholder?: string;
   readOnly?: boolean;
+  /** weaveNotes Phase 3: called whenever the local selection/caret moves (for cursor broadcast). */
+  onSelectionChange?: () => void;
+  /** Called on EVERY local doc change (before the debounced save) so the host can mark an edit as
+   *  pending — e.g. so a remote-echo reload doesn't clobber an unsaved edit that didn't focus the
+   *  editor (a diagram/ink toolbar button). */
+  onLocalEdit?: () => void;
 }): Promise<EditorInstance> {
   const { container, initialDocJson, onSave, placeholder = 'Start writing… type / for commands', readOnly = false } = opts;
 
@@ -184,9 +273,26 @@ export async function mountNotesEditor(opts: {
       bundle.TaskItem,
       bundle.Underline,
       bundle.Link,
+      // weaveNotes Phase 1 creative marks + nodes.
+      bundle.Highlight,
+      bundle.TextColor,
+      bundle.Callout,
+      bundle.Toggle,
+      bundle.ImageBlock,
+      bundle.Sticker,
+      bundle.WashiDivider,
+      // weaveNotes Phase 4 creative nodes.
+      bundle.DiagramNode,
+      bundle.InkCanvasNode,
+      // Tables (planner / Cornell / charting layouts) — resizable, with header cells.
+      bundle.Table?.configure?.({ resizable: true, HTMLAttributes: { class: 'gw-table' } }) ?? bundle.Table,
+      bundle.TableRow,
+      bundle.TableHeader,
+      bundle.TableCell,
       bundle.Placeholder?.configure?.({ placeholder }) ?? bundle.Placeholder,
-    ],
+    ].filter(Boolean),
     onUpdate: ({ editor: ed }: { editor: TiptapEditor }) => {
+      opts.onLocalEdit?.(); // mark an edit as pending immediately (the save is debounced 1.5s)
       scheduleSave(ed);
     },
     onSelectionUpdate: ({ editor: ed }: { editor: TiptapEditor }) => {
@@ -199,6 +305,8 @@ export async function mountNotesEditor(opts: {
       } else {
         bubbleEl.style.display = 'none';
       }
+      // Phase 3: tell the host the caret moved (it broadcasts the live cursor).
+      opts.onSelectionChange?.();
     },
   });
 
@@ -242,14 +350,42 @@ export async function mountNotesEditor(opts: {
     if (slashMenu && !slashMenu.contains(e.target as Node)) closeSlashMenu();
   }, { once: false });
 
+  // Reach into the ProseMirror view/state for live-cursor read-out (Phase 3).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const pm = editor as any;
   return {
     destroy() {
       if (saveTimer) clearTimeout(saveTimer);
       closeSlashMenu();
       editor.destroy();
     },
+    cmd(name: string, arg?: unknown) {
+      try {
+        const c = editor.chain().focus() as Record<string, (a?: unknown) => { run: () => void }>;
+        const fn = c[name];
+        if (typeof fn === 'function') fn.call(c, arg).run();
+      } catch { /* command unavailable / editor not ready */ }
+    },
     getJSON() {
       return editor.getJSON();
+    },
+    getSelection() {
+      try {
+        const sel = pm.state?.selection;
+        if (!sel) return null;
+        return { anchor: Number(sel.from), head: Number(sel.to), empty: !!sel.empty };
+      } catch { return null; }
+    },
+    coordsAtPos(pos: number) {
+      try {
+        const size = pm.state?.doc?.content?.size ?? 0;
+        const p = Math.max(0, Math.min(pos, size));
+        const c = pm.view?.coordsAtPos(p);
+        return c ? { left: c.left, top: c.top, bottom: c.bottom } : null;
+      } catch { return null; }
+    },
+    docSize() {
+      try { return Number(pm.state?.doc?.content?.size ?? 0); } catch { return 0; }
     },
   };
 }

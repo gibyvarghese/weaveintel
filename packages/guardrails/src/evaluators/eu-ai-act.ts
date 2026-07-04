@@ -1,5 +1,5 @@
 /**
- * @weaveintel/guardrails — evaluators/eu-ai-act.ts  (Phase 4)
+ * @weaveintel/guardrails — evaluators/eu-ai-act.ts
  *
  * LLM-judge evaluators for EU AI Act compliance (mandatory since Aug 2025):
  *

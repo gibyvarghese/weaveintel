@@ -1,5 +1,5 @@
 // Authentication related functions
-import { api, loadChats, loadModels, loadTools, loadUserPreferences } from './api.js';
+import { api } from './api.js';
 import { state } from './state.js';
 import { h } from './dom.js';
 
@@ -154,16 +154,17 @@ export async function initiateOAuthFlow(provider: string) {
 }
 
 async function loadChatsAfterAuth() {
-  try {
-    state.view = 'chat';
-    state.authMode = 'login';
-    state.authError = '';
-
-    await loadChats();
-    await Promise.all([loadModels(), loadTools(), loadUserPreferences()]);
-  } catch (e) {
-    console.error('Failed to load after auth:', e);
-  }
+  // The session cookie is now set. Reload so the SINGLE canonical authenticated-init
+  // sequence in ui-client.ts (the `/auth/check` → authenticated branch) runs in full:
+  // tenant appearance, AI-transparency, chat-citations, answer-versions, accessibility,
+  // workspace-access, i18n message pack, suggested prompts, models, tools, chats, etc.
+  //
+  // This helper previously RE-IMPLEMENTED only a subset of that list (chats/models/tools/
+  // prefs), so logging in via the form silently skipped loadI18n() (and the other post-auth
+  // config) — the nav then rendered raw i18n keys (nav.home, action.newChat, …) until a
+  // manual reload. Delegating to a reload keeps one source of truth and prevents that drift.
+  state.authError = '';
+  window.location.reload();
 }
 
 export function renderAuth(): HTMLElement {

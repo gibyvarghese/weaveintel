@@ -21,7 +21,7 @@
  *   3. Else a generic `"You are <name>. Process the inbound task..."` string.
  *
  * --- Required HandlerContext slots ---
- * - `model`  (this is an LLM-driven kind — geneweave must supply a Model)
+ * - `model`  (this is an LLM-driven kind — the host application must supply a Model)
  *
  * --- Optional HandlerContext slots ---
  * - `tools`                — passed through to the ReAct loop if present.
@@ -82,7 +82,7 @@ function buildAgenticReact(ctx: HandlerContext): TaskHandler {
   if (!ctx.model && !ctx.modelResolver) {
     throw new Error(
       `agentic.react: HandlerContext.model OR HandlerContext.modelResolver is required ` +
-        `for agent ${ctx.agent.id} (binding ${ctx.binding.id}). Geneweave must resolve a ` +
+        `for agent ${ctx.agent.id} (binding ${ctx.binding.id}). The host application must resolve a ` +
         `Model (pinned) or supply a ModelResolver (per-tick) before binding this kind.`,
     );
   }

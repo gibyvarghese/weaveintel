@@ -40,6 +40,44 @@ tree is installed.
 - **Tenant theming** with AA-contrast enforcement — a failing override degrades
   to the base theme rather than shipping unreadable colors.
 
+## Notes — offline-first editor + ink
+
+The Notes tab works **with no signal**. Every note is read from and written to an on-device cache
+first, and a durable **outbox** syncs to geneWeave the moment connectivity returns — so you can jot,
+edit, and **draw** on the train and it all shows up on the web later, untouched.
+
+What it delivers, layered the usual pure ⇆ device way:
+
+```
+src/lib/notes/      pure, vitest-tested sync brain (no react-native):
+  note-store.ts       the offline cache + outbox PORT + an in-memory reference adapter
+  offline-sync.ts     optimistic writes + idempotent FIFO drain + last-write-wins pull
+  ink-capture.ts      touch points → validated InkStroke (reuses @weaveintel/notes)
+  editor-model.ts     split/compose a note for the editor — never drops web-only blocks
+src/native/notes/   device layer:
+  ../adapters/expo-sqlite-notes-store.ts   durable SQLite cache + outbox (same port)
+  use-notes.ts        offline-first hook (SQLite on device, in-memory on web)
+  ink-canvas.tsx      react-native-svg drawing surface (PanResponder)
+app/(tabs)/notes.tsx  the list — offline banner, "N pending" + per-note sync badges
+app/note/[id].tsx     the editor — title, text, and a freehand ink canvas
+```
+
+- **Shared document model.** A note is the same `doc_json` on web and phone. Ink is stored as the
+  exact `inkCanvas` node the web renders (via `@weaveintel/notes`' shared `blocksToDoc`/`docToBlocks`
+  + `validateStrokes`), so **a drawing made on a phone arrives on the web byte-for-byte** — the
+  Phase-7 "Done when". Web-only blocks (a teammate's diagram) are **preserved verbatim** when you edit
+  a note on mobile — never silently dropped.
+- **Visible sync states.** Queued (saved locally) → Syncing → Synced, shown as a dot per note + a
+  header banner, following offline-first UX best practice.
+- **Governed.** An admin can turn offline editing or ink off, and set the on-device cache size, in
+  **weaveNotes Settings** (the Builder). The app reads `GET /api/me/notes/capabilities` to gate.
+- **AI-aware.** A mobile edit is stamped "on mobile" in the note's activity log, so the assistant's
+  `read_note_activity` tool understands a note was changed on a phone.
+
+The sync brain is fully unit-tested in Node (offline/online, conflicts, retries, idempotency, the ink
+round-trip). On-device visual QA (the drawing surface, gestures) is validated on a simulator/device —
+the app has no `react-native-web` runtime, so the screens are not exercised headlessly in CI.
+
 ## Install the Expo/RN tree and run (dev machine)
 
 The heavy React Native / Expo dependency tree is listed in `package.json` but is
@@ -92,5 +130,6 @@ These are validated on a simulator/device after the Expo install (not in CI):
 
 The app consumes the workspace TypeScript packages:
 
-- `@geneweave/tokens` — brand design tokens (M1)
-- `@geneweave/api-client` — typed `/api/me` client (M2)
+- `@weaveintel/tokens` — brand design tokens (M1)
+- `@weaveintel/api-client` — typed `/api/me` client (M2)
+- `@weaveintel/notes` — the shared cross-platform note-document + ink model

@@ -51,6 +51,10 @@ export interface IChatStore {
   // User preferences
   getUserPreferences(userId: string): Promise<UserPreferencesRow | null>;
   saveUserPreferences(userId: string, defaultMode: string, theme: string, showProcessCard?: boolean): Promise<void>;
+  // m136 — Account settings surface: patch the profile/formatting-preference columns + notification matrix.
+  updateUserAccountPrefs(userId: string, patch: Record<string, string | null>): Promise<void>;
+  getUserNotificationPrefs(userId: string): Promise<import('./core.js').UserNotificationPrefRow[]>;
+  setUserNotificationPref(userId: string, eventKey: string, channels: { in_app?: boolean; email?: boolean; push?: boolean }): Promise<void>;
 
   // Chat settings
   getChatSettings(chatId: string): Promise<ChatSettingsRow | null>;

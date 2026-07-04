@@ -7,7 +7,7 @@
  * `RewritableTableSpec` adapters — the package never imports a database.
  *
  * Reusability invariant: depends ONLY on `@weaveintel/core` (transitive
- * via key-manager) + `node:crypto`. Hosts (geneweave, future apps,
+ * via key-manager) + `node:crypto`. Hosts (consuming applications,
  * tests) wire one `RewritableTableSpec` per encrypted (table, column)
  * pair.
  *

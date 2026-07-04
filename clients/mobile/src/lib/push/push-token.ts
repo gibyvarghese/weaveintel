@@ -7,7 +7,7 @@
  * concrete storage key via {@link PUSH_TOKEN_STORE_KEY}.
  */
 
-import type { KeyValueStore } from '@geneweave/api-client';
+import type { KeyValueStore } from '@weaveintel/api-client';
 
 /** SecureStore key where the device push token is persisted between launches. */
 export const PUSH_TOKEN_STORE_KEY = '@geneweave/push:device-token';

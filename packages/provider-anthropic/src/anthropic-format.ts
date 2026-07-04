@@ -1,5 +1,5 @@
 import type { ContentPart, ModelRequest, ModelResponse, StreamChunk } from '@weaveintel/core';
-import { anthropicAdapter, translate } from '@weaveintel/tool-schema';
+import { anthropicAdapter, translate } from '@weaveintel/tools/schema';
 import type { AnthropicContentBlock } from './anthropic-types.js';
 import type { AnthropicSSEEvent } from './shared.js';
 

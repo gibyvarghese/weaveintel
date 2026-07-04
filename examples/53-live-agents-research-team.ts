@@ -56,7 +56,7 @@ import {
   type AttentionPolicy,
 } from '@weaveintel/live-agents';
 import { weaveRealMCPTransport } from '@weaveintel/mcp-server';
-import { liveGmailAdapter, type GmailCredentials, type GmailMessage } from '@weaveintel/tools-gmail';
+import { liveGmailAdapter, type GmailCredentials, type GmailMessage } from '@weaveintel/tools/gmail';
 
 const TARGET_SENDER = 'giby.varghese@tech-lunch.com';
 const ENABLE_EMAIL_SEND = process.env['GMAIL_ENABLE_SEND'] === '1';
@@ -681,6 +681,7 @@ async function startHeartbeatRuntime(args: {
     stateStore: args.store,
     workerId,
     concurrency: Math.max(1, args.agents.length),
+    model: routedModels.get('demo:research-fast')!,
     attentionPolicy: useModelAttention ? modelBackedPolicy : multiplexPolicy,
     actionExecutor: createActionExecutor({ observability: { runLogger } }),
     runOptions: {

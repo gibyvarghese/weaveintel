@@ -1,12 +1,12 @@
 /**
- * @weaveintel/encryption — alert evaluator (Phase 9).
+ * @weaveintel/encryption — alert evaluator.
  *
  * Pure functions over a `MetricsSnapshot` + a list of `AlertRule`s. Returns
  * which rules are firing right now. Hosts persist rules in their own table
- * (geneweave: `tenant_encryption_alert_config`) and call `evaluateAlerts`
+ * (for example: `tenant_encryption_alert_config`) and call `evaluateAlerts`
  * on a schedule + on demand from the admin dashboard.
  *
- * Reusability: this module knows nothing about SQLite, geneweave, or HTTP.
+ * Reusability: this module knows nothing about SQLite, the host app, or HTTP.
  * It only consumes the package's metric snapshot shape.
  */
 

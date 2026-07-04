@@ -180,6 +180,19 @@ const TOOL_POLICIES: Record<ChatMode, string[]> = {
   agent: [
     'emit_artifact',
     'emit_widget',
+    'create_note', // weaveNotes Phase 3.1: the agent can create a new note
+    'note_edit', // weaveNotes Phase 3: the agent can co-author the user's notes
+    'note_publish', // weaveNotes Phase 4: the agent can publish a note as an artifact
+    'find_related_notes', // weaveNotes Phase 5: semantic note search/knowledge-graph nav
+    'suggest_links', // weaveNotes Phase 3: proactive linking — list/apply [[wiki-link]] suggestions
+    'summarize_meeting', // weaveNotes Phase 4: transcript → structured meeting note
+    'recall_second_brain', // weaveNotes Phase 5: temporally-aware recall from the note-derived memory
+    'set_workspace_appearance', // geneWeave UI rebuild: white-label workspace branding (admin-gated)
+    'update_account_profile', // geneWeave UI rebuild: the user's own account (profile/prefs/notifications)
+    'autofill_database', // weaveNotes Phase 6: AI table column auto-fill
+    'capture_web_page', // weaveNotes Phase 7: clip a web page into a structured note
+    'workspace_search', // weaveNotes Phase 8: cited RAG over the user notes + runs
+    'read_note_activity', // weaveNotes Phase 0: read a note's recent change history
     'datetime', 'timezone_info',
     'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list',
     'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status',
@@ -192,6 +205,19 @@ const TOOL_POLICIES: Record<ChatMode, string[]> = {
   supervisor: [
     'emit_artifact',
     'emit_widget',
+    'create_note', // weaveNotes Phase 3.1: create a new note
+    'note_edit', // weaveNotes Phase 3: co-author notes
+    'note_publish', // weaveNotes Phase 4: publish a note as an artifact
+    'find_related_notes', // weaveNotes Phase 5: semantic note search
+    'suggest_links', // weaveNotes Phase 3: proactive linking — list/apply [[wiki-link]] suggestions
+    'summarize_meeting', // weaveNotes Phase 4: transcript → structured meeting note
+    'recall_second_brain', // weaveNotes Phase 5: temporally-aware recall from the note-derived memory
+    'set_workspace_appearance', // geneWeave UI rebuild: white-label workspace branding (admin-gated)
+    'update_account_profile', // geneWeave UI rebuild: the user's own account (profile/prefs/notifications)
+    'autofill_database', // weaveNotes Phase 6: AI table column auto-fill
+    'capture_web_page', // weaveNotes Phase 7: clip a web page into a structured note
+    'workspace_search', // weaveNotes Phase 8: cited RAG over the user notes + runs
+    'read_note_activity', // weaveNotes Phase 0: read a note's recent change history
     'datetime', 'timezone_info', 'calculator', 'json_format', 'text_analysis',
     'agenda_list', 'agenda_create', 'agenda_update', 'agenda_delete',
   ],
@@ -199,6 +225,19 @@ const TOOL_POLICIES: Record<ChatMode, string[]> = {
   ensemble: [
     'emit_artifact',
     'emit_widget',
+    'create_note', // weaveNotes Phase 3.1: create a new note
+    'note_edit', // weaveNotes Phase 3: co-author notes
+    'note_publish', // weaveNotes Phase 4: publish a note as an artifact
+    'find_related_notes', // weaveNotes Phase 5: semantic note search
+    'suggest_links', // weaveNotes Phase 3: proactive linking — list/apply [[wiki-link]] suggestions
+    'summarize_meeting', // weaveNotes Phase 4: transcript → structured meeting note
+    'recall_second_brain', // weaveNotes Phase 5: temporally-aware recall from the note-derived memory
+    'set_workspace_appearance', // geneWeave UI rebuild: white-label workspace branding (admin-gated)
+    'update_account_profile', // geneWeave UI rebuild: the user's own account (profile/prefs/notifications)
+    'autofill_database', // weaveNotes Phase 6: AI table column auto-fill
+    'capture_web_page', // weaveNotes Phase 7: clip a web page into a structured note
+    'workspace_search', // weaveNotes Phase 8: cited RAG over the user notes + runs
+    'read_note_activity', // weaveNotes Phase 0: read a note's recent change history
     'datetime', 'timezone_info',
     'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list',
     'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status',
