@@ -1335,7 +1335,7 @@ import { weaveRuntime, weaveContext } from '@weaveintel/core';
 import { weaveSqlitePersistence } from '@weaveintel/persistence';
 import { weaveAgent } from '@weaveintel/agents';
 import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
-import { weaveSemanticMemory, weaveConversationMemory, weaveRuntimeMemoryStore } from '@weaveintel/memory';
+import { weaveSemanticMemory, weaveConversationMemory } from '@weaveintel/memory';
 import { weaveOpenAIEmbeddingModel } from '@weaveintel/provider-openai';
 
 // One runtime wires persistence for memory + audit + DLQ simultaneously
@@ -2091,10 +2091,10 @@ const governor = weaveCostGovernor(
     maxStepsCap: 20,
     budgetCeilingUsd: 50.00,
     modelCascade: {
-      cheap:     { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
-      expensive: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+      cheap:     { provider: 'anthropic', modelId: 'claude-haiku-4-5-20251001' },
+      expensive: { provider: 'anthropic', modelId: 'claude-sonnet-4-6' },
     },
-    toolSubset: { maxTools: 8 },
+    toolSubset: { strategy: 'intent-rag', topK: 8 },
   },
   {
     // Pass the ledger + a run-id resolver so the budget gate can enforce spend
@@ -2330,7 +2330,7 @@ const stdioTransport = createMCPStdioClientTransport({
 
 // Connect to an HTTP MCP server (endpoint first, then options)
 const httpTransport = createMCPStreamableHttpTransport('https://mcp.example.com/v1', {
-  getHeaders: () => ({ Authorization: \`Bearer \${process.env.MCP_TOKEN}\` }),
+  getHeaders: async () => ({ Authorization: \`Bearer \${process.env.MCP_TOKEN}\` }),
 });
 
 const client = weaveMCPClient();
@@ -2447,7 +2447,7 @@ await agent.run(ctx, {
 // Retrieve spans after the run (the in-memory tracer exposes a .spans array)
 const spans = tracer.spans;
 spans.forEach(s => {
-  console.log(\`[\${s.name}] \${s.durationMs}ms status=\${s.status ?? 'ok'}\`);
+  console.log(\`[\${s.name}] \${s.endTime - s.startTime}ms status=\${s.status}\`);
   if (s.attributes['tool.name']) {
     console.log('  tool:', s.attributes['tool.name']);
   }
@@ -3073,10 +3073,10 @@ const vaultSecretResolver = (opts: { path: string }): SecretResolver => ({
 
 // Production: chain resolvers — Vault first, fall back to env
 const chainedRuntime = weaveRuntime({
-  secrets: chainSecretResolvers([
+  secrets: chainSecretResolvers(
     vaultSecretResolver({ path: 'secret/data/myapp' }),
     envSecretResolver(),  // fallback
-  ]),
+  ),
 });
 
 // Provide secrets in-memory (for testing)
@@ -3746,25 +3746,18 @@ import { weaveSqliteStateStore } from '@weaveintel/live-agents';
 
 const store = await weaveSqliteStateStore({ path: './live-agents.db' });
 
-// Boot an entire mesh from the database
+// Boot an entire mesh from the database — weaveLiveMeshFromDb(db, opts)
 // db must have live_meshes + live_agents + live_agent_handler_bindings rows
-const mesh = await weaveLiveMeshFromDb({
-  db,
-  meshId:          'equity-mesh',
+const mesh = await weaveLiveMeshFromDb(db, {
   store,
-  handlerRegistry: myHandlerRegistry,
-  modelFactory:    async () => weaveAnthropicModel('claude-sonnet-4-6'),
-  policy:          weaveDbLiveAgentPolicy({ db }),
-  toolCatalog:     resolveAgentToolCatalog({ db, registry: myToolRegistry }),
+  modelFactory: async () => weaveAnthropicModel('claude-sonnet-4-6'),
+  policy:       weaveDbLiveAgentPolicy({ db }),
 });
 
-// Boot a single agent from its DB record
-const agent = await weaveLiveAgentFromDb({
-  db,
-  agentId:         'agent-researcher',
+// Boot a single agent from its DB record — weaveLiveAgentFromDb(db, agentId, opts?)
+const agent = await weaveLiveAgentFromDb(db, 'agent-researcher', {
   store,
-  handlerRegistry: myHandlerRegistry,
-  modelFactory:    async () => weaveAnthropicModel('claude-haiku-4-5-20251001'),
+  model: weaveAnthropicModel('claude-haiku-4-5-20251001'),
 });
 
 // Start ticking
@@ -4267,9 +4260,9 @@ if (toolBinding) {
   console.log(toolBinding.policyRef);   // → look up the referenced tool_policy row
 }
 
-// Check whether a tenant-level capability pack is bound
-const packBinding = resolveCapabilityBinding(bindings, 'tenant', 'acme', 'capability_pack');
-const hasPremiumSearch = packBinding?.policyRef === 'premium.search';`, ['@weaveintel/core'])}
+// Check the tenant-level cost policy binding
+const costBinding = resolveCapabilityBinding(bindings, 'tenant', 'acme', 'cost_policy');
+const costPolicyRef = costBinding?.policyRef;`, ['@weaveintel/core'])}
 `)}`;
 }
 
@@ -4439,19 +4432,19 @@ const consent = createDurableConsentManager({ runtime });
 // Record user consent — grant(subjectId, purpose, source, expiresAt?)
 await consent.grant(
   'user-alice',
-  'marketing-emails',
+  'marketing',
   'signup-form',
   Date.now() + 365 * 24 * 3600 * 1000,
 );
 
 // Check consent before sending — isGranted returns a boolean
-const allowed = await consent.isGranted('user-alice', 'marketing-emails');
+const allowed = await consent.isGranted('user-alice', 'marketing');
 if (!allowed) {
   console.log('No consent for marketing emails');
 }
 
 // Revoke consent
-await consent.revoke('user-alice', 'marketing-emails');`, ['@weaveintel/guardrails/compliance'])}
+await consent.revoke('user-alice', 'marketing');`, ['@weaveintel/guardrails/compliance'])}
 `)}
 
 ${section('comp-gdpr', 'GDPR Deletion (Right to Erasure)', `
