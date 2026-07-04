@@ -20,17 +20,17 @@ import {
   BlockDoc,
   type BlockOp,
 } from '@weaveintel/coedit';
+import { sanitizeColor } from '@weaveintel/notes';
 import {
   isColorScheme,
   schemeLabels,
   schemeColor,
   assignTopicColors,
   locatePhrase,
-  sanitizeColor,
   HIGHLIGHT_PALETTE,
   TEXT_COLOR_PALETTE,
   type ColorScheme,
-} from '@weaveintel/notes';
+} from '@weaveintel/geneweave-ui/notes';
 import { makeFence, fenceUntrusted, spotlightPreamble } from '@weaveintel/guardrails/spotlighting';
 import { newUUIDv7 } from '@weaveintel/core';
 import { roleAtLeast } from '@weaveintel/collaboration';

@@ -86,18 +86,6 @@ export {
   computeRollup,
 } from './note-database.js';
 
-// weaveNotes Phase 0 — foundation: the "colour encodes agency" contract.
-export {
-  type Author,
-  type AgencyStyle,
-  AGENCY_PALETTE,
-  authorStyle,
-  AI_BYLINE_PREFIX,
-  aiByline,
-  isAiSignalColor,
-  aiContentPalette,
-} from './agency.js';
-
 // weaveNotes Phase 0 — the note content-node registry (shared editor schema).
 export {
   type NoteNodeType,
@@ -109,45 +97,8 @@ export {
   editableNodes,
 } from './note-nodes.js';
 
-// weaveNotes Phase 1 — the creative layer: page themes, highlighter swatches, callout
-// tones, sticker presets, and the shared `sanitizeColor` colour gate.
-export {
-  type PageTheme,
-  type HighlighterTreatment,
-  type PageThemeTokens,
-  type Swatch,
-  type CalloutTone,
-  type CalloutToneSpec,
-  PAGE_THEMES,
-  PAGE_THEME_TOKENS,
-  pageThemeTokens,
-  coercePageTheme,
-  HIGHLIGHTER_SWATCHES,
-  DEFAULT_HIGHLIGHT,
-  CALLOUT_TONES,
-  coerceCalloutTone,
-  STICKER_PRESETS,
-  isKnownSwatch,
-} from './creative.js';
-
 // Colour-safety gate (shared by ink/diagram/creative + the app).
 export { sanitizeColor } from './color-safety.js';
-
-// weaveNotes Phase 2 — the AI colour-coding contract: a pre-validated WCAG-AA palette,
-// the semantic colour schemes (topic/importance/status/sentiment), and phrase location.
-export {
-  type ColorScheme,
-  type SchemeBucket,
-  READING_INK,
-  HIGHLIGHT_PALETTE,
-  TEXT_COLOR_PALETTE,
-  COLOR_SCHEMES,
-  isColorScheme,
-  schemeLabels,
-  schemeColor,
-  assignTopicColors,
-  locatePhrase,
-} from './colorize.js';
 
 // weaveNotes Phase 4 — the creative INK model + renderer (freehand strokes → SVG).
 export {
@@ -162,21 +113,6 @@ export {
   inkFromPrimitives,
   recolorStrokes,
 } from './ink.js';
-
-// weaveNotes Phase 4 — the native DIAGRAM model + renderer (nodes/edges → laid-out SVG).
-export {
-  type DiagramKind,
-  type NodeShape,
-  type DiagramNode,
-  type DiagramEdge,
-  type DiagramScene,
-  type PlacedNode,
-  type DiagramLayout,
-  type DiagramStyle,
-  validateDiagramScene,
-  layoutDiagram,
-  diagramToSvg,
-} from './diagram.js';
 
 // weaveNotes Phase 7 — the SHARED cross-platform note-document model (mobile ⇆ web doc_json).
 export {

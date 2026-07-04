@@ -42,7 +42,6 @@ import {
   type NoteDatabaseSource,
   type NoteDatabaseViewType,
   type UpdateNotePatch,
-  coercePageTheme,
   blocksToDoc,
   extractPlainText,
   type NoteBlock,
@@ -71,7 +70,8 @@ import { createNoteTranslateService } from '../note-translate-sql.js';
 import { createTenantGovernanceService } from '../tenant-governance-sql.js';
 import { createNoteScheduledAgentService } from '../note-scheduled-agent-sql.js';
 import { createMcpNotesServer } from '../mcp-notes-sql.js';
-import { isColorScheme, parseProvenanceFromSvg } from '@weaveintel/notes';
+import { parseProvenanceFromSvg } from '@weaveintel/notes';
+import { isColorScheme, coercePageTheme } from '@weaveintel/geneweave-ui/notes';
 import { sanitizeAwarenessState } from '@weaveintel/coedit';
 import { withAiPresence } from '../note-ai-presence.js';
 import { createNotePublishService, type PublishFormat } from '../note-publish-sql.js';

@@ -15,6 +15,11 @@
       "types": "./dist/ui/styles.d.ts",
       "import": "./dist/ui/styles.js",
       "default": "./dist/ui/styles.js"
+    },
+    "./notes": {
+      "types": "./dist/notes/index.d.ts",
+      "import": "./dist/notes/index.js",
+      "default": "./dist/notes/index.js"
     }
   },
   "files": [
@@ -25,7 +30,8 @@
     "build:tsc": "tsc -b",
     "build:bundle": "node scripts/bundle-notes-editor.mjs",
     "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist *.tsbuildinfo"
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "test": "vitest run"
   },
   "dependencies": {
     "@tiptap/core": "^2.11.5",
@@ -42,9 +48,13 @@
     "@tiptap/extension-underline": "^2.11.5",
     "@tiptap/pm": "^2.11.5",
     "@tiptap/starter-kit": "^2.11.5",
+    "@weaveintel/notes": "*",
     "@weaveintel/tokens": "*",
     "@weaveintel/ui-primitives": "*",
     "esbuild": "^0.25.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "vitest": "^3.2.6"
+  }
 }

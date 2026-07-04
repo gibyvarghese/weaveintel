@@ -13,7 +13,8 @@ import { Mark, Node, mergeAttributes } from '@tiptap/core';
 // (unlike the main tsc-built UI client) — Phase 4 ink + diagrams render via the shared,
 // tested @weaveintel/notes SVG renderers, so the picture is identical server-, share-, and
 // editor-side.
-import { diagramToSvg, validateDiagramScene, strokesToSvg, validateStrokes, HIGHLIGHT_PALETTE, type InkStroke } from '@weaveintel/notes';
+import { strokesToSvg, validateStrokes, type InkStroke } from '@weaveintel/notes';
+import { diagramToSvg, validateDiagramScene, HIGHLIGHT_PALETTE } from './notes/index.js';
 
 // The recolour swatches in the diagram editor — a subset of the shared WCAG-AA highlight palette
 // (its labels resolve back to the same pastels in the renderer, so a recolour survives validation).

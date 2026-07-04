@@ -16,10 +16,10 @@
  */
 import { BlockDoc, type BlockOp } from '@weaveintel/coedit';
 import {
-  validateDiagramScene, diagramToSvg, type DiagramScene,
   inkFromPrimitives, strokesToSvg, validateStrokes, recolorStrokes, type InkStroke,
   buildImageProvenance, embedXmpInSvg, type ImageProvenance,
 } from '@weaveintel/notes';
+import { validateDiagramScene, diagramToSvg, type DiagramScene } from '@weaveintel/geneweave-ui/notes';
 // weaveNotes product modules moved app-side (Phase 2f):
 import { type WeaveNotesConfig } from './notes/notes-config.js';
 import { sanitizeSvg, svgToDataUri } from './notes/svg.js';

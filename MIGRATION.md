@@ -204,7 +204,7 @@ rewiring every consumer, and leaving the suite green.
 | 2c | `mcp.ts` (transport-free JSON-RPC core) | `mcp-server` | ✅ done |
 | 2d | `scheduled-agent.ts` (split: cron+budget→triggers, recipes→app) | `triggers` + app | ✅ done |
 | 2e | `rag.ts` (+ rag-citations) | `retrieval` (reconcile RRF `hybrid.ts` + `citations.ts`) | ✅ done |
-| 2f | product modules → apps (batched by UI/server coupling) | `apps/geneweave` (+ `-ui`) | 🔵 in progress (Batch A done) |
+| 2f | product modules → apps (batched by UI/server coupling) | `apps/geneweave` (+ `-ui`) | ✅ done |
 | 2g | slim `index.ts`, genericize `provenance.ts`, drop the notes deferral from the no-app-brand allowlist | — | ⏳ |
 
 ### 2a — `prompt-safety.ts` → `@weaveintel/guardrails/spotlighting` ✅
@@ -353,7 +353,18 @@ the cluster can't wholesale leave notes. Verified corrected plan (all 5 modules 
    `geneweave-ui` is an app package); the generic-`AgencyContract`-in-notes split is optional per the
    plan and can be skipped since no consumer needs it.
 
-Then **2g**.
+**UI cluster ✅ (executed as 2 commits).** (1) Extracted `sanitizeColor` → slim `color-safety.ts`
+(broke `ink→creative`). (2) Gave geneweave-ui a `@weaveintel/notes` dep + tsconfig ref + **vitest** (its
+first test setup), moved `{agency, colorize, creative, diagram}` (+ tests + the agency test block) →
+`apps/geneweave-ui/src/notes/` with a `./notes` subpath export, and rewired consumers (the UI's
+`notes-creative-extensions` split ink↔notes / rest↔`./notes`; server `note-creative-sql`/
+`note-colorize-sql`/`me-notes` → `@weaveintel/geneweave-ui/notes`; ink + sanitizeColor stay from
+`@weaveintel/notes`). `ink` stays in slim-notes (it's the note-document data model). geneweave-ui's
+notes-editor bundler + tsc both build clean. Gate: **268/268** (geneweave-ui gained a test task — 33
+cluster tests); notes-deferred **51→37**. **Phase 2f is done — all product modules relocated.**
+
+Then **2g** — slim `notes/index.ts` header, genericize `provenance.ts`, de-brand the remaining notes
+strings (ink + header), and delete the notes deferral from the no-app-brand allowlist.
 
 ---
 
