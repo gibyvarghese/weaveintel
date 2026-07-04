@@ -17,7 +17,7 @@
  * Pure + dependency-light → fully unit-testable in Node; the web UI + the Tauri shell are thin
  * consumers. Quick-capture template hints reuse the Phase-6 {@link templateByKey} registry.
  */
-import { templateByKey } from './templates.js';
+import { templateByKey } from '@weaveintel/notes';
 
 // ── Quick capture ───────────────────────────────────────────────────────────────
 

@@ -44,12 +44,12 @@ import {
   type UpdateNotePatch,
   coercePageTheme,
   templateByKey,
-  parseQuickCapture,
   blocksToDoc,
   extractPlainText,
   type NoteBlock,
 } from '@weaveintel/notes';
 import { normalizeLanguage, LANGUAGE_NAMES } from '../notes/image-search.js';
+import { parseQuickCapture } from '../notes/desktop.js';
 
 /** The image-label languages offered for the per-user preference (code → English name). */
 const NOTE_IMAGE_LANGUAGES = LANGUAGE_NAMES;

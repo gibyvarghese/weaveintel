@@ -304,9 +304,21 @@ imports; `admin/api/tenant-governance` at `../../notes/`; an inline `import('…
 type in `me-notes` retargeted). These modules' brand strings leave the framework (fewer notes-deferred
 hits in `check:no-app-brand`).
 
-**Remaining 2f batches:** Batch B — `notes-config`, `templates`, `study`, `desktop`, `suggestions`,
-`svg` (server-only, larger/some cross-refs). Batch C — the UI cluster `colorize`/`ink`/`diagram`/
-`creative`/`agency` → `geneweave-ui` (+ agency split). Then **2g**.
+**Batch B ✅ (this step):** moved 4 server-only modules (+ tests) to `apps/geneweave/src/notes/`:
+`study` (FSRS/SM-2), `desktop`, `suggestions`, `svg`. **Coupling discovered mid-batch** (the
+typecheck gate caught it): `note-doc.ts` (slim core, stays) imports `type PMNode/PMDoc` from
+`templates`, and `creative.ts` (UI cluster) imports `type NotesTheme` from `notes-config` — so
+`templates` and `notes-config` can't move to the app cleanly yet. **`notes-config` reverted** to notes
+(it belongs with the UI cluster in Batch C, since creative depends on it); **`templates` reverted** to
+notes pending a small extraction of the generic `PMNode/PMDoc` types into slim-core. Also split the
+notes `phase0.test.ts` by concern: suggestion + config tests followed their modules (suggestions test →
+app; config test stays with notes-config in notes), agency + note-node tests stay. Rewired consumers:
+`note-creative-sql` (svg), `note-study-sql` (study), `me-notes` (desktop's `parseQuickCapture`),
+`desktop` (its `templateByKey` now via the notes barrel).
+
+**Remaining:** Batch C — the UI cluster `colorize`/`ink`/`diagram`/`creative`/`agency` **+ `notes-config`**
+→ `geneweave-ui` (with agency's palette split); `templates` → app after the `PMNode/PMDoc` slim-core
+extraction. Then **2g**.
 
 ---
 

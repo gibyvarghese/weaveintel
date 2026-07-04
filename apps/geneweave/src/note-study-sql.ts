@@ -17,7 +17,7 @@
 import {
   validateFlashcards, sm2, fsrs, fsrsPreview, studyStats, initialSchedule,
   type Flashcard, type ReviewRating, type CardSchedule, type StudyStats,
-} from '@weaveintel/notes';
+} from './notes/study.js';
 import { newUUIDv7 } from '@weaveintel/core';
 import { roleAtLeast } from '@weaveintel/collaboration';
 import { createNoteCoeditRepo, resolveNoteAccess, type NoteAccess } from './note-coedit-sql.js';

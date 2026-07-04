@@ -98,24 +98,6 @@ export {
   aiContentPalette,
 } from './agency.js';
 
-// weaveNotes Phase 0 — the AI-suggestion (tracked-changes) state machine.
-export {
-  type SuggestionKind,
-  type SuggestionState,
-  type Suggestion,
-  type SuggestionMap,
-  emptySuggestions,
-  addSuggestion,
-  resolveSuggestion,
-  acceptSuggestion,
-  rejectSuggestion,
-  resolveAll,
-  clearResolved,
-  pendingCount,
-  pendingQueue,
-  decisionTag,
-} from './suggestions.js';
-
 // weaveNotes Phase 0 — the weaveNotes capability configuration (DB-backed, Builder-editable).
 export {
   type NotesTheme,
@@ -203,29 +185,6 @@ export {
   diagramToSvg,
 } from './diagram.js';
 
-// weaveNotes Phase 4 (creative expansion) — the SVG ILLUSTRATION sanitiser (AI-authored vector art).
-export {
-  sanitizeSvg,
-  svgToDataUri,
-  svgToSafeDataUri,
-} from './svg.js';
-
-// weaveNotes Phase 8 — the SHARED desktop quick-capture + offline-session model.
-export {
-  type QuickCapture,
-  type RecentNote,
-  type SnapshotNote,
-  type NotesSnapshot,
-  DEFAULT_RECENTS_LIMIT,
-  SNAPSHOT_VERSION,
-  parseQuickCapture,
-  pushRecent,
-  resolveLastNote,
-  buildNotesSnapshot,
-  readNotesSnapshot,
-  snapshotNote,
-} from './desktop.js';
-
 // weaveNotes Phase 7 — the SHARED cross-platform note-document model (mobile ⇆ web doc_json).
 export {
   type ParagraphBlock,
@@ -256,32 +215,6 @@ export {
   templateCategories,
   listSystemTemplates,
 } from './templates.js';
-
-// weaveNotes Phase 5 — STUDY: flashcards + the SM-2 spaced-repetition scheduler.
-export {
-  type ReviewRating,
-  type CardSchedule,
-  type Flashcard,
-  type StudyStats,
-  type FsrsGrade,
-  type FsrsOptions,
-  MIN_EASE,
-  INITIAL_EASE,
-  ratingToQuality,
-  initialSchedule,
-  sm2,
-  ratingToGrade,
-  fsrs,
-  fsrsInterval,
-  fsrsPreview,
-  retrievability,
-  FSRS_DEFAULT_WEIGHTS,
-  FSRS_DEFAULT_RETENTION,
-  isDue,
-  dueCards,
-  studyStats,
-  validateFlashcards,
-} from './study.js';
 
 // IMAGE PROVENANCE (Phase 2): licence + AI-lineage credentials embedded with image assets.
 export type { ImageSourceKind, ImageProvenance } from './provenance.js';
