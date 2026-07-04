@@ -1710,56 +1710,42 @@ ${exlinks([
 ])}
 
 ${section('guardrails-pipeline', 'Building a Pipeline', `
-${code('typescript', `import {
-  createGuardrailPipeline,
-  DefaultRiskClassifier,
-  DefaultConfidenceGate,
-  DefaultActionGate,
-  CostGuard,
-} from '@weaveintel/guardrails';
+${code('typescript', `import { createGuardrailPipeline } from '@weaveintel/guardrails';
+import type { Guardrail } from '@weaveintel/core';
 
-const pipeline = createGuardrailPipeline({
-  preChecks: [
-    // Block dangerous input patterns
-    new DefaultRiskClassifier({
-      rules: [
-        { pattern: /\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b/,
-          category: 'pii',        action: 'deny',   severity: 'high' },
-        { pattern: /\bssn\b|\bsocial security\b/i,
-          category: 'pii',        action: 'deny',   severity: 'high' },
-        { pattern: /\bpassword\b|\bapi.?key\b/i,
-          category: 'credential', action: 'warn',   severity: 'medium' },
-        { pattern: /ignore previous|forget instructions|jailbreak/i,
-          category: 'injection',  action: 'deny',   severity: 'critical' },
-      ],
-    }),
-    // Block expensive operations for budget tiers
-    new CostGuard({ maxCostUsd: 0.20, ledger: costLedger }),
-  ],
-  postChecks: [
-    // Require stated confidence
-    new DefaultConfidenceGate({ minConfidence: 0.70, requireExplicit: false }),
-    // Block specific action patterns in output
-    new DefaultActionGate({
-      blockedActions: ['delete_database', 'send_to_all_users', 'override_safety'],
-    }),
-  ],
-  onViolation: async (result, ctx) => {
-    // Log to audit system
-    await auditLog.record({ userId: ctx.userId, violation: result });
-  },
+// A pipeline is built from a flat Guardrail[] — each declares its stage,
+// type, and config. The pipeline runs the ones matching the requested stage.
+const guardrails: Guardrail[] = [
+  { id: 'pii-card', name: 'Credit card', type: 'regex', stage: 'pre-execution', enabled: true,
+    config: { pattern: '\\\\d{4}[\\\\s-]?\\\\d{4}[\\\\s-]?\\\\d{4}[\\\\s-]?\\\\d{4}', action: 'deny' } },
+  { id: 'pii-ssn', name: 'SSN', type: 'regex', stage: 'pre-execution', enabled: true,
+    config: { pattern: '\\\\b(ssn|social security)\\\\b', flags: 'i', action: 'deny' } },
+  { id: 'injection', name: 'Prompt injection', type: 'regex', stage: 'pre-execution', enabled: true,
+    config: { pattern: 'ignore previous|forget instructions|jailbreak', flags: 'i', action: 'deny' } },
+  { id: 'confidence', name: 'Confidence gate', type: 'model-graded', stage: 'post-execution', enabled: true,
+    config: { minConfidence: 0.70 } },
+  { id: 'blocked-actions', name: 'Blocked actions', type: 'blocklist', stage: 'post-execution', enabled: true,
+    config: { deniedActions: ['delete_database', 'send_to_all_users', 'override_safety'] } },
+];
+
+const pipeline = createGuardrailPipeline(guardrails);
+
+// Use in your chat handler. evaluate() returns a GuardrailResult[] —
+// each result has { decision, guardrailId, explanation }.
+const preResults = await pipeline.evaluate(userMessage, 'pre-execution', {
+  metadata: { userId, sessionId },
 });
-
-// Use in your chat handler:
-const preResult = await pipeline.evaluate(userMessage, 'pre-execution', { userId, sessionId });
-if (preResult.action === 'deny') {
-  return { error: preResult.reason, code: preResult.category };
+const preDenied = preResults.find(r => r.decision === 'deny');
+if (preDenied) {
+  return { error: preDenied.explanation, code: preDenied.guardrailId };
 }
 
-const llmResponse = await model.generate({ messages });
+const llmResponse = await model.generate(ctx, { messages });
 
-const postResult = await pipeline.evaluate(llmResponse.content, 'post-execution', { userId });
-if (postResult.action === 'deny') {
+const postResults = await pipeline.evaluate(llmResponse.content, 'post-execution', {
+  metadata: { userId },
+});
+if (postResults.some(r => r.decision === 'deny')) {
   return { error: 'Response blocked by safety policy.' };
 }`)}
 `)}
@@ -4564,17 +4550,16 @@ ${featureCards([
 ])}
 
 ${section('trig-setup', 'Defining a Trigger', `
-${code('typescript', `import { TriggerDispatcher, TriggerStore } from '@weaveintel/triggers';
-import { InMemoryTriggerStore } from '@weaveintel/triggers';
+${code('typescript', `import { createTriggerDispatcher, InMemoryTriggerStore } from '@weaveintel/triggers';
 import type { Trigger } from '@weaveintel/triggers';
 
 const store      = new InMemoryTriggerStore();
-const dispatcher = new TriggerDispatcher({ store, workflowEngine: engine });
+const dispatcher = createTriggerDispatcher({ store, targetAdapters: [workflowTargetAdapter] });
 
 // Cron trigger — run a report workflow every day at 09:00 UTC
 const trigger: Trigger = {
   id:     'daily-report',
-  name:   'Daily Revenue Report',
+  key:    'daily-report',        // human-readable key (Trigger uses 'key', not 'name')
   enabled: true,
   source: {
     kind:   'cron',
@@ -4588,12 +4573,12 @@ const trigger: Trigger = {
 };
 
 await store.save(trigger);
-dispatcher.reload();  // always call after store changes
+await dispatcher.reload();  // always call after store changes
 
 // Webhook trigger — route incoming GitHub push events to a CI workflow
 const webhookTrigger: Trigger = {
   id:     'github-push',
-  name:   'GitHub Push → CI',
+  key:    'github-push',
   enabled: true,
   source: {
     kind:   'webhook',
@@ -4606,7 +4591,7 @@ const webhookTrigger: Trigger = {
   },
 };
 await store.save(webhookTrigger);
-dispatcher.reload();`, ['@weaveintel/triggers'])}
+await dispatcher.reload();`, ['@weaveintel/triggers'])}
 `)}
 
 ${section('trig-fire', 'Firing & Monitoring', `
