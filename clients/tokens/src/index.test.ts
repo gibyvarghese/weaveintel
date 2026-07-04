@@ -2,13 +2,13 @@ import { describe, it, expect } from 'vitest';
 import {
   TOKENS_SCHEMA_VERSION,
   SPACING_BASE_UNIT,
-  themes,
+  neutralThemes,
   spacing,
   radii,
   typography,
   motion,
-  darkColors,
-  lightColors,
+  neutralDark,
+  neutralLight,
 } from './index.js';
 
 describe('@weaveintel/tokens barrel', () => {
@@ -22,11 +22,11 @@ describe('@weaveintel/tokens barrel', () => {
     expect(spacing.md).toBe(12);
   });
 
-  it('exposes assembled dark and light themes with all token groups', () => {
+  it('exposes assembled dark and light neutralThemes with all token groups', () => {
     for (const name of ['dark', 'light'] as const) {
-      const t = themes[name];
+      const t = neutralThemes[name];
       expect(t.name).toBe(name);
-      expect(t.colors).toBe(name === 'dark' ? darkColors : lightColors);
+      expect(t.colors).toBe(name === 'dark' ? neutralDark : neutralLight);
       expect(t.typography).toBe(typography);
       expect(t.spacing).toBe(spacing);
       expect(t.radii).toBe(radii);
@@ -34,12 +34,12 @@ describe('@weaveintel/tokens barrel', () => {
     }
   });
 
-  it('defines the four brand font families (dc.html spec)', () => {
+  it('defines NEUTRAL default font families (apps override with their own brand fonts)', () => {
     expect(typography.families).toEqual({
-      display: 'Plus Jakarta Sans',
-      body: 'Inter',
-      mono: 'JetBrains Mono',
-      hand: 'Caveat',
+      display: 'system-ui',
+      body: 'system-ui',
+      mono: 'ui-monospace',
+      hand: 'cursive',
     });
   });
 

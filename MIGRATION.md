@@ -541,11 +541,51 @@ prune the root tsconfig reference. Doc-comment package-name references updated f
 
 Root tsconfig references: 91 → 73. Published package count: 86 → **73**.
 
-**Remaining Phase 4:** the tokens engine/brand split (+a11y) — the only NON-merge in the phase: split
-`clients/tokens` into a brand-neutral theming ENGINE (`@weaveintel/tokens` — schema, colour maths,
-`contrastRatio`/`meetsAA` absorbing `a11y`, CSS/native transforms; takes a palette as INPUT) and move the
-geneWeave palette + `--gw-` names + brand values into `apps/geneweave-ui/src/brand/`. Needs design-token
-research + UI rewiring; handled as a focused unit next.
+### 4k — tokens engine/brand split ✅ [the only NON-merge]
+
+Split `clients/tokens` (which WAS the geneWeave brand, published as `@weaveintel/tokens`) into a
+brand-neutral ENGINE + an app-owned BRAND, **research-grounded** in the [W3C Design Tokens spec 2025](https://www.w3.org/community/design-tokens/)
+(three-layer model: raw palette → semantic roles → platform CSS; palette is INPUT).
+
+- **Engine (`@weaveintel/tokens`, stays)**: the machinery only — token schema/types, colour maths
+  (`contrastRatio`/`meetsAA`), the CSS transform `toCssVariables(theme, { prefix })` with a
+  **parameterized prefix** (was hardcoded `--gw-`; default now `wv`), the per-tenant white-label
+  functions (`tenantThemeVars`/`tenantThemeCss` now take base themes as INPUT), generic scales, and a
+  **neutral reference palette/theme** (slate+blue, AA-verified) so it is self-contained. Fully
+  brand-word-clean.
+- **Brand (`apps/geneweave-ui/src/brand/geneweave-brand.ts`, new)**: the geneWeave emerald palette,
+  Plus Jakarta Sans/Inter/JetBrains Mono/Caveat fonts, assembled `geneweaveThemes`, the `--gw-*` names +
+  agency/Pro-Creative/legacy stylesheet assembly — all composed on the engine. Exported via a new
+  geneweave-ui `./brand` subpath.
+- **Rewired**: the web build script (`gen-tokens-css.mjs`, now esbuild-bundles the brand `.ts`), the API
+  app's tenant white-label (`tenant-appearance-sql.ts` → `tenantThemeVars(geneweaveThemes, …, {prefix:'gw'})`,
+  importing the brand from `@weaveintel/geneweave-ui/brand`), and `clients/mobile` (engine types from
+  tokens; `themes` → the shared brand). `notes` was a false-positive consumer (no real dep).
+- **a11y finding**: the plan assumed `a11y` was colour/contrast maths to fold into the engine — but it is
+  focus-trap/focus/scroll DOM helpers, and the contrast maths ALREADY lived in tokens' `color.ts`. Folding
+  DOM helpers into a zero-dep token engine would be wrong, so `a11y` was LEFT as-is (could merge into
+  `ui-primitives` later). The plan's stated rationale is already satisfied.
+
+**Correctness bar met — VISUAL INVARIANCE**: the generated geneWeave CSS (`tokens.generated.ts`) is
+**byte-identical** to before the split (only two comment strings differ). Verified end-to-end with a
+Playwright screenshot: the live browser reports `--gw-color-accent: #0E9A6E` (emerald), `#F6F8F7` canvas,
+Plus Jakarta Sans — the brand is intact. The existing DB-backed tenant Appearance + Builder admin +
+`set_workspace_appearance` tool keep working unchanged (engine refactored underneath).
+
+**Ratchet fully closed**: removed the last `no-app-brand` deferral (`clients/tokens/`) — the framework is
+now **100% app-brand-clean (0 deferrals, 958 files)**.
+
+Gate: topology (71 refs) + api-boundaries + no-app-brand (0 deferrals) green; tokens 35 + geneweave-ui 40
+(incl. new brand test) + geneweave-api 2102 tests green; Playwright visual e2e green.
+
+---
+
+## Phase 4 COMPLETE
+
+Eleven merge groups + the tokens split, all gated and pushed. **Published packages: 86 → 68.** Root
+tsconfig references: 91 → 71. The framework is brand-clean with zero de-brand deferrals remaining.
+Remaining restructure phases: 5 (tools subpath consolidation), 6 (apps sweep), 7 (docs), 8 (publish —
+needs confirmation), 9 (private-repo sync), 10 (final report).
 
 ---
 

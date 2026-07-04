@@ -20,6 +20,11 @@
       "types": "./dist/notes/index.d.ts",
       "import": "./dist/notes/index.js",
       "default": "./dist/notes/index.js"
+    },
+    "./brand": {
+      "types": "./dist/brand/geneweave-brand.d.ts",
+      "import": "./dist/brand/geneweave-brand.js",
+      "default": "./dist/brand/geneweave-brand.js"
     }
   },
   "files": [

@@ -1,5 +1,5 @@
 /**
- * color.ts — color math for the geneWeave token system.
+ * color.ts — color math for the token engine.
  *
  * Pure, framework-agnostic sRGB color utilities used to compute and verify
  * WCAG 2.1 contrast ratios. No dependencies, no React. Hex colors are the

@@ -1,5 +1,5 @@
 /**
- * breakpoints.ts — responsive breakpoints for the geneWeave adaptive shell.
+ * breakpoints.ts — responsive breakpoints for the an adaptive shell.
  *
  * Values are `min-width` thresholds in CSS pixels. Per 2026 practice we treat the 600–899 "foldable /
  * small-tablet" range explicitly rather than jumping 320→768→1024. The adaptive rule of thumb:

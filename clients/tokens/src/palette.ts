@@ -1,15 +1,12 @@
 /**
- * palette.ts — geneWeave brand color palettes (dark + light).
+ * palette.ts — the theming engine's NEUTRAL reference palettes (dark + light).
  *
- * The dark palette is the canonical brand surface (deep green-black with a
- * teal accent), grounded in the shipped geneWeave product UI. The light
- * palette is derived to satisfy WCAG-AA contrast for every text-on-surface
- * pair (verified by the contrast audit test) — it is intentionally NOT a
- * verbatim copy of the product's light CSS, whose muted tones predate the AA
- * requirement.
+ * These are brand-AGNOSTIC defaults (a slate + blue set) so `@weaveintel/tokens` is usable and
+ * demonstrable on its own. Every text-on-surface pair is WCAG-AA verified by the contrast audit test.
+ * An app supplies its OWN palette with the same {@link ColorTokens} shape (see a consuming app's own `src/brand/`) and feeds it to the same engine — the palette is INPUT, not baked in.
  *
- * Token names are semantic (role-based), not positional, so consumers never
- * depend on a raw `bg2`/`fg3` index and tenant overrides read clearly.
+ * Token names are semantic (role-based), not positional, so consumers never depend on a raw `bg2`/`fg3`
+ * index and tenant overrides read clearly.
  */
 
 /** Semantic, role-based color tokens. Every value is an opaque hex string. */
@@ -46,7 +43,7 @@ export interface ColorTokens {
   /** Caution / warning. */
   warning: string;
 
-  // ── geneWeave weaveNotes additions (spec §10.2) — the "colour encodes agency" palette.
+  // ── Optional "colour encodes agency" roles — an app may map these to human/AI attribution.
   /** Notes page surface in Creative theme (warm paper). */
   paper: string;
   /** AI surface tint (agent bubbles, AI blocks, active rows). Same family as accentSoft. */
@@ -65,62 +62,70 @@ export interface ColorTokens {
   dangerZoneBg: string; dangerZoneBorder: string; dangerZoneFg: string;
 }
 
-/** Canonical dark brand palette — geneWeave dark (deep green-black + bright emerald). */
-export const darkColors: ColorTokens = {
-  background: '#0E1714',
-  surface: '#15201C',
-  surfaceElevated: '#1B2723',
-  border: '#2A3833',
+/**
+ * The engine's NEUTRAL reference dark palette — a brand-agnostic slate + blue set, AA-verified for
+ * every text-on-surface pair. It is the default so the engine is self-contained and demonstrable; an
+ * app supplies its OWN palette (e.g. an app brand) with the same {@link ColorTokens} shape.
+ */
+export const neutralDark: ColorTokens = {
+  background: '#0F172A',
+  surface: '#1E293B',
+  surfaceElevated: '#334155',
+  border: '#334155',
 
-  text: '#E8EFEB',
-  textSecondary: '#AEC2B9',
-  textMuted: '#9DB3A9',
+  text: '#F1F5F9',
+  textSecondary: '#CBD5E1',
+  textMuted: '#94A3B8',
 
-  accent: '#2FD39B',        // reversed-emerald (large/decorative on dark)
-  accentStrong: '#3FE0A8',  // bright — normal text on dark surfaces
-  accentSoft: '#16332A',    // mint, dark
-  onAccent: '#06120D',      // dark ink on a bright accent fill
+  accent: '#60A5FA',        // blue-400 (large/decorative on dark)
+  accentStrong: '#93C5FD',  // blue-300 (normal text on dark surfaces)
+  accentSoft: '#1E3A5F',
+  onAccent: '#0F172A',      // dark ink on a bright accent fill
 
-  danger: '#F08A60',
-  success: '#3FE0A8',
-  warning: '#E0A87F',
+  danger: '#F87171',
+  success: '#4ADE80',
+  warning: '#FBBF24',
 
-  paper: '#141E18',
-  mint: '#16332A',
-  mintDeep: '#1C3F33',
-  coral: '#F08A60',
-  amber: '#E0A87F',
-  hlAmber: '#FAC775', hlPink: '#F4C0D1', hlTeal: '#9FE1CB', hlBlue: '#B5D4F4',
-  diffAddedBg: '#16332A', diffRemovedBg: '#3A201A', diffRemovedFg: '#D4A595',
-  dangerZoneBg: '#241A14', dangerZoneBorder: '#3A2A1E', dangerZoneFg: '#E0A87F',
+  paper: '#1A2331',
+  mint: '#1E3A5F',
+  mintDeep: '#25476F',
+  coral: '#FB923C',
+  amber: '#FBBF24',
+  hlAmber: '#78350F', hlPink: '#831843', hlTeal: '#134E4A', hlBlue: '#1E3A5F',
+  diffAddedBg: '#14332A', diffRemovedBg: '#3A201A', diffRemovedFg: '#FCA5A5',
+  dangerZoneBg: '#2A1A1A', dangerZoneBorder: '#4A2A2A', dangerZoneFg: '#FCA5A5',
 };
 
-/** geneWeave light palette (the canonical weaveNotes surface — spec §10.2). AA-verified. */
-export const lightColors: ColorTokens = {
-  background: '#F6F8F7',     // canvas
-  surface: '#FFFFFF',
+/**
+ * The engine's NEUTRAL reference light palette — slate + blue, AA-verified for every text-on-surface
+ * pair. Apps override with their own {@link ColorTokens}; the tenant white-label functions and the
+ * contrast audit work identically on any palette.
+ */
+export const neutralLight: ColorTokens = {
+  background: '#FFFFFF',
+  surface: '#F8FAFC',
   surfaceElevated: '#FFFFFF',
-  border: '#E7ECEA',         // hairline
+  border: '#E2E8F0',
 
-  text: '#14201B',           // ink
-  textSecondary: '#5E6E67',  // muted
-  textMuted: '#5E6E67',      // muted (large-text use)
+  text: '#0F172A',
+  textSecondary: '#334155',
+  textMuted: '#64748B',
 
-  accent: '#0E9A6E',         // emerald (large/decorative + AI presence)
-  accentStrong: '#0B7A57',   // emerald-press (normal text + on-mint text)
-  accentSoft: '#E8F5EE',     // mint
+  accent: '#2563EB',         // blue-600 (large/decorative)
+  accentStrong: '#1D4ED8',   // blue-700 (normal text)
+  accentSoft: '#EFF6FF',
   onAccent: '#FFFFFF',
 
   danger: '#B91C1C',
   success: '#15803D',
   warning: '#B45309',
 
-  paper: '#FBF8F1',
-  mint: '#E8F5EE',
-  mintDeep: '#DCEFE5',
-  coral: '#D85A30',
-  amber: '#D98A3D',
-  hlAmber: '#FAC775', hlPink: '#F4C0D1', hlTeal: '#9FE1CB', hlBlue: '#B5D4F4',
-  diffAddedBg: '#E8F5EE', diffRemovedBg: '#FBEFEA', diffRemovedFg: '#9C6B5C',
-  dangerZoneBg: '#FCF7F2', dangerZoneBorder: '#F0E0D5', dangerZoneFg: '#A8551F',
+  paper: '#FAFAF9',
+  mint: '#EFF6FF',
+  mintDeep: '#DBEAFE',
+  coral: '#EA580C',
+  amber: '#D97706',
+  hlAmber: '#FEF3C7', hlPink: '#FCE7F3', hlTeal: '#CCFBF1', hlBlue: '#DBEAFE',
+  diffAddedBg: '#F0FDF4', diffRemovedBg: '#FEF2F2', diffRemovedFg: '#991B1B',
+  dangerZoneBg: '#FEF2F2', dangerZoneBorder: '#FECACA', dangerZoneFg: '#991B1B',
 };

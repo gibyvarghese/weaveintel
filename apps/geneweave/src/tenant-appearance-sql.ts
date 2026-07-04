@@ -10,11 +10,13 @@
  * inaccessible re-brand. The AI-agency colours (mint/emerald as AI presence) are NEVER re-branded; only
  * the primary-action accent + neutral shell chrome respond to the brand.
  *
- * Reuses `@weaveintel/tokens` (tenantThemeVars + the AA audit) — the single source of truth shared with
- * the native app. Owner = the tenant; edited in the Builder Appearance surface; the assistant can also
- * apply it via the set_workspace_appearance tool.
+ * Reuses the `@weaveintel/tokens` ENGINE (tenantThemeVars + the AA audit) fed with the geneWeave brand
+ * themes (from the app's own brand, not baked into the framework) — the single source of truth shared
+ * with the native app. Owner = the tenant; edited in the Builder Appearance surface; the assistant can
+ * also apply it via the set_workspace_appearance tool.
  */
 import { tenantThemeVars, type TenantThemeOverride } from '@weaveintel/tokens';
+import { geneweaveThemes, GENEWEAVE_CSS_PREFIX } from '@weaveintel/geneweave-ui/brand';
 import type { DatabaseAdapter } from './db-types/adapter.js';
 import type { TenantAppearanceRow } from './db-types/adapter-me.js';
 
@@ -79,7 +81,9 @@ export function createTenantAppearanceService(db: DatabaseAdapter, opts: { now?:
   }> {
     const row = (await db.getTenantAppearance?.(tenantId)) ?? defaults(tenantId);
     const override = toOverride(row);
-    const resolved = Object.keys(override).length ? tenantThemeVars(override) : { light: {}, dark: {}, degraded: false };
+    const resolved = Object.keys(override).length
+      ? tenantThemeVars(geneweaveThemes, override, { prefix: GENEWEAVE_CSS_PREFIX })
+      : { light: {}, dark: {}, degraded: false };
     const mapLegacy = (gw: Record<string, string>): Record<string, string> => {
       const out: Record<string, string> = {};
       for (const [k, v] of Object.entries(gw)) for (const legacy of (GW_TO_LEGACY[k] ?? [])) out[legacy] = v;

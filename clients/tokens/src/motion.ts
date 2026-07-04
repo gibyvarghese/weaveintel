@@ -1,5 +1,5 @@
 /**
- * motion.ts — geneWeave motion tokens + the weave-shimmer spec.
+ * motion.ts — motion tokens + a shimmer spec.
  *
  * Durations are milliseconds; easings are cubic-bezier control-point tuples
  * `[x1, y1, x2, y2]` so they stay framework-agnostic (mobile maps them onto

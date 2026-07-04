@@ -1,56 +1,43 @@
 // SPDX-License-Identifier: MIT
 /**
- * Tests for the web token transform (css.ts): CSS-variable emission from the shared themes, the full
- * stylesheet (light/dark/creative + breakpoints + legacy aliases), and injection-safety of values.
+ * Tests for the web token transform (css.ts): CSS-variable emission with a configurable prefix,
+ * per-tenant white-label var diffing (accessibility-enforced), and injection-safety of values.
+ * Brand-specific stylesheet assembly (the geneWeave `--gw-*` sheet) is tested in the app, not here.
  */
 import { describe, it, expect } from 'vitest';
-import { toCssVariables, themeCss, tenantThemeVars, tenantThemeCss, breakpoints, mediaUp, mediaBelow } from './index.js';
-import { themes } from './theme.js';
+import { toCssVariables, tenantThemeVars, tenantThemeCss, neutralThemes, breakpoints, mediaUp, mediaBelow, DEFAULT_CSS_PREFIX } from './index.js';
+
+const bases = { light: neutralThemes.light, dark: neutralThemes.dark };
 
 describe('toCssVariables', () => {
-  it('emits the dc.html light tokens as --gw-* custom properties', () => {
-    const v = toCssVariables(themes.light);
-    expect(v['--gw-color-background']).toBe('#F6F8F7'); // canvas
-    expect(v['--gw-color-text']).toBe('#14201B');       // ink
-    expect(v['--gw-color-accent']).toBe('#0E9A6E');     // emerald (AI + primary)
-    expect(v['--gw-color-mint']).toBe('#E8F5EE');       // AI surface
-    expect(v['--gw-color-paper']).toBe('#FBF8F1');      // Creative page
-    expect(v['--gw-color-coral']).toBe('#D85A30');      // human ink
-    expect(v['--gw-space-lg']).toBe('16px');
-    expect(v['--gw-radius-md']).toBe('12px');
-    expect(v['--gw-font-display']).toContain('Plus Jakarta Sans');
-    expect(v['--gw-font-mono']).toContain('JetBrains Mono');
-    expect(v['--gw-text-title-size']).toBe('22px');
+  it('emits tokens under the DEFAULT neutral prefix (--wv-*) when none is given', () => {
+    const v = toCssVariables(neutralThemes.light);
+    expect(DEFAULT_CSS_PREFIX).toBe('wv');
+    expect(v['--wv-color-background']).toBe('#FFFFFF');
+    expect(v['--wv-color-text']).toBe('#0F172A');
+    expect(v['--wv-space-lg']).toBe('16px');
+    expect(v['--wv-radius-md']).toBe('12px');
+    expect(v['--wv-text-title-size']).toBe('22px');
+  });
+  it('emits tokens under an APP-supplied prefix (the palette + names are INPUT)', () => {
+    const v = toCssVariables(neutralThemes.light, { prefix: 'gw' });
+    expect(v['--gw-color-background']).toBe('#FFFFFF');
+    expect(v['--gw-color-accent']).toBe('#2563EB');
   });
   it('emits the dark palette (different background) for the dark theme', () => {
-    expect(toCssVariables(themes.dark)['--gw-color-background']).toBe('#0E1714');
+    expect(toCssVariables(neutralThemes.dark, { prefix: 'gw' })['--gw-color-background']).toBe('#0F172A');
   });
-});
-
-describe('themeCss', () => {
-  const css = themeCss();
-  it('writes light on :root, dark on [data-theme=dark], and the Creative page/title swap', () => {
-    expect(css).toContain(':root {');
-    expect(css).toContain('[data-theme="dark"]');
-    expect(css).toContain('[data-variant="creative"]');
-    expect(css).toContain('--gw-page: var(--gw-color-paper)');   // creative → warm paper
-    expect(css).toContain('--gw-font-title: var(--gw-font-hand)'); // creative → handwriting
-    expect(css).toContain('--gw-ai-surface: var(--gw-color-mint)'); // agency stays mint in both modes
-  });
-  it('includes breakpoint tokens and legacy aliases by default', () => {
-    expect(css).toContain('--gw-bp-tablet: 900px');
-    expect(css).toContain('--accent: var(--gw-color-accent)'); // legacy alias → SSOT
-    expect(css).toContain('--bg: var(--gw-color-background)');
-  });
-  it('can omit legacy aliases', () => {
-    expect(themeCss({ legacy: false })).not.toContain('--bg: var(--gw-color-background)');
+  it('sanitises a hostile prefix so it can never inject CSS', () => {
+    const v = toCssVariables(neutralThemes.light, { prefix: 'x; } body {' });
+    // The bad chars are stripped; every key stays a valid `--<safe>-*` name.
+    expect(Object.keys(v).every((k) => /^--[a-z0-9-]+$/.test(k))).toBe(true);
   });
 });
 
 describe('injection safety', () => {
   it('strips CSS-breaking characters from token values (defence-in-depth for tenant overrides)', () => {
-    const hostile = { ...themes.light, colors: { ...themes.light.colors, accent: '#000; } body { display:none' } };
-    const v = toCssVariables(hostile as never);
+    const hostile = { ...neutralThemes.light, colors: { ...neutralThemes.light.colors, accent: '#000; } body { display:none' } };
+    const v = toCssVariables(hostile as never, { prefix: 'gw' });
     expect(v['--gw-color-accent']).not.toContain(';');
     expect(v['--gw-color-accent']).not.toContain('{');
     expect(v['--gw-color-accent']).not.toContain('}');
@@ -58,9 +45,8 @@ describe('injection safety', () => {
 });
 
 describe('tenantThemeVars (per-tenant white-label)', () => {
-  it('emits only the CHANGED --gw-* vars for a valid brand override (font + corner)', () => {
-    // Non-colour overrides never affect contrast, so they always apply in both light + dark.
-    const v = tenantThemeVars({ typography: { families: { display: 'Georgia' } }, radii: { md: 4 } });
+  it('emits only the CHANGED vars for a valid brand override (font + corner), under the app prefix', () => {
+    const v = tenantThemeVars(bases, { typography: { families: { display: 'Georgia' } }, radii: { md: 4 } }, { prefix: 'gw' });
     expect(v.degraded).toBe(false);
     expect(v.light['--gw-font-display']).toContain('Georgia');
     expect(v.light['--gw-radius-md']).toBe('4px');
@@ -69,34 +55,32 @@ describe('tenantThemeVars (per-tenant white-label)', () => {
   });
   it('applies a brand accent PER-THEME — branded where accessible, base where not', () => {
     // A mid-tone brand blue reads fine on the light canvas but is too dark on the near-black dark
-    // surface (accent-as-text fails AA there). The resolver applies the brand to LIGHT and falls the
-    // DARK theme back to its accessible default, flagging `degraded` so the admin can be told.
-    const v = tenantThemeVars({ colors: { accentStrong: '#1D4ED8', onAccent: '#FFFFFF' } });
-    expect(v.light['--gw-color-accent-strong']).toBe('#1D4ED8'); // branded in light
-    expect(v.dark['--gw-color-accent-strong']).toBeUndefined();  // fell back in dark (accessible)
-    expect(v.degraded).toBe(true);                                // at least one theme fell back
+    // surface (accent-as-text fails AA there): applied to LIGHT, fell back in DARK, `degraded` flagged.
+    const v = tenantThemeVars(bases, { colors: { accentStrong: '#6D28D9', onAccent: '#FFFFFF' } }, { prefix: 'gw' });
+    expect(v.light['--gw-color-accent-strong']).toBe('#6D28D9');
+    expect(v.dark['--gw-color-accent-strong']).toBeUndefined();
+    expect(v.degraded).toBe(true);
   });
   it('DROPS an override that fails WCAG-AA in EITHER theme (accessibility can never be re-branded away)', () => {
-    // White on near-white for the on-accent pair fails in both light and dark.
-    const v = tenantThemeVars({ colors: { accentStrong: '#FEFEFE', onAccent: '#FFFFFF' } });
+    const v = tenantThemeVars(bases, { colors: { accentStrong: '#FEFEFE', onAccent: '#FFFFFF' } }, { prefix: 'gw' });
     expect(v.degraded).toBe(true);
     expect(Object.keys(v.light)).toHaveLength(0);
     expect(Object.keys(v.dark)).toHaveLength(0);
   });
   it('allows a failing override when contrast enforcement is off (live preview mode)', () => {
-    const v = tenantThemeVars({ colors: { accentStrong: '#FEFEFE', onAccent: '#FFFFFF' } }, { enforceContrast: false });
+    const v = tenantThemeVars(bases, { colors: { accentStrong: '#FEFEFE', onAccent: '#FFFFFF' } }, { prefix: 'gw', enforceContrast: false });
     expect(v.light['--gw-color-accent-strong']).toBe('#FEFEFE');
   });
 });
 
 describe('tenantThemeCss (server-inject, no-FOUC)', () => {
   it('wraps the changed vars in :root for a valid override', () => {
-    const css = tenantThemeCss({ colors: { accentStrong: '#1D4ED8', onAccent: '#FFFFFF' } });
+    const css = tenantThemeCss(bases, { colors: { accentStrong: '#6D28D9', onAccent: '#FFFFFF' } }, { prefix: 'gw' });
     expect(css).toContain(':root {');
-    expect(css).toMatch(/--gw-color-accent-strong:\s*#1D4ED8/);
+    expect(css).toMatch(/--gw-color-accent-strong:\s*#6D28D9/);
   });
   it('emits nothing for a fully-degraded override', () => {
-    const css = tenantThemeCss({ colors: { accentStrong: '#FEFEFE', onAccent: '#FFFFFF' } });
+    const css = tenantThemeCss(bases, { colors: { accentStrong: '#FEFEFE', onAccent: '#FFFFFF' } }, { prefix: 'gw' });
     expect(css).not.toContain('--gw-color-accent-strong');
   });
 });

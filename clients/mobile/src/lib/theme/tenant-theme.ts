@@ -10,12 +10,14 @@
  */
 
 import {
-  themes,
   applyTenantTheme,
   type Theme,
   type ThemeName,
   type TenantThemeOverride,
 } from '@weaveintel/tokens';
+// The geneWeave BRAND themes are app-owned now (composed on the neutral engine above). In the private
+// commercial repo this is a shared `@geneweave/brand`; here the web app owns the single source of truth.
+import { geneweaveThemes as themes } from '@weaveintel/geneweave-ui/brand';
 
 /** The user-facing appearance preference. */
 export type ThemePreference = 'dark' | 'light' | 'system';

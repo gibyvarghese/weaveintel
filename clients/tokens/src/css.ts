@@ -1,21 +1,19 @@
 /**
- * css.ts — the WEB transform for the geneWeave token system.
+ * css.ts — the WEB transform for the token engine (brand-neutral).
  *
- * Turns the framework-agnostic {@link Theme} objects into CSS custom properties (`--gw-*`) so the web app
- * consumes the SAME single source of truth the native app does. This is the in-house, zero-dependency
- * equivalent of a Style-Dictionary "css/variables" transform: DTCG-shaped tokens in, platform CSS out.
+ * Turns a framework-agnostic {@link Theme} into CSS custom properties so the web shares the SAME
+ * single source of truth as any native app. This is the in-house, zero-dependency equivalent of a
+ * Style-Dictionary "css/variables" transform: DTCG-shaped tokens in, platform CSS out.
  *
- *   toCssVariables(theme)  → a flat { '--gw-color-accent': '#0E9A6E', … } map (one theme).
- *   themeCss(opts)         → a full stylesheet string: :root (light) + [data-theme=dark] +
- *                            [data-variant=creative] + breakpoint vars, optionally with legacy `--bg`/…
- *                            aliases so an existing stylesheet migrates without a rewrite.
+ *   toCssVariables(theme, { prefix })  → a flat { '--<prefix>-color-accent': '#…', … } map (one theme).
+ *   tenantThemeVars(bases, override)   → ONLY the vars a per-tenant white-label override changes,
+ *                                        for light + dark, accessibility-enforced.
  *
- * "Colour encodes agency" is preserved as tokens: `--gw-color-mint` / `--gw-color-emerald` are AI-only,
- * neutrals are user content. Creative mode only swaps the *page* surface to warm paper + the *title* font
- * to handwriting; it never recolours across the agency line.
+ * The CSS variable PREFIX is a parameter (default `wv`) — an app passes its own brand prefix (e.g. `gw`
+ * → `--gw-*`). The engine never hardcodes a brand's names; the app's full stylesheet assembly (agency
+ * tokens, theme variants, legacy aliases) lives in the app.
  */
-import { themes, applyTenantTheme, type Theme, type TenantThemeOverride } from './theme.js';
-import { breakpoints } from './breakpoints.js';
+import { applyTenantTheme, type Theme, type TenantThemeOverride } from './theme.js';
 
 /** camelCase → kebab-case (background, surfaceElevated, hlAmber → background, surface-elevated, hl-amber). */
 function kebab(s: string): string {
@@ -29,27 +27,37 @@ function safeValue(v: string | number): string {
   return s.replace(/[;{}<>]/g, '').trim();
 }
 
+/** The default CSS custom-property prefix when an app does not supply its own brand prefix. */
+export const DEFAULT_CSS_PREFIX = 'wv';
+
+export interface CssVarsOptions {
+  /** CSS custom-property prefix, without dashes (default `wv`). an app passes its own, e.g. `gw` → `--gw-*`. */
+  prefix?: string;
+}
+
 /**
- * Flatten one {@link Theme} into `--gw-*` custom properties: colours, spacing, radii, fonts, the type
- * scale (size/line/weight per role), and a couple of synthesised web shadows. Pure.
+ * Flatten one {@link Theme} into `--<prefix>-*` custom properties: colours, spacing, radii, fonts, the
+ * type scale (size/line/weight per role), and a couple of synthesised web shadows. Pure. The prefix is
+ * sanitised to `[a-z0-9-]` so it can never inject CSS.
  */
-export function toCssVariables(theme: Theme): Record<string, string> {
+export function toCssVariables(theme: Theme, opts: CssVarsOptions = {}): Record<string, string> {
+  const p = (opts.prefix ?? DEFAULT_CSS_PREFIX).toLowerCase().replace(/[^a-z0-9-]/g, '') || DEFAULT_CSS_PREFIX;
   const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(theme.colors)) out[`--gw-color-${kebab(k)}`] = safeValue(v);
-  for (const [k, v] of Object.entries(theme.spacing)) out[`--gw-space-${kebab(k)}`] = `${Number(v)}px`;
-  for (const [k, v] of Object.entries(theme.radii)) out[`--gw-radius-${kebab(k)}`] = `${Number(v)}px`;
-  for (const [k, v] of Object.entries(theme.typography.families)) out[`--gw-font-${kebab(k)}`] = `${safeValue(v)}, sans-serif`;
+  for (const [k, v] of Object.entries(theme.colors)) out[`--${p}-color-${kebab(k)}`] = safeValue(v);
+  for (const [k, v] of Object.entries(theme.spacing)) out[`--${p}-space-${kebab(k)}`] = `${Number(v)}px`;
+  for (const [k, v] of Object.entries(theme.radii)) out[`--${p}-radius-${kebab(k)}`] = `${Number(v)}px`;
+  for (const [k, v] of Object.entries(theme.typography.families)) out[`--${p}-font-${kebab(k)}`] = `${safeValue(v)}, sans-serif`;
   for (const [role, t] of Object.entries(theme.typography.scale)) {
     const st = t as { fontSize: number; lineHeight: number; fontWeight: number; family: string };
-    out[`--gw-text-${kebab(role)}-size`] = `${st.fontSize}px`;
-    out[`--gw-text-${kebab(role)}-line`] = `${st.lineHeight}px`;
-    out[`--gw-text-${kebab(role)}-weight`] = `${st.fontWeight}`;
+    out[`--${p}-text-${kebab(role)}-size`] = `${st.fontSize}px`;
+    out[`--${p}-text-${kebab(role)}-line`] = `${st.lineHeight}px`;
+    out[`--${p}-text-${kebab(role)}-weight`] = `${st.fontWeight}`;
   }
   // Web shadows — the design is "almost no shadow": a hairline default and ONE soft level for floating cards.
   const e = theme.elevation.level2 ?? theme.elevation.level1;
   const sc = safeValue(e.shadowColor);
-  out['--gw-shadow-soft'] = `0 ${e.shadowOffset.height}px ${e.shadowRadius}px ${sc}${Math.round((e.shadowOpacity ?? 0.1) * 255).toString(16).padStart(2, '0')}`;
-  out['--gw-shadow-pop'] = `0 10px 30px rgba(20,32,27,0.18)`;
+  out[`--${p}-shadow-soft`] = `0 ${e.shadowOffset.height}px ${e.shadowRadius}px ${sc}${Math.round((e.shadowOpacity ?? 0.1) * 255).toString(16).padStart(2, '0')}`;
+  out[`--${p}-shadow-pop`] = `0 10px 30px rgba(20,32,27,0.18)`;
   return out;
 }
 
@@ -58,116 +66,46 @@ function block(selector: string, vars: Record<string, string>, indent = '  '): s
   return `${selector} {\n${body}\n}`;
 }
 
-/** Legacy `--bg`/`--accent`/… aliases so the existing web stylesheet keeps working while it migrates. */
-function legacyAliases(): Record<string, string> {
-  return {
-    '--canvas': 'var(--gw-color-background)',
-    '--surface': 'var(--gw-color-surface)',
-    '--paper': 'var(--gw-color-paper)',
-    '--ink': 'var(--gw-color-text)',
-    '--muted': 'var(--gw-color-text-secondary)',
-    '--hairline': 'var(--gw-color-border)',
-    '--bg': 'var(--gw-color-background)',
-    '--bg2': 'var(--gw-color-surface)',
-    '--bg3': 'var(--gw-color-mint)',
-    '--bg4': 'var(--gw-color-border)',
-    '--fg': 'var(--gw-color-text)',
-    '--fg2': 'var(--gw-color-text-secondary)',
-    '--fg3': 'var(--gw-color-text-muted)',
-    '--accent': 'var(--gw-color-accent)',
-    '--accent2': 'var(--gw-color-accent-strong)',
-    '--accent-dim': 'var(--gw-color-mint)',
-    '--mint': 'var(--gw-color-mint)',
-    '--mint-deep': 'var(--gw-color-mint-deep)',
-    '--amber': 'var(--gw-color-amber)',
-    '--coral': 'var(--gw-color-coral)',
-    '--hl-amber': 'var(--gw-color-hl-amber)',
-    '--hl-pink': 'var(--gw-color-hl-pink)',
-    '--hl-teal': 'var(--gw-color-hl-teal)',
-    '--hl-blue': 'var(--gw-color-hl-blue)',
-    '--font': 'var(--gw-font-body)',
-    '--font-display': 'var(--gw-font-display)',
-    '--mono': 'var(--gw-font-mono)',
-    '--radius': 'var(--gw-radius-md)',
-    '--radius-lg': 'var(--gw-radius-lg)',
-  };
-}
-
-export interface ThemeCssOptions {
-  /** Emit legacy `--bg`/`--accent`/… aliases (default true) so an existing stylesheet migrates gradually. */
-  legacy?: boolean;
-  /** Selector the light theme is written to (default ':root'). */
-  rootSelector?: string;
-}
-
-/**
- * The full geneWeave web token stylesheet: light on :root, dark on `[data-theme="dark"]`, the Creative
- * page/title swap on `[data-variant="creative"]`, plus breakpoint + agency component tokens. Drop this at
- * the top of the app stylesheet; every component then reads `var(--gw-*)`.
- */
-export function themeCss(opts: ThemeCssOptions = {}): string {
-  const root = opts.rootSelector ?? ':root';
-  const legacy = opts.legacy !== false;
-
-  // Page + title tokens make Pro/Creative a token flip, not a fork: page = surface (pro) / paper (creative),
-  // title font = display (pro) / handwriting (creative). AI surfaces stay mint in BOTH.
-  const proExtras: Record<string, string> = {
-    '--gw-page': 'var(--gw-color-surface)',
-    '--gw-font-title': 'var(--gw-font-display)',
-    '--gw-ai-surface': 'var(--gw-color-mint)',
-    '--gw-ai-border': 'var(--gw-color-mint-deep)',
-    '--gw-ai-signal': 'var(--gw-color-accent)',
-    '--gw-bp-foldable': `${breakpoints.foldable}px`,
-    '--gw-bp-tablet': `${breakpoints.tablet}px`,
-    '--gw-bp-desktop': `${breakpoints.desktop}px`,
-    '--gw-bp-wide': `${breakpoints.wide}px`,
-  };
-
-  const lightVars = { ...toCssVariables(themes.light), ...proExtras, ...(legacy ? legacyAliases() : {}) };
-  const darkVars = toCssVariables(themes.dark);
-
-  const parts = [
-    '/* geneWeave design tokens — generated from @weaveintel/tokens (single source of truth). Do not edit by hand. */',
-    block(root, lightVars),
-    block(`${root}[data-theme="dark"], [data-theme="dark"]`, darkVars),
-    block('[data-variant="creative"]', {
-      '--gw-page': 'var(--gw-color-paper)',
-      '--gw-font-title': 'var(--gw-font-hand)',
-    }),
-    block('@media (prefers-color-scheme: dark) { :root:not([data-theme="light"])', darkVars, '    ') + '\n}',
-  ];
-  return parts.join('\n\n');
-}
-
 // ─── Per-tenant appearance / white-label branding ───────────────────────────────
 
 export interface TenantThemeVars {
-  /** Changed `--gw-*` variables for the light theme (empty if the override changes nothing / was dropped). */
+  /** Changed `--<prefix>-*` variables for the light theme (empty if the override changes nothing / was dropped). */
   readonly light: Record<string, string>;
-  /** Changed `--gw-*` variables for the dark theme. */
+  /** Changed `--<prefix>-*` variables for the dark theme. */
   readonly dark: Record<string, string>;
   /** True if the override failed WCAG-AA and was DROPPED for accessibility (branding falls back to base). */
   readonly degraded: boolean;
 }
 
+/** The light + dark base themes an app hands to the tenant white-label functions. */
+export interface BaseThemes {
+  light: Theme;
+  dark: Theme;
+}
+
+export interface TenantThemeOptions extends CssVarsOptions {
+  enforceContrast?: boolean;
+}
+
 /**
- * Resolve a tenant's brand override into ONLY the `--gw-*` variables that differ from the base — for both
- * light and dark themes — so a client can apply them at runtime with `documentElement.style.setProperty`
- * (CSP-safe; no `<style>` injection needed). Accessibility is enforced: an override that would fail
- * WCAG-AA contrast is DROPPED (per {@link applyTenantTheme}) and `degraded` is set, so a tenant can never
- * ship an inaccessible re-brand. Pure.
+ * Resolve a tenant's brand override into ONLY the `--<prefix>-*` variables that differ from the base —
+ * for both light and dark — so a client can apply them at runtime with `documentElement.style.setProperty`
+ * (CSP-safe; no `<style>` injection). Accessibility is enforced: an override that would fail WCAG-AA
+ * contrast is DROPPED (per {@link applyTenantTheme}) and `degraded` is set, so a tenant can never ship an
+ * inaccessible re-brand. The app passes its base themes + brand prefix. Pure.
  */
-export function tenantThemeVars(override: TenantThemeOverride, opts: { enforceContrast?: boolean } = {}): TenantThemeVars {
+export function tenantThemeVars(bases: BaseThemes, override: TenantThemeOverride, opts: TenantThemeOptions = {}): TenantThemeVars {
+  const cssOpts: CssVarsOptions = opts.prefix !== undefined ? { prefix: opts.prefix } : {};
   const changedFor = (base: Theme): { changed: Record<string, string>; degraded: boolean } => {
     const { theme, degraded } = applyTenantTheme(base, override, { enforceContrast: opts.enforceContrast ?? true });
-    const baseVars = toCssVariables(base);
-    const themeVars = toCssVariables(theme);
+    const baseVars = toCssVariables(base, cssOpts);
+    const themeVars = toCssVariables(theme, cssOpts);
     const changed: Record<string, string> = {};
     for (const [k, v] of Object.entries(themeVars)) if (v !== baseVars[k]) changed[k] = v;
     return { changed, degraded };
   };
-  const l = changedFor(themes.light);
-  const d = changedFor(themes.dark);
+  const l = changedFor(bases.light);
+  const d = changedFor(bases.dark);
   return { light: l.changed, dark: d.changed, degraded: l.degraded || d.degraded };
 }
 
@@ -176,10 +114,13 @@ export function tenantThemeVars(override: TenantThemeOverride, opts: { enforceCo
  * `[data-theme="dark"]`) suitable for injecting into an SSR shell for zero-FOUC re-branding. Only the
  * changed vars are emitted. Accessibility-degraded exactly like {@link tenantThemeVars}.
  */
-export function tenantThemeCss(override: TenantThemeOverride, opts: { rootSelector?: string; enforceContrast?: boolean } = {}): string {
+export function tenantThemeCss(bases: BaseThemes, override: TenantThemeOverride, opts: TenantThemeOptions & { rootSelector?: string } = {}): string {
   const root = opts.rootSelector ?? ':root';
-  const v = tenantThemeVars(override, { ...(opts.enforceContrast !== undefined ? { enforceContrast: opts.enforceContrast } : {}) });
-  const parts: string[] = ['/* geneWeave tenant brand override — accessibility-enforced. */'];
+  const v = tenantThemeVars(bases, override, {
+    ...(opts.prefix !== undefined ? { prefix: opts.prefix } : {}),
+    ...(opts.enforceContrast !== undefined ? { enforceContrast: opts.enforceContrast } : {}),
+  });
+  const parts: string[] = ['/* tenant brand override — accessibility-enforced. */'];
   if (Object.keys(v.light).length) parts.push(block(root, v.light));
   if (Object.keys(v.dark).length) parts.push(block(`${root}[data-theme="dark"], [data-theme="dark"]`, v.dark));
   return parts.join('\n\n');

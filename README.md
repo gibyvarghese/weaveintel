@@ -13,10 +13,10 @@ weaveIntel gives you composable, vendor-neutral building blocks for everything f
 
 weaveIntel is **open core**:
 
-- **The library** — everything under [`packages/`](packages/) (the `@weaveintel/*` modules) plus the shared
-  [`@geneweave/tokens`](clients/tokens/) — is **MIT-licensed** and **published to npm**. Use it in your own
-  projects: `npm install @weaveintel/core` (and any other module you need). This is the actively-developed,
-  reusable core.
+- **The library** — everything under [`packages/`](packages/) (the `@weaveintel/*` modules) plus the
+  brand-neutral theming engine [`@weaveintel/tokens`](clients/tokens/) — is **MIT-licensed** and
+  **published to npm**. Use it in your own projects: `npm install @weaveintel/core` (and any other module
+  you need). This is the actively-developed, reusable core.
 - **The apps** — [`apps/geneweave`](apps/geneweave/) (the geneWeave server) and
   [`apps/geneweave-ui`](apps/geneweave-ui/) (its web client) — are the **open-source community edition** of the
   geneWeave product, MIT-licensed, so you can **self-host today's geneWeave**. They consume the library above.
@@ -688,7 +688,7 @@ What's in it:
 - **MCP gateway** — exposes the tool catalog as an MCP server with per-client allocation classes.
 - **Live agents** — generic supervisor + Kaggle competition mesh (9 agents, 3 playbooks for NLP/Vision/TimeSeries) demonstrating long-running mesh execution.
 - **Agent strategy settings** — global and per-tenant defaults (HITL threshold, max agent hops, tool confirmation level, memory policy) readable and writable via the DB adapter.
-- **Responsive, brandable UI** — the web app (`apps/geneweave-ui`, vanilla-TS, no framework) is built to high-fidelity design references and adapts to web / tablet / mobile (persistent side rails on desktop become slide-over drawers below 900px, keyboard- and screen-reader-friendly). All colours flow from `@geneweave/tokens` (the design-token single source of truth shared with the native app), so light/dark and per-tenant white-label branding apply everywhere. The **Account** screen (profile, preferences, a per-event in-app/email/push notification matrix) is DB-backed per user and also editable by the assistant via the `update_account_profile` tool (scoped to the signed-in user); the **Builder** is a schema-driven three-pane admin over the whole platform; **Appearance & branding** is a per-tenant white-label surface (`set_workspace_appearance`, WCAG-AA-enforced).
+- **Responsive, brandable UI** — the web app (`apps/geneweave-ui`, vanilla-TS, no framework) is built to high-fidelity design references and adapts to web / tablet / mobile (persistent side rails on desktop become slide-over drawers below 900px, keyboard- and screen-reader-friendly). All colours flow from the app's own brand (`apps/geneweave-ui/src/brand/`) composed on the brand-neutral `@weaveintel/tokens` engine — the single source of truth shared with the native app — so light/dark and per-tenant white-label branding apply everywhere. The **Account** screen (profile, preferences, a per-event in-app/email/push notification matrix) is DB-backed per user and also editable by the assistant via the `update_account_profile` tool (scoped to the signed-in user); the **Builder** is a schema-driven three-pane admin over the whole platform; **Appearance & branding** is a per-tenant white-label surface (`set_workspace_appearance`, WCAG-AA-enforced).
 
 Run it locally with [`scripts/start-geneweave.sh`](scripts/start-geneweave.sh) (see [Quick Start](#quick-start)).
 
