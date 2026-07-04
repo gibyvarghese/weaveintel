@@ -4,9 +4,9 @@
   "private": true,
   "description": "geneWeave desktop app — a Tauri v2 shell around the geneWeave web build (global quick-capture, offline notes cache, native menus, signed auto-update).",
   "scripts": {
-    "//": "The native desktop app needs the Rust toolchain + the Tauri CLI, which are NOT part of the headless TS workspace. So `build` no-ops when the Tauri CLI is absent — this keeps the repo-wide `turbo build` (and start-geneweave.sh) working on machines without Tauri, while still producing a real native build wherever the CLI is installed.",
+    "//": "The native desktop app needs the Rust toolchain (and a valid Tauri config), which are NOT part of the headless TS workspace or CI. So build no-ops by default and only runs the native Tauri build when you opt in with DESKTOP_NATIVE_BUILD=1 — this keeps the repo-wide turbo build (and start-geneweave.sh) green everywhere, while still producing a real native build on a properly set-up machine.",
     "dev": "tauri dev",
-    "build": "if command -v tauri >/dev/null 2>&1 || [ -x node_modules/.bin/tauri ]; then tauri build; else echo '[@geneweave/desktop] Tauri CLI not found — skipping the native desktop build. To build the desktop app, install Rust + run `npm install` in clients/desktop (adds @tauri-apps/cli), then `npm run build` here.'; fi",
+    "build": "if [ \"$DESKTOP_NATIVE_BUILD\" = \"1\" ] && { command -v tauri >/dev/null 2>&1 || [ -x node_modules/.bin/tauri ]; }; then tauri build; else echo '[@geneweave/desktop] Skipping the native desktop build (set DESKTOP_NATIVE_BUILD=1 with Rust + the Tauri CLI installed to produce a native build).'; fi",
     "tauri": "tauri"
   },
   "devDependencies": {

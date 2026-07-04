@@ -4,7 +4,6 @@
   "version": "1.0.0",
   "identifier": "dev.weaveintel.geneweave",
   "build": {
-    "//": "The desktop shell wraps the geneWeave WEB BUILD. In dev the webview loads the running dev server; a production build points devUrl/window.url at your deployed geneWeave host.",
     "devUrl": "http://localhost:3500",
     "frontendDist": "http://localhost:3500"
   },
@@ -25,13 +24,11 @@
       }
     ],
     "security": {
-      "//": "Allow the webview to talk to the geneWeave server (the SPA + /api). Tighten to your host in production.",
       "csp": null
     }
   },
   "plugins": {
     "updater": {
-      "//": "Auto-update: the app pings `endpoints` for a signed latest.json; `pubkey` is generated with `tauri signer generate`. User data lives in appConfigDir so updates never clobber it.",
       "active": true,
       "dialog": true,
       "pubkey": "REPLACE_WITH_YOUR_TAURI_UPDATER_PUBLIC_KEY",
