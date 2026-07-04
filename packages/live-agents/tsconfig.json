@@ -1,12 +1,30 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "outDir": "./dist", "rootDir": "./src" },
-  "include": ["src"],
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src"
+  },
+  "include": [
+    "src"
+  ],
   "references": [
-    { "path": "../core" },
-    { "path": "../memory" },
-    { "path": "../mcp-client" },
-    { "path": "../identity" },
-    { "path": "../tools" }
+    {
+      "path": "../core"
+    },
+    {
+      "path": "../memory"
+    },
+    {
+      "path": "../mcp-client"
+    },
+    {
+      "path": "../identity"
+    },
+    {
+      "path": "../tools"
+    },
+    {
+      "path": "../observability"
+    }
   ]
 }

@@ -178,7 +178,8 @@
       "Bash(node -e \"console.log\\(JSON.stringify\\(require\\('./packages/agents/tsconfig.json'\\).references\\)\\)\")",
       "Bash(perl -pi -e \"s{from '\\\\@weaveintel/agents'}{from '../index.js'}g\" packages/agents/src/recipes/*.ts)",
       "Bash(perl -pi -e \"s{\\\\@weaveintel/recipes —}{\\\\@weaveintel/agents/recipes —}g\" packages/agents/src/recipes/*.ts)",
-      "Bash(node -e \"console.log\\('deps',Object.keys\\(require\\('./packages/testing/package.json'\\).dependencies\\).join\\(' '\\)\\);console.log\\('refs',JSON.stringify\\(require\\('./packages/testing/tsconfig.json'\\).references\\)\\)\")"
+      "Bash(node -e \"console.log\\('deps',Object.keys\\(require\\('./packages/testing/package.json'\\).dependencies\\).join\\(' '\\)\\);console.log\\('refs',JSON.stringify\\(require\\('./packages/testing/tsconfig.json'\\).references\\)\\)\")",
+      "Bash(node -e \"console.log\\(Object.keys\\(require\\('./packages/observability/package.json'\\).dependencies||{}\\).join\\(' '\\)\\)\")"
     ]
   }
 }

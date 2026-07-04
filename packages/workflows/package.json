@@ -23,6 +23,7 @@
     "@aws-sdk/lib-dynamodb": "^3.810.0",
     "@weaveintel/core": "^0.0.1",
     "@weaveintel/human-tasks": "^0.0.1",
+    "@weaveintel/observability": "^0.0.1",
     "better-sqlite3": "^11.10.0",
     "mongodb": "^6.16.0",
     "pg": "^8.13.1",

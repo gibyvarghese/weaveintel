@@ -3,7 +3,7 @@ import type {
   RunLog,
   StepLog,
 } from '@weaveintel/core';
-import { createReplayEngine, type ReplayResult } from '@weaveintel/replay';
+import { createReplayEngine, type ReplayResult } from '@weaveintel/observability/replay';
 import type {
   LiveAgentsRunLogger,
   ReplayLiveAgentsRunOptions,

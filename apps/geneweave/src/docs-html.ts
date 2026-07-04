@@ -5662,12 +5662,12 @@ POST   /api/admin/artifacts/:id/live-refresh
 function sReplay(): string {
   return `
 <div class="pkg-hdr">
-  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/replay</span></div>
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/observability/replay</span></div>
   <h1 class="pkg-title">Replay</h1>
   <p class="pkg-desc">Deterministic re-execution of workflow runs from a saved snapshot. Replay uses the same definition, inputs, and tool outputs from the original run — so you can reproduce exact model behaviour, debug failures, or run evals against historical data without hitting live APIs.</p>
 </div>
 
-${callout('info', '🔁', 'Reproducibility is always @weaveintel/replay.', 'Never invent a bespoke bundle format for reproducing runs. The replay package handles definition snapshots, step-level output recording, and ordinal-strict re-execution.')}
+${callout('info', '🔁', 'Reproducibility is always @weaveintel/observability/replay.', 'Never invent a bespoke bundle format for reproducing runs. The replay package handles definition snapshots, step-level output recording, and ordinal-strict re-execution.')}
 
 ${section('replay-record', 'Recording a Run for Replay', `
 <p>Every workflow run automatically records step outputs when a checkpoint store and run repository are configured. No extra wiring is needed — runs are replayable by default when persistence is on.</p>

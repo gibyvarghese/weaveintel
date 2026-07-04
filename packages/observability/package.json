@@ -8,6 +8,11 @@
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./replay": {
+      "import": "./dist/replay/index.js",
+      "types": "./dist/replay/index.d.ts",
+      "default": "./dist/replay/index.js"
     }
   },
   "main": "./dist/index.js",

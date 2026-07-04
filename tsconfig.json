@@ -164,9 +164,6 @@
       "path": "packages/tools-filewatch"
     },
     {
-      "path": "packages/replay"
-    },
-    {
       "path": "packages/triggers"
     },
     {

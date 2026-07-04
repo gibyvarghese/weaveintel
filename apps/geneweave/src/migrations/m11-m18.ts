@@ -349,7 +349,7 @@ export function applyM11_M18(db: BetterSqlite3.Database): void {
   // ─── M12 — Phase K4: Kaggle run artifacts (contract + replay storage) ──
   // Each materialized Kaggle run gets ONE artifact row that stores:
   //   - the @weaveintel/contracts CompletionReport (evidence bundle)
-  //   - the @weaveintel/replay RunLog (deterministic re-execution input)
+  //   - the @weaveintel/observability/replay RunLog (deterministic re-execution input)
   // Source-of-truth invariants from KAGGLE_AGENT_DESIGN §3:
   //   - kaggle_runs is a derived view; this artifact table holds the actual
   //     contract + trace JSON so admin UI + replay endpoint can reconstruct.

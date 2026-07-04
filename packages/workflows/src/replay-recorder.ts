@@ -13,7 +13,7 @@
  * output matches the recorded output, the trace is deterministic.
  *
  * Designed to live in `@weaveintel/workflows` so the replay package
- * (`@weaveintel/replay`) can wrap workflow runs without depending on
+ * (`@weaveintel/observability/replay`) can wrap workflow runs without depending on
  * engine internals.
  */
 
