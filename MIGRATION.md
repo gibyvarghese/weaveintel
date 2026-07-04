@@ -331,11 +331,29 @@ Then `git mv`'d `notes-config.ts` + test → `apps/geneweave/src/notes/`, re-hea
 the barrel export, rewired 4 consumers (`m104`, `note-settings-sql{,.test}`, `note-creative-sql`). Gate:
 267/267; notes-deferred **70→57** (biggest single drop).
 
-**Remaining — the pure UI cluster:** `agency`, `colorize`, `creative`, `diagram`, `ink` (a connected
-component: `colorize→agency`, `ink→creative`, `diagram→colorize+creative`, `creative→agency`) → move to
-`geneweave-ui` (used by both the server and the editor UI; the app imports them via new subpath exports
-like it already does `/styles`), **with the agency split** (generic `AgencyContract` type stays in
-notes; the geneWeave hex palette + byline move to the UI package). Then **2g**.
+**Remaining — the UI cluster → `geneweave-ui`.** A naive "move all 5 together" was attempted and
+**reverted** after the build exposed a deeper coupling than the intra-cluster edges: a **slim-core
+back-dependency chain** `note-doc.ts (slim, MUST stay) → ink → creative → agency`. `note-doc`'s
+`InkBlock` uses `ink`'s `validateStrokes`/`InkStroke` (ink is the note-document *data model*), `ink`
+uses `creative`'s `sanitizeColor` (4×), and `creative`/`colorize` use `agency`'s `AGENCY_PALETTE`. So
+the cluster can't wholesale leave notes. Verified corrected plan (all 5 modules are DOM-free; only
+`note-doc` imports the cluster from slim-core):
+
+1. **`ink` STAYS in slim-notes** — it's the ink data model note-doc needs; a generic freehand-ink
+   capability (de-brand its 2 strings in 2g).
+2. **Extract `sanitizeColor`** (a ~15-line generic colour-safety gate) out of `creative` into slim
+   (e.g. `ink.ts` or a small slim util) + export from the barrel, breaking the `ink→creative` edge.
+3. **`geneweave-ui` gains a `@weaveintel/notes` dependency** (+ tsconfig project reference) and a
+   **vitest test setup** (it has none today) so the moved cluster tests still run.
+4. Move **only `{agency, colorize, creative, diagram}`** (+ tests, + the agency-colour test block from
+   notes' `phase0.test.ts`) → `apps/geneweave-ui/src/notes/`; add a `./notes` subpath export.
+5. Rewire: the UI's `notes-creative-extensions.ts` splits (ink symbols ← `@weaveintel/notes`; diagram/
+   colorize/agency ← `./notes`); server consumers import agency/colorize/creative/diagram from
+   `@weaveintel/geneweave-ui/notes`, ink stays from `@weaveintel/notes`. Agency keeps its brand (fine —
+   `geneweave-ui` is an app package); the generic-`AgencyContract`-in-notes split is optional per the
+   plan and can be skipped since no consumer needs it.
+
+Then **2g**.
 
 ---
 
