@@ -1,7 +1,7 @@
 /**
  * answer-versions-sql.ts — Regenerate an assistant answer, keeping version history (m139).
  *
- * Reuses the pure variant model in `@weaveintel/collaboration` (makeVariantStack / addVariant / selectVariant
+ * Reuses the pure variant model in `@weaveintel/collab` (makeVariantStack / addVariant / selectVariant
  * / variantLabel) so the "stack of answers with an active pointer" logic is shared + unit-tested, and reuses
  * the platform's EXISTING routing quality signal (recordChatFeedbackSignal, signal='regenerate') so a
  * regenerate already teaches the model-routing loop that the reader wasn't satisfied.
@@ -15,7 +15,7 @@ import { newUUIDv7 } from './lib/uuid.js';
 import {
   makeVariantStack, addVariant, selectVariant as selectInStack, variantLabel,
   type AnswerVariant,
-} from '@weaveintel/collaboration';
+} from '@weaveintel/collab';
 import { recordChatFeedbackSignal } from './routing-feedback.js';
 import type { DatabaseAdapter } from './db.js';
 import type { MessageVariantRow, TenantAnswerVersionsRow } from './db-types/adapter-me.js';

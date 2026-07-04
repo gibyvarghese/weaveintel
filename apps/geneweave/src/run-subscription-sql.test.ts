@@ -12,7 +12,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHmac } from 'node:crypto';
-import { subscriptionManagerContract, type SubscriptionManager } from '@weaveintel/collaboration';
+import { subscriptionManagerContract, type SubscriptionManager } from '@weaveintel/collab';
 import { notificationFeedStoreContract } from '@weaveintel/notifications';
 import { SQLiteAdapter } from './db-sqlite.js';
 import { createSqlSubscriptionManager, createSqlFeedStore } from './run-subscription-sql.js';

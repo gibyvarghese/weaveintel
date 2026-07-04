@@ -4,7 +4,7 @@
  *
  * geneWeave stores runs in `user_runs` and run events in `user_run_events`. Until
  * Phase 0 those tables were geneWeave's OWN parallel implementation of the run
- * registry + run journal that also (separately) lived in `@weaveintel/collaboration`.
+ * registry + run journal that also (separately) lived in `@weaveintel/collab`.
  * Phase 0 makes the journal/registry a single CONTRACT in `@weaveintel/core`
  * (`RunJournal` / `RunRegistry` ports). These adapters make geneWeave's SQL
  * tables conform to that one contract — so the platform has one interface with

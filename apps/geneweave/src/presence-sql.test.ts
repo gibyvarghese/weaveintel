@@ -1,7 +1,7 @@
 /**
  * Conformance test — geneWeave's SQL PresenceManager adapter (Collaboration Phase 1).
  *
- * Runs the SAME `presenceManagerContract` from `@weaveintel/collaboration` that
+ * Runs the SAME `presenceManagerContract` from `@weaveintel/collab` that
  * the in-memory reference adapter passes, against the SQL adapter backed by the
  * `run_presence` table — proving geneWeave's presence storage is interchangeable
  * behind the one port. Plus the agent-as-peer synthesis helper.
@@ -12,7 +12,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { presenceManagerContract, type PresenceHarness } from '@weaveintel/collaboration';
+import { presenceManagerContract, type PresenceHarness } from '@weaveintel/collab';
 import { SQLiteAdapter } from './db-sqlite.js';
 import { createSqlPresenceManager, withAgentPeer } from './presence-sql.js';
 

@@ -2,7 +2,7 @@
  * accessibility-sql.ts — per-tenant accessibility defaults for streaming answers (m140).
  *
  * Small config service shared by the client-facing GET (/api/me/accessibility) and the Builder admin CRUD.
- * The announce mode drives the accessible live-region policy (@weaveintel/collaboration stream-announce);
+ * The announce mode drives the accessible live-region policy (@weaveintel/collab stream-announce);
  * reduced_motion is a workspace default layered on top of each person's OS "reduce motion" (always respected).
  */
 import type { DatabaseAdapter } from './db.js';

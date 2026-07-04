@@ -1,6 +1,6 @@
 /**
  * geneWeave SQL adapter for Collaboration Phase 5 — the unified handoff lifecycle.
- * The SQL implementation of the `@weaveintel/collaboration` `UnifiedHandoffManager`
+ * The SQL implementation of the `@weaveintel/collab` `UnifiedHandoffManager`
  * PORT; passes the SAME `handoffManagerContract` the in-memory adapter passes
  * (the Phase 0–4 pattern). State-machine validity, actor authorization, and the
  * append-only audit trail are enforced here exactly as in the reference adapter.
@@ -19,7 +19,7 @@ import {
   type HandoffState,
   type HandoffActor,
   type HandoffBriefing,
-} from '@weaveintel/collaboration';
+} from '@weaveintel/collab';
 import type { DatabaseAdapter } from './db-types.js';
 import type { SessionHandoffRow, HandoffEventRow, UserRunRow } from './db-types/adapter-me.js';
 

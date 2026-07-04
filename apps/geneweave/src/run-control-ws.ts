@@ -32,7 +32,7 @@ import type { DatabaseAdapter } from './db-types.js';
 import type { MeRunExecutor } from './me-run-executor.js';
 import { isTerminalRunStatus } from './me-run-executor.js';
 import { resolveRunAccess, annotatePresenceRoles } from './shared-session-sql.js';
-import { roleAtLeast } from '@weaveintel/collaboration';
+import { roleAtLeast } from '@weaveintel/collab';
 import { createSqlPresenceManager, withAgentPeer } from './presence-sql.js';
 import { loadCollaborationConfig } from './collab-config.js';
 

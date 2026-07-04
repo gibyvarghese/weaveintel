@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { sessionManagerContract, type SessionManager } from '@weaveintel/collaboration';
+import { sessionManagerContract, type SessionManager } from '@weaveintel/collab';
 import { SQLiteAdapter } from './db-sqlite.js';
 import { createSqlSessionManager, resolveRunAccess, mintShareToken, hashShareToken, annotatePresenceRoles } from './shared-session-sql.js';
 import type { RunPresenceParticipant } from '@weaveintel/core';

@@ -19,7 +19,7 @@
  */
 import { test, expect, type Page, type Browser } from '@playwright/test';
 import { createRunClient, createRunSession, type RunClient, type RunSession } from '@weaveintel/client';
-import { RgaDoc, type RgaOp } from '@weaveintel/coedit';
+import { RgaDoc, type RgaOp } from '@weaveintel/collab';
 
 const PASSWORD = 'Str0ng!Pass99';
 const OWNER = 'p7-owner@weaveintel.dev';

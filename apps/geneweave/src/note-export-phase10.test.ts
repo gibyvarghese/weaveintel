@@ -15,7 +15,7 @@ import { SQLiteAdapter } from './db-sqlite.js';
 import { agentExportNote, agentCreateNote } from './note-ai-sql.js';
 import { createNoteSettingsService } from './note-settings-sql.js';
 import { createToolRegistry } from './tools.js';
-import { parseNoteExportBundle } from '@weaveintel/coedit';
+import { parseNoteExportBundle } from '@weaveintel/collab';
 
 function tmpDb(): string { return join(tmpdir(), `gw-exp10-${Date.now()}-${Math.random().toString(36).slice(2)}.db`); }
 async function makeDb(): Promise<SQLiteAdapter> {

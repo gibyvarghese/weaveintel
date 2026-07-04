@@ -19,7 +19,7 @@ import {
   type Flashcard, type ReviewRating, type CardSchedule, type StudyStats,
 } from './notes/study.js';
 import { newUUIDv7 } from '@weaveintel/core';
-import { roleAtLeast } from '@weaveintel/collaboration';
+import { roleAtLeast } from '@weaveintel/collab';
 import { createNoteCoeditRepo, resolveNoteAccess, type NoteAccess } from './note-coedit-sql.js';
 import { createNoteSettingsService } from './note-settings-sql.js';
 import type { DatabaseAdapter } from './db-types.js';

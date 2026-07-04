@@ -1,6 +1,7 @@
 {
-  "name": "@weaveintel/collaboration",
+  "name": "@weaveintel/collab",
   "version": "0.0.1",
+  "description": "Real-time collaboration + CRDT co-editing — one presence model, a CoeditDoc port with an RGA reference adapter, and the AI-as-editing-peer.",
   "type": "module",
   "exports": {
     ".": {

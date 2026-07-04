@@ -1,19 +1,136 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/collaboration — Public API
+ * @weaveintel/collab — real-time collaboration + CRDT co-editing (one package).
  *
- * MULTIPLAYER collaboration primitives only. In Collaboration Phase 0 the
- * run-lifecycle substrate (run registry, run journal) was relocated to
- * `@weaveintel/core` (where `RunHandle`/`RunEventEnvelope` already live), and the
- * dead `events.ts` helpers + dormant `durable.ts` KV variants were removed. This
- * package is now scoped to its single, non-duplicative reason to exist:
- * **shared sessions, presence, run subscriptions, and user handoff** — the
- * mid-2026 "multiplayer for AI" layer (Phases 1–5 build the durable, DB-backed
- * versions on top of these in-memory prototypes).
+ * Two layers, one home:
+ *   • CO-EDITING (CRDT): a zero-dependency toolkit so a human and an AI agent can edit ONE document
+ *     concurrently and always converge — the RGA sequence + the BlockDoc rich-text CRDT, awareness
+ *     (live cursors), the AI-as-editing-peer, and the trusted-relay op validators.
+ *   • MULTIPLAYER: presence ("who's here"), shared sessions + roles, durable run subscriptions,
+ *     comments/annotations, unified handoff, message feedback, and suggested prompts.
  *
- * For run registry / run journal, import from `@weaveintel/core`:
- *   `createKvRunRegistry`, `createKvRunJournal`, `RunRegistry`, `RunJournal`.
+ * Each capability is a PORT (interface) + an in-memory reference adapter with a shared contract test;
+ * a consuming application supplies the SQL adapter. (Formerly the separate @weaveintel/coedit +
+ * @weaveintel/collaboration packages.)
  */
+
+// ─────────────────────────── CO-EDITING (CRDT) ───────────────────────────
+export {
+  RgaDoc,
+  idGreater,
+  idEqual,
+  idKey,
+  opIdOf,
+  type RgaId,
+  type RgaOp,
+  type StateVector,
+  type RgaSnapshot,
+} from './rga.js';
+
+export {
+  Awareness,
+  cursorFromIndex,
+  indexFromCursor,
+  type RelativePosition,
+  type AwarenessState,
+  type AwarenessEntry,
+  type AwarenessOptions,
+} from './awareness.js';
+
+// Live-presence helpers: stable per-peer cursor colours, the
+// synthetic AI participant identity, and a strict sanitiser for incoming awareness.
+export {
+  CURSOR_COLORS,
+  peerColor,
+  AI_PARTICIPANT,
+  aiPeerId,
+  isAiPeerId,
+  aiAwarenessState,
+  sanitizeAwarenessState,
+} from './presence-helpers.js';
+
+export {
+  createAgentPeer,
+  agentSiteId,
+  isAgentSite,
+  AGENT_SITE_PREFIX,
+  type AgentPeer,
+  type AgentPeerOptions,
+} from './agent-peer.js';
+
+export {
+  validateClientOps,
+  siteOwnedBy,
+  type OpValidationOptions,
+  type OpValidationResult,
+} from './validation.js';
+
+// The BLOCK-document CRDT (rich text / notes) on top of the
+// same RGA. A flat sequence of char|block-marker elements + LWW block attrs +
+// Peritext-lite marks; converges identically. Plus ProseMirror ⇄ blocks
+// conversion + schema repair, Markdown/HTML serializers, and the agent block-peer.
+export {
+  BlockDoc,
+  blockOpId,
+  type BlockType,
+  type BlockAttrs,
+  type MarkType,
+  type RenderedBlock,
+  type BlockOp,
+  type BlockSpec,
+  type BlockDocSnapshot,
+  type StateVector as BlockStateVector,
+} from './block-doc.js';
+export {
+  pmToBlocks,
+  blocksToProseMirror,
+  normalizeBlocks,
+  type NormalBlock,
+} from './prosemirror.js';
+export {
+  blocksToMarkdown,
+  blocksToHtml,
+  safeCssColor,
+} from './block-markdown.js';
+// Multi-format note export (Markdown / HTML / Word / lossless JSON).
+export {
+  type ExportableNote,
+  type NoteExport,
+  type ExportFormat,
+  type ExportFormatSpec,
+  type NoteExportBundle,
+  EXPORT_FORMATS,
+  NOTE_EXPORT_KIND,
+  NOTE_EXPORT_VERSION,
+  isExportFormat,
+  noteToMarkdown,
+  noteToHtmlFragment,
+  noteToHtmlDocument,
+  noteToWordHtml,
+  noteToJson,
+  parseNoteExportBundle,
+  exportNote,
+} from './note-export.js';
+export {
+  markdownToBlocks,
+  appendBlocksToDoc,
+  createBlockAgentPeer,
+  type BlockAgentPeer,
+  type BlockAgentPeerOptions,
+} from './block-agent.js';
+
+// The TRUSTED-RELAY block-op validator (anti-forgery + caps
+// for BlockOps) and `diffBlocks` (turn a whole edited document into convergent
+// block ops for the "diff-on-save" client path). These power a consuming app's notes
+// co-editing relay + collaborative editor.
+export {
+  validateClientBlockOps,
+  type BlockOpValidationOptions,
+  type BlockOpValidationResult,
+} from './block-validation.js';
+export { diffBlocks } from './block-diff.js';
+
+// ─────────────────────────── MULTIPLAYER ───────────────────────────
 export {
   type SessionParticipant,
   type PresenceState,

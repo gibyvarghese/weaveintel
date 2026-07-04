@@ -1,7 +1,7 @@
 /**
  * Playwright E2E — weaveNotes Phase 1 (BlockDoc CRDT), live server + real LLM.
  *
- * Phase 1 added the rich-text BLOCK CRDT (`@weaveintel/coedit` BlockDoc) + the
+ * Phase 1 added the rich-text BLOCK CRDT (`@weaveintel/collab` BlockDoc) + the
  * ProseMirror⇄blocks conversion + Markdown/HTML serializers, and a thin app
  * surface: `GET /api/me/notes/:id/blocks?format=blocks|markdown|html` that runs a
  * real note's content THROUGH the CRDT and renders it. This e2e proves, with a

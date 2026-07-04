@@ -6,7 +6,7 @@ import { safeExec } from './helpers.js';
  *
  * The empty chat used to be a blank screen with a one-line hint. Now it offers CLICKABLE conversation
  * starters — a few curated defaults plus a few PERSONALISED ones drawn from the person's own recent notes +
- * chats — built on the pure @weaveintel/collaboration `suggested-prompts` core.
+ * chats — built on the pure @weaveintel/collab `suggested-prompts` core.
  *
  *  • tenant_suggested_prompts — a per-workspace policy: whether starters show at all, whether they may be
  *    personalised from recent notes / recent chats, whether AI-generated starters are allowed, and how many

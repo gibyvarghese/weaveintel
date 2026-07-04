@@ -3,7 +3,7 @@
  * SQL adapter + access control for shared sessions (Collaboration Phase 2).
  *
  * - `createSqlSessionManager` makes geneWeave's `shared_sessions` +
- *   `session_participants` tables conform to the `@weaveintel/collaboration`
+ *   `session_participants` tables conform to the `@weaveintel/collab`
  *   `SessionManager` port (the same Phase 0/1 ports-&-adapters pattern; proven by
  *   `sessionManagerContract`).
  * - `mintShareToken` / `hashShareToken` generate invite-link tokens: a 256-bit
@@ -19,7 +19,7 @@
  */
 import { randomBytes, createHash } from 'node:crypto';
 import { newUUIDv7, type RunPresenceParticipant } from '@weaveintel/core';
-import { roleAtLeast, type SessionManager, type SessionRole } from '@weaveintel/collaboration';
+import { roleAtLeast, type SessionManager, type SessionRole } from '@weaveintel/collab';
 import type { SharedSessionRow, SessionParticipantRow, UserRunRow } from './db-types/adapter-me.js';
 
 /**

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 /**
  * geneWeave collaborative NOTE co-editing — the TRUSTED RELAY around
- * `@weaveintel/coedit`'s {@link BlockDoc} (weaveNotes Phase 2).
+ * `@weaveintel/collab`'s {@link BlockDoc} (weaveNotes Phase 2).
  *
  * This is the notes counterpart of the Phase 7 run co-edit relay
  * ({@link "./coedit-sql"}), with three differences that matter:
@@ -36,9 +36,9 @@ import {
   type BlockStateVector,
   type RenderedBlock,
   type BlockSpec,
-} from '@weaveintel/coedit';
+} from '@weaveintel/collab';
 import { newUUIDv7 } from '@weaveintel/core';
-import { roleAtLeast, type SessionRole } from '@weaveintel/collaboration';
+import { roleAtLeast, type SessionRole } from '@weaveintel/collab';
 import { randomBytes, createHash } from 'node:crypto';
 import type { DatabaseAdapter } from './db-types.js';
 import type { NoteCoeditDocRow, NoteShareRow, NoteShareTokenRow } from './db-types/adapter-me.js';

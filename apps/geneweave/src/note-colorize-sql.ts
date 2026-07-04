@@ -19,7 +19,7 @@
 import {
   BlockDoc,
   type BlockOp,
-} from '@weaveintel/coedit';
+} from '@weaveintel/collab';
 import { sanitizeColor } from '@weaveintel/notes';
 import {
   isColorScheme,
@@ -33,7 +33,7 @@ import {
 } from '@weaveintel/geneweave-ui/notes';
 import { makeFence, fenceUntrusted, spotlightPreamble } from '@weaveintel/guardrails/spotlighting';
 import { newUUIDv7 } from '@weaveintel/core';
-import { roleAtLeast } from '@weaveintel/collaboration';
+import { roleAtLeast } from '@weaveintel/collab';
 import { createNoteCoeditRepo, resolveNoteAccess, type NoteAccess } from './note-coedit-sql.js';
 import { noteCoeditHub } from './note-coedit-hub.js';
 import type { DatabaseAdapter } from './db-types.js';

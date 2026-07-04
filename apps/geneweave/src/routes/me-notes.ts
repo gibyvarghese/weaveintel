@@ -53,8 +53,8 @@ import { templateByKey } from '../notes/templates.js';
 /** The image-label languages offered for the per-user preference (code → English name). */
 const NOTE_IMAGE_LANGUAGES = LANGUAGE_NAMES;
 import { createSqlNoteRepository } from '../note-repository-sql.js';
-import { BlockDoc, pmToBlocks, blocksToProseMirror, blocksToMarkdown, blocksToHtml, exportNote as coeditExportNote, isExportFormat, type ExportFormat } from '@weaveintel/coedit';
-import { roleAtLeast } from '@weaveintel/collaboration';
+import { BlockDoc, pmToBlocks, blocksToProseMirror, blocksToMarkdown, blocksToHtml, exportNote as coeditExportNote, isExportFormat, type ExportFormat } from '@weaveintel/collab';
+import { roleAtLeast } from '@weaveintel/collab';
 import {
   createNoteCoeditRepo,
   createNoteSharing,
@@ -72,7 +72,7 @@ import { createNoteScheduledAgentService } from '../note-scheduled-agent-sql.js'
 import { createMcpNotesServer } from '../mcp-notes-sql.js';
 import { parseProvenanceFromSvg } from '@weaveintel/notes';
 import { isColorScheme, coercePageTheme } from '@weaveintel/geneweave-ui/notes';
-import { sanitizeAwarenessState } from '@weaveintel/coedit';
+import { sanitizeAwarenessState } from '@weaveintel/collab';
 import { withAiPresence } from '../note-ai-presence.js';
 import { createNotePublishService, type PublishFormat } from '../note-publish-sql.js';
 import { createNoteGraphService } from '../note-graph-sql.js';
@@ -301,7 +301,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
   }, { auth: true });
 
   // weaveNotes Phase 10: EXPORT/download a note in a chosen format (Markdown / HTML / Word / lossless
-  // JSON). Reuses @weaveintel/coedit's serializers. Owner + collaborators (read access); gated by the
+  // JSON). Reuses @weaveintel/collab's serializers. Owner + collaborators (read access); gated by the
   // Builder config (export on/off + the allowed-format list). Returns the file as a download.
   router.get('/api/me/notes/:id/export', async (req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }

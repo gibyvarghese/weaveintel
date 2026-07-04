@@ -14,7 +14,7 @@
  * / thumbnails / OCR. Colours come from the pre-validated WCAG-AA palette, so a diagram is always
  * legible.
  */
-import { BlockDoc, type BlockOp } from '@weaveintel/coedit';
+import { BlockDoc, type BlockOp } from '@weaveintel/collab';
 import {
   inkFromPrimitives, strokesToSvg, validateStrokes, recolorStrokes, type InkStroke,
   buildImageProvenance, embedXmpInSvg, type ImageProvenance,
@@ -35,7 +35,7 @@ import {
 } from './notes/visual-verify.js';
 import { makeFence, fenceUntrusted, spotlightPreamble } from '@weaveintel/guardrails/spotlighting';
 import { newUUIDv7, weaveContext, hardenedFetch, type ModelRequest } from '@weaveintel/core';
-import { roleAtLeast } from '@weaveintel/collaboration';
+import { roleAtLeast } from '@weaveintel/collab';
 import { getOrCreateModel, type ChatEngineConfig } from './chat-runtime.js';
 import { createNoteCoeditRepo, resolveNoteAccess, type NoteAccess } from './note-coedit-sql.js';
 import { isSafePublicUrl } from './note-capture-sql.js';

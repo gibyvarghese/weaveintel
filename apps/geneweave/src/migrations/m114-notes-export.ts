@@ -12,7 +12,7 @@ import { safeExec } from './helpers.js';
  *   - `allowed_export_formats`  — which formats are offered (JSON array of markdown/html/word/json).
  *
  * Registers the **`export_note`** tool — so the assistant can "export my note as markdown" — grants it
- * to the weaveNotes Editor agent, and enables it. The export itself reuses `@weaveintel/coedit`'s
+ * to the weaveNotes Editor agent, and enables it. The export itself reuses `@weaveintel/collab`'s
  * serializers. Idempotent (safeExec ALTERs + INSERT OR IGNORE + JSON merges).
  */
 export function applyM114NotesExport(db: BetterSqlite3.Database): void {

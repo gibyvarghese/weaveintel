@@ -2,7 +2,7 @@
  * Accessible streaming announcements (m140 / H19) — the chat-side glue.
  *
  * Owns ONE visually-hidden `role="status" aria-live="polite"` region and drives it with the pure policy in
- * `@weaveintel/collaboration` (nextStreamAnnouncement). Instead of the transcript re-announcing the whole
+ * `@weaveintel/collab` (nextStreamAnnouncement). Instead of the transcript re-announcing the whole
  * conversation every token (the bug), a screen reader hears: "Generating response…", then — depending on the
  * workspace's mode — the finished answer once ('summary'), sentence-complete chunks as they arrive ('live'),
  * or nothing ('off'). Also applies the workspace's reduced-motion default (on top of the OS setting).
@@ -12,7 +12,7 @@ import { applyForceFocusRing } from './focus.js';
 import { setConfirmDestructive } from './dialog.js';
 import { setShowSkeletons } from './skeleton.js';
 
-// NOTE: the canonical, unit-tested version of this policy lives in `@weaveintel/collaboration`
+// NOTE: the canonical, unit-tested version of this policy lives in `@weaveintel/collab`
 // (stream-announce.ts). The raw-served browser modules can't bare-import a workspace package (only the notes
 // editor is bundled), and this decision runs per-token on the client (no server round-trip), so we mirror the
 // same pure logic here. Keep the two in sync; the package tests are the spec.

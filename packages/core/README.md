@@ -62,7 +62,7 @@ Core contracts, types, and runtime primitives for the weaveIntel AI framework.
 - Used by GeneWeave admin schema composition to reduce app-local duplication and keep metadata quality consistent
 
 ### Run substrate (Collaboration Phase 0)
-The canonical run-lifecycle contracts, relocated here from `@weaveintel/collaboration`
+The canonical run-lifecycle contracts, relocated here from `@weaveintel/collab`
 so there is ONE registry/journal interface with interchangeable backends (a KV
 reference adapter here; a SQL adapter in geneWeave), each proven by the same
 shared conformance suite.

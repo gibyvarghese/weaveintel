@@ -1,7 +1,7 @@
 /**
  * Run registry — the canonical durable run-handle store contract.
  *
- * Collaboration Phase 0: relocated from `@weaveintel/collaboration` into
+ * Collaboration Phase 0: relocated from `@weaveintel/collab` into
  * `@weaveintel/core` (the §5b verdict). A "run registry" tracks the *current
  * state* of every run — its status, owner, progress, last-seen event sequence —
  * so that state survives a process restart and is queryable from any client.

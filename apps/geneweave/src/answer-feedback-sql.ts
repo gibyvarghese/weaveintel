@@ -4,7 +4,7 @@
  * This is a thin composition layer over TWO things that already exist:
  *   1. the platform's message-feedback store + routing learning loop (recordChatFeedbackSignal), which we
  *      EXTENDED (m137) to also carry a tiered down-vote reason (`categories`) and a `tenant_id`; and
- *   2. the pure taxonomy/validation/aggregation in `@weaveintel/collaboration` (message-feedback), so the
+ *   2. the pure taxonomy/validation/aggregation in `@weaveintel/collab` (message-feedback), so the
  *      API route, the agent tool, and the Builder admin all read/write feedback the same safe way.
  *
  * It adds the genuinely new per-tenant AI-transparency config (label / disclosure / content warnings).
@@ -14,7 +14,7 @@ import type { TenantAiTransparencyRow } from './db-types/adapter-me.js';
 import {
   summarizeMessageFeedback, sanitizeFeedbackCategories, signalToRating,
   FEEDBACK_CATEGORIES, type FeedbackRow, type FeedbackCategory,
-} from '@weaveintel/collaboration';
+} from '@weaveintel/collab';
 
 const DEFAULT_TRANSPARENCY = (tenantId: string): TenantAiTransparencyRow => ({
   tenant_id: tenantId, show_ai_label: 1,

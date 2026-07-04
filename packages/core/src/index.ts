@@ -72,7 +72,7 @@ export {
 } from './json-patch.js';
 
 // Run-lifecycle substrate (Collaboration Phase 0 — relocated from
-// @weaveintel/collaboration). The PORTS (RunRegistry / RunJournal) + a reference
+// @weaveintel/collab). The PORTS (RunRegistry / RunJournal) + a reference
 // KV adapter; a host application's SQL tables are another adapter behind the same ports.
 export {
   type RunRegistry,

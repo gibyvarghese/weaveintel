@@ -13,7 +13,7 @@ import {
   annotationManagerContract,
   type CommentManager,
   type AnnotationManager,
-} from '@weaveintel/collaboration';
+} from '@weaveintel/collab';
 import { SQLiteAdapter } from './db-sqlite.js';
 import { createSqlCommentManager, createSqlAnnotationManager, mintPublicShareToken, hashPublicShareToken } from './run-comment-sql.js';
 

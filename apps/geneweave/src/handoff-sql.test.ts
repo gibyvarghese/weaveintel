@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { handoffManagerContract, type UnifiedHandoffManager } from '@weaveintel/collaboration';
+import { handoffManagerContract, type UnifiedHandoffManager } from '@weaveintel/collab';
 import { SQLiteAdapter } from './db-sqlite.js';
 import { createSqlHandoffManager, buildRunBriefing } from './handoff-sql.js';
 

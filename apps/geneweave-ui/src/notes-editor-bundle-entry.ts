@@ -18,7 +18,7 @@ export { TableHeader } from '@tiptap/extension-table-header';
 export { TableCell } from '@tiptap/extension-table-cell';
 
 // weaveNotes Phase 1 — hand-rolled creative marks + nodes (no extra installs). Names
-// match the @weaveintel/coedit round-trip so creative content survives co-editing.
+// match the @weaveintel/collab round-trip so creative content survives co-editing.
 export {
   Highlight,
   TextColor,

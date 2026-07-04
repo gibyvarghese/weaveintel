@@ -3,7 +3,7 @@
  * SQL adapter for the collaboration `PresenceManager` port (Collaboration Phase 1).
  *
  * geneWeave stores presence in the `run_presence` current-state table (m94).
- * This adapter makes that table conform to the `@weaveintel/collaboration`
+ * This adapter makes that table conform to the `@weaveintel/collab`
  * PresenceManager port — the SAME interface the in-memory reference adapter
  * implements — so both pass the shared `presenceManagerContract`. (Same
  * ports-&-adapters pattern as the Phase 0 run substrate.)
@@ -12,7 +12,7 @@
  * nothing is ever written to the durable run journal.
  */
 import { newUUIDv7, type RunPresenceParticipant } from '@weaveintel/core';
-import type { PresenceManager, PresenceScope, PresenceHeartbeat } from '@weaveintel/collaboration';
+import type { PresenceManager, PresenceScope, PresenceHeartbeat } from '@weaveintel/collab';
 import type { RunPresenceRow } from './db-types/adapter-me.js';
 
 /** The slice of the geneWeave DB adapter the presence adapter uses. */

@@ -2,7 +2,7 @@
 //
 // Hand-rolled (no extra @tiptap/* installs) so the editor gains text colour, a
 // multi-colour highlighter, callouts, toggles, image embeds, stickers and washi
-// dividers. The node/mark NAMES here MATCH the @weaveintel/coedit round-trip
+// dividers. The node/mark NAMES here MATCH the @weaveintel/collab round-trip
 // (pmToBlocks / blocksToProseMirror) exactly, so creative content survives the CRDT
 // co-edit relay — and the colour the AI/user picks is preserved through a merge.
 //

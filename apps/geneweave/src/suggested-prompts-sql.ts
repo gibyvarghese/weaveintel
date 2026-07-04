@@ -2,7 +2,7 @@
 /**
  * suggested-prompts-sql.ts — Suggested / starter prompts service (m146, Round 10).
  *
- * Ties the pure @weaveintel/collaboration `suggested-prompts` core (candidate assembly + dedupe + rank +
+ * Ties the pure @weaveintel/collab `suggested-prompts` core (candidate assembly + dedupe + rank +
  * sanitise) to the app + database. Two read paths + a write:
  *
  *   1. getSuggestions — the INSTANT path used by the empty chat (no LLM). Reads the per-tenant policy, gathers
@@ -18,7 +18,7 @@
 import {
   selectSuggestions, buildSuggestPromptsPrompt, parseSuggestedPromptsReply,
   type SuggestedPrompt, type RecentNoteSignal, type RecentChatSignal,
-} from '@weaveintel/collaboration';
+} from '@weaveintel/collab';
 import { newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter } from './db.js';
 import type { NoteAiGenerate } from './note-ai-sql.js';

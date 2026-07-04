@@ -135,7 +135,7 @@ export async function recordCapabilitySignal(
  * Convenience: ingest a chat UI feedback signal (👍/👎/regenerate/copy).
  *
  * m137: `categories` carries the small fixed taxonomy of WHY an answer got a thumbs-down (see
- * @weaveintel/collaboration FEEDBACK_CATEGORIES) — stored alongside the signal so down-votes become an
+ * @weaveintel/collab FEEDBACK_CATEGORIES) — stored alongside the signal so down-votes become an
  * actionable, aggregatable reason and not just a free-text comment. modelId/provider/taskKey are the resolved
  * routing decision; when they are present the feedback ALSO updates the model's production quality score
  * (the routing learning loop). When they are absent (e.g. a message whose decision wasn't snapshotted), the

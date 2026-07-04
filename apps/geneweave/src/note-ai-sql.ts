@@ -37,11 +37,11 @@ import {
   type BlockDocSnapshot,
   type BlockSpec,
   type RgaId,
-} from '@weaveintel/coedit';
+} from '@weaveintel/collab';
 import { newUUIDv7, weaveContext, type ModelRequest } from '@weaveintel/core';
 import { templateByKey, SYSTEM_TEMPLATES } from './notes/templates.js';
 import { makeFence, fenceUntrusted, spotlightPreamble } from '@weaveintel/guardrails/spotlighting';
-import { roleAtLeast } from '@weaveintel/collaboration';
+import { roleAtLeast } from '@weaveintel/collab';
 import { getOrCreateModel, type ChatEngineConfig } from './chat-runtime.js';
 import { createNoteCoeditRepo, resolveNoteAccess, type NoteAccess } from './note-coedit-sql.js';
 import { noteCoeditHub } from './note-coedit-hub.js';
@@ -498,7 +498,7 @@ export async function agentRecentNotes(
 
 /**
  * weaveNotes Phase 10 — the `export_note` tool helper. Exports one of the user's notes in a chosen
- * format (Markdown / HTML / Word / lossless JSON), reusing `@weaveintel/coedit`'s serializers. Owner-
+ * format (Markdown / HTML / Word / lossless JSON), reusing `@weaveintel/collab`'s serializers. Owner-
  * scoped. Returns the exported CONTENT for the text formats (markdown/html/json) so the assistant can
  * show or save it; for Word it returns the HTML body too (a `.doc` is HTML). Unknown format → markdown.
  */

@@ -5,7 +5,7 @@ import type BetterSqlite3 from 'better-sqlite3';
  *
  * A "co-edit doc" is a shared text document attached to a run that a human AND
  * the run's agent can edit at the SAME time, always converging (a CRDT — see
- * `@weaveintel/coedit`). geneWeave is the TRUSTED RELAY: it holds the canonical
+ * `@weaveintel/collab`). geneWeave is the TRUSTED RELAY: it holds the canonical
  * replica, validates every incoming edit, persists it, and fans it out live.
  *
  * Two tables (tenant-isolated by construction):

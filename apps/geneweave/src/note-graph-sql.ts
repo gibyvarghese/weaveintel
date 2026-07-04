@@ -20,7 +20,7 @@
  * the note's entities/relations and re-points its auto-links). Everything is
  * owner-scoped + tenant-isolated.
  */
-import { BlockDoc, pmToBlocks, blocksToMarkdown } from '@weaveintel/coedit';
+import { BlockDoc, pmToBlocks, blocksToMarkdown } from '@weaveintel/collab';
 import { parseWikiLinks, findUnlinkedMentions, titleKey, extractPlainText, buildLinkSuggestions, linkifyFirstMention, canonicalizeEntityName, resolveEntities, chunk, type Note, type LinkSuggestion } from '@weaveintel/notes';
 import { extractKnowledgeGraph } from '@weaveintel/extraction';
 import { cosineSimilarity } from '@weaveintel/cache';

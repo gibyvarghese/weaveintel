@@ -24,7 +24,7 @@
  * reply, and someone marks the thread "resolved" when it is handled. "Anchored to a block"
  * just means the comment remembers WHICH paragraph it is about, even after edits move things.
  */
-import { renderCommentMarkdown } from '@weaveintel/collaboration';
+import { renderCommentMarkdown } from '@weaveintel/collab';
 import { newUUIDv7 } from '@weaveintel/core';
 import { resolveNoteAccess } from './note-coedit-sql.js';
 import type { DatabaseAdapter } from './db-types.js';

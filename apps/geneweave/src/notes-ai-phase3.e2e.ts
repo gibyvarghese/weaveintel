@@ -15,7 +15,7 @@
  */
 import { test, expect, type Page, type APIRequestContext } from '@playwright/test';
 import { createRunClient, createRunSession, type RunClient, type RunSession } from '@weaveintel/client';
-import { BlockDoc, diffBlocks, type BlockDocSnapshot, type BlockSpec } from '@weaveintel/coedit';
+import { BlockDoc, diffBlocks, type BlockDocSnapshot, type BlockSpec } from '@weaveintel/collab';
 
 const PASSWORD = 'Str0ng!Pass99';
 const OWNER = 'notes-p3-owner@weaveintel.dev';

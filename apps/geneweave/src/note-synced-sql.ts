@@ -23,7 +23,7 @@
  * Think of it like an embedded live cell from another spreadsheet: you are not copying the
  * value, you are pointing at it, so when the original changes, what you see changes too.
  */
-import { BlockDoc, pmToBlocks, blocksToMarkdown } from '@weaveintel/coedit';
+import { BlockDoc, pmToBlocks, blocksToMarkdown } from '@weaveintel/collab';
 import { newUUIDv7 } from '@weaveintel/core';
 import { type Note } from '@weaveintel/notes';
 import type { DatabaseAdapter } from './db-types.js';

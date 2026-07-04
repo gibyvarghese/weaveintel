@@ -4,7 +4,7 @@ import type { DatabaseAdapter } from '../db.js';
 import type { ChatEngine, ChatAttachment } from '../chat.js';
 import { DashboardService } from '../dashboard.js';
 import { recordChatFeedbackSignal } from '../routing-feedback.js';
-import { sanitizeFeedbackCategories } from '@weaveintel/collaboration';
+import { sanitizeFeedbackCategories } from '@weaveintel/collab';
 import { json, html, readBody, LARGE_REQUEST_BODY_BYTES } from '../server-core.js';
 import type { Router } from '../server-core.js';
 import { createActionItem } from '@weaveintel/human-tasks';

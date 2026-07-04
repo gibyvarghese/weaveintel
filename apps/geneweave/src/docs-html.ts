@@ -186,7 +186,7 @@ ${code('text', `Applications (geneweave, your app)
   └─ Agent Layer    @weaveintel/agents · @weaveintel/workflows · @weaveintel/live-agents
                     @weaveintel/a2a · @weaveintel/skills · @weaveintel/cost-governor
   └─ Capability     @weaveintel/prompts · @weaveintel/memory · @weaveintel/retrieval
-                    @weaveintel/extraction · @weaveintel/graph · @weaveintel/collaboration
+                    @weaveintel/extraction · @weaveintel/graph · @weaveintel/collab
                     @weaveintel/evals · @weaveintel/guardrails · @weaveintel/resilience
   └─ Integration    @weaveintel/providers · @weaveintel/mcp-client · @weaveintel/mcp-server
                     @weaveintel/tools-* · @weaveintel/sandbox · @weaveintel/oauth

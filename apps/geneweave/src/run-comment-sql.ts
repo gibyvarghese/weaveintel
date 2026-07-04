@@ -1,6 +1,6 @@
 /**
  * geneWeave SQL adapters for Collaboration Phase 4 — run comments + annotations.
- * These are the SQL implementations of the `@weaveintel/collaboration`
+ * These are the SQL implementations of the `@weaveintel/collab`
  * `CommentManager` and `AnnotationManager` PORTS; both pass the SAME shared
  * contracts the in-memory reference adapters pass (the Phase 0–3 pattern).
  * Plus the public-share token util (256-bit, SHA-256-hashed at rest).
@@ -16,7 +16,7 @@ import {
   type RunAnnotation,
   type AnnotationDataType,
   type AnnotationSource,
-} from '@weaveintel/collaboration';
+} from '@weaveintel/collab';
 import type { DatabaseAdapter } from './db-types.js';
 import type { RunCommentRow, RunAnnotationRow } from './db-types/adapter-me.js';
 

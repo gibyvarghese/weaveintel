@@ -18,11 +18,11 @@
  * The same service powers the `POST /api/me/notes/:id/emit-artifact` endpoint and the
  * `note_publish` agent tool, so a human and the agent publish through one audited path.
  */
-import { BlockDoc, pmToBlocks, blocksToMarkdown, blocksToHtml } from '@weaveintel/coedit';
+import { BlockDoc, pmToBlocks, blocksToMarkdown, blocksToHtml } from '@weaveintel/collab';
 import { redactText, publishPolicyForSensitivity, type PublishSensitivity } from '@weaveintel/artifacts';
 import { resolveNoteAccess, type NoteAccess } from './note-coedit-sql.js';
 import { signShareToken } from './routes/artifacts.js';
-import { roleAtLeast } from '@weaveintel/collaboration';
+import { roleAtLeast } from '@weaveintel/collab';
 import type { DatabaseAdapter } from './db-types.js';
 
 export type PublishFormat = 'markdown' | 'html';

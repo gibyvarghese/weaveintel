@@ -9,16 +9,16 @@
  * it is pure "right now" chatter sent over the note's live pipe (SSE) and rendered on top of the
  * editor.
  *
- * It reuses the server's `@weaveintel/coedit` Awareness convention (per-peer last-write-wins by
+ * It reuses the server's `@weaveintel/collab` Awareness convention (per-peer last-write-wins by
  * a clock, with a 30s time-to-live so a closed tab's cursor fades). The peer-colour hash here is
- * a deliberate browser-safe MIRROR of `@weaveintel/coedit`'s `peerColor` (the package can't be
+ * a deliberate browser-safe MIRROR of `@weaveintel/collab`'s `peerColor` (the package can't be
  * imported into the un-bundled browser client) — same palette, same algorithm, so a person is
  * the same colour on every screen.
  */
 import type { NoteCoeditSession, AwarenessLike } from './notes-coedit.js';
 import type { EditorInstance } from './notes-editor.js';
 
-// — Mirror of @weaveintel/coedit CURSOR_COLORS + peerColor (browser-safe copy) —
+// — Mirror of @weaveintel/collab CURSOR_COLORS + peerColor (browser-safe copy) —
 const CURSOR_COLORS = ['#D85A30', '#3B6FB0', '#8254C8', '#D98A3D', '#C84A7B', '#2C8C7C', '#B0521F', '#5B6BD6'];
 function hashString(s: string): number { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
 export function peerColor(key: string): string { return CURSOR_COLORS[hashString(key) % CURSOR_COLORS.length]!; }

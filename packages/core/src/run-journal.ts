@@ -1,7 +1,7 @@
 /**
  * Run event journal — the canonical append-only run-event log contract.
  *
- * Collaboration Phase 0: this used to live in `@weaveintel/collaboration` as a
+ * Collaboration Phase 0: this used to live in `@weaveintel/collab` as a
  * second, parallel implementation of the run journal that a host application already had
  * in SQL. The journal is *run-lifecycle substrate*, not a collaboration concern,
  * and its vocabulary (`RunEventEnvelope`, `RunEventCursor`) already lives here —

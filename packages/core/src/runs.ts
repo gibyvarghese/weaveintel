@@ -13,7 +13,7 @@
 
 /**
  * Lifecycle status of a run.  Terminal states: `completed`, `failed`,
- * `cancelled`.  Promoted from `@weaveintel/collaboration` so all packages can
+ * `cancelled`.  Promoted from `@weaveintel/collab` so all packages can
  * reference it without a collaboration dependency.
  */
 export type RunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';

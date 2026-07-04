@@ -9,7 +9,7 @@ import { safeExec } from './helpers.js';
  * quality signal that steers model routing). Rather than duplicate it, we add the two things it lacked:
  *
  *  • message_feedback.categories — a small, fixed taxonomy of WHY an answer got a thumbs-down
- *    (see @weaveintel/collaboration message-feedback: inaccurate / incomplete / didn't-follow / unsafe …).
+ *    (see @weaveintel/collab message-feedback: inaccurate / incomplete / didn't-follow / unsafe …).
  *    A free-text "comment" existed; a structured reason did not, so down-votes could not be turned into an
  *    actionable, aggregatable signal. We also add message_feedback.tenant_id so a workspace's feedback can be
  *    summarised without joining every user to their tenant.

@@ -3,7 +3,7 @@
  *
  * The empty chat shows a few CLICKABLE conversation starters instead of a blank screen. The server does all
  * the thinking (curated defaults + personalised-from-your-own-notes/chats, deduped + ranked via the pure
- * @weaveintel/collaboration core) and hands the UI the final list; this module just fetches it, renders the
+ * @weaveintel/collab core) and hands the UI the final list; this module just fetches it, renders the
  * cards, and logs which one was picked. Personalised cards get a subtle "for you" (mint) treatment so it's
  * clear they were tailored — never sent to another user (owner-scoped on the server).
  */

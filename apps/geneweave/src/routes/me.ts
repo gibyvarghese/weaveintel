@@ -61,11 +61,11 @@ import { createSqlRunJournal } from '../run-substrate-sql.js';
 import { createSqlPresenceManager, withAgentPeer } from '../presence-sql.js';
 import { loadCollaborationConfig, clientCollabConfig } from '../collab-config.js';
 import { resolveRunAccess, createSqlSessionManager, mintShareToken, hashShareToken, annotatePresenceRoles } from '../shared-session-sql.js';
-import { roleAtLeast, type SessionRole, type SubscriptionChannel } from '@weaveintel/collaboration';
+import { roleAtLeast, type SessionRole, type SubscriptionChannel } from '@weaveintel/collab';
 import { createSqlSubscriptionManager, createSqlFeedStore } from '../run-subscription-sql.js';
 import { enqueueRunTerminalNotifications, isSafeWebhookUrl } from '../run-notifications-outbox.js';
 import { createSqlCommentManager, createSqlAnnotationManager, mintPublicShareToken } from '../run-comment-sql.js';
-import { summarizeAnnotations, annotationsToEvalExamples, type CommentAnchor, type AnnotationDataType, type AnnotationSource, type HandoffScope, type HandoffBriefing } from '@weaveintel/collaboration';
+import { summarizeAnnotations, annotationsToEvalExamples, type CommentAnchor, type AnnotationDataType, type AnnotationSource, type HandoffScope, type HandoffBriefing } from '@weaveintel/collab';
 import { createSqlHandoffManager, buildRunBriefing } from '../handoff-sql.js';
 import { createCoeditRepo, userSiteId } from '../coedit-sql.js';
 

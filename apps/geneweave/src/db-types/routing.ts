@@ -209,7 +209,7 @@ export interface MessageFeedbackRow {
   comment: string | null;
   /**
    * m137 — for a thumbs-down, the small fixed taxonomy of WHY (JSON array of reason keys, see
-   * @weaveintel/collaboration FEEDBACK_CATEGORIES). Null for up-votes / older rows.
+   * @weaveintel/collab FEEDBACK_CATEGORIES). Null for up-votes / older rows.
    */
   categories: string | null;
   /** m137 — workspace the feedback belongs to, so it can be summarised per tenant. */

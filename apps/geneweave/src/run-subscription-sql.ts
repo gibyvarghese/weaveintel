@@ -1,7 +1,7 @@
 /**
  * geneWeave SQL adapters for Collaboration Phase 3 — durable run subscriptions
  * and the in-app notification feed. These are the SQL implementations of the
- * `@weaveintel/collaboration` `SubscriptionManager` and `@weaveintel/notifications`
+ * `@weaveintel/collab` `SubscriptionManager` and `@weaveintel/notifications`
  * `NotificationFeedStore` PORTS; both pass the SAME shared contracts the
  * in-memory reference adapters pass (the Phase 0/1/2 pattern — one interface,
  * two interchangeable backends).
@@ -12,7 +12,7 @@ import {
   type SubscriptionManager,
   type RunSubscription,
   type SubscriptionChannel,
-} from '@weaveintel/collaboration';
+} from '@weaveintel/collab';
 import type { NotificationFeedStore, FeedNotification } from '@weaveintel/notifications';
 import type { DatabaseAdapter } from './db-types.js';
 import type { RunSubscriptionRow, NotificationFeedRow } from './db-types/adapter-me.js';

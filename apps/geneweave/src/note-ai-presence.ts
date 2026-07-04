@@ -12,7 +12,7 @@
  * EPHEMERAL — never stored. The AI's actual edit is still a suggestion the human accepts/rejects;
  * this only adds the "the assistant is working on this right now" live signal.
  */
-import { aiPeerId, aiAwarenessState } from '@weaveintel/coedit';
+import { aiPeerId, aiAwarenessState } from '@weaveintel/collab';
 import { noteCoeditHub } from './note-coedit-hub.js';
 import { createNoteSettingsService } from './note-settings-sql.js';
 import type { DatabaseAdapter } from './db-types.js';

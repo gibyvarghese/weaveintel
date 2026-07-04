@@ -10,7 +10,7 @@ import { describe, it, expect } from 'vitest';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { newUUIDv7 } from '@weaveintel/core';
-import { BlockDoc, diffBlocks } from '@weaveintel/coedit';
+import { BlockDoc, diffBlocks } from '@weaveintel/collab';
 import { SQLiteAdapter } from './db-sqlite.js';
 import { createNoteCoeditRepo, createNoteSharing, resolveNoteAccess } from './note-coedit-sql.js';
 import { createNoteAiService, type NoteAiGenerate } from './note-ai-sql.js';

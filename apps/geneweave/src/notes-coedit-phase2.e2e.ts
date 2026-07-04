@@ -22,7 +22,7 @@
  */
 import { test, expect, type Page, type APIRequestContext } from '@playwright/test';
 import { createRunClient, createRunSession, type RunClient, type RunSession, type RunEventEnvelope } from '@weaveintel/client';
-import { BlockDoc, diffBlocks, type BlockDocSnapshot, type BlockSpec, type BlockStateVector, type BlockOp } from '@weaveintel/coedit';
+import { BlockDoc, diffBlocks, type BlockDocSnapshot, type BlockSpec, type BlockStateVector, type BlockOp } from '@weaveintel/collab';
 
 const PASSWORD = 'Str0ng!Pass99';
 const OWNER = 'notes-p2-owner@weaveintel.dev';

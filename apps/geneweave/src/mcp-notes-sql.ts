@@ -18,7 +18,7 @@
  */
 import { extractPlainText } from '@weaveintel/notes';
 import { handleMcpMessage, mcpText, MCP_PROTOCOL_VERSION, type McpTool, type McpToolResult } from '@weaveintel/mcp-server';
-import { BlockDoc, pmToBlocks, blocksToMarkdown } from '@weaveintel/coedit';
+import { BlockDoc, pmToBlocks, blocksToMarkdown } from '@weaveintel/collab';
 import { newUUIDv7 } from '@weaveintel/core';
 import { createHash, randomBytes } from 'node:crypto';
 import { createNoteSettingsService } from './note-settings-sql.js';

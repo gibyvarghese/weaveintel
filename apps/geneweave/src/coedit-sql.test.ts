@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { RgaDoc } from '@weaveintel/coedit';
+import { RgaDoc } from '@weaveintel/collab';
 import { SQLiteAdapter } from './db-sqlite.js';
 import { createCoeditRepo, userSiteId } from './coedit-sql.js';
 

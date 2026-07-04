@@ -4,44 +4,120 @@
     "outDir": "./dist",
     "rootDir": "./src"
   },
-  "include": ["src"],
+  "include": [
+    "src"
+  ],
   "references": [
-    { "path": "../geneweave-ui" },
-    { "path": "../../packages/core" },
-    { "path": "../../packages/coedit" },
-    { "path": "../../packages/oauth" },
-    { "path": "../../packages/agents" },
-    { "path": "../../packages/observability" },
-    { "path": "../../packages/redaction" },
-    { "path": "../../packages/evals" },
-    { "path": "../../packages/workflows" },
-    { "path": "../../packages/triggers" },
-    { "path": "../../packages/capability-packs" },
-    { "path": "../../packages/cost-governor" },
-    { "path": "../../packages/encryption" },
-    { "path": "../../packages/guardrails" },
-    { "path": "../../packages/scope" },
-    { "path": "../../packages/human-tasks" },
-    { "path": "../../packages/notifications" },
-    { "path": "../../packages/notes" },
-    { "path": "../../packages/contracts" },
-    { "path": "../../packages/prompts" },
-    { "path": "../../packages/skills" },
-    { "path": "../../packages/routing" },
-    { "path": "../../packages/cache" },
-    { "path": "../../packages/identity" },
-    { "path": "../../packages/i18n" },
-    { "path": "../../packages/memory" },
-    { "path": "../../packages/mcp-statsnz" },
-    { "path": "../../packages/mcp-server" },
-    { "path": "../../packages/tools-http" },
-    { "path": "../../packages/tools-time" },
-    { "path": "../../packages/ui-primitives" },
-    { "path": "../../packages/devtools" },
-    { "path": "../../packages/recipes" },
-    { "path": "../../packages/resilience" },
-    { "path": "../../packages/live-agents" },
-    { "path": "../../packages/live-agents-runtime" },
-    { "path": "../../packages/live-agents-trace-tools" }
+    {
+      "path": "../geneweave-ui"
+    },
+    {
+      "path": "../../packages/core"
+    },
+    {
+      "path": "../../packages/oauth"
+    },
+    {
+      "path": "../../packages/agents"
+    },
+    {
+      "path": "../../packages/observability"
+    },
+    {
+      "path": "../../packages/redaction"
+    },
+    {
+      "path": "../../packages/evals"
+    },
+    {
+      "path": "../../packages/workflows"
+    },
+    {
+      "path": "../../packages/triggers"
+    },
+    {
+      "path": "../../packages/capability-packs"
+    },
+    {
+      "path": "../../packages/cost-governor"
+    },
+    {
+      "path": "../../packages/encryption"
+    },
+    {
+      "path": "../../packages/guardrails"
+    },
+    {
+      "path": "../../packages/scope"
+    },
+    {
+      "path": "../../packages/human-tasks"
+    },
+    {
+      "path": "../../packages/notifications"
+    },
+    {
+      "path": "../../packages/notes"
+    },
+    {
+      "path": "../../packages/contracts"
+    },
+    {
+      "path": "../../packages/prompts"
+    },
+    {
+      "path": "../../packages/skills"
+    },
+    {
+      "path": "../../packages/routing"
+    },
+    {
+      "path": "../../packages/cache"
+    },
+    {
+      "path": "../../packages/identity"
+    },
+    {
+      "path": "../../packages/i18n"
+    },
+    {
+      "path": "../../packages/memory"
+    },
+    {
+      "path": "../../packages/mcp-statsnz"
+    },
+    {
+      "path": "../../packages/mcp-server"
+    },
+    {
+      "path": "../../packages/tools-http"
+    },
+    {
+      "path": "../../packages/tools-time"
+    },
+    {
+      "path": "../../packages/ui-primitives"
+    },
+    {
+      "path": "../../packages/devtools"
+    },
+    {
+      "path": "../../packages/recipes"
+    },
+    {
+      "path": "../../packages/resilience"
+    },
+    {
+      "path": "../../packages/live-agents"
+    },
+    {
+      "path": "../../packages/live-agents-runtime"
+    },
+    {
+      "path": "../../packages/live-agents-trace-tools"
+    },
+    {
+      "path": "../../packages/collab"
+    }
   ]
 }

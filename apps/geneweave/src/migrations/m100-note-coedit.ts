@@ -5,7 +5,7 @@ import type BetterSqlite3 from 'better-sqlite3';
  *
  * Phase 7 (m99) made a RUN's text doc co-editable. Phase 2 does the same for a
  * NOTE — but a note is a STRUCTURED, rich-text document, so it is co-edited as
- * `BlockDoc` block-ops (`@weaveintel/coedit`), and a note is USER-scoped (not tied
+ * `BlockDoc` block-ops (`@weaveintel/collab`), and a note is USER-scoped (not tied
  * to a run), so it brings its own lightweight sharing model. geneWeave stays the
  * TRUSTED RELAY: it holds the canonical replica, validates every block-op, persists
  * it, and fans it out live over a per-note event stream.

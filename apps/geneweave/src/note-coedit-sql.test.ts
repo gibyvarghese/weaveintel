@@ -13,7 +13,7 @@ import { describe, it, expect } from 'vitest';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { newUUIDv7 } from '@weaveintel/core';
-import { BlockDoc, diffBlocks, type BlockOp, type BlockSpec } from '@weaveintel/coedit';
+import { BlockDoc, diffBlocks, type BlockOp, type BlockSpec } from '@weaveintel/collab';
 import { SQLiteAdapter } from './db-sqlite.js';
 import { createNoteCoeditRepo, createNoteSharing, resolveNoteAccess, userNoteSiteId } from './note-coedit-sql.js';
 

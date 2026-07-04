@@ -1,97 +1,278 @@
 {
   "files": [],
   "references": [
-    { "path": "packages/core" },
-    { "path": "packages/models" },
-    { "path": "packages/notifications" },
-    { "path": "packages/notes" },
-    { "path": "packages/agents" },
-    { "path": "packages/memory" },
-    { "path": "packages/retrieval" },
-    { "path": "packages/oauth" },
-    { "path": "packages/observability" },
-    { "path": "packages/redaction" },
-    { "path": "packages/skills" },
-    { "path": "packages/mcp-client" },
-    { "path": "packages/mcp-server" },
-    { "path": "packages/mcp-statsnz" },
-    { "path": "packages/a2a" },
-    { "path": "packages/evals" },
-    { "path": "packages/testing" },
-    { "path": "packages/provider-openai" },
-    { "path": "packages/provider-anthropic" },
-    { "path": "packages/provider-google" },
-    { "path": "packages/provider-llamacpp" },
-    { "path": "packages/provider-ollama" },
-    { "path": "packages/workflows" },
-    { "path": "packages/guardrails" },
-    { "path": "packages/human-tasks" },
-    { "path": "packages/contracts" },
-    { "path": "packages/prompts" },
-    { "path": "packages/routing" },
-    { "path": "packages/tool-schema" },
-    { "path": "packages/cache" },
-    { "path": "packages/identity" },
-    { "path": "packages/tools" },
-    { "path": "packages/tools-search" },
-    { "path": "packages/tools-time" },
-    { "path": "packages/tools-http" },
-    { "path": "packages/tools-browser" },
-    { "path": "packages/tools-social" },
-    { "path": "packages/tools-enterprise" },
-    { "path": "packages/tools-gmail" },
-    { "path": "packages/tools-kaggle" },
-    { "path": "packages/tools-marketdata" },
-    { "path": "packages/tools-news" },
-    { "path": "packages/tools-altdata" },
-    { "path": "packages/equity-scoring" },
-    { "path": "packages/tools-broker" },
-    { "path": "packages/tools-outlook" },
-    { "path": "packages/tools-imap" },
-    { "path": "packages/tools-gdrive" },
-    { "path": "packages/tools-onedrive" },
-    { "path": "packages/tools-dropbox" },
-    { "path": "packages/tools-gcal" },
-    { "path": "packages/tools-outlook-cal" },
-    { "path": "packages/tools-slack" },
-    { "path": "packages/tools-webhook" },
-    { "path": "packages/tools-filewatch" },
-    { "path": "packages/replay" },
-    { "path": "packages/triggers" },
-    { "path": "packages/capability-packs" },
-    { "path": "packages/cost-governor" },
-    { "path": "packages/encryption" },
-    { "path": "packages/tenancy" },
-    { "path": "packages/sandbox" },
-    { "path": "packages/extraction" },
-    { "path": "packages/artifacts" },
-    { "path": "packages/reliability" },
-    { "path": "packages/durability" },
-    { "path": "packages/resilience" },
-    { "path": "packages/collaboration" },
-    { "path": "packages/coedit" },
-    { "path": "packages/compliance" },
-    { "path": "packages/graph" },
-    { "path": "packages/plugins" },
-    { "path": "packages/ui-primitives" },
-    { "path": "packages/devtools" },
-    { "path": "packages/recipes" },
-    { "path": "packages/persistence" },
-    { "path": "packages/social-growth" },
-    { "path": "packages/live-agents" },
-    { "path": "packages/live-agents-runtime" },
-    { "path": "packages/live-agents-trace-tools" },
-    { "path": "packages/client" },
-    { "path": "packages/react-client" },
-    { "path": "packages/weaveintel" },
-    { "path": "apps/geneweave" },
-    { "path": "apps/geneweave-ui" },
-    { "path": "apps/live-agents-demo" },
-    { "path": "clients/tokens" },
-    { "path": "clients/api-client" },
-    { "path": "packages/a11y" },
-    { "path": "packages/i18n" },
-    { "path": "packages/scope" },
-    { "path": "packages/voice" }
+    {
+      "path": "packages/core"
+    },
+    {
+      "path": "packages/models"
+    },
+    {
+      "path": "packages/notifications"
+    },
+    {
+      "path": "packages/notes"
+    },
+    {
+      "path": "packages/agents"
+    },
+    {
+      "path": "packages/memory"
+    },
+    {
+      "path": "packages/retrieval"
+    },
+    {
+      "path": "packages/oauth"
+    },
+    {
+      "path": "packages/observability"
+    },
+    {
+      "path": "packages/redaction"
+    },
+    {
+      "path": "packages/skills"
+    },
+    {
+      "path": "packages/mcp-client"
+    },
+    {
+      "path": "packages/mcp-server"
+    },
+    {
+      "path": "packages/mcp-statsnz"
+    },
+    {
+      "path": "packages/a2a"
+    },
+    {
+      "path": "packages/evals"
+    },
+    {
+      "path": "packages/testing"
+    },
+    {
+      "path": "packages/provider-openai"
+    },
+    {
+      "path": "packages/provider-anthropic"
+    },
+    {
+      "path": "packages/provider-google"
+    },
+    {
+      "path": "packages/provider-llamacpp"
+    },
+    {
+      "path": "packages/provider-ollama"
+    },
+    {
+      "path": "packages/workflows"
+    },
+    {
+      "path": "packages/guardrails"
+    },
+    {
+      "path": "packages/human-tasks"
+    },
+    {
+      "path": "packages/contracts"
+    },
+    {
+      "path": "packages/prompts"
+    },
+    {
+      "path": "packages/routing"
+    },
+    {
+      "path": "packages/tool-schema"
+    },
+    {
+      "path": "packages/cache"
+    },
+    {
+      "path": "packages/identity"
+    },
+    {
+      "path": "packages/tools"
+    },
+    {
+      "path": "packages/tools-search"
+    },
+    {
+      "path": "packages/tools-time"
+    },
+    {
+      "path": "packages/tools-http"
+    },
+    {
+      "path": "packages/tools-browser"
+    },
+    {
+      "path": "packages/tools-social"
+    },
+    {
+      "path": "packages/tools-enterprise"
+    },
+    {
+      "path": "packages/tools-gmail"
+    },
+    {
+      "path": "packages/tools-kaggle"
+    },
+    {
+      "path": "packages/tools-marketdata"
+    },
+    {
+      "path": "packages/tools-news"
+    },
+    {
+      "path": "packages/tools-altdata"
+    },
+    {
+      "path": "packages/equity-scoring"
+    },
+    {
+      "path": "packages/tools-broker"
+    },
+    {
+      "path": "packages/tools-outlook"
+    },
+    {
+      "path": "packages/tools-imap"
+    },
+    {
+      "path": "packages/tools-gdrive"
+    },
+    {
+      "path": "packages/tools-onedrive"
+    },
+    {
+      "path": "packages/tools-dropbox"
+    },
+    {
+      "path": "packages/tools-gcal"
+    },
+    {
+      "path": "packages/tools-outlook-cal"
+    },
+    {
+      "path": "packages/tools-slack"
+    },
+    {
+      "path": "packages/tools-webhook"
+    },
+    {
+      "path": "packages/tools-filewatch"
+    },
+    {
+      "path": "packages/replay"
+    },
+    {
+      "path": "packages/triggers"
+    },
+    {
+      "path": "packages/capability-packs"
+    },
+    {
+      "path": "packages/cost-governor"
+    },
+    {
+      "path": "packages/encryption"
+    },
+    {
+      "path": "packages/tenancy"
+    },
+    {
+      "path": "packages/sandbox"
+    },
+    {
+      "path": "packages/extraction"
+    },
+    {
+      "path": "packages/artifacts"
+    },
+    {
+      "path": "packages/reliability"
+    },
+    {
+      "path": "packages/durability"
+    },
+    {
+      "path": "packages/resilience"
+    },
+    {
+      "path": "packages/compliance"
+    },
+    {
+      "path": "packages/graph"
+    },
+    {
+      "path": "packages/plugins"
+    },
+    {
+      "path": "packages/ui-primitives"
+    },
+    {
+      "path": "packages/devtools"
+    },
+    {
+      "path": "packages/recipes"
+    },
+    {
+      "path": "packages/persistence"
+    },
+    {
+      "path": "packages/social-growth"
+    },
+    {
+      "path": "packages/live-agents"
+    },
+    {
+      "path": "packages/live-agents-runtime"
+    },
+    {
+      "path": "packages/live-agents-trace-tools"
+    },
+    {
+      "path": "packages/client"
+    },
+    {
+      "path": "packages/react-client"
+    },
+    {
+      "path": "packages/weaveintel"
+    },
+    {
+      "path": "apps/geneweave"
+    },
+    {
+      "path": "apps/geneweave-ui"
+    },
+    {
+      "path": "apps/live-agents-demo"
+    },
+    {
+      "path": "clients/tokens"
+    },
+    {
+      "path": "clients/api-client"
+    },
+    {
+      "path": "packages/a11y"
+    },
+    {
+      "path": "packages/i18n"
+    },
+    {
+      "path": "packages/scope"
+    },
+    {
+      "path": "packages/voice"
+    },
+    {
+      "path": "packages/collab"
+    }
   ]
 }

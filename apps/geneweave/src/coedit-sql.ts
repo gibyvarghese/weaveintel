@@ -1,6 +1,6 @@
 /**
  * geneWeave CRDT co-editing repository (Collaboration Phase 7) — the TRUSTED
- * RELAY around `@weaveintel/coedit`.
+ * RELAY around `@weaveintel/collab`.
  *
  * The server holds the canonical replica of each shared document. A client never
  * edits the database directly: it submits ops, which this repository VALIDATES
@@ -23,7 +23,7 @@ import {
   type RgaOp,
   type RgaSnapshot,
   type StateVector,
-} from '@weaveintel/coedit';
+} from '@weaveintel/collab';
 import { newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter } from './db-types.js';
 import type { CoeditDocRow, CoeditOpRow } from './db-types/adapter-me.js';
