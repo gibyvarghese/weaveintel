@@ -23,6 +23,8 @@ apps/geneweave/PROCESS_CARD_UX_SPEC.md
 /*_REPORT.md
 /*_PLAN.md
 /*_SPEC.md
+# ...except the restructure handover report, which is an intentional committed deliverable:
+!/RESTRUCTURE_REPORT.md
 /*_NOTES.md
 
 # Local Copilot agent instructions (not for public repo).
