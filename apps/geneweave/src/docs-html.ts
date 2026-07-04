@@ -4120,22 +4120,22 @@ ${section('pers-adapters', 'High-Level Adapters (Workflow Stores)', `
 <p>Workflow stores (checkpoints, run repository, audit log, etc.) use typed adapters with CRUD operations on top of the underlying DB driver. These differ from the KV slot — they manage workflow-specific schemas and queries.</p>
 
 ${code('typescript', `import {
-  SqliteCheckpointStore,
-  SqliteWorkflowRunRepository,
-  SqliteAuditLog,
-  SqliteStepLockStore,
-  SqliteIdempotencyStore,
+  weaveSqliteCheckpointStore,
+  weaveSqliteWorkflowRunRepository,
+  weaveSqliteAuditLog,
+  weaveSqliteStepLockStore,
+  weaveSqliteIdempotencyStore,
 } from '@weaveintel/workflows';
 
 // All SQLite-backed workflow stores share one file
-const dbPath = './workflows.db';
+const databasePath = './workflows.db';
 
 const engine = new DefaultWorkflowEngine({
-  checkpointStore: new SqliteCheckpointStore(dbPath),
-  runRepository:   new SqliteWorkflowRunRepository(dbPath),
-  auditLog:        new SqliteAuditLog(dbPath),
-  stepLockStore:   new SqliteStepLockStore(dbPath),
-  idempotencyStore: new SqliteIdempotencyStore(dbPath),
+  checkpointStore: weaveSqliteCheckpointStore({ databasePath }),
+  runRepository:   weaveSqliteWorkflowRunRepository({ databasePath }),
+  auditLog:        weaveSqliteAuditLog({ databasePath }),
+  stepLockStore:   weaveSqliteStepLockStore({ databasePath }),
+  idempotencyStore: weaveSqliteIdempotencyStore({ databasePath }),
 });`, ['@weaveintel/workflows'])}
 `)}`;
 }
@@ -4665,25 +4665,18 @@ ${featureCards([
 ])}
 
 ${section('browser-setup', 'Setup', `
-${code('typescript', `import { createBrowserToolRegistry } from '@weaveintel/tools-browser';
+${code('typescript', `import { createBrowserTools } from '@weaveintel/tools-browser';
 import { weaveAgent } from '@weaveintel/agents';
 import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
-import { weaveContext } from '@weaveintel/core';
+import { weaveContext, weaveToolRegistry } from '@weaveintel/core';
 
-// Creates a registry with all browser tools pre-registered
-const browserTools = createBrowserToolRegistry({
-  // Optional: only include specific tools
-  include: ['fetch_page', 'extract_content', 'scrape_structured'],
-  fetchOptions: {
-    timeoutMs: 15_000,
-    maxBytes:  5 * 1024 * 1024,  // 5 MiB
-    userAgent: 'WeaveIntel/1.0 (Research Bot)',
-  },
-});
+// createBrowserTools() returns the browser Tool[] — register them in a registry
+const tools = weaveToolRegistry();
+for (const t of createBrowserTools()) tools.register(t);
 
 const agent = weaveAgent({
   model:        weaveAnthropicModel('claude-sonnet-4-6'),
-  tools:        browserTools,
+  tools,
   systemPrompt: 'You are a research assistant. Use browser tools to find and extract information from the web.',
   maxSteps:     6,
 });
@@ -4698,20 +4691,16 @@ console.log(result.output);`, ['@weaveintel/tools-browser', '@weaveintel/agents'
 ${section('browser-playwright', 'Playwright Automation', `
 <p>Playwright tools require the sandbox with a browser-enabled image. Use them for dynamic pages that require JavaScript execution.</p>
 
-${code('typescript', `import { createPlaywrightToolRegistry } from '@weaveintel/tools-browser';
-import { createLocalCSEProvider } from '@weaveintel/sandbox';
+${code('typescript', `import { createAutomationTools } from '@weaveintel/tools-browser';
+import { weaveToolRegistry } from '@weaveintel/core';
 
-const sandbox = createLocalCSEProvider({
-  networkAccess:    true,
-  networkAllowlist: ['github.com', 'api.github.com'],
-});
-
-// Playwright tools run code inside a browser-enabled sandbox container
-const playwrightTools = createPlaywrightToolRegistry({ sandbox });
+// Browser-automation tools drive a real browser (Playwright) — register them
+const tools = weaveToolRegistry();
+for (const t of createAutomationTools()) tools.register(t);
 
 const agent = weaveAgent({
   model: weaveAnthropicModel('claude-sonnet-4-6'),
-  tools: playwrightTools,
+  tools,
   systemPrompt: 'You can control a browser. Take screenshots and interact with web pages.',
 });
 
@@ -4739,25 +4728,27 @@ ${featureCards([
 ])}
 
 ${section('search-setup', 'Setup', `
-${code('typescript', `import { createSearchToolRegistry } from '@weaveintel/tools/search';
+${code('typescript', `import { createSearchTools, createSearchRouter } from '@weaveintel/tools/search';
 import { weaveAgent } from '@weaveintel/agents';
 import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
-import { weaveContext } from '@weaveintel/core';
+import { weaveContext, weaveToolRegistry } from '@weaveintel/core';
 
-const searchTools = createSearchToolRegistry({
-  providers: [
-    { kind: 'tavily', apiKey: process.env['TAVILY_API_KEY']! },
-    { kind: 'brave',  apiKey: process.env['BRAVE_API_KEY']! },
-    { kind: 'bing',   apiKey: process.env['BING_API_KEY']! },
-  ],
-  maxResults:  5,      // results per call
-  timeoutMs:   8_000,  // per provider timeout
-  includeRaw:  false,  // exclude raw HTML from results
+// A router tries its providers in priority order (lower priority = tried first)
+const router = createSearchRouter({
+  configs: {
+    tavily: { name: 'tavily', enabled: true, apiKey: process.env['TAVILY_API_KEY']!, priority: 10 },
+    brave:  { name: 'brave',  enabled: true, apiKey: process.env['BRAVE_API_KEY']!,  priority: 20 },
+    bing:   { name: 'bing',   enabled: true, apiKey: process.env['BING_API_KEY']!,   priority: 30 },
+  },
 });
+
+// createSearchTools(router) returns the search Tool[] — register them
+const tools = weaveToolRegistry();
+for (const t of createSearchTools(router)) tools.register(t);
 
 const agent = weaveAgent({
   model:        weaveAnthropicModel('claude-sonnet-4-6'),
-  tools:        searchTools,
+  tools,
   systemPrompt: 'You are a research assistant with web search capability.',
   maxSteps:     4,
 });
@@ -4769,28 +4760,28 @@ const result = await agent.run(ctx, {
 console.log(result.output);`, ['@weaveintel/tools/search', '@weaveintel/agents', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
 
 ${params([
-  ['providers', '{ kind, apiKey }[]', 'required', 'Ordered list of providers to try. First available is used; others are failovers.'],
-  ['maxResults', 'number', 'optional', 'Max results to return per search. Default: 5.'],
-  ['timeoutMs', 'number', 'optional', 'Per-provider request timeout in ms. Default: 8000.'],
-  ['includeRaw', 'boolean', 'optional', 'Include raw HTML in results. Default: false. Increases token consumption significantly.'],
+  ['configs', 'Record<string, SearchProviderConfig>', 'required', 'Per-provider config keyed by provider name: { name, enabled, apiKey?, priority? }. Lower priority is tried first; others are failovers.'],
+  ['providers', 'SearchProvider[]', 'optional', 'Custom provider instances, merged with the built-ins.'],
+  ['fallback', 'boolean', 'optional', 'Fall through to the next provider when one fails.'],
 ])}
 `)}
 
 ${section('search-e2e', 'End-to-End: Research Agent', `
-${code('typescript', `import { createSearchToolRegistry } from '@weaveintel/tools/search';
-import { createBrowserToolRegistry } from '@weaveintel/tools-browser';
+${code('typescript', `import { createSearchTools, createSearchRouter } from '@weaveintel/tools/search';
+import { createBrowserTools } from '@weaveintel/tools-browser';
 import { weaveAgent } from '@weaveintel/agents';
 import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
 import { weaveContext, weaveToolRegistry } from '@weaveintel/core';
 
 // Combine search + browser tools for deep research
 const tools = weaveToolRegistry();
-const searchTools  = createSearchToolRegistry({ providers: [{ kind: 'tavily', apiKey: process.env['TAVILY_API_KEY']! }] });
-const browserTools = createBrowserToolRegistry({ include: ['extract_content'] });
+const router = createSearchRouter({
+  configs: { tavily: { name: 'tavily', enabled: true, apiKey: process.env['TAVILY_API_KEY']! } },
+});
 
-// Merge both registries
-searchTools.list().forEach(t => tools.register(t));
-browserTools.list().forEach(t => tools.register(t));
+// Merge both tool sets into one registry
+for (const t of createSearchTools(router)) tools.register(t);
+for (const t of createBrowserTools()) tools.register(t);
 
 const agent = weaveAgent({
   model:        weaveAnthropicModel('claude-opus-4-8'),
@@ -4834,51 +4825,53 @@ function sSkills(): string {
 ${callout('info', '🎯', 'Skills vs Prompts vs Tools.', 'A <strong>prompt</strong> is model instructions. A <strong>tool</strong> is a capability. A <strong>skill</strong> is a named bundle that activates both — it defines which tools are available, what the system prompt says, and how the agent should behave for a specific task type.')}
 
 ${section('skills-define', 'Defining Skills', `
-${code('typescript', `import { weaveSkill, weaveSkillRegistry } from '@weaveintel/skills';
-import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
+${code('typescript', `import { defineSkill, createSkillRegistry } from '@weaveintel/skills';
 
-const registry = weaveSkillRegistry();
+const registry = createSkillRegistry();
 
-// Register a named skill bundle
-registry.register(weaveSkill({
-  key:  'web-research',
+// A skill is a declarative playbook the runtime injects into the prompt and
+// uses to gate tools — query-aware, so only relevant skills are activated.
+registry.register(defineSkill({
+  id:   'web-research',
   name: 'Web Research',
-  description: 'Search the web, extract content, and synthesise findings into a structured report.',
-  systemPrompt: \`You are a thorough research assistant.
-For every research task:
+  category: 'research',
+  summary: 'Search the web, extract content, and synthesise findings into a structured report.',
+  reasoningGuidance: \`For every research task:
 1. Search for the topic to get an overview.
 2. Extract full content from the 2 most relevant results.
 3. Synthesise findings into a structured bullet-point report with citations.\`,
-  tools:    ['web_search', 'extract_content'],   // Tool keys to activate
-  model:    weaveAnthropicModel('claude-sonnet-4-6'),
-  maxSteps: 8,
-  metadata: { category: 'research', tier: 'pro' },
+  toolNames:       ['web_search', 'extract_content'],   // tools this skill may use
+  triggerPatterns: ['research', 'find out about', 'look up'],
 }));
 
-registry.register(weaveSkill({
-  key:  'code-review',
+registry.register(defineSkill({
+  id:   'code-review',
   name: 'Code Review',
-  description: 'Review code for correctness, security, and style.',
-  systemPrompt: 'You are a senior engineer. Review the provided code for bugs, security issues, and style violations. Output findings as a structured list.',
-  tools:    [],   // No external tools — pure model reasoning
-  model:    weaveAnthropicModel('claude-opus-4-8'),
-  maxSteps: 3,
-}));`, ['@weaveintel/skills', '@weaveintel/provider-anthropic'])}
+  category: 'code',
+  summary: 'Review code for correctness, security, and style.',
+  reasoningGuidance: 'Review the provided code for bugs, security issues, and style violations. Output findings as a structured list.',
+  toolNames:       [],   // no external tools — pure model reasoning
+  triggerPatterns: ['review this code', 'code review'],
+}));`, ['@weaveintel/skills'])}
 `)}
 
 ${section('skills-invoke', 'Invoking a Skill', `
-${code('typescript', `import { weaveSkillRegistry } from '@weaveintel/skills';
-import { weaveContext } from '@weaveintel/core';
+${code('typescript', `import { createSkillRegistry, buildSkillSystemPrompt } from '@weaveintel/skills';
 
-const ctx  = weaveContext({ userId: 'alice' });
-const skill = registry.get('web-research');
+const registry = createSkillRegistry();
+// ...register skills as above...
 
-// Build an agent from the skill definition
-const agent = skill.toAgent({ tools: myToolRegistry });
-const result = await agent.run(ctx, {
-  messages: [{ role: 'user', content: 'Research the latest advances in quantum error correction.' }],
-});
-console.log(result.output);`, ['@weaveintel/skills', '@weaveintel/core'])}
+// Query-aware activation: the registry picks the skills relevant to the input
+// and reports which were selected (and which were rejected, and why).
+const activation = await registry.activate(
+  'Research the latest advances in quantum error correction.',
+);
+
+console.log(activation.selected.map((m) => m.skill.name));
+
+// Build the augmented system prompt to feed into your agent's model call
+const systemPrompt = buildSkillSystemPrompt([...activation.selected]);
+console.log(systemPrompt);`, ['@weaveintel/skills'])}
 `)}`;
 }
 
