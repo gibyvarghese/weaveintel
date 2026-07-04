@@ -513,10 +513,10 @@ ${featureCards([
   ['Memory policy', '<code>memory_policy</code> decides how the agent\'s working memory is handled across turns. <code>\'none\'</code> — start fresh every turn (great for privacy-sensitive deployments); <code>\'session\'</code> — remember within a session, forget when it ends; <code>\'persistent\'</code> — remember across sessions indefinitely. Default: <code>\'session\'</code>.'],
 ])}
 
-${code('typescript', `import { SqlitePersistenceAdapter } from '@weaveintel/persistence';
+${code('typescript', `import { SQLiteAdapter } from '@weaveintel/geneweave-api';
 
-const db = new SqlitePersistenceAdapter();
-await db.connect();
+const db = new SQLiteAdapter('./geneweave.db');
+await db.initialize();
 
 // Read the global defaults
 const settings = await db.getAgentStrategySettings('global');
@@ -775,6 +775,7 @@ ${code('typescript', `.forEach('process-items', 'Process Line Items', {
 })
 
 // Body handler receives:
+interface LineItem { id: string; quantity: number }
 engine.registerHandler('process-item', async (vars) => {
   const item = vars['__item'] as LineItem;   // Current item
   const index = vars['__itemIndex'] as number;
@@ -1125,9 +1126,10 @@ ${section('prompts-contracts', 'Output Contracts', `
 <p>Contracts validate or repair model output against a schema — JSON structure, Markdown formatting, code fences, max length, forbidden phrases.</p>
 ${code('typescript', `import { createContract, DefaultCompletionValidator } from '@weaveintel/core/contracts';
 
+// A contract declares its name, output schema, and acceptance criteria.
 const contract = createContract({
-  type: 'JSON',
-  schema: {
+  name: 'sentiment-classification',
+  outputSchema: {
     type: 'object',
     required: ['sentiment', 'confidence', 'reason'],
     properties: {
@@ -1136,17 +1138,19 @@ const contract = createContract({
       reason:     { type: 'string', maxLength: 200 },
     },
   },
-  repair: true,   // Attempt to fix malformed JSON before failing
+  acceptanceCriteria: [
+    { id: 'schema', description: 'Output matches the JSON schema', type: 'schema', required: true },
+  ],
 });
 
 const validator = new DefaultCompletionValidator();
-const result = await validator.validate(llmOutput, contract);
+const report = await validator.validate(llmOutput, contract);
 
-if (!result.valid) {
-  console.log(result.errors); // [{ path, message, rule }]
-  console.log(result.repaired); // Attempted repair, if repair: true
+// validate() returns a CompletionReport (status + per-criterion results)
+if (report.status !== 'fulfilled') {
+  console.log(report.results.filter(r => !r.passed));  // failing criteria
 } else {
-  const data = JSON.parse(result.content) as SentimentResult;
+  console.log('confidence', report.confidence);
 }`)}
 `)}
 
@@ -1933,12 +1937,12 @@ console.log(PROVIDER_RESILIENCE_DEFAULTS);
 // { retry: { maxAttempts: 2, baseDelayMs: 500, maxDelayMs: 30_000, jitter: true },
 //   circuit: { failureThreshold: 8, cooldownMs: 30_000 } }
 
-// Signal bus — receive normalised events from every resilience primitive
+// Signal bus — one listener receives every normalised event; branch on sig.kind
 const bus = createResilienceSignalBus();
-bus.on('circuit_opened',  sig => monitor.alert(\`Circuit opened: \${sig.endpoint}\`));
-bus.on('circuit_closed',  sig => monitor.info(\`Circuit closed: \${sig.endpoint}\`));
-bus.on('rate_limited',    sig => metrics.increment('rate_limited', { endpoint: sig.endpoint }));
-bus.on('retry_exhausted', sig => monitor.alert(\`Retries exhausted on \${sig.endpoint}\`));
+bus.on((sig) => {
+  if (sig.kind === 'shed')     monitor.alert(\`Shed on \${sig.endpoint}: \${sig.reason}\`);
+  if (sig.kind === 'retrying') metrics.increment('retry', { endpoint: sig.endpoint });
+});
 
 // Token bucket — shared rate quota across all callers with the same endpoint key
 const bucket = createTokenBucket({ capacity: 60, refillPerSec: 1 });
@@ -1949,8 +1953,10 @@ await bucket.acquire(5_000);
 
 // Circuit breaker — opens after N consecutive failures, half-opens after cooldown
 const breaker = createCircuitBreaker({ failureThreshold: 5, cooldownMs: 30_000 });
-const canPass = breaker.canPass();
-if (!canPass.allowed) throw new Error(\`Circuit open, reopens in \${canPass.reopensAt - Date.now()}ms\`);
+const decision = breaker.canPass();
+if (decision.allowed === false) {
+  throw new Error(\`Circuit open, reopens in \${decision.reopensAt - Date.now()}ms\`);
+}
 try {
   const result = await callExternalService();
   breaker.recordSuccess();
@@ -1961,13 +1967,18 @@ try {
   throw err;
 }
 
-// Retry policy — exponential backoff with jitter
+// Retry policy — decides whether/when to retry (drive it from your call loop)
 const retry = createRetryPolicy({ maxAttempts: 3, baseDelayMs: 500, maxDelayMs: 10_000, jitter: true });
-const result = await retry.execute(() => callFlakyApi());
+// retry.shouldRetry(classifiedError, attempt) + retry.nextDelayMs(...) inform your loop.
 
-// Concurrency limiter — cap in-flight requests
+// Concurrency limiter — cap in-flight requests. acquire() returns a release fn.
 const limiter = createConcurrencyLimiter({ maxConcurrent: 10 });
-await limiter.run(() => heavyOperation());`, ['@weaveintel/resilience'])}
+const release = await limiter.acquire();
+try {
+  await heavyOperation();
+} finally {
+  release();
+}`, ['@weaveintel/resilience'])}
 
 <h4>Primitive API reference</h4>
 ${typeTable([
@@ -2181,7 +2192,7 @@ registry.register(sendEmailTool);`, ['@weaveintel/core'])}
 `)}
 
 ${section('tools-policy', 'Policy-Enforced Registry', `
-${code('typescript', `import { createPolicyEnforcedRegistry, weaveHealthTracker } from '@weaveintel/tools';
+${code('typescript', `import { createPolicyEnforcedRegistry, weaveHealthTracker, InMemoryToolPolicyResolver } from '@weaveintel/tools';
 import { weaveToolRegistry } from '@weaveintel/core';
 
 const base = weaveToolRegistry();
@@ -2190,25 +2201,23 @@ base.register(sendEmailTool);
 
 const tracker = weaveHealthTracker({ windowMs: 60_000 });
 
+// The policy is supplied by a resolver keyed per tool. Higher-risk tools must
+// be explicitly enabled and can require approval.
+const resolver = new InMemoryToolPolicyResolver(new Map([
+  ['web_search', { enabled: true, allowedRiskLevels: ['read-only'] }],
+  ['send_email', { enabled: true, requiresApproval: true, allowedRiskLevels: ['read-only', 'external-side-effect'] }],
+]));
+
 const enforced = createPolicyEnforcedRegistry(base, {
-  allowedTools:    ['web_search', 'send_email'],
-  blockedTools:    ['delete_database', 'drop_table'],
-  rateLimit:       { maxPerMinute: 30, maxPerHour: 500 },
-  requireApproval: ['send_email'],
-  networkGuard: {
-    blockPrivateIps: true,
-    allowedDomains:  ['api.example.com', 'cdn.example.com'],
-  },
-  costLimit: { maxCostUsd: 0.05, ledger: costLedger },
-}, {
+  resolver,
   auditEmitter:  myAuditEmitter,
   approvalGate:  myApprovalGate,
   healthTracker: tracker,
 });
 
 // Query health after some calls
-const health = tracker.getHealth('send_email');
-// { successRate: 0.99, avgLatencyMs: 320, p95LatencyMs: 580, recentErrors: [] }`, ['@weaveintel/tools', '@weaveintel/core'])}
+const health = tracker.get('send_email');
+// { successRate: 0.99, avgLatencyMs: 320, p95LatencyMs: 580, ... }`, ['@weaveintel/tools', '@weaveintel/core'])}
 `)}
 
 ${section('tools-e2e', 'End-to-End: Governed Agent', `
@@ -2271,8 +2280,7 @@ ${code('typescript', `import { createTimeTools, createInMemoryTemporalStore } fr
 const tools = createTimeTools({
   defaultTimezone: 'Pacific/Auckland',
   locale: 'en-NZ',
-  store: createInMemoryTemporalStore(),  // Or DbTemporalStore for persistence
-  allowedTimezones: ['UTC', 'America/New_York', 'Pacific/Auckland'],  // Optional whitelist
+  store: createInMemoryTemporalStore(),  // Or a durable TemporalStore for persistence
 });
 
 // Register all 16 tools at once
@@ -5173,7 +5181,7 @@ ${code('typescript', `// In geneWeave, agents call emit_artifact to persist type
 
 // To use @weaveintel/artifacts directly in your own agent:
 import { createArtifactStore, inferMimeType } from '@weaveintel/artifacts';
-import { weaveTool, weaveToolRegistry } from '@weaveintel/core';
+import { weaveTool, weaveToolRegistry, weaveContext } from '@weaveintel/core';
 import { weaveAgent } from '@weaveintel/agents';
 import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
 
@@ -5214,7 +5222,7 @@ const agent = weaveAgent({
   systemPrompt: 'Generate SVG charts for data analysis tasks and save them as artifacts.',
 });
 
-const result = await agent.run({ userId: 'alice' }, {
+const result = await agent.run(weaveContext({ userId: 'alice' }), {
   messages: [{ role: 'user', content: 'Create a bar chart of FAANG stock returns in 2024.' }],
 });
 console.log(result.output);  // "Chart saved as artifact 01JP..., version 1"`, ['@weaveintel/artifacts', '@weaveintel/core', '@weaveintel/agents', '@weaveintel/provider-anthropic'])}
@@ -5504,9 +5512,9 @@ ${code('typescript', `import { injectLiveToolbar } from '../../src/routes/artifa
 const liveHtml = injectLiveToolbar(renderedHtml, {
   artifactId: 'abc-123',
   refreshIntervalSeconds: 30,
-  cacheTtlSeconds: 5,
   refreshCount: 4,
   lastRefreshedAt: '2026-06-23T14:00:00Z',
+  refreshEndpoint: '/api/artifacts/abc-123/refresh',
 });
 // → html with a dark toolbar: LIVE badge | Refreshed: 4× | [Refresh] | [Auto-refresh: 30s]`)}
 
