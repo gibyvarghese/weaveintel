@@ -1,5 +1,5 @@
 /**
- * @weaveintel/recipes — Multi-Tenant Runtime
+ * @weaveintel/agents/recipes — Multi-Tenant Runtime
  *
  * Agent factory that stamps each instance with tenant isolation metadata.
  */
@@ -11,7 +11,7 @@ import type {
   EventBus,
   AgentMemory,
 } from '@weaveintel/core';
-import { weaveAgent } from '@weaveintel/agents';
+import { weaveAgent } from '../index.js';
 
 export interface MultiTenantRuntimeOptions {
   name?: string;

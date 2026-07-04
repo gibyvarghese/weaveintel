@@ -1,5 +1,5 @@
 /**
- * @weaveintel/recipes — Event-Driven Agent
+ * @weaveintel/agents/recipes — Event-Driven Agent
  *
  * Agent that reacts to events from the EventBus and emits structured events.
  */
@@ -11,7 +11,7 @@ import type {
   EventBus,
   AgentMemory,
 } from '@weaveintel/core';
-import { weaveAgent } from '@weaveintel/agents';
+import { weaveAgent } from '../index.js';
 
 export interface EventDrivenAgentOptions {
   name?: string;

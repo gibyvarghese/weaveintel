@@ -1,5 +1,5 @@
 /**
- * @weaveintel/recipes — Eval-Routed Assistant
+ * @weaveintel/agents/recipes — Eval-Routed Assistant
  *
  * Agent that routes requests based on eval scores or complexity classification.
  */
@@ -11,7 +11,7 @@ import type {
   EventBus,
   AgentMemory,
 } from '@weaveintel/core';
-import { weaveAgent } from '@weaveintel/agents';
+import { weaveAgent } from '../index.js';
 
 export interface EvalRoutedAssistantOptions {
   name?: string;

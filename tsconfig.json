@@ -212,9 +212,6 @@
       "path": "packages/devtools"
     },
     {
-      "path": "packages/recipes"
-    },
-    {
       "path": "packages/persistence"
     },
     {

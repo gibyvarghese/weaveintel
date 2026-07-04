@@ -1,5 +1,5 @@
 /**
- * @weaveintel/recipes — Approval-Driven Agent
+ * @weaveintel/agents/recipes — Approval-Driven Agent
  *
  * Agent that pauses for human approval before executing high-risk actions.
  */
@@ -16,7 +16,7 @@ import type {
   AgentUsage,
   ToolSchema,
 } from '@weaveintel/core';
-import { weaveAgent } from '@weaveintel/agents';
+import { weaveAgent } from '../index.js';
 
 export interface ApprovalDrivenAgentOptions {
   name?: string;

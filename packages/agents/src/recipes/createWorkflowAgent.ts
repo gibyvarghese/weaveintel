@@ -1,5 +1,5 @@
 /**
- * @weaveintel/recipes — Workflow Agent
+ * @weaveintel/agents/recipes — Workflow Agent
  *
  * Pre-configured agent that executes multi-step workflows with state tracking.
  */
@@ -14,7 +14,7 @@ import type {
   AgentInput,
   AgentResult,
 } from '@weaveintel/core';
-import { weaveAgent } from '@weaveintel/agents';
+import { weaveAgent } from '../index.js';
 
 export interface WorkflowAgentOptions {
   name?: string;

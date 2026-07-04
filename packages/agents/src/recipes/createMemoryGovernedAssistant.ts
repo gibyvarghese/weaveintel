@@ -1,5 +1,5 @@
 /**
- * @weaveintel/recipes — Memory-Governed Assistant
+ * @weaveintel/agents/recipes — Memory-Governed Assistant
  *
  * Agent with memory retention policies and semantic memory integration.
  */
@@ -11,7 +11,7 @@ import type {
   EventBus,
   AgentMemory,
 } from '@weaveintel/core';
-import { weaveAgent } from '@weaveintel/agents';
+import { weaveAgent } from '../index.js';
 
 export interface MemoryGovernedAssistantOptions {
   name?: string;

@@ -1,5 +1,5 @@
 /**
- * @weaveintel/recipes — Governed Assistant
+ * @weaveintel/agents/recipes — Governed Assistant
  *
  * An assistant with built-in guardrail and policy enforcement.
  */
@@ -16,7 +16,7 @@ import type {
   AgentUsage,
   ToolSchema,
 } from '@weaveintel/core';
-import { weaveAgent } from '@weaveintel/agents';
+import { weaveAgent } from '../index.js';
 
 export interface GovernedAssistantOptions {
   name?: string;

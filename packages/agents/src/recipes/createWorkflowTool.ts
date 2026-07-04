@@ -1,5 +1,5 @@
 /**
- * @weaveintel/recipes — Workflow-as-tool adapter (W4)
+ * @weaveintel/agents/recipes — Workflow-as-tool adapter (W4)
  *
  * `weaveWorkflowTool` bridges the agent↔workflow gap in the direction that
  * was previously missing: an **agent calling a workflow as a tool**.

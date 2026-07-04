@@ -8,6 +8,11 @@
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./recipes": {
+      "import": "./dist/recipes/index.js",
+      "types": "./dist/recipes/index.d.ts",
+      "default": "./dist/recipes/index.js"
     }
   },
   "main": "./dist/index.js",

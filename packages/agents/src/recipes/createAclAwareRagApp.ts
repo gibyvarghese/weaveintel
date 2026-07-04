@@ -1,5 +1,5 @@
 /**
- * @weaveintel/recipes — ACL-Aware RAG App
+ * @weaveintel/agents/recipes — ACL-Aware RAG App
  *
  * RAG agent that respects access-control lists when retrieving documents.
  */
@@ -11,7 +11,7 @@ import type {
   EventBus,
   AgentMemory,
 } from '@weaveintel/core';
-import { weaveAgent } from '@weaveintel/agents';
+import { weaveAgent } from '../index.js';
 
 export interface AclAwareRagOptions {
   name?: string;

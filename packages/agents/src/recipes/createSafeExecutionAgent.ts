@@ -1,5 +1,5 @@
 /**
- * @weaveintel/recipes — Safe Execution Agent
+ * @weaveintel/agents/recipes — Safe Execution Agent
  *
  * Agent with sandbox constraints for safe code/tool execution.
  */
@@ -16,7 +16,7 @@ import type {
   AgentUsage,
   ToolSchema,
 } from '@weaveintel/core';
-import { weaveAgent } from '@weaveintel/agents';
+import { weaveAgent } from '../index.js';
 
 export interface SafeExecutionAgentOptions {
   name?: string;

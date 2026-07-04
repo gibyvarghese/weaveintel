@@ -172,7 +172,12 @@
       "Bash(perl -0pi -e 's/\\\\\\): ConcurrencyLimiter \\\\{/\\): DurableConcurrencyLimiter {/g; s/getStatus\\\\\\(\\\\\\): ConcurrencyStatus \\\\{/getStatus\\(\\): DurableConcurrencyStatus {/g' packages/resilience/src/durable-concurrency.ts)",
       "Bash(perl -pi -e \"s{\\\\@weaveintel/durability}{\\\\@weaveintel/resilience}g\" apps/geneweave/src/docs-html.ts)",
       "Bash(node -e \"const p=require\\('./packages/react-client/package.json'\\);console.log\\('deps',JSON.stringify\\(p.dependencies\\)\\);console.log\\('peer',JSON.stringify\\(p.peerDependencies\\)\\);console.log\\('devDeps',JSON.stringify\\(p.devDependencies\\)\\)\")",
-      "Bash(perl -pi -e \"s{from '\\\\@weaveintel/client'}{from '../index.js'}g\" packages/client/src/react/index.ts)"
+      "Bash(perl -pi -e \"s{from '\\\\@weaveintel/client'}{from '../index.js'}g\" packages/client/src/react/index.ts)",
+      "Bash(node -e \"console.log\\(Object.keys\\(require\\('./packages/agents/package.json'\\).dependencies\\).join\\(' '\\)\\)\")",
+      "Bash(node -e \"console.log\\(Object.keys\\(require\\('./packages/recipes/package.json'\\).dependencies\\).join\\(' '\\)\\)\")",
+      "Bash(node -e \"console.log\\(JSON.stringify\\(require\\('./packages/agents/tsconfig.json'\\).references\\)\\)\")",
+      "Bash(perl -pi -e \"s{from '\\\\@weaveintel/agents'}{from '../index.js'}g\" packages/agents/src/recipes/*.ts)",
+      "Bash(perl -pi -e \"s{\\\\@weaveintel/recipes —}{\\\\@weaveintel/agents/recipes —}g\" packages/agents/src/recipes/*.ts)"
     ]
   }
 }
