@@ -2074,51 +2074,32 @@ ${section('cost-levers', 'The 8 Levers', `
 ${section('cost-setup', 'Setup & Usage', `
 ${code('typescript', `import { weaveCostGovernor, createInMemoryCostLedger } from '@weaveintel/cost-governor';
 
-const governor = weaveCostGovernor({
-  ledger: createInMemoryCostLedger(),   // Or a durable ledger for persistence
-  policy: {
-    tiers: [
-      {
-        name: 'free',
-        monthlyBudgetUsd: 5.00,
-        levers: {
-          modelCascade:     { startModel: 'fast', escalationModel: 'smart', confidenceThreshold: 0.75 },
-          toolSubset:       { maxTools: 3, strategy: 'intent-rag' },
-          historyCompaction:{ maxMessages: 20, summariseAfter: 30 },
-          maxSteps:         { value: 5 },
-          outputTruncation: { maxChars: 1000 },
-        },
-      },
-      {
-        name: 'pro',
-        monthlyBudgetUsd: 50.00,
-        levers: {
-          promptCaching:    { enabled: true },
-          intelGating:      { complexityThreshold: 0.4 },
-          maxSteps:         { value: 20 },
-        },
-      },
-      {
-        name: 'enterprise',
-        monthlyBudgetUsd: 500.00,
-        levers: {},  // No restrictions
-      },
-    ],
-    escalation: {
-      threshold: 0.80,  // Alert + downgrade at 80% of budget
-      action: 'downgrade-tier',
+// weaveCostGovernor(policy, opts?) resolves a CostPolicy tier into a bundle of
+// levers (model cascade, tool subset, history compaction, step cap, budget gate).
+const governor = weaveCostGovernor(
+  {
+    tier: 'balanced',              // 'economy' | 'balanced' | 'performance' | 'max' | 'custom'
+    maxStepsCap: 20,
+    budgetCeilingUsd: 50.00,
+    modelCascade: {
+      cheap:     { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
+      expensive: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
     },
+    toolSubset: { maxTools: 8 },
   },
-});
+  {
+    // Pass the ledger + a run-id resolver so the budget gate can enforce spend
+    costLedger:    createInMemoryCostLedger(),
+    runIdResolver: (ctx) => ctx.runId ?? null,
+  },
+);
 
-// Wrap model — governor applies levers based on userId's tier
-const governedModel = governor.wrapModel(model, {
-  userId: 'alice',
-  tier: await getTierForUser('alice'),  // 'free' | 'pro' | 'enterprise'
-});
+// The bundle exposes the resolved levers — the agent framework applies them.
+console.log(governor.maxStepsCap, governor.reasoningEffort);
 
-// The model call now enforces all configured levers
-const result = await governedModel.generate({ messages });`)}
+// e.g. ask the model resolver which model to actually use for this turn
+const decision = await governor.modelResolver({ runId: 'run-1' });
+console.log(decision?.modelIdOverride);   // null when no downgrade/upgrade applies`)}
 `)}`;
 }
 
@@ -4133,30 +4114,30 @@ ${featureCards([
 ])}
 
 ${section('enc-setup', 'Setup', `
-${code('typescript', `import { weaveTenantKeyManager, KmsProviderRegistry } from '@weaveintel/encryption';
+${code('typescript', `import { weaveTenantKeyManager, createKmsProviderRegistry } from '@weaveintel/encryption';
 
-// 1. Register KMS providers
-const kmsRegistry = new KmsProviderRegistry();
-kmsRegistry.register('local',   localKmsProvider({ masterKey: process.env['WEAVE_ENCRYPTION_MASTER_KEY']! }));
-kmsRegistry.register('aws-kms', awsKmsProvider({ keyArn: process.env['AWS_KMS_KEY_ARN']! }));
+// 1. Register KMS providers via the factory. register() takes one
+//    KmsProviderRegistration: { id, factory }.
+const kmsRegistry = createKmsProviderRegistry();
+kmsRegistry.register({ id: 'local',   factory: async () => localKmsProvider({ masterKey: process.env['WEAVE_ENCRYPTION_MASTER_KEY']! }) });
+kmsRegistry.register({ id: 'aws-kms', factory: async () => awsKmsProvider({ keyArn: process.env['AWS_KMS_KEY_ARN']! }) });
 
-// 2. Create a key manager (one per tenant, cached by the resolver)
+// 2. Create a key manager. tenantId is passed per-operation, not here.
 const manager = weaveTenantKeyManager({
-  tenantId: 'acme',
-  kmsRegistry,
-  db,             // DB adapter for storing DEKs, KEKs, policy
+  store: db,                                  // stores DEKs, KEKs, policy
+  kms:   await kmsRegistry.build('local', {}), // or pass kmsResolver for per-tenant routing
 });
 
-// 3. Encrypt / decrypt a field value
-const ciphertext = await manager.encrypt('alice@example.com', {
-  table:  'users',
-  column: 'email',
-  rowId:  'user-001',
+// 3. Encrypt / decrypt a field value — one options object per call
+const ciphertext = await manager.encrypt({
+  tenantId: 'acme', table: 'users', column: 'email', rowId: 'user-001',
+  plaintext: 'alice@example.com',
 });
 // → "enc:v1:1234567890:iv_base64:ciphertext_base64"
 
-const plaintext = await manager.decrypt(ciphertext, {
-  table: 'users', column: 'email', rowId: 'user-001',
+const plaintext = await manager.decrypt({
+  tenantId: 'acme', table: 'users', column: 'email', rowId: 'user-001',
+  value: ciphertext,
 });
 // → "alice@example.com"`, ['@weaveintel/encryption'])}
 `)}
@@ -4164,29 +4145,22 @@ const plaintext = await manager.decrypt(ciphertext, {
 ${section('enc-proxy', 'Multi-Table Encrypted DB Proxy', `
 <p>The proxy wraps any DB adapter and transparently encrypts/decrypts specified columns on every read and write. Use this instead of calling encrypt/decrypt at each call site.</p>
 
-${code('typescript', `import { withTenantEncryptedDb } from '@weaveintel/encryption';
+${code('typescript', `import { withTenantEncryptedDb } from '../../src/encryption/db-encrypted-adapter.js';
 
-const encryptedDb = withTenantEncryptedDb({
-  db,
-  getManager: () => tenantKeyManager,   // live-binding getter
-  specs: [
-    { table: 'users',    column: 'email',   rowIdColumn: 'id' },
-    { table: 'users',    column: 'phone',   rowIdColumn: 'id' },
-    { table: 'messages', column: 'content', rowIdColumn: 'id' },
-  ],
-});
+// Wrap the raw DB adapter. The second arg is a live-binding accessor that
+// returns the bootstrapped TenantKeyManager. The column specs (which fields on
+// which tables are encrypted) are built in per method.
+const encryptedDb = withTenantEncryptedDb(db, () => tenantKeyManager);
 
-// All reads/writes through encryptedDb are automatically encrypted
-const user = await encryptedDb.users.findById('user-001');
-console.log(user.email); // "alice@example.com" — already decrypted`, ['@weaveintel/encryption'])}
+// All reads/writes through encryptedDb are automatically encrypted/decrypted
+const user = await encryptedDb.getUserById('user-001');
+console.log(user?.email); // already decrypted`, [])}
 `)}
 
 ${section('enc-blind-index', 'Blind Indexes — Equality Search', `
-${code('typescript', `import { computeBlindIndex } from '@weaveintel/encryption';
-
-// Compute the index value to search with
-const bidx = await computeBlindIndex({
-  manager,
+${code('typescript', `// computeBlindIndex is a method on the TenantKeyManager (see Setup above)
+const bidx = await manager.computeBlindIndex({
+  tenantId: 'acme',
   table:  'users',
   column: 'email',
   value:  'alice@example.com',
@@ -4196,7 +4170,7 @@ const bidx = await computeBlindIndex({
 const user = await db.query(
   'SELECT * FROM users WHERE email_bidx = ?',
   [bidx],
-);`, ['@weaveintel/encryption'])}
+);`, [])}
 `)}`;
 }
 
