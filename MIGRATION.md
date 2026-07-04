@@ -519,10 +519,33 @@ obsolete "canonical import" callout). Gate: topology (87 refs) + api-boundaries 
 (incl. absorbed reliability suites) + tools-kaggle/marketdata/notifications/weaveintel green; geneweave-api
 build + typecheck green.
 
-**Remaining Phase 4:** guardrails trio (redaction/compliance → subpaths; spotlighting already done);
-identity quartet (oauth/tenancy/scope); core absorptions (models/contracts/plugins/capability-packs/i18n);
-tokens engine/brand split (+a11y); testing+evals; observability+replay; live-agents+trace-tools;
-memory+graph; agents+recipes; client+react-client.
+### 4b–4j — the mechanical merges ✅
+
+Nine groups, each gated (topology + api-boundaries + affected suites) and committed separately. Pattern:
+`git mv` source `src` into `target/src/<sub>` (subpath) or flat; fix moved-file imports (self → relative,
+`@weaveintel/target` → relative); add the exports subpath (or fold the barrel, for flat); rewire every
+consumer's `.ts` imports + `package.json` dep + `tsconfig` reference (deduped); delete the old package;
+prune the root tsconfig reference. Doc-comment package-name references updated for accuracy.
+
+| Sub | Merge | Kind | Notes |
+|---|---|---|---|
+| 4b | react-client → **client**/react | subpath | React is now an OPTIONAL peer of client; only comments referenced it. client 209 tests. |
+| 4c | recipes → **agents**/recipes | subpath | deps (core+agents) became internal. agents 419. |
+| 4d | evals → **testing**/evals | subpath | rewired agents (RubricCriterion) + geneweave; no cycle (testing⊅agents). |
+| 4e | replay → **observability**/replay | subpath | added observability dep to workflows (source importer). |
+| 4f | live-agents-trace-tools → **live-agents**/trace-tools | subpath | the live-agents-runtime ref was a doc comment (no cycle). live-agents 89. |
+| 4g | graph → **memory** | flat | knowledge graph is a memory store; folded 5 modules + barrel (only index.ts collided). |
+| 4h | redaction + compliance → **guardrails**/{redaction,compliance} | subpath | guardrails absorbed compliance's persistence dep; the core refs were JSDoc. guardrails 326. |
+| 4i | oauth + tenancy + scope → **identity**/{oauth,tenancy,scope} | subpath | identity absorbed oauth's persistence dep. identity 148. |
+| 4j | models + contracts + plugins + capability-packs + i18n → **core**/{…} | subpath | SUBPATH-ONLY (not in core's main barrel) so moved files' core imports go relative with NO cycle; core stays dependency-free (api-boundaries green). core 259; full framework build+typecheck + package tests (135 tasks each) green. |
+
+Root tsconfig references: 91 → 73. Published package count: 86 → **73**.
+
+**Remaining Phase 4:** the tokens engine/brand split (+a11y) — the only NON-merge in the phase: split
+`clients/tokens` into a brand-neutral theming ENGINE (`@weaveintel/tokens` — schema, colour maths,
+`contrastRatio`/`meetsAA` absorbing `a11y`, CSS/native transforms; takes a palette as INPUT) and move the
+geneWeave palette + `--gw-` names + brand values into `apps/geneweave-ui/src/brand/`. Needs design-token
+research + UI rewiring; handled as a focused unit next.
 
 ---
 
