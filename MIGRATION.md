@@ -411,9 +411,32 @@ Gate: **collab 252 tests pass** — every RGA convergence + contract test intact
 app typecheck 62/62; `check:api-boundaries` + `check:workspace-topology` + `check:no-app-brand` all PASS.
 (One unrelated `encryption/byok` load-flake, passes isolated.)
 
-**Remaining Phase 3:** 3b `note-export` → notes; 3c the `CoeditDoc` port + `createRgaDoc` reference
-adapter; 3d unify presence (delete the duplicate — one `PresenceState`/awareness model); 3e agent-peer
-against the port; 3f `docs/adapters.md` (how a Yjs adapter implements the port — no Yjs dependency).
+### 3b — `note-export` → `@weaveintel/notes` ✅
+
+Multi-format note export (Markdown/HTML/Word/lossless JSON) is note-domain, not CRDT code. `git mv`'d
+`note-export.ts` + its 11-test suite into slim-notes; its block-serializer imports (`pmToBlocks`/
+`blocksToMarkdown`/`blocksToHtml`) now come from `@weaveintel/collab`, so **notes gains a
+`@weaveintel/collab` dependency** (verified acyclic — collab doesn't import notes). Exported from the
+notes barrel; rewired 3 app consumers. (A regex mishap briefly removed adjacent collab barrel exports;
+recovered from git and verified all coedit exports intact.) Gate: 265/265; note-export.test (11) in notes.
+
+### 3d — unify presence ✅
+
+`AwarenessState` (ephemeral, in-doc cursors) and `PresenceHeartbeat` (durable, session heartbeat) were
+two vocabularies for the same "peer + status + colour + cursor" concept, with the status expressed
+three ways (`status?: string`, `presence: string`, and a `PresenceState` enum). **Research-grounded**
+(collaborative systems use one participant model for both ephemeral cursor awareness and durable
+heartbeat presence): created `presence-model.ts` — the ONE vocabulary: `PresenceStatus` (canonical
+status union), `PeerKind`, `PeerIdentity`, `isPresenceStatus`/`normalizePresenceStatus`. Both
+`AwarenessState.status` and `PresenceHeartbeat.presence` are now `PresenceStatus`; `peerType`/`kind`
+are `PeerKind`; `session.ts`'s `PresenceState` collapses to a deprecated **alias** of `PresenceStatus`
+(one definition, not a duplicate). The clock/TTL (Awareness) and session/participant/handoff
+(PresenceManager/SharedSession) **mechanisms are untouched** — only the words are unified.
+Gate: **grep proves exactly one `PresenceStatus` definition, `PresenceState` is an alias, zero
+free-string peer-shape definitions**; collab 241 tests pass.
+
+**Remaining Phase 3:** 3c the `CoeditDoc` port + `createRgaDoc` reference adapter; 3e agent-peer against
+the port; 3f `docs/adapters.md` (how a Yjs adapter implements the port — no Yjs dependency).
 
 ---
 

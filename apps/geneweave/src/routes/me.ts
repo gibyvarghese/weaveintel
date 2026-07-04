@@ -61,7 +61,7 @@ import { createSqlRunJournal } from '../run-substrate-sql.js';
 import { createSqlPresenceManager, withAgentPeer } from '../presence-sql.js';
 import { loadCollaborationConfig, clientCollabConfig } from '../collab-config.js';
 import { resolveRunAccess, createSqlSessionManager, mintShareToken, hashShareToken, annotatePresenceRoles } from '../shared-session-sql.js';
-import { roleAtLeast, type SessionRole, type SubscriptionChannel } from '@weaveintel/collab';
+import { roleAtLeast, normalizePresenceStatus, type SessionRole, type SubscriptionChannel } from '@weaveintel/collab';
 import { createSqlSubscriptionManager, createSqlFeedStore } from '../run-subscription-sql.js';
 import { enqueueRunTerminalNotifications, isSafeWebhookUrl } from '../run-notifications-outbox.js';
 import { createSqlCommentManager, createSqlAnnotationManager, mintPublicShareToken } from '../run-comment-sql.js';
@@ -375,7 +375,7 @@ export function registerMeRoutes(
       humans = await presence.leave(scope, auth.userId);
     } else {
       const rawName = typeof body['displayName'] === 'string' ? body['displayName'] : `User ${auth.userId.slice(0, 8)}`;
-      const state = typeof body['presence'] === 'string' ? body['presence'] : 'online';
+      const state = normalizePresenceStatus(body['presence']);
       humans = await presence.heartbeat(scope, {
         userId: auth.userId,                       // server-derived identity (anti-spoof)
         displayName: rawName.slice(0, 64),         // cosmetic, length-capped, no PII

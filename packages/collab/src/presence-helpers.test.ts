@@ -46,10 +46,14 @@ describe('presence-helpers — sanitizeAwarenessState (security gate)', () => {
     expect(sanitizeAwarenessState('nonsense')).toBeNull();
     expect(sanitizeAwarenessState(42)).toBeNull();
   });
-  it('caps a giant name + status (anti-flood)', () => {
+  it('caps a giant name; normalizes status to the shared vocabulary (anti-flood)', () => {
     const s = sanitizeAwarenessState({ name: 'A'.repeat(5000), status: 'x'.repeat(500) })!;
     expect(s.name!.length).toBe(64);
-    expect(s.status!.length).toBe(32);
+    // A giant/unknown status is coerced to a valid PresenceStatus (not truncated garbage).
+    expect(s.status).toBe('online');
+    // A valid status from the shared vocabulary passes through unchanged.
+    expect(sanitizeAwarenessState({ status: 'editing' })!.status).toBe('editing');
+    expect(sanitizeAwarenessState({ status: 'composing' })!.status).toBe('composing');
   });
   it('drops a script-laden / url() colour (no CSS injection)', () => {
     expect(sanitizeAwarenessState({ color: 'url(javascript:alert(1))' })!.color).toBeUndefined();

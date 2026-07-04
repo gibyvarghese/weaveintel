@@ -32,7 +32,7 @@ import type { DatabaseAdapter } from './db-types.js';
 import type { MeRunExecutor } from './me-run-executor.js';
 import { isTerminalRunStatus } from './me-run-executor.js';
 import { resolveRunAccess, annotatePresenceRoles } from './shared-session-sql.js';
-import { roleAtLeast } from '@weaveintel/collab';
+import { roleAtLeast, normalizePresenceStatus } from '@weaveintel/collab';
 import { createSqlPresenceManager, withAgentPeer } from './presence-sql.js';
 import { loadCollaborationConfig } from './collab-config.js';
 
@@ -159,7 +159,7 @@ export async function handleRunControlConnection(ws: WsSocket, runId: string, au
             if (cfg.enabled) {
               const presence = createSqlPresenceManager(db, { ttlMs: cfg.presenceTtlMs });
               const scope = { runId: run.id, tenantId: run.tenant_id ?? '__default__' };
-              const state = typeof msg['presence'] === 'string' ? msg['presence'] : 'online';
+              const state = normalizePresenceStatus(msg['presence']);
               const rawName = typeof msg['displayName'] === 'string' ? (msg['displayName'] as string).slice(0, 64) : `User ${auth.userId.slice(0, 8)}`;
               const humans = await presence.heartbeat(scope, { userId: auth.userId, displayName: rawName, presence: state, peerType: 'human', ...(msg['cursor'] && typeof msg['cursor'] === 'object' ? { cursor: msg['cursor'] as Record<string, unknown> } : {}) });
               const participants = await annotatePresenceRoles(withAgentPeer(humans, run.status, cfg.showAgentPresence), db, run);

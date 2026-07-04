@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/coedit — Awareness (Collaboration Phase 7).
+ * @weaveintel/collab — Awareness (ephemeral, in-document live cursors).
  *
  * "Awareness" is the EPHEMERAL state of who-is-editing-and-where: each peer's
  * name, colour, status (a human typing, the agent `composing`), and cursor.
@@ -19,6 +19,7 @@
  * own state every ≤15s. A peer may only mutate its OWN entry.
  */
 import type { RgaId, RgaDoc } from './rga.js';
+import type { PresenceStatus, PeerKind } from './presence-model.js';
 
 /**
  * A cursor anchored to the document so it survives concurrent edits. `anchorId`
@@ -34,8 +35,10 @@ export interface RelativePosition {
 export interface AwarenessState {
   name?: string;
   color?: string;
-  /** e.g. a human `editing`/`idle`, or the agent `thinking`/`composing`. */
-  status?: string;
+  /** Human or AI agent — the shared {@link PeerKind}. */
+  kind?: PeerKind;
+  /** The shared {@link PresenceStatus} (e.g. a human `editing`, the agent `composing`). */
+  status?: PresenceStatus;
   /** The peer's cursor, anchored relatively. */
   cursor?: RelativePosition | null;
   [k: string]: unknown;

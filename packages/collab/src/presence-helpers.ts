@@ -20,6 +20,7 @@
  * Pure + zero-dependency.
  */
 import type { AwarenessState } from './awareness.js';
+import { type PresenceStatus, normalizePresenceStatus } from './presence-model.js';
 
 /**
  * The cursor palette for HUMAN peers — distinct, legible on both the Pro white page and the
@@ -60,8 +61,8 @@ export function aiPeerId(noteId: string): string { return `ai:${noteId}`; }
 export function isAiPeerId(peerId: string): boolean { return typeof peerId === 'string' && peerId.startsWith('ai:'); }
 
 /** Build the AI participant's awareness state for a given live status (e.g. "composing"). */
-export function aiAwarenessState(status: string): AwarenessState {
-  return { name: AI_PARTICIPANT.name, color: AI_PARTICIPANT.color, status, peerType: 'ai' };
+export function aiAwarenessState(status: PresenceStatus): AwarenessState {
+  return { name: AI_PARTICIPANT.name, color: AI_PARTICIPANT.color, kind: 'agent', status, peerType: 'ai' };
 }
 
 const MAX_NAME = 64;
@@ -95,7 +96,7 @@ export function sanitizeAwarenessState(state: unknown): AwarenessState | null {
   const out: AwarenessState = {};
   if (typeof s['name'] === 'string') out.name = s['name'].slice(0, MAX_NAME);
   const color = safeColor(s['color']); if (color) out.color = color;
-  if (typeof s['status'] === 'string') out.status = s['status'].slice(0, MAX_STATUS);
+  if (typeof s['status'] === 'string') out.status = normalizePresenceStatus(s['status']);
   if (s['peerType'] === 'human' || s['peerType'] === 'ai') out['peerType'] = s['peerType'];
   // Cursor: a bounded {anchor, head} pair (ProseMirror positions). Either may be absent.
   const cur = s['cursor'];

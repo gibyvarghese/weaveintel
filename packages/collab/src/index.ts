@@ -26,6 +26,16 @@ export {
   type RgaSnapshot,
 } from './rga.js';
 
+// The ONE presence vocabulary (shared by ephemeral awareness + durable presence).
+export {
+  type PresenceStatus,
+  type PeerKind,
+  type PeerIdentity,
+  PRESENCE_STATUSES,
+  isPresenceStatus,
+  normalizePresenceStatus,
+} from './presence-model.js';
+
 export {
   Awareness,
   cursorFromIndex,

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
-// @weaveintel/collaboration — Shared sessions, presence, live updates, user handoff
+// @weaveintel/collab — Shared sessions, presence, live updates, user handoff
 
 import type { ExecutionContext } from '@weaveintel/core';
+import type { PresenceStatus } from './presence-model.js';
 
 /* ── Types ──────────────────────────────────────────────── */
 
@@ -14,7 +15,11 @@ export interface SessionParticipant {
   readonly presence: PresenceState;
 }
 
-export type PresenceState = 'online' | 'idle' | 'typing' | 'away' | 'offline';
+/**
+ * @deprecated Use {@link PresenceStatus} — the ONE shared presence vocabulary. Kept as an alias so
+ * existing session/participant callers keep working; it is the same type, not a second definition.
+ */
+export type PresenceState = PresenceStatus;
 
 export interface SharedSession {
   readonly id: string;

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/collaboration — Presence ("who else is here").
+ * @weaveintel/collab — Presence ("who else is here").
  *
  * Collaboration Phase 1. Presence is the multiplayer baseline: a heartbeat-driven,
  * TTL-expiring set of participants currently watching a shared resource (a run).
@@ -31,6 +31,7 @@
  * the `run_presence` table. Both pass {@link presenceManagerContract}.
  */
 import type { RunPresenceParticipant } from '@weaveintel/core';
+import type { PresenceStatus, PeerKind } from './presence-model.js';
 
 /** Scope a presence set to one run within one tenant (hard isolation). */
 export interface PresenceScope {
@@ -42,8 +43,10 @@ export interface PresenceScope {
 export interface PresenceHeartbeat {
   userId: string;
   displayName: string;
-  presence: string;
-  peerType?: 'human' | 'agent';
+  /** The shared {@link PresenceStatus}. */
+  presence: PresenceStatus;
+  /** Human or AI agent — the shared {@link PeerKind}. */
+  peerType?: PeerKind;
   color?: string;
   cursor?: Record<string, unknown>;
 }

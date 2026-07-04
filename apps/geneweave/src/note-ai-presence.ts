@@ -12,7 +12,7 @@
  * EPHEMERAL — never stored. The AI's actual edit is still a suggestion the human accepts/rejects;
  * this only adds the "the assistant is working on this right now" live signal.
  */
-import { aiPeerId, aiAwarenessState } from '@weaveintel/collab';
+import { aiPeerId, aiAwarenessState, normalizePresenceStatus } from '@weaveintel/collab';
 import { noteCoeditHub } from './note-coedit-hub.js';
 import { createNoteSettingsService } from './note-settings-sql.js';
 import type { DatabaseAdapter } from './db-types.js';
@@ -34,7 +34,7 @@ export async function emitAiPresence(db: Pick<DatabaseAdapter, 'getWeaveNotesSet
       return;
     }
     noteCoeditHub.broadcast(noteId, 'presence.join', { peerId });
-    noteCoeditHub.broadcast(noteId, 'coedit.awareness', { peerId, entry: { clock, state: aiAwarenessState(status) } });
+    noteCoeditHub.broadcast(noteId, 'coedit.awareness', { peerId, entry: { clock, state: aiAwarenessState(normalizePresenceStatus(status)) } });
   } catch { /* presence is best-effort */ }
 }
 
