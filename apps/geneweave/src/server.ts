@@ -53,7 +53,7 @@ import {
   SERVER_MAX_REQUESTS_PER_SOCKET,
 } from './server-core.js';
 import { createHttpRateLimiter, createLoginFailureStore } from './http-rate-limiter.js';
-import { createDurableConsentManager } from '@weaveintel/compliance';
+import { createDurableConsentManager } from '@weaveintel/guardrails/compliance';
 import {
   registerAuthRoutes,
   registerModelRoutes,

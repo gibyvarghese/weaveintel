@@ -360,7 +360,7 @@ export interface ToolCallingAgentOptions {
    * with their data classification in the audit trail.
    *
    * Requires `ctx.runtime.compliance` to be wired (e.g. via
-   * `createRuntimeComplianceAdapter()` from `@weaveintel/compliance`).
+   * `createRuntimeComplianceAdapter()` from `@weaveintel/guardrails/compliance`).
    */
   complianceTools?: {
     /**

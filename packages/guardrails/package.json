@@ -13,6 +13,16 @@
       "import": "./dist/spotlighting.js",
       "types": "./dist/spotlighting.d.ts",
       "default": "./dist/spotlighting.js"
+    },
+    "./redaction": {
+      "import": "./dist/redaction/index.js",
+      "types": "./dist/redaction/index.d.ts",
+      "default": "./dist/redaction/index.js"
+    },
+    "./compliance": {
+      "import": "./dist/compliance/index.js",
+      "types": "./dist/compliance/index.d.ts",
+      "default": "./dist/compliance/index.js"
     }
   },
   "main": "./dist/index.js",
@@ -25,7 +35,8 @@
     "guardrails:eval": "npx tsx src/eval/runner.ts"
   },
   "dependencies": {
-    "@weaveintel/core": "^0.0.1"
+    "@weaveintel/core": "^0.0.1",
+    "@weaveintel/persistence": "^0.0.1"
   },
   "devDependencies": {
     "@weaveintel/testing": "^0.0.1",

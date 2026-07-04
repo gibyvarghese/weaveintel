@@ -1,5 +1,5 @@
 /**
- * @weaveintel/compliance — Domain error classes
+ * @weaveintel/guardrails/compliance — Domain error classes
  *
  * L-27+A-6: Typed subclasses of WeaveIntelError for compliance violations.
  * Using typed subclasses instead of plain WeaveIntelError lets callers use

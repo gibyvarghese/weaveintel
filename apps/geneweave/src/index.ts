@@ -32,7 +32,7 @@ import { createDurableCostLedger, createRuntimeCostAdapter } from '@weaveintel/c
 const log = createLogger('geneweave');
 import { weaveConsoleTracer, createOtelTracer } from '@weaveintel/observability';
 import { weaveSqlitePersistence } from '@weaveintel/persistence';
-import { weaveRedactor } from '@weaveintel/redaction';
+import { weaveRedactor } from '@weaveintel/guardrails/redaction';
 import { createDatabaseAdapter, type DatabaseAdapter, type DatabaseConfig } from './db.js';
 import { ChatEngine, type ProviderConfig } from './chat.js';
 import { createGeneWeaveServer } from './server.js';
@@ -179,7 +179,7 @@ import { initPgVectorSemanticMemory } from './memory-pgvector.js';
 import { initMemoryConsolidation } from './memory-consolidation.js';
 import { createGeneWeaveMemoryStore, createKeywordSemanticMemory } from './memory-store-adapter.js';
 import { weaveSemanticMemory, weaveWorkingMemory, createRuntimeMemoryAdapter } from '@weaveintel/memory';
-import { createRuntimeComplianceAdapter } from '@weaveintel/compliance';
+import { createRuntimeComplianceAdapter } from '@weaveintel/guardrails/compliance';
 import { createRuntimeIdentityAdapter } from '@weaveintel/identity';
 import { weaveInMemoryCacheStore, weaveRedisCacheStore, weaveTieredCacheStore, createRuntimeCacheAdapter, createCacheMetrics, withMetrics, weaveSemanticCache, createCacheInvalidator, createSingleflight } from '@weaveintel/cache';
 import { setActiveCacheInvalidator, loadInvalidationRules } from './cache-invalidator.js';
@@ -204,7 +204,7 @@ export let geneweaveEncryptionMetrics: (MetricsEmitter & { snapshot?: InMemoryMe
  *
  *  1. Database — SQLite adapter for persistence (users, sessions, chats, metrics)
  *  2. ChatEngine — orchestrates @weaveintel/models, @weaveintel/agents,
- *     @weaveintel/observability, @weaveintel/redaction, @weaveintel/testing/evals,
+ *     @weaveintel/observability, @weaveintel/guardrails/redaction, @weaveintel/testing/evals,
  *     @weaveintel/guardrails, @weaveintel/routing, and @weaveintel/cache
  *  3. seedDefaultData — creates admin user and default settings on first run
  *  4. HTTP Server — zero-dependency router with auth, CORS, SSE streaming

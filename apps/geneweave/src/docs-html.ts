@@ -190,7 +190,7 @@ ${code('text', `Applications (geneweave, your app)
                     @weaveintel/testing/evals · @weaveintel/guardrails · @weaveintel/resilience
   └─ Integration    @weaveintel/providers · @weaveintel/mcp-client · @weaveintel/mcp-server
                     @weaveintel/tools-* · @weaveintel/sandbox · @weaveintel/oauth
-  └─ Platform       @weaveintel/security · @weaveintel/tenancy · @weaveintel/compliance
+  └─ Platform       @weaveintel/security · @weaveintel/tenancy · @weaveintel/guardrails/compliance
                     @weaveintel/encryption · @weaveintel/resilience · @weaveintel/persistence
   └─ Contracts      @weaveintel/core  (zero runtime dependencies)`)}
 ${callout('info', '🔌', 'Where "run plumbing" lives (Collaboration Phase 0).', 'A <strong>run registry</strong> (what runs exist + their status) and a <strong>run journal</strong> (the numbered, append-only log of everything a run did, so a dropped connection can resume from "event 41") are now single <em>interfaces</em> in <code>@weaveintel/core</code>. geneWeave stores them in SQL; a key-value adapter ships in core — same interface, swappable storage, no duplicate code. The one Server-Sent-Events stream parser lives there too. New to this? Think of an interface as a power socket: anything that fits the socket (SQL, key-value) works, and nothing that plugs in needs to know what is behind the wall.')}
@@ -2601,7 +2601,7 @@ ${code('typescript', `import {
 } from '@weaveintel/core';
 import { weaveSqlitePersistence } from '@weaveintel/persistence';
 import { weaveConsoleTracer } from '@weaveintel/observability';
-import { weaveRedactor } from '@weaveintel/redaction';
+import { weaveRedactor } from '@weaveintel/guardrails/redaction';
 
 const runtime = weaveRuntime({
   // 1. Tracer — every span, agent step, and tool call emits here
@@ -2663,7 +2663,7 @@ await weaveLogSafetyDowngrade(ctx, {
   feature:   'guardrails',
   reason:    'trusted-internal-agent',
   component: 'batch-processor',
-});`, ['@weaveintel/core', '@weaveintel/persistence', '@weaveintel/observability', '@weaveintel/redaction'])}
+});`, ['@weaveintel/core', '@weaveintel/persistence', '@weaveintel/observability', '@weaveintel/guardrails/redaction'])}
 
 <h4>WeaveRuntimeOptions — complete reference</h4>
 ${params([
@@ -3002,7 +3002,7 @@ ${section('sec-redaction', 'Auto-Redaction on Audit Write Paths', `
 
 ${code('typescript', `import { weaveRuntime, weaveContext, weaveAudit } from '@weaveintel/core';
 import { weaveSqlitePersistence } from '@weaveintel/persistence';
-import { weaveRedactor } from '@weaveintel/redaction';
+import { weaveRedactor } from '@weaveintel/guardrails/redaction';
 
 const redactor = weaveRedactor({
   patterns: [
@@ -3024,7 +3024,7 @@ const ctx = weaveContext({ runtime });
 await weaveAudit(ctx, {
   action: 'user.login', outcome: 'success',
   details: { email: 'alice@example.com', ip: '1.2.3.4' },
-});`, ['@weaveintel/core', '@weaveintel/persistence', '@weaveintel/redaction'])}
+});`, ['@weaveintel/core', '@weaveintel/persistence', '@weaveintel/guardrails/redaction'])}
 
 <h4>Wrap any logger manually</h4>
 ${code('typescript', `import { createRedactingAuditLogger } from '@weaveintel/core';
@@ -4346,7 +4346,7 @@ const hasPremiumSearch = await resolveCapabilityBinding({
 function sRedaction(): string {
   return `
 <div class="pkg-hdr">
-  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/redaction</span></div>
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/guardrails/redaction</span></div>
   <h1 class="pkg-title">Redaction</h1>
   <p class="pkg-desc">PII detection and redaction middleware. Runs as a model-call interceptor so LLMs never see raw sensitive data. Supports built-in patterns (email, phone, SSN, credit card, IPv4), custom regex, allowlists, and optionally reversible tokenisation so the original value can be restored after the model response.</p>
 </div>
@@ -4359,7 +4359,7 @@ ${exlinks([
 ])}
 
 ${section('red-setup', 'Basic Setup', `
-${code('typescript', `import { weaveRedactor } from '@weaveintel/redaction';
+${code('typescript', `import { weaveRedactor } from '@weaveintel/guardrails/redaction';
 import { weaveContext } from '@weaveintel/core';
 
 const redactor = weaveRedactor({
@@ -4391,13 +4391,13 @@ const response = await model.generate({
 });
 
 // Restore originals in the response (reversible mode)
-const restored = await redactor.restore!(ctx, response.content, detections);`, ['@weaveintel/redaction', '@weaveintel/core'])}
+const restored = await redactor.restore!(ctx, response.content, detections);`, ['@weaveintel/guardrails/redaction', '@weaveintel/core'])}
 `)}
 
 ${section('red-model-middleware', 'Model Middleware (Recommended)', `
 <p>Wrap the model with a redaction middleware so every <code>model.generate()</code> call transparently redacts + de-redacts without any call-site changes.</p>
 
-${code('typescript', `import { weaveRedactor, createRedactingModel } from '@weaveintel/redaction';
+${code('typescript', `import { weaveRedactor, createRedactingModel } from '@weaveintel/guardrails/redaction';
 import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
 import { weaveAgent } from '@weaveintel/agents';
 import { weaveContext } from '@weaveintel/core';
@@ -4427,7 +4427,7 @@ const ctx    = weaveContext({ userId: 'alice' });
 const result = await agent.run(ctx, {
   messages: [{ role: 'user', content: 'My phone is 555-867-5309. Can you update my profile?' }],
 });
-// The model sees "[PHONE_1]" — the response with "[PHONE_1]" is de-redacted back to "555-867-5309"`, ['@weaveintel/redaction', '@weaveintel/provider-anthropic', '@weaveintel/agents', '@weaveintel/core'])}
+// The model sees "[PHONE_1]" — the response with "[PHONE_1]" is de-redacted back to "555-867-5309"`, ['@weaveintel/guardrails/redaction', '@weaveintel/provider-anthropic', '@weaveintel/agents', '@weaveintel/core'])}
 `)}
 
 ${section('red-audit', 'Auto-Redaction on Audit Writes', `
@@ -4435,7 +4435,7 @@ ${section('red-audit', 'Auto-Redaction on Audit Writes', `
 
 ${code('typescript', `import { weaveRuntime, weaveContext, weaveAudit } from '@weaveintel/core';
 import { weaveSqlitePersistence } from '@weaveintel/persistence';
-import { weaveRedactor } from '@weaveintel/redaction';
+import { weaveRedactor } from '@weaveintel/guardrails/redaction';
 
 const runtime = weaveRuntime({
   persistence: weaveSqlitePersistence({ path: './audit.db' }),
@@ -4455,7 +4455,7 @@ await weaveAudit(ctx, {
   outcome:  'success',
   resource: 'users/alice',
   details:  { email: 'alice@example.com', newPlan: 'pro' },
-});`, ['@weaveintel/core', '@weaveintel/persistence', '@weaveintel/redaction'])}
+});`, ['@weaveintel/core', '@weaveintel/persistence', '@weaveintel/guardrails/redaction'])}
 
 ${params([
   ['patterns', 'RedactionPattern[]', 'required', 'Array of patterns to detect. Each has <code>name</code>, <code>type</code> (builtin|regex|model), and optional <code>replacement</code>.'],
@@ -4470,7 +4470,7 @@ ${params([
 function sCompliance(): string {
   return `
 <div class="pkg-hdr">
-  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/compliance</span></div>
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/guardrails/compliance</span></div>
   <h1 class="pkg-title">Compliance</h1>
   <p class="pkg-desc">Data governance primitives for regulated environments: legal hold, consent management, data residency enforcement, retention policies with scheduled deletion, audit export, and GDPR-compliant user deletion. All six stores are runtime-aware — pass a persistence slot to make them restart-safe.</p>
 </div>
@@ -4490,7 +4490,7 @@ ${code('typescript', `import {
   createDurableConsentManager,
   createDurableRetentionEngine,
   createDurableDeletionManager,
-} from '@weaveintel/compliance';
+} from '@weaveintel/guardrails/compliance';
 import { weaveSqlitePersistence } from '@weaveintel/persistence';
 import { weaveRuntime } from '@weaveintel/core';
 
@@ -4502,11 +4502,11 @@ const runtime = weaveRuntime({
 const holds     = createDurableLegalHoldManager({ runtime, namespace: 'legal-hold' });
 const consent   = createDurableConsentManager({ runtime, namespace: 'consent' });
 const retention = createDurableRetentionEngine({ runtime, namespace: 'retention' });
-const deletion  = createDurableDeletionManager({ runtime, namespace: 'deletion' });`, ['@weaveintel/compliance', '@weaveintel/persistence', '@weaveintel/core'])}
+const deletion  = createDurableDeletionManager({ runtime, namespace: 'deletion' });`, ['@weaveintel/guardrails/compliance', '@weaveintel/persistence', '@weaveintel/core'])}
 `)}
 
 ${section('comp-consent', 'Consent Management', `
-${code('typescript', `import { createDurableConsentManager } from '@weaveintel/compliance';
+${code('typescript', `import { createDurableConsentManager } from '@weaveintel/guardrails/compliance';
 
 const consent = createDurableConsentManager({ runtime });
 
@@ -4526,12 +4526,12 @@ if (!allowed.granted) {
 }
 
 // Revoke consent
-await consent.revoke({ subjectId: 'user-alice', purpose: 'marketing-emails' });`, ['@weaveintel/compliance'])}
+await consent.revoke({ subjectId: 'user-alice', purpose: 'marketing-emails' });`, ['@weaveintel/guardrails/compliance'])}
 `)}
 
 ${section('comp-gdpr', 'GDPR Deletion (Right to Erasure)', `
-${code('typescript', `import { createDurableDeletionManager } from '@weaveintel/compliance';
-import { createDurableLegalHoldManager } from '@weaveintel/compliance';
+${code('typescript', `import { createDurableDeletionManager } from '@weaveintel/guardrails/compliance';
+import { createDurableLegalHoldManager } from '@weaveintel/guardrails/compliance';
 
 const deletion = createDurableDeletionManager({ runtime });
 const holds    = createDurableLegalHoldManager({ runtime });
@@ -4556,7 +4556,7 @@ if (holdStatus.held) {
     completedAt: new Date().toISOString(),
     deletedAt:   new Date().toISOString(),
   });
-}`, ['@weaveintel/compliance'])}
+}`, ['@weaveintel/guardrails/compliance'])}
 `)}`;
 }
 

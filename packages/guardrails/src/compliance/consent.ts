@@ -1,4 +1,4 @@
-// @weaveintel/compliance — Processing consent flags
+// @weaveintel/guardrails/compliance — Processing consent flags
 
 export type ConsentPurpose = 'analytics' | 'training' | 'personalization' | 'marketing' | 'research' | 'third-party';
 

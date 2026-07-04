@@ -1,4 +1,4 @@
-// @weaveintel/compliance — Tenant-level audit export
+// @weaveintel/guardrails/compliance — Tenant-level audit export
 
 export type ExportFormat = 'json' | 'csv' | 'ndjson';
 export type ExportStatus = 'pending' | 'generating' | 'ready' | 'expired' | 'failed';

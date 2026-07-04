@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// @weaveintel/compliance — Public API
+// @weaveintel/guardrails/compliance — Public API
 
 // Domain error classes (L-27+A-6)
 export {

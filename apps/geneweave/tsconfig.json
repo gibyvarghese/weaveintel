@@ -24,7 +24,7 @@
       "path": "../../packages/observability"
     },
     {
-      "path": "../../packages/redaction"
+      "path": "../../packages/guardrails"
     },
     {
       "path": "../../packages/testing"
@@ -43,9 +43,6 @@
     },
     {
       "path": "../../packages/encryption"
-    },
-    {
-      "path": "../../packages/guardrails"
     },
     {
       "path": "../../packages/scope"

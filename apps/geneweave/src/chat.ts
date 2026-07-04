@@ -13,7 +13,7 @@
  *   @weaveintel/core         — ExecutionContext, EventBus, Model/ToolRegistry types
  *   @weaveintel/agents       — weaveAgent (ReAct loop, with optional supervisor mode)
  *   @weaveintel/observability — weaveInMemoryTracer, weaveUsageTracker for spans
- *   @weaveintel/redaction     — weaveRedactor for PII scrubbing before/after LLM
+ *   @weaveintel/guardrails/redaction     — weaveRedactor for PII scrubbing before/after LLM
  *   @weaveintel/testing/evals         — weaveEvalRunner for response quality assertions
  *   @weaveintel/guardrails    — createGuardrailPipeline, risk classification
  *   @weaveintel/human-tasks   — PolicyEvaluator for automatic human-review triggers
@@ -23,7 +23,7 @@
  */
 
 import { newUUIDv7, createLogger } from '@weaveintel/core';
-import type { DurableConsentManager } from '@weaveintel/compliance';
+import type { DurableConsentManager } from '@weaveintel/guardrails/compliance';
 
 const log = createLogger('chat');
 import type { ServerResponse } from 'node:http';

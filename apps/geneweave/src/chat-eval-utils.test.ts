@@ -4,7 +4,7 @@ import type { DatabaseAdapter } from './db.js';
 const redactMock = vi.fn();
 const evalRunMock = vi.fn();
 
-vi.mock('@weaveintel/redaction', () => ({
+vi.mock('@weaveintel/guardrails/redaction', () => ({
   weaveRedactor: () => ({ redact: redactMock }),
 }));
 

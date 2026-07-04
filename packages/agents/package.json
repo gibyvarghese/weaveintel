@@ -25,9 +25,9 @@
   },
   "dependencies": {
     "@weaveintel/a2a": "^0.0.1",
-    "@weaveintel/compliance": "^0.0.1",
     "@weaveintel/core": "^0.0.1",
     "@weaveintel/cost-governor": "^0.0.1",
+    "@weaveintel/guardrails": "^0.0.1",
     "@weaveintel/human-tasks": "^0.0.1",
     "@weaveintel/memory": "^0.0.1",
     "@weaveintel/models": "^0.0.1",

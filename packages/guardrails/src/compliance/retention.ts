@@ -1,4 +1,4 @@
-// @weaveintel/compliance — Data retention rules
+// @weaveintel/guardrails/compliance — Data retention rules
 
 export type RetentionAction = 'delete' | 'archive' | 'anonymize';
 

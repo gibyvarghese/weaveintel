@@ -54,7 +54,6 @@
     "@weaveintel/observability": "*",
     "@weaveintel/persistence": "*",
     "@weaveintel/prompts": "*",
-    "@weaveintel/redaction": "*",
     "@weaveintel/resilience": "*",
     "@weaveintel/retrieval": "*",
     "@weaveintel/routing": "*",

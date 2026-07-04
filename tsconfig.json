@@ -29,9 +29,6 @@
       "path": "packages/observability"
     },
     {
-      "path": "packages/redaction"
-    },
-    {
       "path": "packages/skills"
     },
     {
@@ -189,9 +186,6 @@
     },
     {
       "path": "packages/resilience"
-    },
-    {
-      "path": "packages/compliance"
     },
     {
       "path": "packages/plugins"

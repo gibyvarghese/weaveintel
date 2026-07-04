@@ -1,4 +1,4 @@
-// @weaveintel/compliance — Legal hold management
+// @weaveintel/guardrails/compliance — Legal hold management
 
 export type LegalHoldStatus = 'active' | 'released' | 'expired';
 

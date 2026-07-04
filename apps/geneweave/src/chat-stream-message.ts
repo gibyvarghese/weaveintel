@@ -5,7 +5,7 @@ import type { ServerResponse } from 'node:http';
 import type { ExecutionContext, Message, AgentStep, ModelRequest, ModelHealth, RuntimeRoutingSlot } from '@weaveintel/core';
 import { weaveContext } from '@weaveintel/core';
 import { applySkillsToPrompt } from '@weaveintel/skills';
-import type { DurableConsentManager } from '@weaveintel/compliance';
+import type { DurableConsentManager } from '@weaveintel/guardrails/compliance';
 import type { DatabaseAdapter } from './db.js';
 import { normalizePersona } from './rbac.js';
 import { buildReasoningRequestMetadata, reasoningAdjustedTemperature, reasoningAdjustedMaxTokens, type ReasoningRequestMetadata } from './chat-reasoning-utils.js';

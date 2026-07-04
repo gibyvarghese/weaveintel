@@ -1,5 +1,5 @@
 /**
- * @weaveintel/compliance — durable variants of the six in-memory managers.
+ * @weaveintel/guardrails/compliance — durable variants of the six in-memory managers.
  *
  * Each factory takes `{ runtime?, namespace? }` and returns an async-flavored
  * manager backed by `runtime.persistence.kv` (Phase 4). When no runtime or

@@ -1,4 +1,4 @@
-// @weaveintel/compliance — Data residency constraints
+// @weaveintel/guardrails/compliance — Data residency constraints
 
 export interface ResidencyConstraint {
   readonly id: string;

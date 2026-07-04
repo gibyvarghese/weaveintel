@@ -1,4 +1,4 @@
-// @weaveintel/compliance — Right-to-delete requests
+// @weaveintel/guardrails/compliance — Right-to-delete requests
 import { randomBytes } from 'node:crypto';
 
 export type DeletionStatus = 'pending' | 'in-progress' | 'completed' | 'failed' | 'blocked';

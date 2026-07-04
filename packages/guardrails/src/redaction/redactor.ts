@@ -1,5 +1,5 @@
 /**
- * @weaveintel/redaction — PII detection & redaction
+ * @weaveintel/guardrails/redaction — PII detection & redaction
  *
  * Regex-based PII detection with built-in patterns for common types
  * (email, phone, SSN, credit card, IP address). Supports custom patterns,

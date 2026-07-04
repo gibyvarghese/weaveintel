@@ -1,5 +1,5 @@
 /**
- * Phase 6 — `RuntimeComplianceSlot` adapter for `@weaveintel/compliance`.
+ * Phase 6 — `RuntimeComplianceSlot` adapter for `@weaveintel/guardrails/compliance`.
  *
  * `createRuntimeComplianceAdapter(opts)` wires all six durable managers into
  * the single `RuntimeComplianceSlot` shape that `weaveRuntime({ compliance })`
