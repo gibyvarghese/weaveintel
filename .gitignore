@@ -49,3 +49,4 @@ geneweave-tasks.json
 # Generated test output / reports
 test-results/
 apps/geneweave/test-results/
+apps/geneweave/docs-samples/.generated/

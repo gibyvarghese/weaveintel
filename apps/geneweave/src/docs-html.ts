@@ -1435,7 +1435,7 @@ const chunker = weaveChunker({
   chunkSize: 512,           // Target tokens per chunk
   chunkOverlap: 64,         // Token overlap between adjacent chunks
   minChunkSize: 100,        // Discard chunks smaller than this
-  splitOn: ['\n\n', '\n', '.', ' '], // Priority-ordered split characters
+  splitOn: ['\\n\\n', '\\n', '.', ' '], // Priority-ordered split characters
   tokenizer: 'cl100k_base', // Tiktoken encoding (or 'simple' for char-based)
 });
 
@@ -1639,7 +1639,7 @@ const runner = weaveEvalRunner({
 
 const dataset = [
   { id: 'q1', input: 'What is the capital of France?',
-    expected: 'Paris, which has been France\'s capital since the 12th century.' },
+    expected: 'Paris, which has been France\\'s capital since the 12th century.' },
   { id: 'q2', input: 'Explain quantum entanglement in one sentence.',
     expected: 'Entangled particles share correlated quantum states regardless of distance.' },
 ];
@@ -2452,7 +2452,7 @@ const mcpTools = await weaveMCPTools(client);   // all MCP tools as a ToolRegist
 const agent  = weaveAgent({
   model:        weaveAnthropicModel('claude-sonnet-4-6'),
   tools:        mcpTools,
-  systemPrompt: 'You have access to the user\'s ~/docs directory via MCP tools. Help them find and summarise documents.',
+  systemPrompt: 'You have access to the user\\'s ~/docs directory via MCP tools. Help them find and summarise documents.',
   maxSteps:     5,
 });
 
@@ -5216,7 +5216,7 @@ const deletedCount = await db.expireArtifacts!();`, ['@weaveintel/geneweave'])}
 
 <h4>Admin REST API (/api/admin/artifacts)</h4>
 <p>All six admin endpoints are registered by <code>registerArtifactRoutes()</code> in <code>server-admin.ts</code>. Endpoints require authentication (<code>platform_admin</code> or <code>tenant_admin</code> persona).</p>
-${code('typescript', `// GET  /api/admin/artifacts                        — list with filters
+${code('http', `# GET  /api/admin/artifacts                        — list with filters
 // GET  /api/admin/artifacts/:id                    — get single artifact
 // GET  /api/admin/artifacts/:id/versions           — full version history
 // GET  /api/admin/artifacts/:id/versions/:n        — specific version
@@ -5965,7 +5965,7 @@ console.log(\`Extracted: \${successful.length}/\${docs.length}\`);
 // Export to CSV
 const csv = results.map(r =>
   [r.documentId, r.data.companyName, r.data.foundingYear, r.data.revenue ?? ''].join(',')
-).join('\n');`, ['@weaveintel/extraction', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
+).join('\\n');`, ['@weaveintel/extraction', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
 `)}
 
 ${section('extraction-e2e', 'End-to-End: Research → Extract → Store', `
