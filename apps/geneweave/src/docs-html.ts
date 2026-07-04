@@ -2352,53 +2352,47 @@ const stdioTransport = createMCPStdioClientTransport({
   env: { HOME: process.env.HOME! },
 });
 
-// Connect to an HTTP MCP server
-const httpTransport = createMCPStreamableHttpTransport({
-  url: 'https://mcp.example.com/v1',
-  headers: { Authorization: \`Bearer \${process.env.MCP_TOKEN}\` },
-  timeout: 10_000,
+// Connect to an HTTP MCP server (endpoint first, then options)
+const httpTransport = createMCPStreamableHttpTransport('https://mcp.example.com/v1', {
+  getHeaders: () => ({ Authorization: \`Bearer \${process.env.MCP_TOKEN}\` }),
 });
 
-const client = await weaveMCPClient(stdioTransport);
+const client = weaveMCPClient();
+await client.connect(stdioTransport);
 
-// Get all tools as a ToolRegistry
-const mcpToolRegistry = await weaveMCPTools(client);
+// Discover the server's tools, then wrap them as a ToolRegistry
+const toolDefs = await client.listTools();
+const mcpToolRegistry = weaveMCPTools(client, toolDefs);
 
 // Use in a weaveAgent
 const agent = weaveAgent({ model, tools: mcpToolRegistry });
 
-// Or register alongside other tools
-mcpToolRegistry.list().forEach(t => myRegistry.register(t));
-
 // Clean up
-await client.close();`)}
+await client.disconnect();`)}
 `)}
 
 ${section('mcp-server', 'MCP Server', `
-${code('typescript', `import { weaveMCPServer } from '@weaveintel/mcp-server';
-import { weaveToolRegistry, weaveTool } from '@weaveintel/core';
-
-const tools = weaveToolRegistry();
-tools.register(weaveTool({
-  name: 'company_search',
-  description: 'Search the internal company knowledge base.',
-  parameters: { type:'object', required:['query'], properties:{ query:{type:'string'} } },
-  execute: async ({ query }) => JSON.stringify(await kb.search(query as string)),
-}));
+${code('typescript', `import { weaveMCPServer, createMCPStreamableHttpServerTransport } from '@weaveintel/mcp-server';
 
 const server = weaveMCPServer({
   name:        'acme-internal-tools',
   version:     '1.0.0',
   description: 'ACME internal tools exposed via MCP for Claude Desktop and Cursor.',
-  tools,
-  capabilities: { tools: { listChanged: true }, logging: {} },
 });
 
-// HTTP — for remote clients (Claude Desktop, Cursor, etc.)
-await server.startHTTP({ port: 3001, path: '/mcp', cors: { origin: '*' } });
+// Tools are added one at a time: addTool(definition, handler)
+server.addTool(
+  {
+    name: 'company_search',
+    description: 'Search the internal company knowledge base.',
+    inputSchema: { type: 'object', required: ['query'], properties: { query: { type: 'string' } } },
+  },
+  async (ctx, args) => ({ content: [{ type: 'text', text: JSON.stringify(await kb.search(String(args['query']))) }] }),
+);
 
-// Or stdio — for local subprocess usage
-// await server.startStdio();`)}
+// HTTP transport — for remote clients (Claude Desktop, Cursor, etc.)
+const transport = createMCPStreamableHttpServerTransport({});
+await server.start(transport);`)}
 `)}
 
 ${section('mcp-e2e', 'End-to-End: Agent with MCP Tools', `
@@ -2413,8 +2407,9 @@ const transport = createMCPStdioClientTransport({
   args: ['-y', '@modelcontextprotocol/server-filesystem', process.env['HOME']! + '/docs'],
 });
 
-const client   = await weaveMCPClient(transport);
-const mcpTools = await weaveMCPTools(client);   // all MCP tools as a ToolRegistry
+const client   = weaveMCPClient();
+await client.connect(transport);
+const mcpTools = weaveMCPTools(client, await client.listTools());   // all MCP tools as a ToolRegistry
 
 const agent  = weaveAgent({
   model:        weaveAnthropicModel('claude-sonnet-4-6'),
@@ -2430,7 +2425,7 @@ const result = await agent.run(ctx, {
 console.log(result.output);
 
 // Clean up
-await client.close();`, ['@weaveintel/mcp-client', '@weaveintel/agents', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
+await client.disconnect();`, ['@weaveintel/mcp-client', '@weaveintel/agents', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
 `)}`;
 }
 
@@ -2473,8 +2468,8 @@ await agent.run(ctx, {
   messages: [{ role: 'user', content: 'Analyse the latest earnings report.' }],
 });
 
-// Retrieve spans after the run
-const spans = tracer.getSpans();
+// Retrieve spans after the run (the in-memory tracer exposes a .spans array)
+const spans = tracer.spans;
 spans.forEach(s => {
   console.log(\`[\${s.name}] \${s.durationMs}ms status=\${s.status ?? 'ok'}\`);
   if (s.attributes['tool.name']) {
@@ -2495,46 +2490,46 @@ ${returns([
 `)}
 
 ${section('obs-budget', 'Budget Tracking & Alerts', `
-${code('typescript', `import { weaveBudgetTracker, weaveUsageTracker } from '@weaveintel/observability';
-import { weaveEventBus } from '@weaveintel/core';
+${code('typescript', `import { weaveBudgetTracker, weaveUsageTracker, type BudgetAlert } from '@weaveintel/observability';
 
-const bus = weaveEventBus();
-
-// Track cumulative spend and alert at thresholds
+// Budget tracker enforces per-hour / per-request token + cost ceilings
 const budget = weaveBudgetTracker({
-  bus,
-  monthlyBudgetUsd: 500,
-  alertThresholds:  [0.5, 0.8, 0.95],   // 50%, 80%, 95%
-  onAlert: async (fraction, spentUsd) => {
-    await pagerDuty.trigger(\`\${Math.round(fraction*100)}% AI budget used — $\${spentUsd.toFixed(2)}\`);
+  maxTokensPerHour:   500_000,
+  maxCostPerHour:     100.00,   // $100/hour
+  maxTokensPerRequest: 50_000,
+  onAlert: (alert: BudgetAlert) => {
+    pagerDuty.trigger(\`Budget alert: \${alert.type} = \${alert.current} (limit \${alert.limit})\`);
   },
 });
 
-// Usage tracker counts tokens and cost per model
-const usage = weaveUsageTracker({ bus });
+// Usage tracker accumulates token/cost records per execution
+const usage = weaveUsageTracker();
 
-const agent = weaveAgent({ model, tools, bus });
-const ctx   = weaveContext({ userId: 'alice' });
-await agent.run(ctx, { messages });
+usage.record({
+  executionId: 'exec-1',
+  model:       'claude-sonnet-4-6',
+  provider:    'anthropic',
+  promptTokens: 1200, completionTokens: 300, totalTokens: 1500,
+  costUsd: 0.009, timestamp: Date.now(),
+});
 
-const report = usage.getReport();
-// { 'claude-sonnet-4-6': { calls: 3, tokens: 4200, costUsd: 0.063 }, ... }
-console.log(report);`, ['@weaveintel/observability', '@weaveintel/core', '@weaveintel/agents'])}
+// Aggregate by execution or across everything
+console.log(usage.getTotal('exec-1'));
+console.log(usage.getAll());`, ['@weaveintel/observability'])}
 `)}
 
 ${section('obs-otel', 'OpenTelemetry Export', `
 ${code('typescript', `import { createOtelTracer } from '@weaveintel/observability';
-import { NodeSDK } from '@opentelemetry/sdk-node';
-import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
+import { weaveRuntime, weaveContext } from '@weaveintel/core';
 
-// Wire OpenTelemetry SDK
-const sdk = new NodeSDK({
-  traceExporter: new OTLPTraceExporter({ url: 'http://otel-collector:4318/v1/traces' }),
+// createOtelTracer exports weaveIntel spans straight to an OTLP endpoint —
+// no separate @opentelemetry/sdk-node wiring needed. Point it at your collector.
+const runtime = weaveRuntime({
+  tracer: createOtelTracer({
+    serviceName: 'my-app',
+    endpoint:    process.env['OTEL_EXPORTER_OTLP_ENDPOINT'] ?? 'http://otel-collector:4318',
+  }),
 });
-sdk.start();
-
-// createOtelTracer bridges weaveIntel spans → OTEL spans
-const runtime = weaveRuntime({ tracer: createOtelTracer({ serviceName: 'my-app' }) });
 const ctx = weaveContext({ runtime });
 // All spans now appear in your Jaeger / Tempo / Honeycomb dashboard`, ['@weaveintel/observability', '@weaveintel/core'])}
 `)}`;
@@ -2768,12 +2763,13 @@ const bus = weaveEventBus();
 // Listen to agent steps
 bus.on(EventTypes.AgentRunStart, e => console.log(\`Agent started: \${e.data.agent}\`));
 bus.on(EventTypes.ToolCallStart,  e => console.log(\`Tool call: \${e.data.tool}\`));
-bus.on(EventTypes.ToolCallEnd,    e => console.log(\`Tool done: \${e.data.tool} result=\${e.data.result?.slice(0,60)}\`));
+bus.on(EventTypes.ToolCallEnd,    e => console.log(\`Tool done: \${e.data.tool} result=\${String(e.data.result ?? '').slice(0,60)}\`));
 bus.on(EventTypes.AgentRunEnd,    e => console.log(\`Agent done: steps=\${e.data.steps}\`));
 
-// Listen to model calls for token metering
-bus.on(EventTypes.ModelCallEnd, e => {
-  metrics.increment('llm.tokens', e.data.usage?.totalTokens ?? 0, { provider: e.data.provider });
+// Listen to model calls for token metering (event.data is a free-form bag)
+bus.on(EventTypes.ModelRequestEnd, e => {
+  const usage = e.data.usage as { totalTokens?: number } | undefined;
+  metrics.increment('llm.tokens', usage?.totalTokens ?? 0, { provider: String(e.data.provider) });
 });
 
 // One-time listener
@@ -3475,7 +3471,7 @@ const researchServer: A2AServer = {
     description: 'Researches topics via web search',
     version: '1.0.0',
     skills: [{ id: 'web-search', name: 'Web Search', description: 'Search and summarise' }],
-    capabilities: { streaming: true },
+    capabilities: { streaming: true, pushNotifications: false, extendedAgentCard: false, stateTransitionHistory: false },
     supportedInterfaces: [{ url: 'http://localhost/api/a2a', protocolBinding: 'JSONRPC', protocolVersion: '1.0' }],
   },
   async handleMessage(ctx, params): Promise<A2ATask> {
@@ -3517,6 +3513,8 @@ ${section('a2a-http', 'Distributed A2A over HTTP (JSON-RPC 2.0)', `
 ${code('typescript', `import { weaveA2AClient, createA2ADispatcher, createInMemoryA2ATaskStore, createInMemoryPushNotificationStore } from '@weaveintel/a2a';
 import { weaveContext } from '@weaveintel/core';
 
+const ctx = weaveContext({ userId: 'u1' });
+
 // ── Server side: wire a JSON-RPC 2.0 dispatcher ─────────────────────────────
 const taskStore = createInMemoryA2ATaskStore();
 const pushStore = createInMemoryPushNotificationStore();
@@ -3535,7 +3533,6 @@ if (result.kind === 'json') {
 
 // ── Client side: connect to any A2A v1.0 agent ──────────────────────────────
 const client = weaveA2AClient();
-const ctx    = weaveContext({ userId: 'u1' });
 
 // Discover and send a message
 const card    = await client.discover('https://research-agent.example.com');
@@ -3600,7 +3597,7 @@ const documentAgent: AgentCard = {
       tags: ['etl', 'pandas', 'sql', 'transform'],
     },
   ],
-  capabilities: { streaming: true, pushNotifications: false },
+  capabilities: { streaming: true, pushNotifications: false, extendedAgentCard: false, stateTransitionHistory: false },
   supportedInterfaces: [
     { url: 'https://agents.example.com/doc-processor', protocolBinding: 'JSONRPC', protocolVersion: '1.0' },
   ],
@@ -5390,19 +5387,19 @@ ${code('typescript', `// Server-Sent Events format:
 // Client-side (browser or Node.js):
 const evtSource = new EventSource(\`/api/artifacts/\${artifactId}/stream\`);
 
-evtSource.addEventListener('update', (e) => {
+evtSource.addEventListener('update', (e: MessageEvent) => {
   const ev = JSON.parse(e.data);
   progressBar.style.width = \`\${ev.progress * 100}%\`;
   previewPane.textContent = ev.data ?? '';
 });
 
-evtSource.addEventListener('complete', (e) => {
+evtSource.addEventListener('complete', (e: MessageEvent) => {
   const ev = JSON.parse(e.data);
   console.log('Done! Final version:', ev.version);
   evtSource.close();
 });
 
-evtSource.addEventListener('error', (e) => {
+evtSource.addEventListener('error', (e: MessageEvent) => {
   console.error('Streaming failed:', JSON.parse(e.data).message);
   evtSource.close();
 });
