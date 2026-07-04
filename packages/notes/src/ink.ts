@@ -21,7 +21,7 @@
  *
  * Pure + zero-dependency (browser- and server-safe).
  */
-import { sanitizeColor } from './creative.js';
+import { sanitizeColor } from './color-safety.js';
 
 /** One sampled pen point: position + optional pressure (0..1). */
 export interface InkPoint { x: number; y: number; p?: number }

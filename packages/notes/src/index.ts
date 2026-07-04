@@ -127,9 +127,11 @@ export {
   CALLOUT_TONES,
   coerceCalloutTone,
   STICKER_PRESETS,
-  sanitizeColor,
   isKnownSwatch,
 } from './creative.js';
+
+// Colour-safety gate (shared by ink/diagram/creative + the app).
+export { sanitizeColor } from './color-safety.js';
 
 // weaveNotes Phase 2 — the AI colour-coding contract: a pre-validated WCAG-AA palette,
 // the semantic colour schemes (topic/importance/status/sentiment), and phrase location.

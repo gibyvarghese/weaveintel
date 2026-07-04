@@ -19,7 +19,7 @@
  *     arrowed edges, and centred labels (for the editor, a share, and the exported artifact).
  */
 import { HIGHLIGHT_PALETTE, READING_INK } from './colorize.js';
-import { sanitizeColor } from './creative.js';
+import { sanitizeColor } from './color-safety.js';
 
 export type DiagramKind = 'flow' | 'mindmap' | 'graph';
 /** Node shapes — process/business/block-diagram vocabulary. */

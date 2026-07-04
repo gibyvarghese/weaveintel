@@ -124,23 +124,7 @@ export const STICKER_PRESETS: readonly string[] = ['✨', '⭐', '🔥', '💡',
 
 // ─── Colour safety (shared by editor, AI, and renderers) ────────────────────────────
 
-/**
- * Return the input ONLY if it is unmistakably an inert CSS colour — a hex literal, an
- * `rgb[a]()` / `hsl[a]()` functional notation, or a short letters-only named colour. Anything
- * containing `url(...)`, `expression(...)`, `;`, `}`, or any non-colour syntax returns `null`.
- * This is the one gate the editor's colour pickers, the AI's colour tools, and the share
- * renderer all pass colours through, so a "colour" can never carry CSS or script.
- */
-export function sanitizeColor(input: unknown): string | null {
-  if (typeof input !== 'string') return null;
-  const s = input.trim();
-  if (s.length === 0 || s.length > 32) return null;
-  if (/^#[0-9a-fA-F]{3,8}$/.test(s)) return s;
-  if (/^rgba?\(\s*[\d.\s,%]+\)$/.test(s)) return s;
-  if (/^hsla?\(\s*[\d.\s,%]+\)$/.test(s)) return s;
-  if (/^[a-zA-Z]{3,20}$/.test(s)) return s.toLowerCase();
-  return null;
-}
+// `sanitizeColor` now lives in the slim `@weaveintel/notes` colour-safety module (`./color-safety.js`).
 
 /**
  * Is a highlighter colour an allowed swatch? The UI offers a fixed palette; the AI's
