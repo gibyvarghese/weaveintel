@@ -23,8 +23,8 @@ import type {
   EventBus,
   Middleware,
   CapabilityId,
-} from '@weaveintel/core';
-import { weaveMiddleware, WeaveIntelError, weaveEvent, EventTypes } from '@weaveintel/core';
+} from '../index.js';
+import { weaveMiddleware, WeaveIntelError, weaveEvent, EventTypes } from '../index.js';
 
 // ─── Chat model provider registry ────────────────────────────
 

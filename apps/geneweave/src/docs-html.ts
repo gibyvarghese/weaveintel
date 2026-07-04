@@ -973,7 +973,7 @@ ${featureCards([
 function sModels(): string {
   return `
 <div class="pkg-hdr">
-  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/models</span></div>
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/core/models</span></div>
   <h1 class="pkg-title">Models</h1>
   <p class="pkg-desc">Provider-agnostic model factory with named registration, capability-based routing, middleware, and cost tracking. Supports text generation, embeddings, image, and audio models.</p>
 </div>
@@ -984,7 +984,7 @@ ${exlinks([
 ])}
 
 ${section('models-register', 'Registration', `
-${code('typescript', `import { weaveRegisterModel, weaveGetModel, weaveListModels } from '@weaveintel/models';
+${code('typescript', `import { weaveRegisterModel, weaveGetModel, weaveListModels } from '@weaveintel/core/models';
 import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
 import { weaveOpenAIModel } from '@weaveintel/provider-openai';
 import { weaveGoogleModel } from '@weaveintel/provider-google';
@@ -1102,7 +1102,7 @@ const result = await model.generate({
 
 ${section('prompts-contracts', 'Output Contracts', `
 <p>Contracts validate or repair model output against a schema — JSON structure, Markdown formatting, code fences, max length, forbidden phrases.</p>
-${code('typescript', `import { createContract, DefaultCompletionValidator } from '@weaveintel/contracts';
+${code('typescript', `import { createContract, DefaultCompletionValidator } from '@weaveintel/core/contracts';
 
 const contract = createContract({
   type: 'JSON',
@@ -4318,7 +4318,7 @@ ${params([
 ${section('ten-caps', 'Capability Bindings', `
 <p>Capability policy bindings determine which tools, models, and prompts each tenant (and each agent or mesh within a tenant) can access. Resolved at runtime with precedence: agent=100 > mesh=50 > workflow=10 > tenant=5 > package_default.</p>
 
-${code('typescript', `import { resolveCapabilityBinding } from '@weaveintel/capability-packs';
+${code('typescript', `import { resolveCapabilityBinding } from '@weaveintel/core/capability-packs';
 
 // Resolve the effective tool policy for this agent+tenant combination
 const policy = await resolveCapabilityBinding({
@@ -4337,7 +4337,7 @@ const hasPremiumSearch = await resolveCapabilityBinding({
   policyKind:  'capability_pack',
   tenantId:    'acme',
   packKey:     'premium.search',
-});`, ['@weaveintel/capability-packs'])}
+});`, ['@weaveintel/core/capability-packs'])}
 `)}`;
 }
 
@@ -4954,7 +4954,7 @@ ${params([
 function sContracts(): string {
   return `
 <div class="pkg-hdr">
-  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/contracts</span></div>
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/core/contracts</span></div>
   <h1 class="pkg-title">Contracts</h1>
   <p class="pkg-desc">Evidence ledger for agent decisions. Every significant model output — a claim, a verdict, a recommendation — is recorded as a signed, append-only contract entry. Contracts are queryable, replayable, and provide the audit trail that makes AI decisions explainable after the fact.</p>
 </div>
@@ -4968,7 +4968,7 @@ ${featureCards([
 
 ${section('contracts-emit', 'Emitting Contracts from Workflows', `
 ${code('typescript', `import { DefaultWorkflowEngine } from '@weaveintel/workflows';
-import { DbContractEmitter } from '@weaveintel/contracts';
+import { DbContractEmitter } from '@weaveintel/core/contracts';
 
 // Wire a contract emitter into the workflow engine
 const engine = new DefaultWorkflowEngine({
@@ -4999,11 +4999,11 @@ const def = {
 await engine.createDefinition(def);
 const run = await engine.startRun('equity-analysis', { ticker: 'AAPL' });
 // After completion, a signed contract entry is appended to the evidence ledger.
-// run.metadata.__outputContract contains the emitted contract id.`, ['@weaveintel/workflows', '@weaveintel/contracts'])}
+// run.metadata.__outputContract contains the emitted contract id.`, ['@weaveintel/workflows', '@weaveintel/core/contracts'])}
 `)}
 
 ${section('contracts-query', 'Querying the Evidence Ledger', `
-${code('typescript', `import { ContractLedger } from '@weaveintel/contracts';
+${code('typescript', `import { ContractLedger } from '@weaveintel/core/contracts';
 
 const ledger = new ContractLedger({ db });
 
@@ -5018,7 +5018,7 @@ for (const entry of entries) {
 
 // Verify the chain integrity — detects tampering
 const valid = await ledger.verifyChain({ runId: run.id });
-console.log('Chain intact:', valid);`, ['@weaveintel/contracts'])}
+console.log('Chain intact:', valid);`, ['@weaveintel/core/contracts'])}
 `)}`;
 }
 

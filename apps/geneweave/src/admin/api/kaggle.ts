@@ -6,7 +6,7 @@
  *  - kaggle_approaches            (candidate modeling approaches per competition)
  *  - kaggle_runs                  (kernel push + submission lifecycle)
  *
- * Source of truth for evidence + agent decisions remains @weaveintel/contracts
+ * Source of truth for evidence + agent decisions remains @weaveintel/core/contracts
  * and live-agents StateStore. These admin routes are the operator window into
  * what GeneWeave has materialized.
  */

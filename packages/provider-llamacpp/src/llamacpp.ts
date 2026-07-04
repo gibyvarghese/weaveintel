@@ -34,7 +34,7 @@ import {
   normalizeError,
   deadlineSignal,
 } from '@weaveintel/core';
-import { weaveRegisterModel, weaveRegisterEmbedding } from '@weaveintel/models';
+import { weaveRegisterModel, weaveRegisterEmbedding } from '@weaveintel/core/models';
 import { openaiAdapter, translate } from '@weaveintel/tool-schema';
 import { llamacppFetch, llamacppFetchStream } from './_fetch.js';
 

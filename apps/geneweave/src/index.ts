@@ -203,7 +203,7 @@ export let geneweaveEncryptionMetrics: (MetricsEmitter & { snapshot?: InMemoryMe
  * It wires together all WeaveIntel subsystems in order:
  *
  *  1. Database — SQLite adapter for persistence (users, sessions, chats, metrics)
- *  2. ChatEngine — orchestrates @weaveintel/models, @weaveintel/agents,
+ *  2. ChatEngine — orchestrates @weaveintel/core/models, @weaveintel/agents,
  *     @weaveintel/observability, @weaveintel/guardrails/redaction, @weaveintel/testing/evals,
  *     @weaveintel/guardrails, @weaveintel/routing, and @weaveintel/cache
  *  3. seedDefaultData — creates admin user and default settings on first run

@@ -4,8 +4,8 @@
  * Builder-pattern API for creating task contracts with acceptance criteria.
  */
 
-import type { TaskContract, AcceptanceCriteria } from '@weaveintel/core';
-import { newUUIDv7 } from '@weaveintel/core';
+import type { TaskContract, AcceptanceCriteria } from '../index.js';
+import { newUUIDv7 } from '../index.js';
 
 export interface CreateContractInput {
   name: string;

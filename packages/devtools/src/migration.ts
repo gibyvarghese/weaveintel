@@ -85,7 +85,7 @@ const MIGRATIONS: MigrationStep[] = [
     description: 'Renamed weaveModel() to the Models package entry',
     breaking: true,
     before: "import { weaveModel } from '@weaveintel/core'",
-    after: "import { weaveModelRouter } from '@weaveintel/models'",
+    after: "import { weaveModelRouter } from '@weaveintel/core/models'",
   },
   {
     version: '0.3.0',

@@ -2,7 +2,7 @@
  * Internationalisation — the client side (m145).
  *
  * The web UI is served as raw ES modules and can't bundle a workspace package, so this MIRRORS the pure
- * @weaveintel/i18n core (the package's tests are the canonical spec). At sign-in the app fetches the
+ * @weaveintel/core/i18n core (the package's tests are the canonical spec). At sign-in the app fetches the
  * effective message pack for the reader's language from GET /api/me/i18n (English base + any built-in locale
  * + the workspace's AI-generated pack, already resolved down the fallback chain), and `t(key)` looks a label
  * up in it. An unknown key returns the key itself, so a missing translation degrades gracefully.
@@ -17,7 +17,7 @@ let _messages: Catalog = {};
 let _locale = 'en';
 let _available: { default_locale: string; assistant_localized: boolean; locales: Array<{ code: string; name: string; source: string }> } = { default_locale: 'en', assistant_localized: false, locales: [{ code: 'en', name: 'English', source: 'builtin' }] };
 
-// ── ICU-subset interpolation (mirror of @weaveintel/i18n) ─────────────────────────────────
+// ── ICU-subset interpolation (mirror of @weaveintel/core/i18n) ─────────────────────────────────
 
 function pluralCategory(n: number, locale = 'en'): string {
   const num = typeof n === 'number' && Number.isFinite(n) ? Math.abs(n) : 0;

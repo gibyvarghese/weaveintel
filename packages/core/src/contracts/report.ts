@@ -7,7 +7,7 @@ import type {
   ValidationResult,
   EvidenceBundle,
   EvidenceItem,
-} from '@weaveintel/core';
+} from '../index.js';
 
 /**
  * Build a CompletionReport from raw validation results.

@@ -30,7 +30,6 @@
     "@weaveintel/guardrails": "^0.0.1",
     "@weaveintel/human-tasks": "^0.0.1",
     "@weaveintel/memory": "^0.0.1",
-    "@weaveintel/models": "^0.0.1",
     "@weaveintel/prompts": "^0.0.1",
     "@weaveintel/testing": "^0.0.1"
   },

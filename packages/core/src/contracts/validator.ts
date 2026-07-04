@@ -11,7 +11,7 @@ import type {
   CompletionValidator,
   ValidationResult,
   EvidenceBundle,
-} from '@weaveintel/core';
+} from '../index.js';
 
 // ─── Built-in criterion checkers ─────────────────────────────
 

@@ -2,7 +2,7 @@
 /**
  * i18n-sql.ts — Internationalisation service (m145, Round 9).
  *
- * Ties the pure @weaveintel/i18n core (locale fallback) + the shared UI catalog (ui-i18n-catalog.ts) to the
+ * Ties the pure @weaveintel/core/i18n core (locale fallback) + the shared UI catalog (ui-i18n-catalog.ts) to the
  * app and database. Three jobs:
  *
  *   1. getEffectiveCatalog(locale, tenantId) — the messages the web UI should show a reader: the base English
@@ -22,7 +22,7 @@ import {
   buildTranslatePrompt, parseTranslation, verifyTranslation,
   TARGET_LANGUAGES,
 } from '@weaveintel/prompts';
-import { resolveLocaleChain } from '@weaveintel/i18n';
+import { resolveLocaleChain } from '@weaveintel/core/i18n';
 import { EN_MESSAGES, BUILTIN_MESSAGES, BASE_LOCALE, type Catalog } from './ui-i18n-catalog.js';
 import type { DatabaseAdapter } from './db.js';
 import type { NoteAiGenerate } from './note-ai-sql.js';

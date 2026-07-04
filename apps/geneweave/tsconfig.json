@@ -36,9 +36,6 @@
       "path": "../../packages/triggers"
     },
     {
-      "path": "../../packages/capability-packs"
-    },
-    {
       "path": "../../packages/cost-governor"
     },
     {
@@ -54,9 +51,6 @@
       "path": "../../packages/notes"
     },
     {
-      "path": "../../packages/contracts"
-    },
-    {
       "path": "../../packages/prompts"
     },
     {
@@ -67,9 +61,6 @@
     },
     {
       "path": "../../packages/cache"
-    },
-    {
-      "path": "../../packages/i18n"
     },
     {
       "path": "../../packages/memory"

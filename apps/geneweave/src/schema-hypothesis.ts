@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS hv_hypothesis (
   budget_envelope_id TEXT NOT NULL REFERENCES hv_budget_envelope(id),
   workflow_run_id TEXT,
   trace_id TEXT,                             -- @weaveintel/observability/replay trace
-  contract_id TEXT,                          -- @weaveintel/contracts completion contract
+  contract_id TEXT,                          -- @weaveintel/core/contracts completion contract
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );

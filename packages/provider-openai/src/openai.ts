@@ -28,7 +28,7 @@ import {
   deadlineSignal,
   parseRetryAfterMs,
 } from '@weaveintel/core';
-import { weaveRegisterModel, weaveRegisterEmbedding } from '@weaveintel/models';
+import { weaveRegisterModel, weaveRegisterEmbedding } from '@weaveintel/core/models';
 import { openaiAdapter, translate } from '@weaveintel/tool-schema';
 import { openaiFetch, openaiFetchStream } from './_fetch.js';
 

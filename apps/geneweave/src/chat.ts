@@ -80,7 +80,7 @@ import {
   applySkillsToPrompt,
   type SkillMatch,
 } from '@weaveintel/skills';
-import { createContract, DefaultCompletionValidator } from '@weaveintel/contracts';
+import { createContract, DefaultCompletionValidator } from '@weaveintel/core/contracts';
 import { ModelHealthTracker, createRuntimeRoutingAdapter } from '@weaveintel/routing';
 import type { RuntimeRoutingSlot } from '@weaveintel/core';
 import {

@@ -7,7 +7,7 @@ import type {
   TaskOutcomeStatus,
   FailureReason,
   CompletionReport,
-} from '@weaveintel/core';
+} from '../index.js';
 
 /**
  * Create a TaskOutcome from a CompletionReport.

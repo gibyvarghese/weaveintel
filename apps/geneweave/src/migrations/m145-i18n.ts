@@ -5,7 +5,7 @@ import { safeExec } from './helpers.js';
  * m145 — Internationalisation (Round 9).
  *
  * geneWeave's UI strings were all hardcoded English. This round adds a real i18n layer built on the pure
- * @weaveintel/i18n core (message catalog + BCP-47 fallback + ICU plurals). Each person already has an
+ * @weaveintel/core/i18n core (message catalog + BCP-47 fallback + ICU plurals). Each person already has an
  * interface-language preference (user_preferences.language, m136); now that preference actually re-labels the
  * app, and a workspace can offer languages beyond the two built in (English + Spanish) via AI-generated packs.
  *
