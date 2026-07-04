@@ -713,8 +713,19 @@ but a full per-sample extraction harness is not built. Build + typecheck green (
   devDep), so the desktop no-op guard ran `tauri build` → failed on invalid `//` keys in `tauri.conf.json`.
   Gated the native build behind `DESKTOP_NATIVE_BUILD=1` + removed the `//` keys; turbo build green (96 tasks).
 
-**Still deferred (low-risk, non-adopter-facing):** the full docs-html.ts sample-extraction-compile harness,
-and ~193 internal (non-docstring-title) source comments that narrate design history by phase number.
+**docs-html.ts sample-typecheck harness (gate 2) — BUILT + GREEN.** `npm run test:docs-samples` extracts
+every `code('typescript', …)` sample from docs-html.ts via the TS AST and type-checks it against the real
+packages ([scripts/extract-docs-samples.mjs](scripts/extract-docs-samples.mjs) + tsconfig.docs-samples.json).
+It accommodates illustrative code without inventing types (builder-chain fragments get an `any` receiver,
+body snippets are wrapped, placeholder free vars are auto-declared per-file, every sample forced to module
+scope), and a parse guard fails loudly on a stray backtick/`${`. It immediately caught genuine bugs that
+also broke the DISPLAYED docs (single-escaped `\n`, unescaped apostrophes, a JSON sample mislabeled
+`typescript`) and then surfaced **218 real API-drift bugs** in the samples — all fixed against current APIs
+(renamed exports w/ changed signatures, removed primitives rewritten to the nearest current equivalent,
+`ExecutionContext`/router/eval/retrieval/extraction/sandbox/mcp/guardrails reshapes). GREEN: 0 errors.
+
+**Still deferred (low-risk, non-adopter-facing):** ~193 internal (non-docstring-title) source comments that
+narrate design history by phase number.
 
 ---
 
