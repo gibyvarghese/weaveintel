@@ -24,15 +24,15 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@weaveintel/core": "^0.0.1",
-    "@weaveintel/models": "^0.0.1",
-    "@weaveintel/evals": "^0.0.1",
-    "@weaveintel/prompts": "^0.0.1",
-    "@weaveintel/human-tasks": "^0.0.1",
     "@weaveintel/a2a": "^0.0.1",
-    "@weaveintel/graph": "^0.0.1",
+    "@weaveintel/compliance": "^0.0.1",
+    "@weaveintel/core": "^0.0.1",
     "@weaveintel/cost-governor": "^0.0.1",
-    "@weaveintel/compliance": "^0.0.1"
+    "@weaveintel/graph": "^0.0.1",
+    "@weaveintel/human-tasks": "^0.0.1",
+    "@weaveintel/models": "^0.0.1",
+    "@weaveintel/prompts": "^0.0.1",
+    "@weaveintel/testing": "^0.0.1"
   },
   "devDependencies": {
     "typescript": "^5.7.0",

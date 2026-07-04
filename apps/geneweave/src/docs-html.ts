@@ -187,7 +187,7 @@ ${code('text', `Applications (geneweave, your app)
                     @weaveintel/a2a · @weaveintel/skills · @weaveintel/cost-governor
   └─ Capability     @weaveintel/prompts · @weaveintel/memory · @weaveintel/retrieval
                     @weaveintel/extraction · @weaveintel/graph · @weaveintel/collab
-                    @weaveintel/evals · @weaveintel/guardrails · @weaveintel/resilience
+                    @weaveintel/testing/evals · @weaveintel/guardrails · @weaveintel/resilience
   └─ Integration    @weaveintel/providers · @weaveintel/mcp-client · @weaveintel/mcp-server
                     @weaveintel/tools-* · @weaveintel/sandbox · @weaveintel/oauth
   └─ Platform       @weaveintel/security · @weaveintel/tenancy · @weaveintel/compliance
@@ -1599,7 +1599,7 @@ console.log(result.output);`, ['@weaveintel/retrieval', '@weaveintel/agents', '@
 function sEvals(): string {
   return `
 <div class="pkg-hdr">
-  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/evals</span></div>
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/testing/evals</span></div>
   <h1 class="pkg-title">Evals</h1>
   <p class="pkg-desc">LLM-as-judge evaluation with rubric scoring, model comparison, CI quality gates, and dataset versioning. Run evals inline during development, as vitest/jest assertions, or as an automated CI gate that fails the build when quality regresses.</p>
 </div>
@@ -1617,7 +1617,7 @@ ${exlinks([
 ])}
 
 ${section('evals-runner', 'Basic Eval Run', `
-${code('typescript', `import { weaveEvalRunner } from '@weaveintel/evals';
+${code('typescript', `import { weaveEvalRunner } from '@weaveintel/testing/evals';
 import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
 
 const runner = weaveEvalRunner({
@@ -1658,11 +1658,11 @@ results.forEach(r => {
 // Aggregate statistics
 const passRate = results.filter(r => r.passed).length / results.length;
 const avgScore = results.reduce((s, r) => s + r.overall, 0) / results.length;
-console.log(\`Pass rate: \${Math.round(passRate * 100)}%  Mean score: \${avgScore.toFixed(3)}\`);`, ['@weaveintel/evals', '@weaveintel/provider-anthropic'])}
+console.log(\`Pass rate: \${Math.round(passRate * 100)}%  Mean score: \${avgScore.toFixed(3)}\`);`, ['@weaveintel/testing/evals', '@weaveintel/provider-anthropic'])}
 `)}
 
 ${section('evals-compare', 'Model Comparison', `
-${code('typescript', `import { weaveEvalRunner, compareEvalResults } from '@weaveintel/evals';
+${code('typescript', `import { weaveEvalRunner, compareEvalResults } from '@weaveintel/testing/evals';
 
 const runner = weaveEvalRunner({ judgeModel, rubric, parallelism: 4 });
 
@@ -1682,7 +1682,7 @@ console.log(\`Delta: \${comparison.delta.toFixed(3)} (\${comparison.delta > 0 ? 
 comparison.perCriterion.forEach(({ criterion, baseline, candidate }) => {
   const arrow = candidate > baseline ? '↑' : candidate < baseline ? '↓' : '→';
   console.log(\`  \${criterion}: \${baseline.toFixed(3)} \${arrow} \${candidate.toFixed(3)}\`);
-});`, ['@weaveintel/evals'])}
+});`, ['@weaveintel/testing/evals'])}
 `)}
 
 ${section('evals-ci', 'CI Quality Gate', `
@@ -1690,7 +1690,7 @@ ${section('evals-ci', 'CI Quality Gate', `
 
 ${code('typescript', `// evals/quality.test.ts — runs in CI
 import { describe, it, expect } from 'vitest';
-import { weaveEvalRunner } from '@weaveintel/evals';
+import { weaveEvalRunner } from '@weaveintel/testing/evals';
 import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
 import { weaveAgent } from '@weaveintel/agents';
 import { weaveContext } from '@weaveintel/core';
@@ -1720,7 +1720,7 @@ describe('agent quality gate', () => {
     expect(passRate).toBeGreaterThanOrEqual(PASS_RATE_THRESHOLD);
     expect(meanScore).toBeGreaterThanOrEqual(MEAN_SCORE_THRESHOLD);
   }, 60_000);   // allow up to 60 s for eval run
-});`, ['@weaveintel/evals', '@weaveintel/provider-anthropic', '@weaveintel/agents', '@weaveintel/core'])}
+});`, ['@weaveintel/testing/evals', '@weaveintel/provider-anthropic', '@weaveintel/agents', '@weaveintel/core'])}
 `)}`;
 }
 

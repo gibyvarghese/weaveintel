@@ -14,7 +14,7 @@
  *   @weaveintel/agents       — weaveAgent (ReAct loop, with optional supervisor mode)
  *   @weaveintel/observability — weaveInMemoryTracer, weaveUsageTracker for spans
  *   @weaveintel/redaction     — weaveRedactor for PII scrubbing before/after LLM
- *   @weaveintel/evals         — weaveEvalRunner for response quality assertions
+ *   @weaveintel/testing/evals         — weaveEvalRunner for response quality assertions
  *   @weaveintel/guardrails    — createGuardrailPipeline, risk classification
  *   @weaveintel/human-tasks   — PolicyEvaluator for automatic human-review triggers
  *   @weaveintel/prompts       — shared prompt record parsing + variable-substituted rendering

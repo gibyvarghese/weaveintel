@@ -104,7 +104,7 @@ export function stubSequenceModel(turns: StubTurn[]): Model {
 
 export interface StubAdapterResponse { score: number; reason?: string }
 
-export function stubAdapter(responses: StubAdapterResponse[]): import('@weaveintel/evals').RubricJudgeAdapter {
+export function stubAdapter(responses: StubAdapterResponse[]): import('@weaveintel/testing/evals').RubricJudgeAdapter {
   let i = 0;
   return {
     id: 'stub-adapter',

@@ -8,7 +8,7 @@ vi.mock('@weaveintel/redaction', () => ({
   weaveRedactor: () => ({ redact: redactMock }),
 }));
 
-vi.mock('@weaveintel/evals', () => ({
+vi.mock('@weaveintel/testing/evals', () => ({
   weaveEvalRunner: () => ({ run: evalRunMock }),
 }));
 

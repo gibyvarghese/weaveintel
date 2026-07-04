@@ -6,7 +6,7 @@
  * - `createSelfCritic`  — re-prompts the same model with the FRAMEWORK_CRITIQUE
  *   template, returning accept/feedback based on the model's own evaluation.
  *
- * - `createRubricCritic` — wraps a RubricJudgeAdapter from @weaveintel/evals
+ * - `createRubricCritic` — wraps a RubricJudgeAdapter from @weaveintel/testing/evals
  *   and accepts when `score >= minScore`.
  *
  * Both share the `Critic` contract from @weaveintel/core so callers can swap
@@ -15,7 +15,7 @@
 
 import type { Critic, CritiqueResult, ExecutionContext } from '@weaveintel/core';
 import type { Model } from '@weaveintel/core';
-import type { RubricJudgeAdapter, RubricCriterion } from '@weaveintel/evals';
+import type { RubricJudgeAdapter, RubricCriterion } from '@weaveintel/testing/evals';
 import { FRAMEWORK_CRITIQUE, renderFramework } from '@weaveintel/prompts';
 
 // ─── Self-critique critic ────────────────────────────────────

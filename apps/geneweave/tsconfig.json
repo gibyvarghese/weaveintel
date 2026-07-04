@@ -27,7 +27,7 @@
       "path": "../../packages/redaction"
     },
     {
-      "path": "../../packages/evals"
+      "path": "../../packages/testing"
     },
     {
       "path": "../../packages/workflows"

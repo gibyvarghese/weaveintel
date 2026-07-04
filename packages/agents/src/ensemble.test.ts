@@ -21,7 +21,7 @@ import {
   stubAdapter,
   stubTextModel,
 } from './test-helpers.js';
-import type { RubricCriterion } from '@weaveintel/evals';
+import type { RubricCriterion } from '@weaveintel/testing/evals';
 
 const CRITERIA: RubricCriterion[] = [
   { id: 'quality', description: 'Overall quality', weight: 1 },

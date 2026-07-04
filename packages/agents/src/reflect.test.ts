@@ -5,7 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import { createSelfCritic, createRubricCritic } from './reflect.js';
 import { makeCtx, stubTextModel, stubAdapter } from './test-helpers.js';
-import type { RubricCriterion } from '@weaveintel/evals';
+import type { RubricCriterion } from '@weaveintel/testing/evals';
 
 const CRITERIA: RubricCriterion[] = [
   { id: 'accuracy', description: 'Factually correct', weight: 0.6 },

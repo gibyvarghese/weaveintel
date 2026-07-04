@@ -25,7 +25,7 @@ import type {
   ExecutionContext,
 } from '@weaveintel/core';
 import { weaveAudit, weaveResolveTracer } from '@weaveintel/core';
-import type { RubricJudgeAdapter, RubricCriterion } from '@weaveintel/evals';
+import type { RubricJudgeAdapter, RubricCriterion } from '@weaveintel/testing/evals';
 import type { Model } from '@weaveintel/core';
 
 // ─── Vote resolver ───────────────────────────────────────────
