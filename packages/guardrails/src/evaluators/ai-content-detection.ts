@@ -1,5 +1,5 @@
 /**
- * @weaveintel/guardrails — evaluators/ai-content-detection.ts  (Phase 4)
+ * @weaveintel/guardrails — evaluators/ai-content-detection.ts
  *
  * LLM-judge evaluators for AI-generated content detection and IP protection:
  *

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/coedit — Op validation for the TRUSTED RELAY (Collaboration Phase 7).
+ * @weaveintel/coedit — Op validation for the TRUSTED RELAY.
  *
  * CRDTs assume non-malicious peers — they converge, but they are NOT
  * Byzantine-tolerant. So the SERVER must validate every op a client submits

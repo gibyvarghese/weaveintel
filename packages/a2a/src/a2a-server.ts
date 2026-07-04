@@ -1,5 +1,5 @@
 /**
- * @weaveintel/a2a — JSON-RPC 2.0 server dispatcher (Phase 3)
+ * @weaveintel/a2a — JSON-RPC 2.0 server dispatcher
  *
  * `createA2ADispatcher` wraps an `A2AServer` implementation and exposes a
  * framework-agnostic dispatch function. Wire it into any HTTP server:

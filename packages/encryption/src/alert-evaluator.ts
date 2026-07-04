@@ -1,5 +1,5 @@
 /**
- * @weaveintel/encryption — alert evaluator (Phase 9).
+ * @weaveintel/encryption — alert evaluator.
  *
  * Pure functions over a `MetricsSnapshot` + a list of `AlertRule`s. Returns
  * which rules are firing right now. Hosts persist rules in their own table

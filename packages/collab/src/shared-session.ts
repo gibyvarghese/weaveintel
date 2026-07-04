@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/collaboration — Shared sessions (Collaboration Phase 2).
+ * @weaveintel/collaboration — Shared sessions.
  *
  * A "shared session" turns a single-owner run into a multi-user one: the owner
  * shares it (via an invite link), other people JOIN with a ROLE, and the run's

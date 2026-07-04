@@ -1,5 +1,5 @@
 /**
- * @weaveintel/cost-governor — Phase 1 (Telemetry & Cost Ledger)
+ * @weaveintel/cost-governor — (Telemetry & Cost Ledger)
  *
  * Phase 1 is purely observational. The ledger records every model + tool
  * invocation with token + $ + lever attribution so downstream phases can

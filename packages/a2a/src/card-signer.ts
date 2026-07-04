@@ -1,5 +1,5 @@
 /**
- * @weaveintel/a2a — Agent Card Signer (Phase 5)
+ * @weaveintel/a2a — Agent Card Signer
  *
  * Signs an AgentCard using JWS ES256 (ECDSA P-256 + SHA-256) via Web Crypto API.
  * The signature is stored as a JWS compact serialization in `card.signatures[]`.

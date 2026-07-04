@@ -1,5 +1,5 @@
 /**
- * @weaveintel/agents — Phase 4 tests
+ * @weaveintel/agents — tests
  *
  * P4-1: createMemoryToolSet — portable memory tool set factory
  * P4-2: memoryContext hook — proactive memory context injection

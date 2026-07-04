@@ -1,5 +1,5 @@
 /**
- * @weaveintel/workflows — Phase 1 unit tests
+ * @weaveintel/workflows — unit tests
  * Covers: path.ts, expressions.ts, resolvers, definition-store, handler
  * resolver registry integration, inputMap/outputMap, expression-driven
  * condition/branch, tickRun.

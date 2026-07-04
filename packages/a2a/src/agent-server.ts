@@ -1,5 +1,5 @@
 /**
- * @weaveintel/a2a — Agent-as-A2A-server adapter (v1.0, Phase 3)
+ * @weaveintel/a2a — Agent-as-A2A-server adapter
  *
  * `weaveAgentAsA2AServer` wraps any `Agent` as an `A2AServer` conforming to
  * A2A v1.0. Phase 3 additions vs Phase 2:

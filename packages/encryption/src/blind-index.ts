@@ -1,5 +1,5 @@
 /**
- * @weaveintel/encryption — Blind-index helpers (Phase 8).
+ * @weaveintel/encryption — Blind-index helpers.
  *
  * A blind index is a deterministic, tenant-keyed HMAC of an encrypted column
  * value, stored alongside the ciphertext as `<column>_bidx`. It enables exact

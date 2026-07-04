@@ -1,5 +1,5 @@
 /**
- * @weaveintel/encryption — BYOK / HYOK KmsProvider (Phase 10).
+ * @weaveintel/encryption — BYOK / HYOK KmsProvider.
  *
  * Wraps tenant KEK material with the customer's RSA-4096 public key (RSA-OAEP,
  * SHA-256). The customer holds the private key in their HSM / KMS / proxy and

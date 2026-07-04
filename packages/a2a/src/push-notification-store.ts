@@ -1,5 +1,5 @@
 /**
- * @weaveintel/a2a — Push Notification Store (Phase 5)
+ * @weaveintel/a2a — Push Notification Store
  *
  * Stores webhook delivery configurations for A2A v1.0 push notifications.
  * Each task can have multiple push configs (one per webhook URL / consumer).

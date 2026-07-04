@@ -1,5 +1,5 @@
 /**
- * @weaveintel/prompts — Prompt dataset evaluation (Phase 7)
+ * @weaveintel/prompts — Prompt dataset evaluation
  *
  * These helpers keep prompt-quality evaluation in shared package code so app
  * runtimes can evaluate prompt versions consistently before promotion.

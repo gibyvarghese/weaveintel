@@ -1,5 +1,5 @@
 /**
- * @weaveintel/encryption — Phase 6 purge scheduler (storage-agnostic).
+ * @weaveintel/encryption — purge scheduler (storage-agnostic).
  *
  * Runs on a fixed interval and asks the host (via injected callbacks) for
  * tenant-deletion requests whose retention window has expired. For each one

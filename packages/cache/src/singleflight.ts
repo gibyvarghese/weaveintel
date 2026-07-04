@@ -1,5 +1,5 @@
 /**
- * @weaveintel/cache — Singleflight / request coalescing (Phase 7, G‑5).
+ * @weaveintel/cache — Singleflight / request coalescing.
  *
  * When N concurrent callers ask for the SAME key, only the first ("leader")
  * actually computes; the rest ("followers") await the leader's result. This

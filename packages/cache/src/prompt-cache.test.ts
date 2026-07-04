@@ -1,5 +1,5 @@
 /**
- * @weaveintel/cache — Phase 2 prompt-cache planner tests.
+ * @weaveintel/cache — prompt-cache planner tests.
  * Positive, negative, boundary, stress, and a security/abuse case.
  */
 import { describe, it, expect } from 'vitest';

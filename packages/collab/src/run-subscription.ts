@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/collaboration — Durable run subscriptions (Collaboration Phase 3).
+ * @weaveintel/collaboration — Durable run subscriptions.
  *
  * A "subscription" is a DURABLE interest in a run's outcome: "tell me when this
  * run finishes, even if I close the tab." It is the opposite of presence (Phase

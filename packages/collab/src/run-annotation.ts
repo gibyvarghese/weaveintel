@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/collaboration — Run annotations / human feedback scores (Phase 4).
+ * @weaveintel/collaboration — Run annotations / human feedback scores.
  *
  * An ANNOTATION is a structured quality judgement on a run (or one part of it):
  * a thumbs-up, a 1–5 rating, a rubric category, a free-text note. Unlike a

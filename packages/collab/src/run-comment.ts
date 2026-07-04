@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/collaboration — Collaborative run comments (Collaboration Phase 4).
+ * @weaveintel/collaboration — Collaborative run comments.
  *
  * Google-Docs-grade review on an AI run: reviewers leave THREADED comments
  * ANCHORED to a specific part/step of the run (a tool call, a reasoning step, a

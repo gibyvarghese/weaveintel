@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/weaveintel — curated entry point (Phase 3).
+ * @weaveintel/weaveintel — curated entry point.
  *
  * Most adopters need ~8 packages out of the ~78 the monorepo ships.
  * Importing them one-by-one is an onboarding cliff. This package re-exports

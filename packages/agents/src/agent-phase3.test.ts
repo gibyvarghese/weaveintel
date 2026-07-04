@@ -1,5 +1,5 @@
 /**
- * @weaveintel/agents — Phase 3 test suite
+ * @weaveintel/agents — test suite
  *
  * P3-1: HITL interrupt mechanism
  * P3-2: Agent handoff (lateral transfer)

@@ -1,5 +1,5 @@
 /**
- * @weaveintel/agents — Phase 5 tests
+ * @weaveintel/agents — tests
  *
  * P5-1: Agent checkpoint / resume
  * P5-2: Dynamic worker registry

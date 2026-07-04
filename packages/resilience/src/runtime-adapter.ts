@@ -1,5 +1,5 @@
 /**
- * @weaveintel/resilience — RuntimeResilienceSlot adapter (Phase 0)
+ * @weaveintel/resilience — RuntimeResilienceSlot adapter
  *
  * Bridges a `ResilienceSignalBus` + the process-wide endpoint registry +
  * the global latency tracker onto the `RuntimeResilienceSlot` structural

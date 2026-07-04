@@ -1,5 +1,5 @@
 /**
- * @weaveintel/encryption — BYOK keystore + HYOK proxy delegate (Phase 10).
+ * @weaveintel/encryption — BYOK keystore + HYOK proxy delegate.
  *
  * Three implementations of `ByokUnwrapDelegate`:
  *

@@ -1,5 +1,5 @@
 /**
- * @weaveintel/a2a — Task store (Phase 3)
+ * @weaveintel/a2a — Task store
  *
  * Provides durable and in-memory A2ATask persistence for the A2A v1.0
  * state machine. Tasks transition through:

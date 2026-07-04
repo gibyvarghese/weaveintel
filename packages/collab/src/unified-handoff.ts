@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/collaboration — Unified handoff (Collaboration Phase 5).
+ * @weaveintel/collaboration — Unified handoff.
  *
  * ONE durable, audited handoff lifecycle that reconciles the three scopes that
  * previously lived apart:

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/core — Run-event stream contract (Phase 0)
+ * @weaveintel/core — Run-event stream contract
  *
  * The single source of truth for:
  *   - the run-event wire envelope (`RunEventEnvelope`),

@@ -1,5 +1,5 @@
 /**
- * @weaveintel/cache — Phase 4 semantic cache tests.
+ * @weaveintel/cache — semantic cache tests.
  * Positive, negative, scope-isolation (security), TTL, LRU, embedding cache,
  * invalidation, pluggable index, and stress.
  */

@@ -1,5 +1,5 @@
 /**
- * @weaveintel/provider-anthropic — Phase 2 prompt-cache wiring tests.
+ * @weaveintel/provider-anthropic — prompt-cache wiring tests.
  *
  * Pure-function coverage of the cache_control breakpoint placement and the
  * cache-token surfacing (the only correct, effective placement is on a content

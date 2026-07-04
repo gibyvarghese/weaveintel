@@ -1,5 +1,5 @@
 /**
- * @weaveintel/encryption — metrics emitter contract (Phase 9).
+ * @weaveintel/encryption — metrics emitter contract.
  *
  * Mirrors the AuditEmitter pattern: a fire-and-forget interface that the
  * package calls from hot paths (encrypt/decrypt/blind-index/wrap/unwrap)

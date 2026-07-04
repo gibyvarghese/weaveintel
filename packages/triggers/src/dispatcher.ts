@@ -1,5 +1,5 @@
 /**
- * @weaveintel/triggers — Phase 3 Unified Trigger Dispatcher
+ * @weaveintel/triggers — Unified Trigger Dispatcher
  *
  * DB-driven dispatch fabric that wires any source (cron, webhook, contract
  * emission, manual, in-process signal bus, …) to any target (start a

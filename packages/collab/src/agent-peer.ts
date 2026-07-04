@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/collab — Agent as a co-editing peer (Collaboration Phase 7).
+ * @weaveintel/collab — Agent as a co-editing peer.
  *
  * The AI agent is just another CRDT replica: a SERVER-SIDE editor with its own
  * site id that streams its output into the shared document as insert ops. Because

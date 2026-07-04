@@ -1,5 +1,5 @@
 /**
- * @weaveintel/observability — OTel GenAI-compatible tracer (Phase 1)
+ * @weaveintel/observability — OTel GenAI-compatible tracer
  *
  * Implements the WeaveIntel `Tracer` interface while emitting spans
  * to an OTLP HTTP/JSON endpoint (Grafana Cloud, Honeycomb, Jaeger, etc.)

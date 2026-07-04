@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/coedit — RGA text CRDT (Collaboration Phase 7).
+ * @weaveintel/coedit — RGA text CRDT.
  *
  * A CRDT (Conflict-free Replicated Data Type) lets many editors — humans AND an
  * AI agent — change the SAME document at the same time and always end up with the
