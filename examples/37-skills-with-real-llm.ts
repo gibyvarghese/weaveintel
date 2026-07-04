@@ -181,7 +181,7 @@ async function main(): Promise<void> {
   const elapsedMs = Date.now() - startedAt;
   info(`agent run completed in ${elapsedMs} ms, ${result.steps.length} step(s)`);
   for (const step of result.steps) {
-    const label = step.type === 'tool'
+    const label = step.type === 'tool_call'
       ? `tool→${step.toolCall?.name ?? '?'}(${JSON.stringify(step.toolCall?.arguments ?? {})})`
       : `model→${(step.content ?? '').slice(0, 80).replace(/\s+/g, ' ')}`;
     info(`step[${step.type}]: ${label}`);

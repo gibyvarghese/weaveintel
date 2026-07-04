@@ -108,7 +108,7 @@ async function main() {
 
     // Attach from sequence 1 → only live events should arrive.
     const sse = fakeSse();
-    const { subscriber } = exec.subscribe('r2', sse.res as never, 1);
+    const { subscriber } = exec.subscribe('r2', sse.res as never, 1, 'u1');
     for (const ev of await store.listUserRunEvents('r2', 1)) {
       subscriber.replay({ runId: 'r2', sequence: ev.sequence, kind: ev.kind, payload: JSON.parse(ev.payload), timestamp: Date.now() });
     }
@@ -131,7 +131,7 @@ async function main() {
     await until(() => (store.events.get('r3')?.some((e) => e.kind === 'run.completed')) ?? false);
 
     const sse = fakeSse();
-    const { subscriber } = exec.subscribe('r3', sse.res as never, 1);
+    const { subscriber } = exec.subscribe('r3', sse.res as never, 1, 'u1');
     for (const ev of await store.listUserRunEvents('r3', 1)) {
       subscriber.replay({ runId: 'r3', sequence: ev.sequence, kind: ev.kind, payload: JSON.parse(ev.payload), timestamp: Date.now() });
     }

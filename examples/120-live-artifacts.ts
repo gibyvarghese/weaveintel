@@ -328,7 +328,7 @@ if (!openaiKey && !anthropicKey) {
     },
   });
 
-  let model: import('@weaveintel/agents').WeaveModel;
+  let model: import('@weaveintel/core').Model;
   let modelLabel: string;
   if (openaiKey) {
     const { weaveOpenAIModel } = await import('@weaveintel/provider-openai');

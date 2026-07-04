@@ -16,6 +16,7 @@
  */
 
 import { weaveAgent, weaveEnsemble, createVoteResolver, createArbiterResolver } from '@weaveintel/agents';
+import type { EnsembleResult } from '@weaveintel/agents';
 import { weaveContext } from '@weaveintel/core';
 import { createMockModel } from '@weaveintel/devtools';
 
@@ -42,9 +43,9 @@ async function main() {
   });
 
   const ctx = weaveContext({});
-  const voteResult = await voteEnsemble.run(ctx, {
+  const voteResult = (await voteEnsemble.run(ctx, {
     messages: [{ role: 'user', content: 'What is the best programming language?' }],
-  });
+  })) as EnsembleResult;
 
   console.log('Winner   :', voteResult.winner);
   console.log('Rationale:', voteResult.rationale);
@@ -66,9 +67,9 @@ async function main() {
     parallel: false,
   });
 
-  const arbiterResult = await arbiterEnsemble.run(ctx, {
+  const arbiterResult = (await arbiterEnsemble.run(ctx, {
     messages: [{ role: 'user', content: 'What is the best programming language?' }],
-  });
+  })) as EnsembleResult;
 
   console.log('Output   :', arbiterResult.output);
   console.log('Rationale:', arbiterResult.rationale);

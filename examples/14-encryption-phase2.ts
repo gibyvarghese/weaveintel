@@ -53,6 +53,9 @@ function createInMemoryStore(): EncryptionStore {
         ...(status === 'previous' ? { rotatedAt: at } : status === 'revoked' ? { revokedAt: at } : {}),
       });
     },
+    async getKekById(tenantId, kekId) {
+      return keks.find((k) => k.tenantId === tenantId && k.id === kekId) ?? null;
+    },
     async listDeks(tenantId) {
       return deks.filter((d) => d.tenantId === tenantId);
     },
@@ -67,6 +70,15 @@ function createInMemoryStore(): EncryptionStore {
         ...(status === 'previous' ? { rotatedAt: at } : status === 'revoked' ? { revokedAt: at } : {}),
       });
     },
+    async getDekById(tenantId, dekId) {
+      return deks.find((d) => d.tenantId === tenantId && d.id === dekId) ?? null;
+    },
+    async getMaxDekEpoch(tenantId) {
+      const epochs = deks
+        .filter((d) => d.tenantId === tenantId && d.status === 'active')
+        .map((d) => d.epoch);
+      return epochs.length ? Math.max(...epochs) : null;
+    },
     async listBiks(tenantId) {
       return biks.filter((b) => b.tenantId === tenantId);
     },
@@ -77,6 +89,20 @@ function createInMemoryStore(): EncryptionStore {
       const r = biks.find((b) => b.id === id);
       if (!r) return;
       Object.assign(r, { status, revokedAt: at });
+    },
+    async deletePolicy(tenantId) {
+      policies.delete(tenantId);
+    },
+    async deleteAllWrappedMaterial(tenantId) {
+      const counts = {
+        keks: keks.filter((k) => k.tenantId === tenantId).length,
+        deks: deks.filter((d) => d.tenantId === tenantId).length,
+        biks: biks.filter((b) => b.tenantId === tenantId).length,
+      };
+      for (let i = keks.length - 1; i >= 0; i--) if (keks[i].tenantId === tenantId) keks.splice(i, 1);
+      for (let i = deks.length - 1; i >= 0; i--) if (deks[i].tenantId === tenantId) deks.splice(i, 1);
+      for (let i = biks.length - 1; i >= 0; i--) if (biks[i].tenantId === tenantId) biks.splice(i, 1);
+      return counts;
     },
   };
 }

@@ -40,7 +40,7 @@ const innerModel: Model = {
   hasCapability: () => false,
   generate: async (_ctx: ExecutionContext, req: ModelRequest): Promise<ModelResponse> => {
     captured.push(req);
-    return { id: 'r-1', content: 'ok', model: 'stub-1', usage: { promptTokens: 0, completionTokens: 0 }, finishReason: 'stop' };
+    return { id: 'r-1', content: 'ok', model: 'stub-1', usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 }, finishReason: 'stop' };
   },
 };
 const wrapped = wrapModelWithStaticReasoningEffort(innerModel, 'high');

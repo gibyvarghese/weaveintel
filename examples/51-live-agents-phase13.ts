@@ -5,6 +5,7 @@
  */
 
 import { weaveContext } from '@weaveintel/core';
+import { createMockModel } from '@weaveintel/devtools';
 import { weaveInMemoryTracer } from '@weaveintel/observability';
 import {
   createActionExecutor,
@@ -144,6 +145,7 @@ async function main() {
     stateStore: store,
     workerId: 'worker-phase13-example',
     concurrency: 1,
+    model: createMockModel(),
     now: () => now,
     attentionPolicy: {
       key: 'phase13-example',

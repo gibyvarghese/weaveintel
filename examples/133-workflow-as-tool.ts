@@ -52,13 +52,14 @@ async function main() {
     id: 'validate-input',
     name: 'Input Validation Pipeline',
     version: '1',
+    entryStepId: 'step1',
     steps: [
-      { id: 'step1', name: 'Validate', handler: 'noop:validate', next: 'step2' },
-      { id: 'step2', name: 'Score',    handler: 'noop:score',    next: null },
+      { id: 'step1', name: 'Validate', type: 'deterministic', handler: 'noop:validate', next: 'step2' },
+      { id: 'step2', name: 'Score',    type: 'deterministic', handler: 'noop:score' },
     ],
   });
 
-  const engine = new DefaultWorkflowEngine({ store, registry: resolver });
+  const engine = new DefaultWorkflowEngine({ definitionStore: store, resolverRegistry: resolver });
 
   const validationTool = weaveWorkflowTool({
     engine,

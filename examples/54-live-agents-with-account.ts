@@ -4,7 +4,7 @@
  * Run: npx tsx examples/54-live-agents-with-account.ts
  */
 
-import type { AccessTokenResolver } from '@weaveintel/core';
+import type { AccessTokenResolver, ExecutionContext, Model, ModelRequest, ModelResponse } from '@weaveintel/core';
 import { weaveContext } from '@weaveintel/core';
 import { weaveMCPServer } from '@weaveintel/mcp-server';
 import { weaveFakeTransport } from '@weaveintel/testing';
@@ -18,6 +18,27 @@ import {
   type LiveAgent,
   type Mesh,
 } from '@weaveintel/live-agents';
+
+// Minimal stub model — the custom attentionPolicy.decide() below never
+// consults it, but createHeartbeat() now requires a Model for its default
+// attention/action machinery.
+function stubModel(): Model {
+  const caps = new Set<never>();
+  return {
+    info: { provider: 'mock', modelId: 'mock-model', capabilities: caps },
+    capabilities: caps,
+    hasCapability: () => false,
+    async generate(_ctx: ExecutionContext, _req: ModelRequest): Promise<ModelResponse> {
+      return {
+        id: 'mock-response',
+        content: JSON.stringify({ type: 'CheckpointAndRest', nextTickAt: new Date().toISOString() }),
+        finishReason: 'stop',
+        usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+        model: 'mock-model',
+      };
+    },
+  };
+}
 
 async function main() {
   const store = weaveInMemoryStateStore();
@@ -254,6 +275,7 @@ async function main() {
     stateStore: store,
     workerId: 'worker-account-1',
     concurrency: 1,
+    model: stubModel(),
     attentionPolicy,
     actionExecutor: createActionExecutor({ sessionProvider }),
     now: () => now,

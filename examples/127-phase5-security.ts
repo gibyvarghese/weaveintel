@@ -30,17 +30,25 @@ import {
 } from '@weaveintel/core';
 import { weaveSqlitePersistence } from '@weaveintel/persistence';
 import { weaveAgent } from '@weaveintel/agents';
-import type { Model, ModelResponse } from '@weaveintel/core';
+import { capabilityId } from '@weaveintel/core';
+import type { Model, ModelResponse, CapabilityId } from '@weaveintel/core';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function stubModel(responseText: string): Model {
+  const caps = new Set([capabilityId('chat')]) as ReadonlySet<CapabilityId>;
   return {
+    info: { provider: 'mock', modelId: 'stub-model', capabilities: caps },
+    capabilities: caps,
+    hasCapability: (id: CapabilityId) => caps.has(id),
     async generate(_ctx, _req): Promise<ModelResponse> {
       return {
+        id: 'stub-1',
         content: responseText,
         toolCalls: [],
+        finishReason: 'stop',
         usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+        model: 'stub-model',
       };
     },
   };

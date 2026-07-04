@@ -144,7 +144,7 @@ async function main() {
   const check = breaker.canPass();
   ok(`After 3 failures: canPass → allowed=${check.allowed} (breaker is now open)`);
 
-  if (!check.allowed) {
+  if (check.allowed === false) {
     // 'reopensAt' is the epoch ms when the breaker will transition to half-open
     info(`Breaker reopens at: ${new Date(check.reopensAt).toISOString()}`);
   }

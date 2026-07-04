@@ -310,7 +310,7 @@ const testAgentUrl = `${testBaseUrl}/api/a2a`;
 console.log(`  Test server listening at ${testBaseUrl}`);
 
 // Update card's supportedInterfaces to point to real server
-(specialistServer.card as { supportedInterfaces: unknown[] }).supportedInterfaces = [
+(specialistServer.card as unknown as { supportedInterfaces: unknown[] }).supportedInterfaces = [
   { url: testAgentUrl, protocolBinding: 'JSONRPC', protocolVersion: '1.0' },
 ];
 

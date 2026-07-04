@@ -13,8 +13,18 @@
  * - Compression maintainer produces compressed context for long-running agents
  */
 
-import type { AccessTokenResolver } from '@weaveintel/core';
+import type { AccessTokenResolver, Model } from '@weaveintel/core';
 import { weaveContext } from '@weaveintel/core';
+
+// Heartbeat now requires a Model; this demo drives the attention/action path
+// with a custom policy + executor and never invokes the model, so a no-op stub
+// suffices.
+const NOOP_MODEL = {
+  info: { id: 'noop', provider: 'noop', family: 'noop' },
+  async generate() {
+    return { content: '', toolCalls: [], usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 } };
+  },
+} as unknown as Model;
 import { weaveMCPServer } from '@weaveintel/mcp-server';
 import { weaveFakeTransport } from '@weaveintel/testing';
 import {
@@ -342,6 +352,7 @@ async function main() {
     stateStore: store,
     workerId: 'worker-comprehensive-1',
     concurrency: 1,
+    model: NOOP_MODEL,
     attentionPolicy: reviewerPolicy,
     actionExecutor: createActionExecutor({ sessionProvider }),
     now: () => now,

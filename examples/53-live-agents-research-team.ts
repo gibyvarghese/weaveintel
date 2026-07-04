@@ -681,6 +681,7 @@ async function startHeartbeatRuntime(args: {
     stateStore: args.store,
     workerId,
     concurrency: Math.max(1, args.agents.length),
+    model: routedModels.get('demo:research-fast')!,
     attentionPolicy: useModelAttention ? modelBackedPolicy : multiplexPolicy,
     actionExecutor: createActionExecutor({ observability: { runLogger } }),
     runOptions: {

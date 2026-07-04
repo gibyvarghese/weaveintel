@@ -32,6 +32,7 @@ import {
   type ActionExecutionContext,
   type Message,
   type LiveAgent,
+  type TaskHandlerResult,
 } from '@weaveintel/live-agents';
 import type { Model, ModelRequest, ModelResponse, ExecutionContext, CapabilityId } from '@weaveintel/core';
 
@@ -151,6 +152,7 @@ const stubModel: Model = {
     capabilities: new Set<CapabilityId>(),
   },
   capabilities: new Set<CapabilityId>(),
+  hasCapability: () => false,
   async generate(_ctx: ExecutionContext, _request: ModelRequest): Promise<ModelResponse> {
     return {
       id: 'stub-resp-1',
@@ -180,11 +182,12 @@ const reactCtx: HandlerContext = {
 };
 
 const reactHandler = registry.build(reactCtx);
-const reactResult = await reactHandler(
+// Handlers may return void or a TaskHandlerResult; narrow to the result shape.
+const reactResult = (await reactHandler(
   { type: 'StartTask', backlogItemId: 'bli-2' },
   execCtx,
   xc,
-);
+)) as TaskHandlerResult | undefined;
 console.log('react result:', {
   completed: reactResult?.completed,
   summary: reactResult?.summaryProse?.slice(0, 120),

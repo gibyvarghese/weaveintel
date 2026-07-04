@@ -27,7 +27,7 @@ import {
 import type { AgentCard } from '@weaveintel/core';
 import { weaveAgent } from '@weaveintel/agents';
 import { weaveA2AWorkerFromCard } from '@weaveintel/agents';
-import { createMockModel } from '@weaveintel/devtools';
+import { weaveFakeModel } from '@weaveintel/testing';
 
 const runtime = weaveRuntime({});
 
@@ -45,12 +45,14 @@ const syntheticCard: AgentCard = {
   name: 'research-specialist',
   description: 'Deep-dive research specialist agent with web access.',
   version: '1.0.0',
-  protocolVersion: '1.0',
   url: 'https://specialist.example.com',
-  supportedInterfaces: [],
+  supportedInterfaces: [
+    { url: 'https://specialist.example.com', protocolBinding: 'JSONRPC', protocolVersion: '1.0' },
+  ],
   capabilities: {
     streaming: false,
     pushNotifications: false,
+    extendedAgentCard: false,
     stateTransitionHistory: false,
   },
   skills: [
@@ -103,10 +105,10 @@ async function scenario1A2ASupervisor() {
   console.log('  A2A worker built:', { name: a2aWorker.name, description: a2aWorker.description });
 
   // Supervisor that can delegate to the A2A specialist
-  const supervisorModel = createMockModel([
-    { toolCalls: [{ id: 'tc1', name: 'delegate_to_worker', arguments: JSON.stringify({ worker: 'research-specialist', goal: 'Research the impact of AI agents on software development in 2026.' }) }] },
+  const supervisorModel = weaveFakeModel({ responses: [
+    { content: '', toolCalls: [{ id: 'tc1', function: { name: 'delegate_to_worker', arguments: JSON.stringify({ worker: 'research-specialist', goal: 'Research the impact of AI agents on software development in 2026.' }) } }] },
     { content: 'Based on the research specialist\'s findings: AI agents are transforming software development through automated code generation, testing, and deployment pipelines.' },
-  ]);
+  ] });
 
   const supervisor = weaveAgent({
     model: supervisorModel,
@@ -156,11 +158,11 @@ async function scenario2MultipleA2AWorkers() {
     { name: 'forecast-agent', client: makeStubClient('forecast', 'Q1 2026 forecast: 18% growth expected, contingent on new product launch.') as never },
   );
 
-  const supervisorModel = createMockModel([
-    { toolCalls: [{ id: 'tc2', name: 'delegate_to_worker', arguments: JSON.stringify({ worker: 'analytics-agent', goal: 'Get Q4 2025 revenue data' }) }] },
-    { toolCalls: [{ id: 'tc3', name: 'delegate_to_worker', arguments: JSON.stringify({ worker: 'forecast-agent', goal: 'Get Q1 2026 forecast' }) }] },
+  const supervisorModel = weaveFakeModel({ responses: [
+    { content: '', toolCalls: [{ id: 'tc2', function: { name: 'delegate_to_worker', arguments: JSON.stringify({ worker: 'analytics-agent', goal: 'Get Q4 2025 revenue data' }) } }] },
+    { content: '', toolCalls: [{ id: 'tc3', function: { name: 'delegate_to_worker', arguments: JSON.stringify({ worker: 'forecast-agent', goal: 'Get Q1 2026 forecast' }) } }] },
     { content: 'Q4 2025 revenue grew 23% YoY. Q1 2026 forecast shows 18% growth pending new product launch.' },
-  ]);
+  ] });
 
   const supervisor = weaveAgent({
     model: supervisorModel,

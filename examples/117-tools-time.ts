@@ -192,7 +192,7 @@ async function main(): Promise<void> {
   store.saveTimer(scope, timerRecord);
 
   // Retrieve and verify the saved timer.
-  const retrieved = store.getTimer(scope, 'timer_demo_001');
+  const retrieved = await store.getTimer(scope, 'timer_demo_001');
   assert.ok(retrieved !== null);
   assert.equal(retrieved!.state, 'running');
   ok(`saveTimer → getTimer: state="${retrieved!.state}", label="${retrieved!.label}"`);
@@ -208,7 +208,7 @@ async function main(): Promise<void> {
   };
   store.saveTimer(scope, pausedTimer);
 
-  const afterPause = store.getTimer(scope, 'timer_demo_001');
+  const afterPause = await store.getTimer(scope, 'timer_demo_001');
   assert.equal(afterPause!.state, 'paused');
   assert.equal(afterPause!.elapsedMs, 5_000);
   ok(`After pause: state="${afterPause!.state}", elapsedMs=${afterPause!.elapsedMs}ms`);
@@ -225,7 +225,7 @@ async function main(): Promise<void> {
   };
   store.saveTimer(scope, resumedTimer);
 
-  const afterResume = store.getTimer(scope, 'timer_demo_001');
+  const afterResume = await store.getTimer(scope, 'timer_demo_001');
   assert.equal(afterResume!.state, 'running');
   ok(`After resume: state="${afterResume!.state}", startedAt set to ${afterResume!.startedAt}`);
 
@@ -240,13 +240,13 @@ async function main(): Promise<void> {
   };
   store.saveTimer(scope, stoppedTimer);
 
-  const afterStop = store.getTimer(scope, 'timer_demo_001');
+  const afterStop = await store.getTimer(scope, 'timer_demo_001');
   assert.equal(afterStop!.state, 'stopped');
   assert.equal(afterStop!.elapsedMs, 13_000);
   ok(`After stop: state="${afterStop!.state}", total elapsedMs=${afterStop!.elapsedMs}ms (13 s)`);
 
   // 3e. listTimers() returns all timers in scope.
-  const allTimers = store.listTimers(scope);
+  const allTimers = await store.listTimers(scope);
   assert.equal(allTimers.length, 1);
   ok(`listTimers(scope) → ${allTimers.length} timer in scope`);
 
@@ -291,7 +291,7 @@ async function main(): Promise<void> {
     ok(`Lap ${i + 1} recorded at ${lapElapsed}ms`);
   }
 
-  const afterLaps = store.getStopwatch(scope, 'watch_demo_001');
+  const afterLaps = await store.getStopwatch(scope, 'watch_demo_001');
   assert.equal(afterLaps!.laps.length, 3);
   assert.deepEqual([...afterLaps!.laps], [3_200, 7_500, 12_800]);
   ok(`laps array: [${afterLaps!.laps.join(', ')}]ms`);
@@ -312,7 +312,7 @@ async function main(): Promise<void> {
     pausedAt: new Date().toISOString(),
   };
   store.saveStopwatch(scope, pausedWatch);
-  assert.equal(store.getStopwatch(scope, 'watch_demo_001')!.state, 'paused');
+  assert.equal((await store.getStopwatch(scope, 'watch_demo_001'))!.state, 'paused');
   ok(`Stopwatch paused at elapsedMs=${pausedWatch.elapsedMs}ms`);
 
   // 4c. Resume the stopwatch.
@@ -324,7 +324,7 @@ async function main(): Promise<void> {
     pausedAt: undefined,
   };
   store.saveStopwatch(scope, resumedWatch);
-  assert.equal(store.getStopwatch(scope, 'watch_demo_001')!.state, 'running');
+  assert.equal((await store.getStopwatch(scope, 'watch_demo_001'))!.state, 'running');
   ok(`Stopwatch resumed`);
 
   // 4d. Stop the stopwatch.
@@ -337,7 +337,7 @@ async function main(): Promise<void> {
   };
   store.saveStopwatch(scope, stoppedWatch);
 
-  const finalWatch = store.getStopwatch(scope, 'watch_demo_001');
+  const finalWatch = await store.getStopwatch(scope, 'watch_demo_001');
   assert.equal(finalWatch!.state, 'stopped');
   assert.equal(finalWatch!.elapsedMs, 18_500);
   assert.equal(finalWatch!.laps.length, 3);

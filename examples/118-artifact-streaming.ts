@@ -147,6 +147,7 @@ async function runSection2(): Promise<void> {
                  'Paragraph 4\nParagraph 5\nParagraph 6\nParagraph 7\nParagraph 8';
 
     const output = await tool.invoke(ctx, {
+      name: 'emit_artifact',
       arguments: {
         name: 'streaming-report.md',
         type: 'markdown',

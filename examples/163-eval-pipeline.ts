@@ -9,6 +9,7 @@
  */
 
 import { weaveAgent } from '@weaveintel/agents';
+import { weaveContext, capabilityId } from '@weaveintel/core';
 import type { Critic, CritiqueResult, Verifier, VerifyResult, ExecutionContext } from '@weaveintel/core';
 
 // --- Build stub model ---
@@ -16,19 +17,34 @@ import type { Critic, CritiqueResult, Verifier, VerifyResult, ExecutionContext }
 import type { Model } from '@weaveintel/core';
 
 const model: Model = {
+  info: {
+    provider: 'mock',
+    modelId: 'eval-stub',
+    capabilities: new Set([capabilityId('chat')]),
+  },
+  capabilities: new Set([capabilityId('chat')]),
+  hasCapability(id) {
+    return this.capabilities.has(id);
+  },
   async generate(_ctx, req) {
     const lastMsg = req.messages.at(-1);
     const content = typeof lastMsg?.content === 'string' ? lastMsg.content : '';
     if (content.includes('JSON')) {
       return {
+        id: 'stub-json',
         content: JSON.stringify({ summary: 'Paris is the capital of France.', confidence: 0.97 }),
         toolCalls: [],
+        finishReason: 'stop',
+        model: 'eval-stub',
         usage: { promptTokens: 10, completionTokens: 15, totalTokens: 25 },
       };
     }
     return {
+      id: 'stub-text',
       content: 'Paris is the capital of France, known for its art, culture, and gastronomy.',
       toolCalls: [],
+      finishReason: 'stop',
+      model: 'eval-stub',
       usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
     };
   },
@@ -105,7 +121,7 @@ const fullPipelineAgent = weaveAgent({
 });
 
 async function main(): Promise<void> {
-  const ctx = { userId: 'demo', sessionId: 'eval-pipeline-demo' } as ExecutionContext;
+  const ctx = weaveContext({ userId: 'demo', executionId: 'eval-pipeline-demo' });
 
   // 1) Run schema-validated agent
   console.log('=== Schema Validation Pipeline ===');

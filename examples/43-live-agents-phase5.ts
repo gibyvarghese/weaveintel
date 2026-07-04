@@ -7,7 +7,7 @@
 import type { AccessTokenResolver } from '@weaveintel/core';
 import { weaveContext } from '@weaveintel/core';
 import { weaveMCPServer } from '@weaveintel/mcp-server';
-import { weaveFakeTransport } from '@weaveintel/testing';
+import { weaveFakeTransport, weaveFakeModel } from '@weaveintel/testing';
 import {
   createActionExecutor,
   createHeartbeat,
@@ -192,6 +192,7 @@ async function main() {
     stateStore: store,
     workerId: 'worker-phase5-1',
     concurrency: 1,
+    model: weaveFakeModel(),
     attentionPolicy,
     actionExecutor: createActionExecutor({ sessionProvider }),
     now: () => now,

@@ -54,8 +54,8 @@ async function main(): Promise<void> {
 
   await budgetA.setBudget({
     tenantId: 'acme',
-    daily: { tokens: 1_000_000, costUsd: 25, steps: 5_000, runs: 500 },
-    monthly: { tokens: 30_000_000, costUsd: 500, steps: 100_000, runs: 10_000 },
+    daily: { maxTokens: 1_000_000, maxCostUsd: 25, maxSteps: 5_000 },
+    monthly: { maxTokens: 30_000_000, maxCostUsd: 500, maxSteps: 100_000 },
   });
   await budgetA.recordUsage('acme', 50_000, 12.34, 3);
 

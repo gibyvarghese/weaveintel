@@ -27,7 +27,13 @@ import {
 } from '@weaveintel/core';
 import { weaveAgent } from '@weaveintel/agents';
 import { weaveInMemoryTracer } from '@weaveintel/observability';
-import type { Model, ModelMessage, ModelResponse } from '@weaveintel/core';
+import type {
+  Model,
+  ModelRequest,
+  ModelResponse,
+  ExecutionContext,
+  CapabilityId,
+} from '@weaveintel/core';
 
 // ─── 1. Recording audit logger so the example can assert what was logged ──
 
@@ -74,13 +80,17 @@ tools.register(
 // ─── 5. Stub model: one tool call, then a final answer ──────────────
 
 let call = 0;
+const modelCaps = new Set<CapabilityId>();
 const model: Model = {
-  name: 'demo-stub',
-  capabilities: { tools: true, streaming: false, vision: false, audio: false, embeddings: false, jsonMode: false, maxContextTokens: 8192 },
-  async generate(_messages: ModelMessage[]): Promise<ModelResponse> {
+  info: { provider: 'stub', modelId: 'demo-stub', capabilities: modelCaps },
+  capabilities: modelCaps,
+  hasCapability: () => false,
+  async generate(_ctx: ExecutionContext, _request: ModelRequest): Promise<ModelResponse> {
     call += 1;
     if (call === 1) {
       return {
+        id: `stub-${call}`,
+        model: 'demo-stub',
         content: '',
         toolCalls: [{ id: 't1', name: 'ping', arguments: '{}' }],
         finishReason: 'tool_calls',
@@ -88,6 +98,8 @@ const model: Model = {
       };
     }
     return {
+      id: `stub-${call}`,
+      model: 'demo-stub',
       content: 'pong received',
       toolCalls: [],
       finishReason: 'stop',
@@ -102,7 +114,7 @@ const agent = weaveAgent({ name: 'demo-agent', model, tools, maxSteps: 4 });
 const result = await agent.run(ctx, { goal: 'say pong', messages: [{ role: 'user', content: 'hi' }] });
 
 console.log('---');
-console.log('final content:', result.finalContent);
+console.log('final content:', result.output);
 console.log('steps:', result.steps.length);
 console.log('audit actions:', audit.map((a) => `${a.action}/${a.outcome}`));
 
@@ -122,4 +134,4 @@ call = 0;
 const denied = await agent.run(weaveContext({ runtime }), { goal: 'denied', messages: [{ role: 'user', content: 'hi' }] });
 const denyEntry = audit.find((a) => a.action === 'agent.tool.invoke' && a.outcome === 'denied');
 if (!denyEntry) throw new Error('expected guardrails deny audit entry');
-console.log('OK: guardrails denial captured in audit, agent continued gracefully ->', denied.finalContent);
+console.log('OK: guardrails denial captured in audit, agent continued gracefully ->', denied.output);

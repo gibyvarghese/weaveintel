@@ -61,6 +61,7 @@ function makeStubModel(provider: string, label: string): Model {
   return {
     info,
     capabilities: info.capabilities,
+    hasCapability: (id) => info.capabilities.has(id),
     async generate(_ctx: ExecutionContext, req: ModelRequest): Promise<ModelResponse> {
       console.log(`  [${label}] outgoing metadata     :`, JSON.stringify(req.metadata ?? {}));
       console.log(
@@ -68,7 +69,9 @@ function makeStubModel(provider: string, label: string): Model {
         req.messages.map((m) => m.role).join(', '),
       );
       return {
-        message: { role: 'assistant', content: 'ok' },
+        id: 'stub-1',
+        content: 'ok',
+        model: info.modelId,
         usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
         finishReason: 'stop',
       };
@@ -77,11 +80,8 @@ function makeStubModel(provider: string, label: string): Model {
 }
 
 const stubCtx: ExecutionContext = {
-  runId: 'run-1',
-  stepId: 'step-1',
-  bus: { emit: () => {}, on: () => () => {}, onAll: () => () => {}, onMatch: () => () => {} } as any,
-  tracer: { startSpan: () => ({ end: () => {}, setAttribute: () => {}, setStatus: () => {}, recordException: () => {} }) } as any,
-  logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+  executionId: 'run-1',
+  metadata: {},
 };
 
 const messages: Message[] = [

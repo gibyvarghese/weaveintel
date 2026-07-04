@@ -125,6 +125,9 @@ class InMemoryEncryptionStore implements EncryptionStore {
         : k,
     );
   }
+  async getKekById(tenantId: string, kekId: string) {
+    return this.keks.find(k => k.tenantId === tenantId && k.id === kekId) ?? null;
+  }
 
   async listDeks()   { return [...this.deks]; }
   async insertDek(d: DekRecord) { this.deks.push(d); }
@@ -134,6 +137,15 @@ class InMemoryEncryptionStore implements EncryptionStore {
         ? { ...d, status: s, rotatedAt: s === 'previous' ? ts : d.rotatedAt, revokedAt: s === 'revoked' ? ts : d.revokedAt }
         : d,
     );
+  }
+  async getDekById(tenantId: string, dekId: string) {
+    return this.deks.find(d => d.tenantId === tenantId && d.id === dekId) ?? null;
+  }
+  async getMaxDekEpoch(tenantId: string) {
+    const epochs = this.deks
+      .filter(d => d.tenantId === tenantId && d.status === 'active')
+      .map(d => d.epoch);
+    return epochs.length ? Math.max(...epochs) : null;
   }
 
   async listBiks()   { return [...this.biks]; }

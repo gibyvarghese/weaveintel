@@ -13,21 +13,28 @@
 
 import { weaveAgent } from '@weaveintel/agents';
 import { weaveToolRegistry } from '@weaveintel/core';
-import type { ExecutionContext } from '@weaveintel/core';
+import type { ExecutionContext, CapabilityId } from '@weaveintel/core';
 import type { Model } from '@weaveintel/core';
 
 // ── Stub model ────────────────────────────────────────────────
 
+const modelCaps = new Set<CapabilityId>();
 const model: Model = {
+  info: { provider: 'stub', modelId: 'compliance-stub', capabilities: modelCaps },
+  capabilities: modelCaps,
+  hasCapability: () => false,
   async generate(_ctx, req) {
     // Only call tool on the first turn (no tool messages yet)
     const hasToolResult = req.messages.some((m) => m.role === 'tool');
     if (!hasToolResult) {
-      const lastMsg = req.messages.findLast((m) => m.role === 'user');
+      const lastMsg = [...req.messages].reverse().find((m) => m.role === 'user');
       const text = typeof lastMsg?.content === 'string' ? lastMsg.content : '';
 
       if (/email|contact/i.test(text)) {
         return {
+          id: 'stub-1',
+          model: 'compliance-stub',
+          finishReason: 'tool_calls',
           content: '',
           toolCalls: [{ id: 'tc1', name: 'read_emails', arguments: '{"userId":"u123","limit":10}' }],
           usage: { promptTokens: 10, completionTokens: 8, totalTokens: 18 },
@@ -36,6 +43,9 @@ const model: Model = {
 
       if (/profile|pii/i.test(text)) {
         return {
+          id: 'stub-2',
+          model: 'compliance-stub',
+          finishReason: 'tool_calls',
           content: '',
           toolCalls: [{ id: 'tc2', name: 'read_user_profile', arguments: '{"userId":"u123"}' }],
           usage: { promptTokens: 10, completionTokens: 8, totalTokens: 18 },
@@ -48,6 +58,9 @@ const model: Model = {
       typeof m.content === 'string' && m.content.includes('consent not granted'),
     );
     return {
+      id: 'stub-3',
+      model: 'compliance-stub',
+      finishReason: 'stop',
       content: hasConsentDenied
         ? 'I was unable to access that data due to consent restrictions.'
         : 'Task completed successfully.',

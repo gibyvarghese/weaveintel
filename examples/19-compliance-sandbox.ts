@@ -85,15 +85,15 @@ const retention = createRetentionEngine();
 
 retention.addRule({
   id: 'ret-logs', name: 'Log Retention', description: 'Delete logs after 90 days',
-  dataCategory: 'logs', retentionDays: 90, action: 'delete', enabled: true,
+  dataCategory: 'logs', retentionDays: 90, action: 'delete', enabled: true, priority: 100,
 });
 retention.addRule({
   id: 'ret-analytics', name: 'Analytics Retention', description: 'Archive analytics after 1 year',
-  dataCategory: 'analytics', retentionDays: 365, action: 'archive', enabled: true,
+  dataCategory: 'analytics', retentionDays: 365, action: 'archive', enabled: true, priority: 100,
 });
 retention.addRule({
   id: 'ret-pii', name: 'PII Retention', description: 'Anonymize PII after 180 days',
-  dataCategory: 'pii', retentionDays: 180, action: 'anonymize', enabled: true,
+  dataCategory: 'pii', retentionDays: 180, action: 'anonymize', enabled: true, priority: 100,
 });
 
 console.log(`  Rules: ${retention.listRules().length}`);

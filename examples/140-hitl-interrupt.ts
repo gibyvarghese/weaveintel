@@ -18,7 +18,14 @@
  */
 
 import { weaveContext, weaveRuntime, weaveToolRegistry, weaveTool } from '@weaveintel/core';
-import type { ExecutionContext } from '@weaveintel/core';
+import type {
+  ExecutionContext,
+  Model,
+  ModelRequest,
+  ModelResponse,
+  ToolCall,
+  CapabilityId,
+} from '@weaveintel/core';
 import {
   weaveAgent,
   autoApproveInterruptHandler,
@@ -28,11 +35,50 @@ import {
   type InterruptResolution,
 } from '@weaveintel/agents';
 import { InMemoryTaskQueue } from '@weaveintel/human-tasks';
-import { createMockModel } from '@weaveintel/devtools';
 
 // ─── Shared setup ─────────────────────────────────────────────
 
 const runtime = weaveRuntime({});
+
+/**
+ * A scripted stub model: returns each turn in order. A turn is either a set of
+ * tool calls (finishReason 'tool_calls') or a final text answer ('stop').
+ * The devtools `createMockModel` only scripts text responses, so we build a
+ * minimal `Model` here to drive the tool-call → approval → response loop.
+ */
+type ScriptedTurn = { toolCalls: ToolCall[] } | { content: string };
+
+function scriptedModel(turns: ScriptedTurn[]): Model {
+  const caps = new Set<CapabilityId>();
+  let call = 0;
+  return {
+    info: { provider: 'stub', modelId: 'hitl-stub', capabilities: caps },
+    capabilities: caps,
+    hasCapability: () => false,
+    async generate(_ctx: ExecutionContext, _req: ModelRequest): Promise<ModelResponse> {
+      const turn = turns[Math.min(call, turns.length - 1)]!;
+      call += 1;
+      if ('toolCalls' in turn) {
+        return {
+          id: `stub-${call}`,
+          content: '',
+          toolCalls: turn.toolCalls,
+          finishReason: 'tool_calls',
+          usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+          model: 'hitl-stub',
+        };
+      }
+      return {
+        id: `stub-${call}`,
+        content: turn.content,
+        toolCalls: [],
+        finishReason: 'stop',
+        usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+        model: 'hitl-stub',
+      };
+    },
+  };
+}
 
 function makeCtx(): ExecutionContext {
   return weaveContext({ executionId: `ex-${Date.now()}`, runtime });
@@ -65,7 +111,7 @@ async function scenario1AutoApprove() {
   reg.register(makeRiskyTool());
 
   // Mock model that calls delete_file once, then responds
-  const model = createMockModel([
+  const model = scriptedModel([
     { toolCalls: [{ id: 'tc1', name: 'delete_file', arguments: '{"path":"/tmp/test.txt"}' }] },
     { content: 'File deleted successfully.' },
   ]);
@@ -93,7 +139,7 @@ async function scenario2AutoReject() {
   const reg = weaveToolRegistry();
   reg.register(makeRiskyTool());
 
-  const model = createMockModel([
+  const model = scriptedModel([
     { toolCalls: [{ id: 'tc2', name: 'delete_file', arguments: '{"path":"/etc/passwd"}' }] },
     { content: 'The deletion was rejected by the safety reviewer.' },
   ]);
@@ -122,7 +168,7 @@ async function scenario3Modify() {
   reg.register(makeRiskyTool());
 
   // Model asks to delete /prod/data — reviewer redirects to /tmp/data
-  const model = createMockModel([
+  const model = scriptedModel([
     { toolCalls: [{ id: 'tc3', name: 'delete_file', arguments: '{"path":"/prod/data"}' }] },
     { content: 'Deleted file (path was redirected to safe location by reviewer).' },
   ]);
@@ -172,7 +218,7 @@ async function scenario4QueueBacked() {
     assignee: 'admin@acme.com',
   });
 
-  const model = createMockModel([
+  const model = scriptedModel([
     { toolCalls: [{ id: 'tc4', name: 'delete_file', arguments: '{"path":"/tmp/demo.txt"}' }] },
     { content: 'File deleted after human approval.' },
   ]);
@@ -189,11 +235,13 @@ async function scenario4QueueBacked() {
   const approveTask = async () => {
     // Wait for the task to be enqueued
     while (true) {
-      const tasks = await queue.list({ status: 'pending' });
+      const tasks = await queue.list({ status: ['pending'] });
       if (tasks.length > 0) {
         const task = tasks[0]!;
         console.log(`  Human reviewer received task: "${task.title}"`);
         await queue.complete(task.id, {
+          taskId: task.id,
+          decidedBy: 'admin@acme.com',
           decision: 'approved',
           decidedAt: new Date().toISOString(),
           data: { decision: 'approve', feedback: 'Looks safe to delete.' },

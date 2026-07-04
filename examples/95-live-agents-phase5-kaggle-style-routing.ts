@@ -30,7 +30,9 @@
 
 import { weaveLiveAgent } from '@weaveintel/live-agents';
 import { weaveDbModelResolver } from '@weaveintel/live-agents-runtime';
-import type { Model, ModelResponse } from '@weaveintel/core';
+import type { ModelCandidate, DbModelRoutingHints, DbRoutingDecision } from '@weaveintel/live-agents-runtime';
+import { Capabilities } from '@weaveintel/core';
+import type { ExecutionContext, Model, ModelRequest, ModelResponse } from '@weaveintel/core';
 
 // ─────────────────────────────────────────────────────────────────────
 // Stub model factory (would normally be `getOrCreateModel` from chat-runtime).
@@ -38,14 +40,21 @@ import type { Model, ModelResponse } from '@weaveintel/core';
 // completions so we can see which model was picked per tick.
 // ─────────────────────────────────────────────────────────────────────
 function makeStubModel(provider: string, modelId: string): Model {
+  const caps = new Set([Capabilities.Chat]);
   const model: Model = {
-    async complete(): Promise<ModelResponse> {
+    info: { provider, modelId, capabilities: caps },
+    capabilities: caps,
+    hasCapability: (c) => caps.has(c),
+    async generate(_ctx: ExecutionContext, _req: ModelRequest): Promise<ModelResponse> {
       return {
+        id: `${provider}-${modelId}-resp`,
+        model: `${provider}/${modelId}`,
         content: `(${provider}/${modelId}) FINAL ANSWER: complete`,
         finishReason: 'stop',
+        usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
       };
     },
-  } as Model;
+  };
   Object.defineProperty(model, 'id', {
     value: `${provider}/${modelId}`,
     enumerable: true,
@@ -57,9 +66,9 @@ function makeStubModel(provider: string, modelId: string): Model {
 // Stub candidate enumerator (would be `listAvailableModelsForRouting`).
 // Returns two providers; the routing brain picks one per call.
 // ─────────────────────────────────────────────────────────────────────
-const candidates = [
-  { provider: 'openai', modelId: 'gpt-4o' },
-  { provider: 'anthropic', modelId: 'claude-sonnet' },
+const candidates: ModelCandidate[] = [
+  { provider: 'openai', id: 'gpt-4o' },
+  { provider: 'anthropic', id: 'claude-sonnet' },
 ];
 
 // ─────────────────────────────────────────────────────────────────────
@@ -68,16 +77,16 @@ const candidates = [
 // ─────────────────────────────────────────────────────────────────────
 let pick = 0;
 async function stubRouteModel(
-  cands: Array<{ provider: string; modelId: string }>,
-  hints: { taskType?: string; prompt?: string },
-): Promise<{ provider: string; modelId: string; taskKey?: string } | null> {
+  cands: ModelCandidate[],
+  hints: DbModelRoutingHints,
+): Promise<DbRoutingDecision | null> {
   if (cands.length === 0) return null;
-  const choice = cands[pick % cands.length];
+  const choice = cands[pick % cands.length]!;
   pick++;
   console.log(
-    `   ↳ stubRouteModel(taskType=${hints.taskType ?? '-'} prompt=${hints.prompt ?? '-'}) → ${choice.provider}/${choice.modelId}`,
+    `   ↳ stubRouteModel(taskType=${hints.taskType ?? '-'} prompt=${hints.prompt ?? '-'}) → ${choice.provider}/${choice.id}`,
   );
-  return { ...choice, taskKey: hints.taskType };
+  return { provider: choice.provider, modelId: choice.id, taskKey: hints.taskType };
 }
 
 // ─────────────────────────────────────────────────────────────────────

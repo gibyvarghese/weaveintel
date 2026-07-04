@@ -744,8 +744,9 @@ if (process.env['ANTHROPIC_API_KEY']) {
   header('9c. Real agent demo — LLM calls run_workflow with W3 context');
   info('ANTHROPIC_API_KEY set — attempting real agent demo...');
   try {
-    const { ReActAgent } = await import('@weaveintel/agents');
-    const { AnthropicProvider } = await import('@weaveintel/provider-anthropic');
+    const { weaveAgent } = await import('@weaveintel/agents');
+    const { weaveAnthropicModel } = await import('@weaveintel/provider-anthropic');
+    const { weaveContext, weaveToolRegistry, weaveTool } = await import('@weaveintel/core');
 
     const payloadStore2 = new InMemoryPayloadStore();
     const engine2 = new DefaultWorkflowEngine({ payloadStore: payloadStore2, defaultPolicy: { maxInlineBytes: 200 } });
@@ -765,39 +766,50 @@ if (process.env['ANTHROPIC_API_KEY']) {
       details: Array.from({ length: 10 }, (_, i) => ({ seq: i, note: `detail-${i}` })),
     }));
 
-    const toolFn = {
-      name: 'run_workflow',
-      description: 'Run a workflow with W3 context propagation. Returns masked output and trace info.',
-      parameters: {
-        type: 'object' as const,
-        required: ['workflowId', 'input'],
-        properties: {
-          workflowId: { type: 'string' },
-          input: { type: 'object' },
+    const tools = weaveToolRegistry();
+    tools.register(
+      weaveTool({
+        name: 'run_workflow',
+        description: 'Run a workflow with W3 context propagation. Returns masked output and trace info.',
+        parameters: {
+          type: 'object' as const,
+          required: ['workflowId', 'input'],
+          properties: {
+            workflowId: { type: 'string' },
+            input: { type: 'object' },
+          },
         },
-      },
-      execute: async (args: { workflowId: string; input: Record<string, unknown> }) => {
-        const run = await engine2.startRun(
-          args.workflowId,
-          args.input,
-          { tenantId: 'llm-agent-tenant' },
-        );
-        return { status: run.status, traceId: run.traceId, output: run.state.variables };
-      },
-    };
+        execute: async (args) => {
+          const { workflowId, input } = args as { workflowId: string; input: Record<string, unknown> };
+          const run = await engine2.startRun(
+            workflowId,
+            input,
+            { tenantId: 'llm-agent-tenant' },
+          );
+          return JSON.stringify({ status: run.status, traceId: run.traceId, output: run.state.variables });
+        },
+      }),
+    );
 
-    const provider = new AnthropicProvider({ apiKey: process.env['ANTHROPIC_API_KEY']! });
-    const agent = new ReActAgent({
-      model: { provider: 'anthropic', id: 'claude-haiku-4-5-20251001' },
+    const model = weaveAnthropicModel('claude-haiku-4-5-20251001', {
+      apiKey: process.env['ANTHROPIC_API_KEY']!,
+    });
+    const agent = weaveAgent({
+      model,
+      tools,
       systemPrompt: 'You run analysis workflows. Use run_workflow to process user queries.',
-      tools: [toolFn],
-      provider,
+      maxSteps: 5,
     });
 
-    const response = await agent.run(
-      'Run workflow "real-agent-w3-wf" with input { query: "market trends" } and report the summary.',
-    );
-    ok(`Agent completed: ${String(response.content).slice(0, 120)}`);
+    const response = await agent.run(weaveContext({ userId: 'llm-agent-demo' }), {
+      messages: [
+        {
+          role: 'user',
+          content: 'Run workflow "real-agent-w3-wf" with input { query: "market trends" } and report the summary.',
+        },
+      ],
+    });
+    ok(`Agent completed: ${String(response.output).slice(0, 120)}`);
   } catch (e) {
     info(`Agent demo skipped: ${(e as Error).message}`);
   }

@@ -16,6 +16,7 @@ import {
   weaveRuntime,
   RuntimeCapabilities,
   weaveInMemoryPersistence,
+  weaveContext,
 } from '@weaveintel/core';
 import type { RuntimeMemorySlot } from '@weaveintel/core';
 import {
@@ -26,7 +27,6 @@ import {
   fusedMemorySearch,
   weaveMemoryStore,
 } from '@weaveintel/memory';
-import { createExecutionContext as weaveContext } from '@weaveintel/core';
 
 // ─── 1. Build the memory instances ───────────────────────────────────────────
 //

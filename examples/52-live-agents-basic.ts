@@ -13,7 +13,32 @@ import {
   type LiveAgent,
   type Mesh,
 } from '@weaveintel/live-agents';
-import { weaveContext } from '@weaveintel/core';
+import {
+  weaveContext,
+  type Model,
+  type ModelRequest,
+  type ModelResponse,
+  type ExecutionContext,
+} from '@weaveintel/core';
+
+// Minimal offline model — the attention policy in this example decides
+// deterministically, so the model is never actually consulted.
+function fakeModel(): Model {
+  return {
+    info: { provider: 'fake', modelId: 'fake-1', capabilities: new Set() },
+    capabilities: new Set(),
+    hasCapability: () => false,
+    async generate(_ctx: ExecutionContext, _req: ModelRequest): Promise<ModelResponse> {
+      return {
+        id: 'res-1',
+        content: '{}',
+        finishReason: 'stop',
+        usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+        model: 'fake-1',
+      };
+    },
+  };
+}
 
 async function main() {
   const store = weaveInMemoryStateStore();
@@ -130,6 +155,7 @@ async function main() {
     stateStore: store,
     workerId: 'worker-basic-1',
     concurrency: 1,
+    model: fakeModel(),
     attentionPolicy,
     actionExecutor: createActionExecutor(),
     now: () => now,

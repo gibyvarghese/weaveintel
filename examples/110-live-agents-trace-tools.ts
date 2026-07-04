@@ -87,21 +87,20 @@ async function demoDirectRegistry() {
   console.log('\n=== Demo 1: Direct registry construction ===');
   const reg = createLiveTraceTools({
     runId: 'run-A',
-    agentId: 'a1',
     eventReader,
     stepReader,
   });
   console.log('Tools registered:', reg.list().map((t) => t.schema.name));
 
   const ctx = weaveContext({});
-  const timeline = await reg.get('live_get_run_timeline')!.invoke(ctx, { arguments: {} });
+  const timeline = await reg.get('live_get_run_timeline')!.invoke(ctx, { name: 'live_get_run_timeline', arguments: {} });
   console.log('timeline:', JSON.parse(timeline.content as string));
 
-  const failed = await reg.get('live_get_failed_attempts')!.invoke(ctx, { arguments: {} });
+  const failed = await reg.get('live_get_failed_attempts')!.invoke(ctx, { name: 'live_get_failed_attempts', arguments: {} });
   console.log('failed attempts:', JSON.parse(failed.content as string));
 
   // Cross-run lookup MUST be rejected:
-  const cross = await reg.get('live_get_event_details')!.invoke(ctx, { arguments: { eventId: 'e99' } });
+  const cross = await reg.get('live_get_event_details')!.invoke(ctx, { name: 'live_get_event_details', arguments: { eventId: 'e99' } });
   console.log('cross-run event lookup (expect error):', JSON.parse(cross.content as string));
 }
 

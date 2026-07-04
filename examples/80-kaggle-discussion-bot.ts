@@ -58,7 +58,9 @@ async function main(): Promise<void> {
       body: 'I trained a LightGBM baseline with 5-fold CV. Notebook attached. Happy to discuss feature engineering choices.',
     },
   });
-  const topic = JSON.parse(topicResult.content[0]!.text);
+  const topicText = topicResult.content[0];
+  if (topicText?.type !== 'text') throw new Error('Expected text content from topic post');
+  const topic = JSON.parse(topicText.text);
   console.log('  topic id:', topic.topicId);
   console.log('  url:', topic.url);
   console.log('  status:', topic.status, '\n');
@@ -78,7 +80,9 @@ async function main(): Promise<void> {
       parentTopicId: topic.topicId,
     },
   });
-  const reply = JSON.parse(replyResult.content[0]!.text);
+  const replyText = replyResult.content[0];
+  if (replyText?.type !== 'text') throw new Error('Expected text content from reply post');
+  const reply = JSON.parse(replyText.text);
   console.log('  reply id:', reply.topicId);
   console.log('  url:', reply.url);
   console.log('  message:', reply.message, '\n');

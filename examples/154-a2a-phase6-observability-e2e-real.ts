@@ -271,9 +271,8 @@ async function path1OtelAttributes() {
   const { url, close } = await startHttpServer(impl);
   const { tracer, spans } = makeCapturingTracer();
 
-  const ctx = weaveContext({ userId: 'u1' }) as unknown as ExecutionContext & { tracer: Tracer };
-  // Inject tracer via WeaveContext's tracer field
-  (ctx as Record<string, unknown>)['tracer'] = tracer;
+  // Inject tracer via ExecutionContext's tracer field
+  const ctx = weaveContext({ userId: 'u1', tracer: tracer as unknown as ExecutionContext['tracer'] }) as ExecutionContext & { tracer: Tracer };
 
   const client = weaveA2AClient();
   try {

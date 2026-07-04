@@ -10,11 +10,59 @@
  *   npx ts-node examples/150-memory-tools.ts
  */
 
-import { weaveContext, weaveRuntime } from '@weaveintel/core';
+import {
+  weaveContext,
+  weaveRuntime,
+  capabilityId,
+  type Model,
+  type ModelRequest,
+  type ModelResponse,
+  type ExecutionContext,
+  type CapabilityId,
+} from '@weaveintel/core';
 import { weaveAgent, createMemoryToolSet, createMemoryToolRegistry } from '@weaveintel/agents';
-import { createMockModel } from '@weaveintel/devtools';
 
 const runtime = weaveRuntime({});
+
+// ─── Scripted mock model ──────────────────────────────────────
+// Drives an agent through a fixed sequence of turns. Each turn is either a
+// final text answer (`content`) or a set of tool calls (`toolCalls`).
+type ScriptTurn =
+  | { content: string }
+  | { toolCalls: Array<{ id: string; name: string; arguments: string }> };
+
+function createMockModel(script: ScriptTurn[]): Model {
+  let idx = 0;
+  const caps = new Set([capabilityId('chat')]) as ReadonlySet<CapabilityId>;
+  return {
+    info: { provider: 'mock', modelId: 'mock-scripted', capabilities: caps },
+    capabilities: caps,
+    hasCapability: (id: CapabilityId) => caps.has(id),
+    async generate(_ctx: ExecutionContext, _req: ModelRequest): Promise<ModelResponse> {
+      const turn = script[idx % script.length]!;
+      idx++;
+      const usage = { promptTokens: 10, completionTokens: 5, totalTokens: 15 };
+      if ('toolCalls' in turn) {
+        return {
+          id: `mock-${idx}`,
+          content: '',
+          toolCalls: turn.toolCalls,
+          finishReason: 'tool_calls',
+          usage,
+          model: 'mock-scripted',
+        };
+      }
+      return {
+        id: `mock-${idx}`,
+        content: turn.content,
+        toolCalls: [],
+        finishReason: 'stop',
+        usage,
+        model: 'mock-scripted',
+      };
+    },
+  };
+}
 
 function makeCtx() {
   return weaveContext({ executionId: `ex-${Date.now()}`, runtime });
