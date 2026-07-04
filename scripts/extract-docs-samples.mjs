@@ -23,6 +23,16 @@ const outDir = join(root, 'apps/geneweave/docs-samples/.generated');
 const source = readFileSync(srcPath, 'utf8');
 const sf = ts.createSourceFile(srcPath, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 
+// Guard: docs-html.ts must itself PARSE cleanly. A stray backtick or `${` in a sample comment silently
+// closes the outer template literal and would mis-extract samples — catch it here, not downstream.
+if (sf.parseDiagnostics?.length) {
+  const d = sf.parseDiagnostics[0];
+  const { line, character } = sf.getLineAndCharacterOfPosition(d.start ?? 0);
+  process.stderr.write(`[extract-docs-samples] docs-html.ts has a PARSE error at ${line + 1}:${character + 1} — ` +
+    `${ts.flattenDiagnosticMessageText(d.messageText, '\n')}\n(likely an unescaped \` or \${ inside a sample). Fix docs-html.ts first.\n`);
+  process.exit(1);
+}
+
 function literalText(node) {
   if (ts.isNoSubstitutionTemplateLiteral(node) || ts.isStringLiteral(node)) return node.text;
   if (ts.isTemplateExpression(node)) {

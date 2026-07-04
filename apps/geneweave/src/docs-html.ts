@@ -3665,7 +3665,7 @@ import { weaveInMemoryStateStore } from '@weaveintel/live-agents';
 const store = weaveInMemoryStateStore();
 
 // provisionMesh(db, opts) instantiates a mesh from a stored blueprint.
-// `db` reads the mesh + agent DEFINITIONS; the runtime rows are written for you.
+// 'db' reads the mesh + agent DEFINITIONS; the runtime rows are written for you.
 const mesh = await provisionMesh(db, {
   meshDefId:    'equity-mesh',        // or meshDefKey to look up by key
   tenantId:     'acme',
