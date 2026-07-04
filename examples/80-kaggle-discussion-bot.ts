@@ -21,7 +21,7 @@
 import { weaveFakeTransport } from '@weaveintel/testing';
 import { weaveMCPClient } from '@weaveintel/mcp-client';
 import { weaveContext } from '@weaveintel/core';
-import { createKaggleMCPServer, fixtureKaggleAdapter } from '@weaveintel/tools-kaggle';
+import { createKaggleMCPServer, fixtureKaggleAdapter } from '../apps/geneweave/src/kaggle/index.js';
 
 async function main(): Promise<void> {
   console.log('━━━ Phase K6: Kaggle Discussion Bot ━━━\n');

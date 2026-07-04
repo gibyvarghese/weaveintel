@@ -1,7 +1,7 @@
 /**
  * 39 — Kaggle MCP write tools + sandboxed local tools (Phase K2)
  *
- * Demonstrates the @weaveintel/tools-kaggle Phase K2 deliverables end-to-end:
+ * Demonstrates the ../apps/geneweave/src/kaggle/index.js Phase K2 deliverables end-to-end:
  *   1. Boots `createKaggleMCPServer` with the fixture adapter PLUS a
  *      `ContainerExecutor` backed by `FakeRuntime` (so this example needs no
  *      Docker, no Python, no network).
@@ -44,7 +44,7 @@ import {
   KAGGLE_RUNNER_IMAGE_DIGEST,
   kaggleRunnerImagePolicyEntry,
   validateSubmissionCsv,
-} from '@weaveintel/tools-kaggle';
+} from '../apps/geneweave/src/kaggle/index.js';
 
 const CLEAN_CSV = `PassengerId,Survived
 1,0

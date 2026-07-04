@@ -10,7 +10,7 @@
  * the strategist still has its DB-driven playbook to fall back on.
  */
 
-import type { KaggleAdapter, KaggleCredentials, KaggleCompetitionFile } from '@weaveintel/tools-kaggle';
+import type { KaggleAdapter, KaggleCredentials, KaggleCompetitionFile } from '../../kaggle/index.js';
 
 export interface CompetitionIntel {
   /** Files Kaggle will mount at /kaggle/input/<slug>/. */

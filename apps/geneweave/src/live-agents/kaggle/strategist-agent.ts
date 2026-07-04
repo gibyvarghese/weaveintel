@@ -42,7 +42,7 @@ import {
   wrapAdapterWithResilience,
   type KaggleAdapter,
   type KaggleCredentials,
-} from '@weaveintel/tools-kaggle';
+} from '../../kaggle/index.js';
 import { createKaggleTools, type KernelPushRecord, type ToolBlockedRecord } from './kaggle-tools.js';
 import { withPerTickReadCache } from './adapter-cache.js';
 import {

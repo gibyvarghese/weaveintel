@@ -134,9 +134,6 @@
       "path": "packages/tools-enterprise"
     },
     {
-      "path": "packages/tools-kaggle"
-    },
-    {
       "path": "packages/triggers"
     },
     {

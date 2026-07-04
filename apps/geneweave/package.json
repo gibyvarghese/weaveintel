@@ -41,6 +41,7 @@
     "@weaveintel/identity": "*",
     "@weaveintel/live-agents": "*",
     "@weaveintel/live-agents-runtime": "*",
+    "@weaveintel/mcp-client": "^0.0.1",
     "@weaveintel/mcp-server": "*",
     "@weaveintel/memory": "*",
     "@weaveintel/notes": "*",

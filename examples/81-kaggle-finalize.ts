@@ -2,9 +2,9 @@
 // Demonstrates: (1) Adversarial validation round-trip, (2) Finalizer skill logic
 // Usage: npx tsx examples/81-kaggle-finalize.ts
 
-import { createKaggleLocalTools, type AdversarialValidationInput } from '@weaveintel/tools-kaggle';
+import { createKaggleLocalTools, type AdversarialValidationInput } from '../apps/geneweave/src/kaggle/index.js';
 import { FakeRuntime, ContainerExecutor, createImagePolicy } from '@weaveintel/sandbox';
-import { kaggleRunnerImagePolicyEntry } from '@weaveintel/tools-kaggle';
+import { kaggleRunnerImagePolicyEntry } from '../apps/geneweave/src/kaggle/index.js';
 
 async function main() {
   // 1. Adversarial validation round-trip

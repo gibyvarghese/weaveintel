@@ -1337,7 +1337,7 @@ export function applyM01_M10(db: BetterSqlite3.Database): void {
   // ─── M10 — Kaggle MCP tool catalog + credential seed (Phase K1) ──
   // Design doc: docs/KAGGLE_AGENT_DESIGN.md §4.1 + §8 (Phase K1).
   // Seeds one credential row pointing at KAGGLE_USERNAME/KAGGLE_KEY env vars
-  // and 13 read-only Kaggle MCP tools backed by the @weaveintel/tools-kaggle
+  // and 13 read-only Kaggle MCP tools backed by the ../kaggle/index.js
   // server. Rows are disabled by default — the operator must:
   //   (a) provision KAGGLE_USERNAME + KAGGLE_KEY in the runtime environment,
   //   (b) start the Kaggle MCP server (see examples/38-kaggle-mcp-readonly.ts),

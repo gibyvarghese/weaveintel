@@ -15,7 +15,7 @@
  * Use it once per handler invocation; do NOT share across ticks.
  */
 
-import type { KaggleAdapter } from '@weaveintel/tools-kaggle';
+import type { KaggleAdapter } from '../../kaggle/index.js';
 
 /** Read-only methods we memoise. Write methods (push/submit) bypass. */
 const CACHED_METHODS = new Set([

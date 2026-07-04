@@ -17,7 +17,7 @@
  */
 
 import { newUUIDv7 } from '@weaveintel/core';
-import type { KaggleAdapter, KaggleCredentials } from '@weaveintel/tools-kaggle';
+import type { KaggleAdapter, KaggleCredentials } from '../kaggle/index.js';
 import type { DatabaseAdapter } from '../db.js';
 import type {
   KaggleCompetitionRubricRow,

@@ -17,7 +17,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { newUUIDv7 } from '@weaveintel/core';
 import { createDurableIdempotencyStore, type DurableIdempotencyEntry } from '@weaveintel/resilience';
-import { liveKaggleAdapter, type KaggleAdapter, type KaggleCredentials } from '@weaveintel/tools-kaggle';
+import { liveKaggleAdapter, type KaggleAdapter, type KaggleCredentials } from '../../../kaggle/index.js';
 import type { DatabaseAdapter } from '../../../db.js';
 import type { KaggleCompetitionRunner } from '../runner.js';
 

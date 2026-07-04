@@ -16,7 +16,7 @@ import type {
 import {
   type KaggleAdapter,
   type KaggleCredentials,
-} from '@weaveintel/tools-kaggle';
+} from '../../../kaggle/index.js';
 import type { Model } from '@weaveintel/core';
 import type { KaggleAgentRole } from '../account-bindings.js';
 import type {

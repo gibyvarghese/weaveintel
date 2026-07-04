@@ -1,6 +1,6 @@
 /** Kaggle Discoverer — agentic seed + deterministic top-N forwarder. */
 import type { TaskHandler } from '@weaveintel/live-agents';
-import type { KaggleCompetition } from '@weaveintel/tools-kaggle';
+import type { KaggleCompetition } from '../../../kaggle/index.js';
 import { competitionSlugFrom, emitToNextAgent, resolveCreds, type SharedHandlerContext } from './_shared.js';
 import { probeCompetitionFiles, renderIntelHeader, type CompetitionIntel } from '../competition-probe.js';
 
