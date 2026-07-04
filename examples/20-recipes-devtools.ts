@@ -45,7 +45,7 @@ import {
   createGovernedAssistant,
   createEventDrivenAgent,
   createSafeExecutionAgent,
-} from '@weaveintel/recipes';
+} from '@weaveintel/agents/recipes';
 
 import {
   scaffold,

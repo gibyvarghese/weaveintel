@@ -44,7 +44,7 @@ import {
   createConsentManager,
   createResidencyEngine,
   createAuditExportManager,
-} from '@weaveintel/compliance';
+} from '@weaveintel/guardrails/compliance';
 
 import {
   createSimulatedSandbox,
@@ -61,7 +61,7 @@ import {
   createDeadLetterQueue,
   createHealthChecker,
   createIdempotencyStore,
-} from '@weaveintel/reliability';
+} from '@weaveintel/resilience';
 
 /* ── Helpers ──────────────────────────────────────────── */
 

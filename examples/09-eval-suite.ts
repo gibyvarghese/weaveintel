@@ -26,7 +26,7 @@
 import 'dotenv/config';
 import { weaveContext } from '@weaveintel/core';
 import type { EvalDefinition, EvalCase } from '@weaveintel/core';
-import { weaveEvalRunner } from '@weaveintel/evals';
+import { weaveEvalRunner } from '@weaveintel/testing/evals';
 import { weaveOpenAIModel } from '@weaveintel/provider-openai';
 
 async function main() {

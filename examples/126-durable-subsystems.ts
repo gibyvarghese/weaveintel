@@ -14,9 +14,9 @@ import assert from 'node:assert/strict';
 
 import { weaveRuntime } from '@weaveintel/core';
 import { weaveSqlitePersistence } from '@weaveintel/persistence';
-import { createDurableLegalHoldManager } from '@weaveintel/compliance';
-import { createDurableOAuthStateStore } from '@weaveintel/oauth';
-import { createDurableBudgetEnforcer } from '@weaveintel/tenancy';
+import { createDurableLegalHoldManager } from '@weaveintel/guardrails/compliance';
+import { createDurableOAuthStateStore } from '@weaveintel/identity/oauth';
+import { createDurableBudgetEnforcer } from '@weaveintel/identity/tenancy';
 import { createDurableBrowserHandoffStore } from '@weaveintel/tools-browser';
 
 async function main(): Promise<void> {

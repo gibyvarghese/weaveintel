@@ -49,7 +49,7 @@ import {
   checkCompatibility,
   // Installer
   createPluginInstaller,
-} from '@weaveintel/plugins';
+} from '@weaveintel/core/plugins';
 
 // ── Presentation helpers ──────────────────────────────────────────────────────
 

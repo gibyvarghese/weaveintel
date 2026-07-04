@@ -60,7 +60,7 @@ import {
   // Handoff management
   createHandoffManager,
   type HandoffStatus,
-} from '@weaveintel/collaboration';
+} from '@weaveintel/collab';
 
 /* ─── Section header helpers ─────────────────────────────────────────────── */
 

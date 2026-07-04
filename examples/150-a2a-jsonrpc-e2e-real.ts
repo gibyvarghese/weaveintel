@@ -64,7 +64,7 @@ import type {
   A2ATask,
   A2AStreamEvent,
 } from '@weaveintel/core';
-import { weaveOpenAIModel } from '@weaveintel/openai';
+import { weaveOpenAIModel } from '@weaveintel/provider-openai';
 
 // ── Env ───────────────────────────────────────────────────────────────────────
 

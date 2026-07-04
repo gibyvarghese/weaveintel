@@ -13,7 +13,7 @@
  */
 
 import { weaveAgent } from '@weaveintel/agents';
-import { weaveWorkflowTool } from '@weaveintel/recipes';
+import { weaveWorkflowTool } from '@weaveintel/agents/recipes';
 import { weaveContext, weaveToolRegistry, Capabilities } from '@weaveintel/core';
 import type { Model, ExecutionContext, ModelRequest, ModelResponse } from '@weaveintel/core';
 import {

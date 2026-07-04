@@ -20,7 +20,7 @@
  *     • fixtureNewsAdapter       — deterministic news articles, no network
  *   @weaveintel/tools/altdata
  *     • fixtureAltDataAdapter    — deterministic ESG / trends data, no network
- *   @weaveintel/equity-scoring
+ *   ./verticals/equity-scoring/src/index.js
  *     • scoreUniverse            — cross-sectional z-score ranking
  *     • computeFactor            — individual factor computation
  *     • strategies               — pre-built ScoringStrategy registry
@@ -41,8 +41,8 @@ import {
   scoreUniverse,
   explainScore,
   strategies,
-} from '@weaveintel/equity-scoring';
-import type { InputBundle, SymbolScore } from '@weaveintel/equity-scoring';
+} from './verticals/equity-scoring/src/index.js';
+import type { InputBundle, SymbolScore } from './verticals/equity-scoring/src/index.js';
 
 // ── Console helpers ────────────────────────────────────────────────────────
 

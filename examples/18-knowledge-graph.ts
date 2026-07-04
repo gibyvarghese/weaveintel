@@ -32,7 +32,7 @@ import {
   createEntityLinker,
   createGraphRetriever,
   createTimelineGraph,
-} from '@weaveintel/graph';
+} from '@weaveintel/memory';
 
 /* ── Helpers ──────────────────────────────────────────── */
 

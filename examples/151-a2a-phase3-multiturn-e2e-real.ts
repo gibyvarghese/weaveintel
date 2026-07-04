@@ -63,7 +63,7 @@ import type {
   RuntimeGuardrailsSlot,
   RuntimeKvStore,
 } from '@weaveintel/core';
-import { createOpenAIProvider } from '@weaveintel/providers';
+import { weaveOpenAIModel } from '@weaveintel/provider-openai';
 
 // ── Guard ─────────────────────────────────────────────────────────────────────
 
@@ -84,8 +84,8 @@ function check(label: string, condition: boolean): void {
 
 // ─── Model ────────────────────────────────────────────────────────────────────
 
-const openai = createOpenAIProvider({ apiKey: process.env['OPENAI_API_KEY']! });
-const model = openai.model('gpt-4o-mini');
+
+const model = weaveOpenAIModel('gpt-4o-mini', { apiKey: process.env['OPENAI_API_KEY']! });
 
 // ─── Agent card ───────────────────────────────────────────────────────────────
 

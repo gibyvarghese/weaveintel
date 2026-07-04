@@ -1,8 +1,8 @@
 import { weaveContext } from '@weaveintel/core';
 import { weaveFakeTransport } from '@weaveintel/testing';
 import { weaveMCPClient } from '@weaveintel/mcp-client';
-import { createWebhookMCPServer, type WebhookAdapter } from '../packages/tools-webhook/src/index.js';
-import { createFilewatchMCPServer, type FilewatchAdapter } from '../packages/tools-filewatch/src/index.js';
+import { createWebhookMCPServer, type WebhookAdapter } from '@weaveintel/tools/webhook';
+import { createFilewatchMCPServer, type FilewatchAdapter } from '@weaveintel/tools/filewatch';
 
 const webhookFixtureAdapter: WebhookAdapter = {
   async post(_creds, url, body) {

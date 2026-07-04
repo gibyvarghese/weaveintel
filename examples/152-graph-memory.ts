@@ -21,7 +21,7 @@
 import { weaveContext, weaveRuntime } from '@weaveintel/core';
 import type { Tool } from '@weaveintel/core';
 import { weaveAgent, createGraphMemoryToolSet, createGraphMemoryToolRegistry } from '@weaveintel/agents';
-import { createGraphMemoryStore } from '@weaveintel/graph';
+import { createGraphMemoryStore } from '@weaveintel/memory';
 import { createMockModel } from '@weaveintel/devtools';
 
 // Helper: call a tool's invoke method directly (for direct use outside agents)

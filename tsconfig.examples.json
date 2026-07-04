@@ -1,9 +1,7 @@
 {
   "extends": "./tsconfig.base.json",
   "include": [
-    "examples/**/*.ts",
-    "apps/geneweave/src/cse.ts",
-    "apps/geneweave/src/live-agents/kaggle/**/*.ts"
+    "examples/**/*.ts"
   ],
   "compilerOptions": {
     "noEmit": true,
@@ -12,6 +10,12 @@
     "moduleResolution": "Bundler",
     "verbatimModuleSyntax": false,
     "strict": false,
-    "noPropertyAccessFromIndexSignature": false
-  }
+    "noPropertyAccessFromIndexSignature": false,
+    "skipLibCheck": true
+  },
+  "references": [
+    {
+      "path": "apps/geneweave"
+    }
+  ]
 }

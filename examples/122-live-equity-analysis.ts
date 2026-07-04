@@ -33,8 +33,8 @@ import {
 } from '@weaveintel/tools/marketdata';
 import { fixtureNewsAdapter } from '@weaveintel/tools/news';
 import { fixtureAltDataAdapter } from '@weaveintel/tools/altdata';
-import { scoreUniverse, strategies } from '@weaveintel/equity-scoring';
-import type { InputBundle } from '@weaveintel/equity-scoring';
+import { scoreUniverse, strategies } from './verticals/equity-scoring/src/index.js';
+import type { InputBundle } from './verticals/equity-scoring/src/index.js';
 
 // ── Console helpers ────────────────────────────────────────────────────────
 

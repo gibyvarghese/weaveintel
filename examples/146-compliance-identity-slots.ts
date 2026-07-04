@@ -16,7 +16,7 @@ import {
   RuntimeCapabilities,
   weaveInMemoryPersistence,
 } from '@weaveintel/core';
-import { createRuntimeComplianceAdapter } from '@weaveintel/compliance';
+import { createRuntimeComplianceAdapter } from '@weaveintel/guardrails/compliance';
 import { createRuntimeIdentityAdapter } from '@weaveintel/identity';
 import { weaveContext } from '@weaveintel/core';
 

@@ -25,7 +25,7 @@ import { strict as assert } from 'node:assert';
 // read once during resolver registry build.
 process.env['GENEWEAVE_ENABLE_SCRIPT_RESOLVER'] = '1';
 
-const { createGeneWeave } = await import('@weaveintel/geneweave');
+const { createGeneWeave } = await import('@weaveintel/geneweave-api');
 
 async function main() {
   const dir = await mkdtemp(join(tmpdir(), 'geneweave-ex132-'));

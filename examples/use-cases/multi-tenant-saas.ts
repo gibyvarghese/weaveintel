@@ -62,7 +62,7 @@ import {
   createEntitlementStore,
   createEntitlementPolicy,
   createBudgetEnforcer,
-} from '@weaveintel/tenancy';
+} from '@weaveintel/identity/tenancy';
 
 /* ── Encryption ──────────────────────────────────────────────────────────── */
 import {

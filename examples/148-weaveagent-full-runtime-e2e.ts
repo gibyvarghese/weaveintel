@@ -77,7 +77,7 @@ import {
   createRuntimeMemoryAdapter,
 } from '@weaveintel/memory';
 
-import { createRuntimeComplianceAdapter } from '@weaveintel/compliance';
+import { createRuntimeComplianceAdapter } from '@weaveintel/guardrails/compliance';
 import { createRuntimeIdentityAdapter } from '@weaveintel/identity';
 
 import {

@@ -34,7 +34,7 @@ import {
   type LiveRunEventReader,
   type LiveRunStepLike,
   type LiveRunStepReader,
-} from '@weaveintel/live-agents-trace-tools';
+} from '@weaveintel/live-agents/trace-tools';
 import {
   dbPrepareFromConfig,
   parsePrepareConfig,

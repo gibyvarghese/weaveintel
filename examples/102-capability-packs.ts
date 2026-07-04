@@ -22,7 +22,7 @@ import {
   resolveActivePackVersion,
   type CapabilityPack,
   type PackInstallAdapter,
-} from '@weaveintel/capability-packs';
+} from '@weaveintel/core/capability-packs';
 
 // ─── 1. Manifest ────────────────────────────────────────────────────
 const manifest: CapabilityPack = {
