@@ -53,7 +53,8 @@ import { templateByKey } from '../notes/templates.js';
 /** The image-label languages offered for the per-user preference (code → English name). */
 const NOTE_IMAGE_LANGUAGES = LANGUAGE_NAMES;
 import { createSqlNoteRepository } from '../note-repository-sql.js';
-import { BlockDoc, pmToBlocks, blocksToProseMirror, blocksToMarkdown, blocksToHtml, exportNote as coeditExportNote, isExportFormat, type ExportFormat } from '@weaveintel/collab';
+import { BlockDoc, pmToBlocks, blocksToProseMirror, blocksToMarkdown, blocksToHtml } from '@weaveintel/collab';
+import { exportNote as coeditExportNote, isExportFormat, type ExportFormat } from '@weaveintel/notes';
 import { roleAtLeast } from '@weaveintel/collab';
 import {
   createNoteCoeditRepo,

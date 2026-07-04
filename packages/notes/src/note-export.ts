@@ -17,8 +17,8 @@
  * Pure + dependency-light → fully unit-testable in Node. The host application's server reuses {@link exportNote}
  * behind a download endpoint + the `export_note` AI tool.
  */
-import { pmToBlocks, type NormalBlock } from './prosemirror.js';
-import { blocksToMarkdown, blocksToHtml } from './block-markdown.js';
+import { pmToBlocks, type NormalBlock } from '@weaveintel/collab';
+import { blocksToMarkdown, blocksToHtml } from '@weaveintel/collab';
 
 /** A note's identity + content, the input to an export. */
 export interface ExportableNote {

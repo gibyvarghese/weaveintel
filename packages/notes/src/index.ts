@@ -144,3 +144,24 @@ export {
   parseProvenanceFromSvg,
 } from './provenance.js';
 
+
+// Multi-format note EXPORT (Markdown / HTML / Word / lossless JSON) — note-domain,
+// built on the block serializers from @weaveintel/collab.
+export {
+  type ExportableNote,
+  type NoteExport,
+  type ExportFormat,
+  type ExportFormatSpec,
+  type NoteExportBundle,
+  EXPORT_FORMATS,
+  NOTE_EXPORT_KIND,
+  NOTE_EXPORT_VERSION,
+  isExportFormat,
+  noteToMarkdown,
+  noteToHtmlFragment,
+  noteToHtmlDocument,
+  noteToWordHtml,
+  noteToJson,
+  parseNoteExportBundle,
+  exportNote,
+} from './note-export.js';

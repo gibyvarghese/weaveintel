@@ -30,14 +30,12 @@ import {
   blocksToProseMirror,
   diffBlocks,
   pmToBlocks,
-  exportNote as coeditExportNote,
-  isExportFormat,
-  type ExportFormat,
   type BlockOp,
   type BlockDocSnapshot,
   type BlockSpec,
   type RgaId,
 } from '@weaveintel/collab';
+import { exportNote as coeditExportNote, isExportFormat, type ExportFormat } from '@weaveintel/notes';
 import { newUUIDv7, weaveContext, type ModelRequest } from '@weaveintel/core';
 import { templateByKey, SYSTEM_TEMPLATES } from './notes/templates.js';
 import { makeFence, fenceUntrusted, spotlightPreamble } from '@weaveintel/guardrails/spotlighting';

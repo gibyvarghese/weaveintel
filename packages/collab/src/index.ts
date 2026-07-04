@@ -14,7 +14,6 @@
  * @weaveintel/collaboration packages.)
  */
 
-// ─────────────────────────── CO-EDITING (CRDT) ───────────────────────────
 export {
   RgaDoc,
   idGreater,
@@ -92,25 +91,7 @@ export {
   blocksToHtml,
   safeCssColor,
 } from './block-markdown.js';
-// Multi-format note export (Markdown / HTML / Word / lossless JSON).
-export {
-  type ExportableNote,
-  type NoteExport,
-  type ExportFormat,
-  type ExportFormatSpec,
-  type NoteExportBundle,
-  EXPORT_FORMATS,
-  NOTE_EXPORT_KIND,
-  NOTE_EXPORT_VERSION,
-  isExportFormat,
-  noteToMarkdown,
-  noteToHtmlFragment,
-  noteToHtmlDocument,
-  noteToWordHtml,
-  noteToJson,
-  parseNoteExportBundle,
-  exportNote,
-} from './note-export.js';
+
 export {
   markdownToBlocks,
   appendBlocksToDoc,
