@@ -435,8 +435,36 @@ are `PeerKind`; `session.ts`'s `PresenceState` collapses to a deprecated **alias
 Gate: **grep proves exactly one `PresenceStatus` definition, `PresenceState` is an alias, zero
 free-string peer-shape definitions**; collab 241 tests pass.
 
-**Remaining Phase 3:** 3c the `CoeditDoc` port + `createRgaDoc` reference adapter; 3e agent-peer against
-the port; 3f `docs/adapters.md` (how a Yjs adapter implements the port — no Yjs dependency).
+### 3c — the `CoeditDoc` port + `createRgaDoc` reference adapter ✅
+
+**Made the port the product and the RGA an adapter behind it.** New `coedit-doc.ts` defines the
+`CoeditDoc` interface — the tiny seam every collaborator talks to: `insert` / `delete` / `applyOps` /
+`opsSince` / `stateVector` / `snapshot` / `fork` + `anchor`/`resolve` (awareness). **Research-grounded**
+(xi-editor's CRDT engine, Zed's `Buffer`, Yjs's `Doc`, AFFiNE's storage layer all converge on this same
+insert/delete/apply/snapshot shape). The hand-rolled zero-dependency RGA ships as the DEFAULT adapter via
+`createRgaDoc(siteId, snapshot?)` (and `fromRgaDoc(doc)` to adapt a live replica with no snapshot
+round-trip) — its buffering / tombstone / convergence / contract tests are **untouched** (`rga.test.ts`
+unchanged). A different engine (Yjs update bytes, OT) is a different adapter behind the same interface.
+New `coedit-doc.test.ts` (11 tests): insert/delete, commutative convergence, snapshot round-trip,
+opsSince delta sync, fork independence, anchor/resolve cursor stability, + a spy-doc proving the agent
+peer touches ONLY the port surface. Gotcha found + fixed: RGA `idAtVisibleIndex` **clamps** past the end
+(never returns null), so the port's `delete` bounds its loop by the shrinking visible `length` instead of
+relying on a null return.
+
+### 3e — agent-peer against the port ✅
+
+`agent-peer.ts` (`createAgentPeer` — the AI-as-editing-peer, the differentiator) now takes a `CoeditDoc`,
+not an `RgaDoc`: it drives `doc.insert` / `doc.length` and, in `suggest` (HITL) mode, `doc.fork()` for the
+private shadow — **zero RGA internals** (dropped the `doc.constructor as typeof RgaDoc` + `fromSnapshot` +
+`localInsertText` coupling). It survives an engine swap. Call sites rewired to wrap at the boundary:
+`coedit-sql.ts` `agentAppend` (`createAgentPeer(fromRgaDoc(doc))`) and the two `awareness.test.ts` agent
+tests. `agent-peer` and `coedit-doc` exported from the collab barrel.
+
+Gate: **suite green (collab 252, geneweave-api 2103); all RGA convergence/contract tests pass unchanged;
+exactly ONE presence model exports; no-app-brand PASS.**
+
+**Remaining Phase 3:** 3f `docs/adapters.md` (how a Yjs adapter implements the `CoeditDoc` port — no Yjs
+dependency).
 
 ---
 

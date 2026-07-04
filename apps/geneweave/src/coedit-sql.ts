@@ -17,6 +17,7 @@
 import {
   RgaDoc,
   createAgentPeer,
+  fromRgaDoc,
   agentSiteId,
   validateClientOps,
   opIdOf,
@@ -137,7 +138,8 @@ export function createCoeditRepo(db: CoeditDb, opts: { now?: () => number } = {}
       if (suffix.length === 0) return { applied: [], view: this.view(row) };
       // The agent edits as its own site, anchored to the current end of the doc.
       const doc = RgaDoc.fromSnapshot(agentSiteId(runId), JSON.parse(row.snapshot_json) as RgaSnapshot);
-      const peer = createAgentPeer(doc); // direct co-edit
+      const peer = createAgentPeer(fromRgaDoc(doc)); // direct co-edit, through the CoeditDoc port
+
       const ops = peer.append(suffix);
       await persist(db, row, doc, already + [...suffix].length, ops, now());
       return { applied: ops, view: { docId, text: doc.text(), snapshot: doc.snapshot(), stateVector: doc.stateVector() } };

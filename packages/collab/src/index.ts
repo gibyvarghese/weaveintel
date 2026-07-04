@@ -26,6 +26,18 @@ export {
   type RgaSnapshot,
 } from './rga.js';
 
+// The co-editing PORT — the seam every collaborator talks to. The RGA above is its
+// zero-dependency reference adapter (`createRgaDoc`); a different engine is a different
+// adapter behind this same interface. See docs/adapters.md.
+export {
+  createRgaDoc,
+  fromRgaDoc,
+  type CoeditDoc,
+  type CoeditOp,
+  type CoeditSnapshot,
+  type CoeditStateVector,
+} from './coedit-doc.js';
+
 // The ONE presence vocabulary (shared by ephemeral awareness + durable presence).
 export {
   type PresenceStatus,

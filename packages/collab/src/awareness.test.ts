@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { describe, it, expect } from 'vitest';
 import { RgaDoc } from './rga.js';
+import { fromRgaDoc } from './coedit-doc.js';
 import { Awareness, cursorFromIndex, indexFromCursor } from './awareness.js';
 import { createAgentPeer, agentSiteId, isAgentSite } from './agent-peer.js';
 import { validateClientOps } from './validation.js';
@@ -81,7 +82,7 @@ describe('agent as a co-editing peer', () => {
     const agent = new RgaDoc(agentSiteId('run-1'));
     expect(isAgentSite(agent.siteId)).toBe(true);
     agent.applyMany(hOps);
-    const peer = createAgentPeer(agent); // direct mode
+    const peer = createAgentPeer(fromRgaDoc(agent)); // direct mode, through the port
     const aOps = peer.append('Body written by the agent.');
     expect(agent.text()).toBe('Title\nBody written by the agent.');
 
@@ -96,7 +97,7 @@ describe('agent as a co-editing peer', () => {
   it('suggest mode returns ops WITHOUT mutating the live doc (HITL gate)', () => {
     const doc = new RgaDoc(agentSiteId('run-2'));
     doc.localInsertText(0, 'x');
-    const peer = createAgentPeer(doc, { mode: 'suggest' });
+    const peer = createAgentPeer(fromRgaDoc(doc), { mode: 'suggest' });
     const ops = peer.append(' suggested');
     expect(ops.length).toBe(10);
     expect(doc.text()).toBe('x'); // unchanged — the suggestion is staged, not applied
