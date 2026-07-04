@@ -1,4 +1,4 @@
-// @weaveintel/graph — Document-to-entity linker
+// @weaveintel/memory (knowledge graph) — Document-to-entity linker
 
 import { createEntityNode, createRelationshipEdge, type EntityNode, type RelationshipEdge } from './entity.js';
 

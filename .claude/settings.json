@@ -184,7 +184,10 @@
       "Bash(node -e \"const d=require\\('./packages/live-agents/package.json'\\).dependencies;console.log\\('live-agents deps live-agents-runtime?',!!d['@weaveintel/live-agents-runtime']\\)\")",
       "Bash(node -e \"console.log\\(JSON.stringify\\(require\\('./packages/live-agents/tsconfig.json'\\).references\\)\\)\")",
       "Bash(node -e \"console.log\\(Object.keys\\(require\\('./packages/live-agents-runtime/package.json'\\).dependencies||{}\\).filter\\(k=>k.startsWith\\('@weaveintel'\\)\\).join\\(' '\\)\\)\")",
-      "Bash(perl -pi -e \"s{\\\\@weaveintel/live-agents-trace-tools —}{\\\\@weaveintel/live-agents/trace-tools —}\" packages/live-agents/src/trace-tools/index.ts)"
+      "Bash(perl -pi -e \"s{\\\\@weaveintel/live-agents-trace-tools —}{\\\\@weaveintel/live-agents/trace-tools —}\" packages/live-agents/src/trace-tools/index.ts)",
+      "Bash(node -e 'const fs=require\\(\"fs\"\\);const f=\"packages/memory/package.json\";const p=JSON.parse\\(fs.readFileSync\\(f,\"utf8\"\\)\\);delete p.dependencies[\"@weaveintel/graph\"];fs.writeFileSync\\(f,JSON.stringify\\(p,null,2\\)+\"\\\\n\"\\);console.log\\(\"removed graph dep from memory\"\\);')",
+      "Bash(node -e 'const fs=require\\(\"fs\"\\);const f=\"packages/memory/tsconfig.json\";const t=JSON.parse\\(fs.readFileSync\\(f,\"utf8\"\\)\\);if\\(Array.isArray\\(t.references\\)\\){t.references=t.references.filter\\(r=>!/\\\\/graph$/.test\\(r.path\\)\\);fs.writeFileSync\\(f,JSON.stringify\\(t,null,2\\)+\"\\\\n\"\\);console.log\\(\"memory tsconfig -graph ref\"\\);}')",
+      "Bash(node -e \"console.log\\('geneweave deps memory?', !!require\\('./apps/geneweave/package.json'\\).dependencies['@weaveintel/memory']\\)\")"
     ]
   }
 }

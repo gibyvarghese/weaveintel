@@ -1,4 +1,4 @@
-// @weaveintel/graph — Timeline graph for event ordering
+// @weaveintel/memory (knowledge graph) — Timeline graph for event ordering
 
 import { createEntityNode, createRelationshipEdge, type EntityNode, type RelationshipEdge } from './entity.js';
 

@@ -24,7 +24,7 @@ import {
 } from '@weaveintel/mcp-client';
 import { weaveA2AClient } from '@weaveintel/a2a';
 import { createGraphMemoryToolSet } from '@weaveintel/agents';
-import type { GraphMemoryStore } from '@weaveintel/graph';
+import type { GraphMemoryStore } from '@weaveintel/memory';
 import { createSVToolMap } from './features/scientific-validation/tools/index.js';
 import { createKaggleToolMap } from './live-agents/kaggle/kaggle-tools.js';
 

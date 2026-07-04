@@ -114,7 +114,7 @@ import { getActiveGuardrailEmbeddingModel } from './guardrail-judge.js';
 import { triggerConsolidationForUser } from './memory-consolidation.js';
 import { createSQLiteGraphMemoryStore } from './chat-graph-store.js';
 import { SQLiteAdapter } from './db-sqlite.js';
-import { createGraphMemoryStore } from '@weaveintel/graph';
+import { createGraphMemoryStore } from '@weaveintel/memory';
 import { normalizePersona } from './rbac.js';
 import {
   TEMPORAL_TOOL_POLICY,
@@ -1241,7 +1241,7 @@ export class ChatEngine {
   ): ToolRegistryOptions {
     // P4-3: Build graph store when graph tools are enabled.
     // Use SQLite-backed store when persist is enabled and raw DB is accessible.
-    let graphStore: import('@weaveintel/graph').GraphMemoryStore | undefined;
+    let graphStore: import('@weaveintel/memory').GraphMemoryStore | undefined;
     if (settings.graphEnabled) {
       if (settings.graphPersistEnabled && this.db instanceof SQLiteAdapter) {
         graphStore = createSQLiteGraphMemoryStore(this.db.rawDb, chatId, userId);

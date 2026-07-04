@@ -14,9 +14,9 @@
  * which would be expensive to express as arbitrary-depth SQLite queries.
  */
 
-import type { GraphMemoryStore } from '@weaveintel/graph';
-import { createGraphMemoryStore, createEntityNode, createRelationshipEdge } from '@weaveintel/graph';
-import type { EntityNode, RelationshipEdge } from '@weaveintel/graph';
+import type { GraphMemoryStore } from '@weaveintel/memory';
+import { createGraphMemoryStore, createEntityNode, createRelationshipEdge } from '@weaveintel/memory';
+import type { EntityNode, RelationshipEdge } from '@weaveintel/memory';
 import { newUUIDv7 } from '@weaveintel/core';
 
 export function createSQLiteGraphMemoryStore(

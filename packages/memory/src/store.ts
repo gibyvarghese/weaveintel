@@ -1,4 +1,4 @@
-// @weaveintel/graph — In-memory graph store
+// @weaveintel/memory (knowledge graph) — In-memory graph store
 
 import type { EntityNode, RelationshipEdge } from './entity.js';
 

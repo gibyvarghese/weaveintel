@@ -194,9 +194,6 @@
       "path": "packages/compliance"
     },
     {
-      "path": "packages/graph"
-    },
-    {
       "path": "packages/plugins"
     },
     {

@@ -1,4 +1,4 @@
-// @weaveintel/graph — Graph-assisted retrieval
+// @weaveintel/memory (knowledge graph) — Graph-assisted retrieval
 
 import type { EntityNode, RelationshipEdge } from './entity.js';
 import type { GraphMemoryStore } from './store.js';

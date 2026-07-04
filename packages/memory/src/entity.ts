@@ -1,4 +1,4 @@
-// @weaveintel/graph — Entity nodes & relationship edges
+// @weaveintel/memory (knowledge graph) — Entity nodes & relationship edges
 
 export interface EntityNode {
   readonly id: string;
