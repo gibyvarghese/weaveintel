@@ -20,7 +20,7 @@ import { newUUIDv7 } from '@weaveintel/core';
 import {
   buildMeetingPrompt, parseMeetingReply, verifyMeetingCitations, citationCoverage, buildMeetingNoteMarkdown,
   transcriptDuration, type TranscriptSegment, type MeetingStructured,
-} from '@weaveintel/notes';
+} from './notes/meeting.js';
 import type { DatabaseAdapter } from './db-types/adapter.js';
 import type { NoteAiGenerate } from './note-ai-sql.js';
 import { agentCreateNote } from './note-ai-sql.js';

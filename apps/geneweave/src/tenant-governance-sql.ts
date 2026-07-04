@@ -15,7 +15,7 @@
  *
  * The pure governance model lives in `@weaveintel/notes` (validated + checklist), reused here.
  */
-import { validateTenantGovernance, governancePosture, governanceScore, DEFAULT_TENANT_GOVERNANCE, type TenantGovernance, type PostureItem } from '@weaveintel/notes';
+import { validateTenantGovernance, governancePosture, governanceScore, DEFAULT_TENANT_GOVERNANCE, type TenantGovernance, type PostureItem } from './notes/governance.js';
 import type { DatabaseAdapter } from './db-types.js';
 import type { TenantGovernanceRow } from './db-types/governance.js';
 

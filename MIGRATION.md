@@ -204,7 +204,7 @@ rewiring every consumer, and leaving the suite green.
 | 2c | `mcp.ts` (transport-free JSON-RPC core) | `mcp-server` | ✅ done |
 | 2d | `scheduled-agent.ts` (split: cron+budget→triggers, recipes→app) | `triggers` + app | ✅ done |
 | 2e | `rag.ts` (+ rag-citations) | `retrieval` (reconcile RRF `hybrid.ts` + `citations.ts`) | ✅ done |
-| 2f | product modules (agency, notes-config, creative, colorize, meeting, study, diagram, ink, svg, visual-verify, image-search, capture, desktop, suggestions, templates, governance) | `apps/geneweave` (+ `-ui`) | ⏳ |
+| 2f | product modules → apps (batched by UI/server coupling) | `apps/geneweave` (+ `-ui`) | 🔵 in progress (Batch A done) |
 | 2g | slim `index.ts`, genericize `provenance.ts`, drop the notes deferral from the no-app-brand allowlist | — | ⏳ |
 
 ### 2a — `prompt-safety.ts` → `@weaveintel/guardrails/spotlighting` ✅
@@ -281,6 +281,32 @@ consumers** (dead-wired), while rag's citation suite (character-verified quotes:
   extractPlainText+Note←notes, rag←retrieval) and added `@weaveintel/retrieval` to the app manifest.
 
 Gate: **267/267 tasks, exit 0**; `check:api-boundaries` PASS; `check:no-app-brand` PASS.
+
+### 2f — product modules → the apps (batched by UI/server coupling) 🔵 in progress
+
+**Key architecture constraint discovered:** `apps/geneweave-ui` does **not** depend on `apps/geneweave`,
+but the app **does** depend on the UI package (`geneweave-api` → `geneweave-ui`). So: modules used only
+by the server → `apps/geneweave`; modules used by the UI (or by both) → `apps/geneweave-ui`. The UI's
+entire `@weaveintel/notes` surface is just 6 symbols from **colorize / ink / diagram**, and those form a
+coupled cluster (`ink→creative`, `diagram→colorize→agency`) that must move to `geneweave-ui` together
+(with agency's palette split per the plan). That's a later batch.
+
+**Decisions taken:** `study.ts` (FSRS/SM-2) → **app** (not kept in the framework): the exception rule
+*permits* keeping brand-free reusable maths, but flashcard scheduling would stretch slim-notes' scope
+beyond "note documents"; default "when in doubt, app" applies. `agency.ts` → **split** later (generic
+`AgencyContract` type stays in notes; geneWeave palette + byline → app).
+
+**Batch A ✅ (this step):** moved 5 self-contained **server-only** modules (+ their tests) to
+`apps/geneweave/src/notes/`: `governance`, `capture`, `meeting`, `visual-verify`, `image-search`.
+Removed their notes-barrel exports; rewired 6 consumers with correct relative paths
+(`note-creative-sql` split visual-verify+image-search out from the still-in-notes diagram/ink/svg
+imports; `admin/api/tenant-governance` at `../../notes/`; an inline `import('…').TranscriptSegment`
+type in `me-notes` retargeted). These modules' brand strings leave the framework (fewer notes-deferred
+hits in `check:no-app-brand`).
+
+**Remaining 2f batches:** Batch B — `notes-config`, `templates`, `study`, `desktop`, `suggestions`,
+`svg` (server-only, larger/some cross-refs). Batch C — the UI cluster `colorize`/`ink`/`diagram`/
+`creative`/`agency` → `geneweave-ui` (+ agency split). Then **2g**.
 
 ---
 

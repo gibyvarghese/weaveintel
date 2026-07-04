@@ -19,14 +19,19 @@ import {
   validateDiagramScene, diagramToSvg, type DiagramScene,
   inkFromPrimitives, strokesToSvg, validateStrokes, recolorStrokes, type InkStroke,
   sanitizeSvg, svgToDataUri, type WeaveNotesConfig,
-  type ImageResult, type LicenseId, DEFAULT_ALLOWED_LICENSES, LICENSE_LABELS, rankImageResults, buildAttribution,
   buildImageProvenance, embedXmpInSvg, type ImageProvenance,
+} from '@weaveintel/notes';
+// weaveNotes product modules moved app-side (Phase 2f):
+import {
+  type ImageResult, type LicenseId, DEFAULT_ALLOWED_LICENSES, LICENSE_LABELS, rankImageResults, buildAttribution,
   normalizeLanguage, languageName, applyLanguagePreference,
   buildOpenverseUrl, buildWikimediaUrl, buildUnsplashUrl, buildPexelsUrl, buildPixabayUrl,
   parseOpenverse, parseWikimedia, parseUnsplash, parsePexels, parsePixabay,
+} from './notes/image-search.js';
+import {
   buildDiagramJudge, parseDiagramVerdict, diagramRegenFeedback, diagramAccept, VERIFY_EARLY_STOP_DELTA,
   buildImageVerify, parseImageVerdict, imageAccept, type DiagramVerdict, type ImageVerdict,
-} from '@weaveintel/notes';
+} from './notes/visual-verify.js';
 import { makeFence, fenceUntrusted, spotlightPreamble } from '@weaveintel/guardrails/spotlighting';
 import { newUUIDv7, weaveContext, hardenedFetch, type ModelRequest } from '@weaveintel/core';
 import { roleAtLeast } from '@weaveintel/collaboration';

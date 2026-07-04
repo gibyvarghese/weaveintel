@@ -11,7 +11,7 @@
  *   PUT    /api/admin/tenant-governance/:tenantId      — upsert a tenant's governance (validated)
  *   DELETE /api/admin/tenant-governance/:tenantId      — revert a tenant to defaults
  */
-import { RESIDENCY_REGIONS, SSO_PROTOCOLS, type TenantGovernance } from '@weaveintel/notes';
+import { RESIDENCY_REGIONS, SSO_PROTOCOLS, type TenantGovernance } from '../../notes/governance.js';
 import { createTenantGovernanceService, type EffectiveGovernance } from '../../tenant-governance-sql.js';
 import type { DatabaseAdapter } from '../../db.js';
 import type { RouterLike, AdminHelpers } from './types.js';

@@ -15,7 +15,7 @@
  * hardened fetch inside `fetchPage`. Run capture goes through `resolveRunAccess`
  * (owner/shared only). Everything is owner-scoped + tenant-isolated.
  */
-import { parseEmail, buildCaptureNote, dailyNoteTitle, type EmailFields } from '@weaveintel/notes';
+import { parseEmail, buildCaptureNote, dailyNoteTitle, type EmailFields } from './notes/capture.js';
 import { fetchPage, readability, extractContent } from '@weaveintel/tools-browser';
 import { newUUIDv7 } from '@weaveintel/core';
 import { agentCreateNote } from './note-ai-sql.js';

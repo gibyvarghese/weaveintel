@@ -46,11 +46,10 @@ import {
   templateByKey,
   parseQuickCapture,
   blocksToDoc,
-  normalizeLanguage,
-  LANGUAGE_NAMES,
   extractPlainText,
   type NoteBlock,
 } from '@weaveintel/notes';
+import { normalizeLanguage, LANGUAGE_NAMES } from '../notes/image-search.js';
 
 /** The image-label languages offered for the per-user preference (code → English name). */
 const NOTE_IMAGE_LANGUAGES = LANGUAGE_NAMES;
@@ -1649,7 +1648,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter, opts:
     if (!cfg.voiceCaptureEnabled) { res.writeHead(403); res.end(JSON.stringify({ error: 'Voice capture is disabled' })); return; }
     let body: { segments?: unknown; title?: unknown; source?: unknown; language?: unknown; durationSec?: unknown } = {};
     try { body = JSON.parse(await readBody(req)) as typeof body; } catch { /* empty */ }
-    const segments = Array.isArray(body.segments) ? body.segments as import('@weaveintel/notes').TranscriptSegment[] : [];
+    const segments = Array.isArray(body.segments) ? body.segments as import('../notes/meeting.js').TranscriptSegment[] : [];
     if (!segments.length) { res.writeHead(400); res.end(JSON.stringify({ error: 'segments required' })); return; }
     const result = await noteMeeting.createMeetingNote({
       userId: auth.userId, tenantId: auth.tenantId ?? null, segments,

@@ -9,22 +9,6 @@
  * `NOTES_CRDT_AND_ARTIFACTS_ROADMAP_2026.md` for the full roadmap.
  */
 export {
-  type DiagramVerdict,
-  type ImageVerdict,
-  DIAGRAM_WEIGHTS,
-  DEFAULT_DIAGRAM_THRESHOLD,
-  DEFAULT_MAX_VERIFY_RETRIES,
-  VERIFY_EARLY_STOP_DELTA,
-  DEFAULT_IMAGE_MIN_CONFIDENCE,
-  buildDiagramJudge,
-  parseDiagramVerdict,
-  diagramRegenFeedback,
-  diagramAccept,
-  buildImageVerify,
-  parseImageVerdict,
-  imageAccept,
-} from './visual-verify.js';
-export {
   type NoteSensitivity,
   type NoteLinkTargetKind,
   type NoteDatabaseSource,
@@ -88,24 +72,6 @@ export {
   relativeWhen,
 } from './note-memory.js';
 
-// weaveNotes Phase 4 — meeting / voice capture: transcript → structured note + anchored citations.
-export {
-  type TranscriptSegment,
-  type TranscriptCitation,
-  type MeetingActionItem,
-  type MeetingHighlight,
-  type MeetingStructured,
-  formatTimestamp,
-  formatTranscript,
-  transcriptDuration,
-  locateInTranscript,
-  buildMeetingPrompt,
-  parseMeetingReply,
-  verifyMeetingCitations,
-  citationCoverage,
-  buildMeetingNoteMarkdown,
-} from './meeting.js';
-
 // weaveNotes Phase 6 — typed database properties, validation + rollups.
 export {
   type PropertyType,
@@ -119,16 +85,6 @@ export {
   validateRow,
   computeRollup,
 } from './note-database.js';
-
-// weaveNotes Phase 7 — capture helpers (email parsing + provenance note assembly).
-export {
-  type CaptureSource,
-  type EmailFields,
-  type ParsedEmail,
-  parseEmail,
-  buildCaptureNote,
-  dailyNoteTitle,
-} from './capture.js';
 
 // weaveNotes Phase 0 — foundation: the "colour encodes agency" contract.
 export {
@@ -337,42 +293,3 @@ export {
   parseProvenanceFromSvg,
 } from './provenance.js';
 
-// GOVERNANCE model (Phase 2): per-tenant enterprise posture (residency/BYOK/no-training/SSO/retention).
-export type { ResidencyRegion, SsoProtocol, TenantGovernance, PostureItem, PostureContext } from './governance.js';
-export {
-  RESIDENCY_REGIONS,
-  SSO_PROTOCOLS,
-  DEFAULT_TENANT_GOVERNANCE,
-  validateTenantGovernance,
-  governancePosture,
-  governanceScore,
-} from './governance.js';
-
-// Free-to-use IMAGE SEARCH (pure helpers; the app does the hardened fetch + storage).
-export type { ImageProvider, LicenseId, ImageResult } from './image-search.js';
-export {
-  DEFAULT_ALLOWED_LICENSES,
-  PUBLIC_DOMAIN_LICENSES,
-  LICENSE_LABELS,
-  requiresAttribution,
-  isLicenseAllowed,
-  normalizeLicense,
-  buildAttribution,
-  rankImageResults,
-  LANGUAGE_NAMES,
-  normalizeLanguage,
-  languageName,
-  detectTitleLanguage,
-  titleLanguageMismatch,
-  applyLanguagePreference,
-  buildOpenverseUrl,
-  buildWikimediaUrl,
-  buildUnsplashUrl,
-  buildPexelsUrl,
-  buildPixabayUrl,
-  parseOpenverse,
-  parseWikimedia,
-  parseUnsplash,
-  parsePexels,
-  parsePixabay,
-} from './image-search.js';
