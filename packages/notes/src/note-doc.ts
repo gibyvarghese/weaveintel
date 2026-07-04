@@ -19,7 +19,10 @@
  * so editing a note on a phone and syncing it never silently drops the diagram a teammate drew on
  * the web. Pure + dependency-light → fully unit-testable in Node.
  */
-import type { PMNode, PMDoc } from './templates.js';
+/** A ProseMirror node — the shape a rich-text editor (and note templates) use for content. */
+export interface PMNode { type: string; attrs?: Record<string, unknown>; content?: PMNode[]; text?: string; marks?: Array<{ type: string; attrs?: Record<string, unknown> }> }
+/** A ProseMirror document (a `doc` node with block content). */
+export interface PMDoc { type: 'doc'; content: PMNode[] }
 import { validateStrokes, type InkStroke } from './ink.js';
 
 /** A paragraph of plain text (the mobile editor's default block). */

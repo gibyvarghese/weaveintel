@@ -17,7 +17,7 @@
 import { describe, it, expect } from 'vitest';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { SYSTEM_TEMPLATES, templateByKey } from '@weaveintel/notes';
+import { SYSTEM_TEMPLATES, templateByKey } from './notes/templates.js';
 import { SQLiteAdapter } from './db-sqlite.js';
 import { agentNewFromTemplate } from './note-ai-sql.js';
 import { extractTaskItems } from '@weaveintel/notes';

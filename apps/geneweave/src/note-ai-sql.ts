@@ -39,7 +39,7 @@ import {
   type RgaId,
 } from '@weaveintel/coedit';
 import { newUUIDv7, weaveContext, type ModelRequest } from '@weaveintel/core';
-import { templateByKey, SYSTEM_TEMPLATES } from '@weaveintel/notes';
+import { templateByKey, SYSTEM_TEMPLATES } from './notes/templates.js';
 import { makeFence, fenceUntrusted, spotlightPreamble } from '@weaveintel/guardrails/spotlighting';
 import { roleAtLeast } from '@weaveintel/collaboration';
 import { getOrCreateModel, type ChatEngineConfig } from './chat-runtime.js';

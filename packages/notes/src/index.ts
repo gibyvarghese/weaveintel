@@ -201,20 +201,9 @@ export {
   blocksPlainText,
   hasInk,
   emptyNoteDoc,
-} from './note-doc.js';
-
-// weaveNotes Phase 6 — the SYSTEM TEMPLATES (ready-made notes as shared doc_json data).
-export {
   type PMNode,
   type PMDoc,
-  type TemplateCategory,
-  type NoteTemplate,
-  SYSTEM_TEMPLATES,
-  TEMPLATE_NODE_TYPES,
-  templateByKey,
-  templateCategories,
-  listSystemTemplates,
-} from './templates.js';
+} from './note-doc.js';
 
 // IMAGE PROVENANCE (Phase 2): licence + AI-lineage credentials embedded with image assets.
 export type { ImageSourceKind, ImageProvenance } from './provenance.js';

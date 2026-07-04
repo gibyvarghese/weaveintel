@@ -316,9 +316,18 @@ app; config test stays with notes-config in notes), agency + note-node tests sta
 `note-creative-sql` (svg), `note-study-sql` (study), `me-notes` (desktop's `parseQuickCapture`),
 `desktop` (its `templateByKey` now via the notes barrel).
 
+**`templates` → app ✅ (this step):** first extracted the generic `PMNode`/`PMDoc` ProseMirror types out
+of `templates.ts` into `note-doc.ts` (slim core) and re-exported them from the barrel — so `note-doc`
+(which stays) no longer depends on a product module. Then `git mv`'d `templates.ts` + its 8-test suite to
+`apps/geneweave/src/notes/`; `templates` now imports `PMNode/PMDoc` from `@weaveintel/notes`. Rewired 6
+consumers (`note-ai-sql`, `me-notes`, `desktop`, migrations `m111`/`m147`, the phase6 test) with
+correct relative paths. Gate: 267/267, notes-deferred 73→70.
+
 **Remaining:** Batch C — the UI cluster `colorize`/`ink`/`diagram`/`creative`/`agency` **+ `notes-config`**
-→ `geneweave-ui` (with agency's palette split); `templates` → app after the `PMNode/PMDoc` slim-core
-extraction. Then **2g**.
+→ `geneweave-ui` (these are used by *both* the server and the editor UI; the app already imports
+`@weaveintel/geneweave-ui/styles`, so it'll import these via new subpath exports), with agency's palette
+split (generic `AgencyContract` type stays in notes; the geneWeave hex palette + byline go to the UI
+package). Then **2g**.
 
 ---
 

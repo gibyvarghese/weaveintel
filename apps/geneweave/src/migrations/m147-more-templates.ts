@@ -1,5 +1,5 @@
 import type BetterSqlite3 from 'better-sqlite3';
-import { SYSTEM_TEMPLATES } from '@weaveintel/notes';
+import { SYSTEM_TEMPLATES } from '../notes/templates.js';
 import { safeExec } from './helpers.js';
 
 /**

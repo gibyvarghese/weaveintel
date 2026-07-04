@@ -2,8 +2,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   SYSTEM_TEMPLATES, TEMPLATE_NODE_TYPES, templateByKey, templateCategories, listSystemTemplates,
-  type PMNode, type NoteTemplate,
+  type NoteTemplate,
 } from './templates.js';
+import type { PMNode } from '@weaveintel/notes';
 
 /** Walk every node in a template doc (depth-first). */
 function walk(node: PMNode, visit: (n: PMNode) => void): void {

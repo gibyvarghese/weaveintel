@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/notes — the SYSTEM TEMPLATES (weaveNotes Phase 6).
+ * geneWeave (weaveNotes) — the SYSTEM TEMPLATES.
  *
  * A new note shouldn't start as a blank page. weaveNotes ships a set of ready-made starting points
  * matching the proven note-taking methods — Cornell, meeting minutes, a study/revision sheet, an
@@ -19,9 +19,8 @@
  * Pure data + pure helpers (no DOM, no framework). Zero-dependency.
  */
 
-/** A ProseMirror inline/block node (the shape stored in `doc_json`). */
-export interface PMNode { type: string; attrs?: Record<string, unknown>; content?: PMNode[]; text?: string; marks?: Array<{ type: string; attrs?: Record<string, unknown> }> }
-export interface PMDoc { type: 'doc'; content: PMNode[] }
+// The generic ProseMirror doc types live in the framework's note-doc module now.
+import type { PMNode, PMDoc } from '@weaveintel/notes';
 
 export type TemplateCategory =
   | 'Blank' | 'Engineering' | 'Product' | 'Design' | 'Planning' | 'Meetings'
