@@ -12,7 +12,7 @@
  *
  * Reuses the pure config schema from `@weaveintel/notes`; everything is owner-scoped.
  */
-import { validateWeaveNotesConfig, DEFAULT_WEAVENOTES_CONFIG, type WeaveNotesConfig } from '@weaveintel/notes';
+import { validateWeaveNotesConfig, DEFAULT_WEAVENOTES_CONFIG, type WeaveNotesConfig } from './notes/notes-config.js';
 import { newUUIDv7 } from '@weaveintel/core';
 import { resolveNoteAccess } from './note-coedit-sql.js';
 import type { DatabaseAdapter } from './db-types.js';

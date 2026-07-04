@@ -323,11 +323,19 @@ of `templates.ts` into `note-doc.ts` (slim core) and re-exported them from the b
 consumers (`note-ai-sql`, `me-notes`, `desktop`, migrations `m111`/`m147`, the phase6 test) with
 correct relative paths. Gate: 267/267, notes-deferred 73→70.
 
-**Remaining:** Batch C — the UI cluster `colorize`/`ink`/`diagram`/`creative`/`agency` **+ `notes-config`**
-→ `geneweave-ui` (these are used by *both* the server and the editor UI; the app already imports
-`@weaveintel/geneweave-ui/styles`, so it'll import these via new subpath exports), with agency's palette
-split (generic `AgencyContract` type stays in notes; the geneWeave hex palette + byline go to the UI
-package). Then **2g**.
+**`notes-config` → app ✅ (this step):** the DB-backed capability-config schema is **server** code
+(`ui≈0`, `srv`-heavy, the biggest brand offender at 13 hits). The only thing tying it to the UI cluster
+was `creative → notes-config` for the trivial `NotesTheme = 'pro' | 'creative'` union. **Decoupled** by
+inlining `PageTheme = 'pro' | 'creative'` directly in `creative.ts` (dropping the `NotesTheme` import).
+Then `git mv`'d `notes-config.ts` + test → `apps/geneweave/src/notes/`, re-headed as app code, removed
+the barrel export, rewired 4 consumers (`m104`, `note-settings-sql{,.test}`, `note-creative-sql`). Gate:
+267/267; notes-deferred **70→57** (biggest single drop).
+
+**Remaining — the pure UI cluster:** `agency`, `colorize`, `creative`, `diagram`, `ink` (a connected
+component: `colorize→agency`, `ink→creative`, `diagram→colorize+creative`, `creative→agency`) → move to
+`geneweave-ui` (used by both the server and the editor UI; the app imports them via new subpath exports
+like it already does `/styles`), **with the agency split** (generic `AgencyContract` type stays in
+notes; the geneWeave hex palette + byline move to the UI package). Then **2g**.
 
 ---
 

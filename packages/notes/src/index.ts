@@ -98,15 +98,6 @@ export {
   aiContentPalette,
 } from './agency.js';
 
-// weaveNotes Phase 0 — the weaveNotes capability configuration (DB-backed, Builder-editable).
-export {
-  type NotesTheme,
-  type WeaveNotesConfig,
-  WEAVENOTES_AI_TOOLS,
-  DEFAULT_WEAVENOTES_CONFIG,
-  validateWeaveNotesConfig,
-} from './notes-config.js';
-
 // weaveNotes Phase 0 — the note content-node registry (shared editor schema).
 export {
   type NoteNodeType,

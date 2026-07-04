@@ -21,11 +21,9 @@
  */
 
 import { AGENCY_PALETTE } from './agency.js';
-import type { NotesTheme } from './notes-config.js';
 
-export type { NotesTheme };
-/** A note's page theme — the same two values as the capability default, named for the page. */
-export type PageTheme = NotesTheme; // 'pro' | 'creative'
+/** A note's page theme. (The capability config's `NotesTheme` mirrors these two values app-side.) */
+export type PageTheme = 'pro' | 'creative';
 export const PAGE_THEMES: readonly PageTheme[] = ['pro', 'creative'] as const;
 
 /** How a highlighter is painted in each theme (spec §10.6). */

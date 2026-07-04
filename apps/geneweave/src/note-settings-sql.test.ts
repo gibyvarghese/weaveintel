@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { DEFAULT_WEAVENOTES_CONFIG } from '@weaveintel/notes';
+import { DEFAULT_WEAVENOTES_CONFIG } from './notes/notes-config.js';
 import { SQLiteAdapter } from './db-sqlite.js';
 import { createNoteSettingsService } from './note-settings-sql.js';
 import { agentCreateNote } from './note-ai-sql.js';

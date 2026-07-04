@@ -1,5 +1,5 @@
 import type BetterSqlite3 from 'better-sqlite3';
-import { DEFAULT_WEAVENOTES_CONFIG } from '@weaveintel/notes';
+import { DEFAULT_WEAVENOTES_CONFIG } from '../notes/notes-config.js';
 
 /**
  * m104 — weaveNotes Phase 0: the configurable foundation.
