@@ -984,46 +984,55 @@ ${exlinks([
 ])}
 
 ${section('models-register', 'Registration', `
-${code('typescript', `import { weaveRegisterModel, weaveGetModel, weaveListModels } from '@weaveintel/core/models';
-import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
-import { weaveOpenAIModel } from '@weaveintel/provider-openai';
-import { weaveGoogleModel } from '@weaveintel/provider-google';
-import { weaveOllamaModel } from '@weaveintel/provider-ollama';
+${code('typescript', `import { weaveRegisterModel, weaveModel } from '@weaveintel/core/models';
+import { weaveContext } from '@weaveintel/core';
 
-// Register named aliases — use consistent names across your codebase
-weaveRegisterModel('fast',   weaveAnthropicModel('claude-haiku-4-5-20251001'));
-weaveRegisterModel('smart',  weaveAnthropicModel('claude-sonnet-4-6'));
-weaveRegisterModel('embed',  weaveOpenAIModel('text-embedding-3-small'));
-weaveRegisterModel('vision', weaveOpenAIModel('gpt-4o'));
-weaveRegisterModel('local',  weaveOllamaModel('llama3.2'));
+// Register a provider factory once (provider packages usually do this for you)
+weaveRegisterModel('anthropic', (modelId, options) => weaveAnthropicModel(modelId, options));
+weaveRegisterModel('openai',    (modelId, options) => weaveOpenAIModel(modelId, options));
+weaveRegisterModel('ollama',    (modelId, options) => weaveOllamaModel(modelId, options));
 
-// Retrieve anywhere
-const model = weaveGetModel('smart');
-const result = await model.generate({
+// Create model instances anywhere via the registered providers
+const model = weaveModel({ provider: 'anthropic', model: 'claude-sonnet-4-6' });
+
+const ctx = weaveContext();
+const result = await model.generate(ctx, {
   messages: [{ role: 'user', content: 'Explain quantum entanglement in one sentence.' }],
   temperature: 0.2,
   maxTokens: 150,
 });
 console.log(result.content);
-console.log(result.usage); // { inputTokens, outputTokens, totalTokens }`)}
+console.log(result.usage); // { inputTokens, outputTokens, totalTokens }`, ['@weaveintel/core'])}
 `)}
 
 ${section('models-routing', 'Smart Routing', `
-${code('typescript', `import { SmartModelRouter, ModelHealthTracker } from '@weaveintel/routing';
+${code('typescript', `import { SmartModelRouter } from '@weaveintel/routing';
 
-const tracker = new ModelHealthTracker();
 const router = new SmartModelRouter({
-  models: [
-    { key: 'fast',  capabilities: ['text', 'tool_calling'], costPerMToken: 0.25 },
-    { key: 'smart', capabilities: ['text', 'tool_calling', 'vision'], costPerMToken: 3.00 },
-    { key: 'local', capabilities: ['text'], costPerMToken: 0 },
+  candidates: [
+    { modelId: 'claude-haiku-4-5-20251001', providerId: 'anthropic', capabilities: ['text', 'tool_calling'] },
+    { modelId: 'claude-sonnet-4-6',         providerId: 'anthropic', capabilities: ['text', 'tool_calling', 'vision'] },
+    { modelId: 'llama3.2',                  providerId: 'ollama',    capabilities: ['text'] },
   ],
-  healthTracker: tracker,
+  costs: [
+    { modelId: 'claude-haiku-4-5-20251001', providerId: 'anthropic', inputCostPer1M: 0.25, outputCostPer1M: 1.25 },
+    { modelId: 'claude-sonnet-4-6',         providerId: 'anthropic', inputCostPer1M: 3.00, outputCostPer1M: 15.0 },
+    { modelId: 'llama3.2',                  providerId: 'ollama',    inputCostPer1M: 0,    outputCostPer1M: 0 },
+  ],
 });
 
-// Route to cheapest model that meets capability requirements
-const model = router.select({ requiredCapabilities: ['text', 'tool_calling'], maxCostPerMToken: 1.0 });
-// Returns 'fast' — cheapest model with tool_calling support under $1/M tokens`)}
+// route(request, policy) picks the best model for the policy + constraints
+const decision = await router.route(
+  { prompt: 'Summarise this contract.' },
+  {
+    id: 'cheap-with-tools',
+    name: 'Cheapest tool-capable model',
+    strategy: 'cost-optimized',
+    enabled: true,
+    constraints: { requiredCapabilities: ['text', 'tool_calling'], maxCostPerRequest: 1.0 },
+  },
+);
+console.log(decision.modelId, decision.providerId, decision.reason);`)}
 `)}
 
 ${section('models-providers', 'Provider Reference', `
@@ -1032,7 +1041,7 @@ ${section('models-providers', 'Provider Reference', `
 <tr><td><code>@weaveintel/provider-openai</code></td><td><code>weaveOpenAIModel(id)</code></td><td>gpt-4o, gpt-4o-mini, gpt-4.1, gpt-4.1-mini, gpt-4.1-nano, o3, o4-mini, text-embedding-3-*</td></tr>
 <tr><td><code>@weaveintel/provider-google</code></td><td><code>weaveGoogleModel(id)</code></td><td>gemini-2.5-pro, gemini-2.5-flash, gemini-2.5-flash-lite, gemini-2.0-flash, text-embedding-004</td></tr>
 <tr><td><code>@weaveintel/provider-ollama</code></td><td><code>weaveOllamaModel(id)</code></td><td>Any model served by Ollama (llama3.3, llama4-scout, qwen3:30b-a3b, phi4, gemma3:27b, codestral:22b, deepseek-r1, mistral-nemo, etc.)</td></tr>
-<tr><td><code>@weaveintel/provider-llamacpp</code></td><td><code>weaveLlamacppModel(id)</code></td><td>Local GGUF models via llama.cpp server</td></tr>
+<tr><td><code>@weaveintel/provider-llamacpp</code></td><td><code>weaveLlamaCppModel(id)</code></td><td>Local GGUF models via llama.cpp server</td></tr>
 </tbody></table>
 
 ${callout('warn', '⚠️', 'Deprecated model IDs.', 'The following model IDs are <strong>disabled</strong> in the model registry as of mid-2026 — they still exist in the DB but are not routed to. Replace them before using: <code>gemini-1.5-pro</code>, <code>gemini-1.5-flash</code> (succeeded by Gemini 2.5 series); <code>llama3</code>, <code>phi3</code>, <code>gemma2</code>, <code>qwen2.5</code> (succeeded by newer Ollama builds). Using a deprecated ID returns a <code>ModelNotRoutableError</code>.')}
@@ -1917,39 +1926,35 @@ ${exlinks([
 ])}
 
 ${section('resilience-run', 'runResilient — All-in-One', `
-${code('typescript', `import { runResilient, type ResilientCallOptions } from '@weaveintel/resilience';
+${code('typescript', `import { runResilient, type ResilienceOptions } from '@weaveintel/resilience';
 
-const options: ResilientCallOptions = {
-  tokenBucket: {
-    capacity: 60,          // Max burst of 60 calls
-    refillRate: 60,        // Refill 60 tokens/minute
-    waitForToken: true,    // Queue rather than reject when empty
-    maxWaitMs: 5000,       // Throw if wait > 5s
+const options: ResilienceOptions = {
+  // Endpoint key — all protections share state across every call with this key
+  endpoint: 'anthropic-completions',
+  rateLimit: {
+    capacity:     60,     // Max burst of 60 calls
+    refillPerSec: 1,      // Refill 1 token/second (~60/min)
   },
-  circuitBreaker: {
-    failureThreshold: 5,   // Open circuit after 5 consecutive failures
-    successThreshold: 2,   // Close circuit after 2 successes (half-open)
-    timeout: 30_000,       // Transition to half-open after 30s
-    volumeThreshold: 10,   // Minimum calls before opening
+  circuit: {
+    failureThreshold: 5,      // Open circuit after 5 consecutive failures
+    cooldownMs:       30_000, // Stay open 30s before a probe
   },
   retry: {
     maxAttempts: 3,
-    initialDelayMs: 500,
-    backoffMultiplier: 2,  // 500ms → 1s → 2s
-    maxDelayMs: 10_000,
-    jitter: true,          // Add ±20% randomness to avoid thundering herd
-    retryOn: (err) => err.status === 429 || err.status >= 500,
+    baseDelayMs: 500,
+    factor:      2,        // 500ms → 1s → 2s
+    maxDelayMs:  10_000,
+    jitter:      true,     // Add randomness to avoid a thundering herd
   },
   concurrency: {
-    maxConcurrent: 20,    // At most 20 in-flight calls
-    queueSize: 100,       // Queue up to 100 waiting
-    timeout: 10_000,      // Reject queued calls after 10s
+    maxConcurrent: 20,     // At most 20 in-flight calls
+    maxQueue:      100,    // Queue up to 100 waiting
   },
+  timeoutMs: 10_000,       // Per-call timeout
 };
 
 // All four protections on a single call
 const result = await runResilient(
-  'anthropic-completions',  // Endpoint key — shared state across all calls with this key
   () => model.generate({ messages }),
   options,
 );`)}
@@ -2119,10 +2124,10 @@ ${section('cost-levers', 'The 8 Levers', `
 `)}
 
 ${section('cost-setup', 'Setup & Usage', `
-${code('typescript', `import { weaveCostGovernor, InMemoryCostLedger } from '@weaveintel/cost-governor';
+${code('typescript', `import { weaveCostGovernor, createInMemoryCostLedger } from '@weaveintel/cost-governor';
 
 const governor = weaveCostGovernor({
-  ledger: new InMemoryCostLedger(),   // Or DbCostLedger for persistence
+  ledger: createInMemoryCostLedger(),   // Or a durable ledger for persistence
   policy: {
     tiers: [
       {
@@ -2556,7 +2561,7 @@ console.log(report);`, ['@weaveintel/observability', '@weaveintel/core', '@weave
 `)}
 
 ${section('obs-otel', 'OpenTelemetry Export', `
-${code('typescript', `import { weaveOtelTracer } from '@weaveintel/observability';
+${code('typescript', `import { createOtelTracer } from '@weaveintel/observability';
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 
@@ -2566,8 +2571,8 @@ const sdk = new NodeSDK({
 });
 sdk.start();
 
-// weaveOtelTracer bridges weaveIntel spans → OTEL spans
-const runtime = weaveRuntime({ tracer: weaveOtelTracer() });
+// createOtelTracer bridges weaveIntel spans → OTEL spans
+const runtime = weaveRuntime({ tracer: createOtelTracer({ serviceName: 'my-app' }) });
 const ctx = weaveContext({ runtime });
 // All spans now appear in your Jaeger / Tempo / Honeycomb dashboard`, ['@weaveintel/observability', '@weaveintel/core'])}
 `)}`;
@@ -2667,7 +2672,7 @@ await weaveLogSafetyDowngrade(ctx, {
 
 <h4>WeaveRuntimeOptions — complete reference</h4>
 ${params([
-  ['tracer', 'Tracer | "noop"', 'optional', 'Observability tracer. Default: built-in noop. Use <code>weaveConsoleTracer()</code> for dev, <code>weaveInMemoryTracer()</code> for tests, <code>weaveOtelTracer()</code> for production.'],
+  ['tracer', 'Tracer | "noop"', 'optional', 'Observability tracer. Default: built-in noop. Use <code>weaveConsoleTracer()</code> for dev, <code>weaveInMemoryTracer()</code> for tests, <code>createOtelTracer({ serviceName })</code> for production.'],
   ['secrets', 'SecretResolver', 'optional', 'Secret resolution strategy. Default: <code>envSecretResolver()</code>. Chain multiple resolvers with <code>chainSecretResolvers([])</code>.'],
   ['persistence', 'RuntimePersistenceSlot', 'optional', 'Durable KV backend. When set: DLQ, cost meter, audit, checkpoints, endpoint state all use it. Default: noop (in-memory only).'],
   ['audit', 'AuditLogger', 'optional', 'Explicit audit logger. When omitted and persistence is set, auto-wires a durable logger. When omitted with no persistence, uses noop.'],
@@ -3261,9 +3266,9 @@ const resp = await llama.generate(ctx, {
 ${section('prov-llamacpp', 'llama.cpp — GGUF Local Models', `
 ${code('typescript', `// 1. Start llama.cpp server:
 //    ./server -m model.gguf --port 8080 --host 0.0.0.0
-import { weaveLlamacppModel } from '@weaveintel/provider-llamacpp';
+import { weaveLlamaCppModel } from '@weaveintel/provider-llamacpp';
 
-const model = weaveLlamacppModel('local-gguf', {
+const model = weaveLlamaCppModel('local-gguf', {
   baseUrl: 'http://localhost:8080',
 });
 
@@ -3285,7 +3290,7 @@ console.log(PROVIDER_RESILIENCE_DEFAULTS);
 // }
 
 // Custom providers should reuse these defaults:
-import { createResilientCallable, PROVIDER_RESILIENCE_DEFAULTS } from '@weaveintel/resilience';
+import { createResilientCallable } from '@weaveintel/resilience';
 
 const myCallable = createResilientCallable(myFetchFn, {
   endpoint: 'my-provider:rest',
@@ -4017,26 +4022,26 @@ const result = await budget.execute(async () => {
 `)}
 
 ${section('dur-health', 'Health Checks', `
-${code('typescript', `import { createHealthRegistry, createHealthCheck } from '@weaveintel/resilience';
+${code('typescript', `import { createHealthChecker } from '@weaveintel/resilience';
 
-const health = createHealthRegistry();
+const health = createHealthChecker('api');
 
-health.register(createHealthCheck('database', async () => {
+health.addCheck('database', async () => {
   await db.query('SELECT 1');
-  return { status: 'healthy' };
-}));
+  return { ok: true };
+});
 
-health.register(createHealthCheck('redis', async () => {
+health.addCheck('redis', async () => {
   const pong = await redis.ping();
-  return { status: pong === 'PONG' ? 'healthy' : 'degraded', detail: pong };
-}));
+  return { ok: pong === 'PONG', message: pong };
+});
 
 // Express / Hono liveness endpoint
 app.get('/health', async (req, res) => {
-  const result = await health.check();
-  res.status(result.status === 'healthy' ? 200 : 503).json(result);
+  const result = await health.run();
+  res.status(result.healthy ? 200 : 503).json(result);
 });
-// { status: 'healthy', checks: { database: 'healthy', redis: 'healthy' } }`, ['@weaveintel/resilience'])}
+// { service: 'api', healthy: true, checks: [{ name: 'database', ok: true, durationMs: 2 }, ...] }`, ['@weaveintel/resilience'])}
 `)}`;
 }
 
@@ -4995,23 +5000,24 @@ const run = await engine.startRun('equity-analysis', { ticker: 'AAPL' });
 // run.metadata.__outputContract contains the emitted contract id.`, ['@weaveintel/workflows', '@weaveintel/core/contracts'])}
 `)}
 
-${section('contracts-query', 'Querying the Evidence Ledger', `
-${code('typescript', `import { ContractLedger } from '@weaveintel/core/contracts';
+${section('contracts-query', 'Recording Completion Evidence', `
+${code('typescript', `import { createEvidenceBundle, evidence, createCompletionReport } from '@weaveintel/core/contracts';
 
-const ledger = new ContractLedger({ db });
+// Attach the evidence gathered while fulfilling the contract
+const bundle = createEvidenceBundle(
+  evidence.text('summary', 'Extracted 42 line items from the invoice.'),
+  evidence.metric('confidence', 0.94),
+  evidence.url('source', 'https://example.com/invoice/123'),
+);
 
-// List all contracts for a specific workflow run
-const entries = await ledger.list({ runId: run.id });
+// Roll the validator results + evidence into an auditable completion report
+const report = createCompletionReport(contract.id, validationResults, bundle);
 
-for (const entry of entries) {
-  console.log(entry.kind, entry.confidence, entry.payloadHash);
-  const payload = JSON.parse(entry.payload);
-  console.log(payload.action, payload.reasoning);
-}
-
-// Verify the chain integrity — detects tampering
-const valid = await ledger.verifyChain({ runId: run.id });
-console.log('Chain intact:', valid);`, ['@weaveintel/core/contracts'])}
+console.log(report.status);      // 'fulfilled' | 'partial' | 'failed'
+console.log(report.confidence);  // aggregate score across acceptance criteria
+for (const item of report.evidence.items) {
+  console.log(item.type, item.label);
+}`, ['@weaveintel/core/contracts'])}
 `)}`;
 }
 
