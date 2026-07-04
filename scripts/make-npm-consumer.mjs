@@ -27,10 +27,14 @@ const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const APPS = ['apps/geneweave', 'apps/geneweave-ui']; // the community edition = these two only
 const ROOT_FILES = ['tsconfig.base.json', 'turbo.json']; // extended/needed by the app builds
 
-// Never copy build output, installed deps, caches, or generated scratch into the standalone repo.
+// Never copy build output, installed deps, caches, generated scratch, LOCAL DATABASES, or SECRETS
+// into the standalone repo. (The monorepo gitignores *.db / .env; a plain recursive copy would not
+// respect that, so the generator must exclude them explicitly.)
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.turbo', 'coverage', 'test-results', 'playwright-report']);
-const SKIP_SUFFIX = ['.tsbuildinfo'];
+const SKIP_SUFFIX = ['.tsbuildinfo', '.db', '.sqlite', '.sqlite3', '.db-wal', '.db-shm', '.db-journal'];
 const SKIP_PATH_CONTAINS = [`docs-samples${sep}.generated`];
+// Skip real secret/env files (but keep templates like .env.example).
+const isSecretFile = (name) => /^\.env(\.|$)/.test(name) && name !== '.env.example';
 
 function parseArgs(argv) {
   const args = { version: null, force: false, target: null };
@@ -51,6 +55,7 @@ function copyFiltered(src, dest) {
       if (!rel) return true;
       const parts = rel.split(sep);
       if (parts.some((p) => SKIP_DIRS.has(p))) return false;
+      if (parts.some((p) => isSecretFile(p))) return false;
       if (SKIP_SUFFIX.some((s) => from.endsWith(s))) return false;
       if (SKIP_PATH_CONTAINS.some((s) => from.includes(s))) return false;
       return true;
