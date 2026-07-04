@@ -218,9 +218,6 @@
       "path": "packages/live-agents-runtime"
     },
     {
-      "path": "packages/live-agents-trace-tools"
-    },
-    {
       "path": "packages/client"
     },
     {

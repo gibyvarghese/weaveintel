@@ -1,5 +1,5 @@
 /**
- * GeneWeave adapters for `@weaveintel/live-agents-trace-tools`.
+ * GeneWeave adapters for `@weaveintel/live-agents/trace-tools`.
  *
  * The trace-tools package is intentionally DB-agnostic: it accepts
  * `LiveRunEventReader` / `LiveRunStepReader` interfaces with no
@@ -13,7 +13,7 @@ import type {
   LiveRunEventReader,
   LiveRunStepLike,
   LiveRunStepReader,
-} from '@weaveintel/live-agents-trace-tools';
+} from '@weaveintel/live-agents/trace-tools';
 import type {
   DatabaseAdapter,
   LiveRunEventRow,

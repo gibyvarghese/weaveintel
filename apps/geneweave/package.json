@@ -44,7 +44,6 @@
     "@weaveintel/identity": "*",
     "@weaveintel/live-agents": "*",
     "@weaveintel/live-agents-runtime": "*",
-    "@weaveintel/live-agents-trace-tools": "*",
     "@weaveintel/mcp-server": "*",
     "@weaveintel/mcp-statsnz": "*",
     "@weaveintel/memory": "*",

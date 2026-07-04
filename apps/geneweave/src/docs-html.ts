@@ -5721,7 +5721,7 @@ ${params([
 function sLiveAgentsTraceTools(): string {
   return `
 <div class="pkg-hdr">
-  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/live-agents-trace-tools</span></div>
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/live-agents/trace-tools</span></div>
   <h1 class="pkg-title">Live Agents Trace Tools</h1>
   <p class="pkg-desc">A thin tool pack that exposes live-agent mesh state as agent-callable tools. Attach these to any agent so it can inspect running meshes, read agent contracts, and trace the history of an agent's decisions — useful for supervisor agents and for admin/debugging interfaces.</p>
 </div>
@@ -5731,7 +5731,7 @@ ${exlinks([
 ])}
 
 ${section('trace-tools-setup', 'Setup', `
-${code('typescript', `import { createLiveAgentTraceToolRegistry } from '@weaveintel/live-agents-trace-tools';
+${code('typescript', `import { createLiveAgentTraceToolRegistry } from '@weaveintel/live-agents/trace-tools';
 import { weaveAgent } from '@weaveintel/agents';
 import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
 import { weaveContext } from '@weaveintel/core';
@@ -5760,7 +5760,7 @@ const ctx    = weaveContext({ userId: 'admin' });
 const result = await monitorAgent.run(ctx, {
   messages: [{ role: 'user', content: 'Which agents are currently active and what did they produce in the last 30 minutes?' }],
 });
-console.log(result.output);`, ['@weaveintel/live-agents-trace-tools', '@weaveintel/agents', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
+console.log(result.output);`, ['@weaveintel/live-agents/trace-tools', '@weaveintel/agents', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
 `)}
 
 ${section('trace-tools-list', 'Available Tools', `

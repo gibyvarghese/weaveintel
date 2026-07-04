@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/live-agents-trace-tools — domain-agnostic, run-scoped trace
+ * @weaveintel/live-agents/trace-tools — domain-agnostic, run-scoped trace
  * retrieval for any DB-driven live agent.
  *
  * Build a `ToolRegistry` with 5 read-only tools (`live_get_run_timeline`,

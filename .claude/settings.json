@@ -179,7 +179,12 @@
       "Bash(perl -pi -e \"s{from '\\\\@weaveintel/agents'}{from '../index.js'}g\" packages/agents/src/recipes/*.ts)",
       "Bash(perl -pi -e \"s{\\\\@weaveintel/recipes —}{\\\\@weaveintel/agents/recipes —}g\" packages/agents/src/recipes/*.ts)",
       "Bash(node -e \"console.log\\('deps',Object.keys\\(require\\('./packages/testing/package.json'\\).dependencies\\).join\\(' '\\)\\);console.log\\('refs',JSON.stringify\\(require\\('./packages/testing/tsconfig.json'\\).references\\)\\)\")",
-      "Bash(node -e \"console.log\\(Object.keys\\(require\\('./packages/observability/package.json'\\).dependencies||{}\\).join\\(' '\\)\\)\")"
+      "Bash(node -e \"console.log\\(Object.keys\\(require\\('./packages/observability/package.json'\\).dependencies||{}\\).join\\(' '\\)\\)\")",
+      "Bash(node -e \"const d=require\\('./packages/live-agents/package.json'\\).dependencies;console.log\\('tools?',!!d['@weaveintel/tools'],'core?',!!d['@weaveintel/core']\\)\")",
+      "Bash(node -e \"const d=require\\('./packages/live-agents/package.json'\\).dependencies;console.log\\('live-agents deps live-agents-runtime?',!!d['@weaveintel/live-agents-runtime']\\)\")",
+      "Bash(node -e \"console.log\\(JSON.stringify\\(require\\('./packages/live-agents/tsconfig.json'\\).references\\)\\)\")",
+      "Bash(node -e \"console.log\\(Object.keys\\(require\\('./packages/live-agents-runtime/package.json'\\).dependencies||{}\\).filter\\(k=>k.startsWith\\('@weaveintel'\\)\\).join\\(' '\\)\\)\")",
+      "Bash(perl -pi -e \"s{\\\\@weaveintel/live-agents-trace-tools —}{\\\\@weaveintel/live-agents/trace-tools —}\" packages/live-agents/src/trace-tools/index.ts)"
     ]
   }
 }

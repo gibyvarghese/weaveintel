@@ -55,7 +55,7 @@ import {
   createDbLiveRunEventReader,
   createDbLiveRunStepReader,
 } from '../cost/db-live-trace-tools.js';
-import { createLiveTraceTools } from '@weaveintel/live-agents-trace-tools';
+import { createLiveTraceTools } from '@weaveintel/live-agents/trace-tools';
 import {
   getLlmEndpointPressure,
   isPressureBlocking,

@@ -10,6 +10,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./trace-tools": {
+      "import": "./dist/trace-tools/index.js",
+      "types": "./dist/trace-tools/index.d.ts",
+      "default": "./dist/trace-tools/index.js"
     }
   },
   "files": [
