@@ -3096,20 +3096,25 @@ ${callout('info', '💡', 'Graceful by construction.', 'A missing <code>guardrai
 ${section('sec-sandbox-egress', 'Sandbox Egress Allowlist', `
 <p>The code-execution sandbox (<code>@weaveintel/sandbox</code>) runs containers with <code>--network=none</code> by default. Enabling outbound network access requires an explicit <code>networkAllowlist</code> — without one, <code>networkAccess: true</code> has no effect and the container stays isolated.</p>
 
-${code('typescript', `import { createCSEProvider } from '@weaveintel/sandbox';
+${code('typescript', `import { createSandbox } from '@weaveintel/sandbox';
+import type { SandboxPolicy } from '@weaveintel/core';
 
-const provider = createCSEProvider({
-  networkAccess: true,                       // necessary but not sufficient
-  networkAllowlist: [                        // ← required to open bridge
-    'pypi.org',
-    'files.pythonhosted.org',
-    'api.openai.com',
-  ],
-});
+const sandbox = createSandbox();
 
-// Without networkAllowlist, the above would still use --network=none.
-// With the allowlist, Docker bridge mode is enabled.
-// Full per-host filtering requires CNI-based egress (road-mapped).`, ['@weaveintel/sandbox'])}
+// networkAccess: false by default → the container runs with --network=none.
+// Opening egress is an explicit, per-policy decision.
+const policy: SandboxPolicy = {
+  id: 'python-net',
+  name: 'Python with limited egress',
+  networkAccess: true,                       // explicit opt-in
+  allowedModules: ['requests', 'json'],      // only these modules may be imported
+  fileSystemAccess: 'none',
+  limits: { maxDurationMs: 30_000, maxMemoryMb: 512 },
+  enabled: true,
+};
+
+const result = await sandbox.execute('import requests; print(requests.__version__)', policy);
+// Full per-host filtering requires CNI-based egress (road-mapped).`, ['@weaveintel/sandbox', '@weaveintel/core'])}
 `)}
 
 ${section('sec-runtime-secrets', 'Secret Resolution — Never Read process.env Directly', `
@@ -3326,99 +3331,100 @@ ${exlinks([
 ])}
 
 ${section('sandbox-setup', 'Setup & Configuration', `
-${code('typescript', `import { createLocalCSEProvider } from '@weaveintel/sandbox';
+${code('typescript', `import { createSandbox, createSimulatedSandbox } from '@weaveintel/sandbox';
+import type { SandboxPolicy } from '@weaveintel/core';
 
-const sandbox = createLocalCSEProvider({
-  executionImage: 'python:3.12-slim',   // default
-  browserImage:   'mcr.microsoft.com/playwright:v1.44.0-jammy',
-  timeoutMs:      30_000,              // per-execution wall-clock limit
-  memoryMb:       512,
-  cpuCount:       1,
-  sessionTtlMs:   600_000,            // 10 min idle before container stops
-  maxSessions:    20,
+// Production: createSandbox() declines execution until a real isolated executor
+// (ContainerExecutor) is wired in — it never silently pretends to run code.
+const sandbox = createSandbox();
 
-  // Egress — both required to enable network
-  networkAccess:    false,             // default: isolated
-  networkAllowlist: [],               // must be non-empty to open bridge
-});
+// Dev / tests only: an in-process simulator (NOT real isolation).
+const devSandbox = createSimulatedSandbox();
 
-// Health check (checks Docker daemon connectivity)
-const health = await sandbox.health();
-console.log(health.status); // 'healthy' | 'degraded' | 'unavailable'`, ['@weaveintel/sandbox'])}
+// Isolation is expressed per-run via a SandboxPolicy — CPU/memory/time limits,
+// module allow/deny lists, filesystem + network posture.
+const policy: SandboxPolicy = {
+  id: 'python-default',
+  name: 'Python (isolated)',
+  networkAccess:    false,             // default: isolated (--network=none)
+  fileSystemAccess: 'none',
+  limits: { maxDurationMs: 30_000, maxMemoryMb: 512, maxCpuMs: 30_000 },
+  enabled: true,
+};
+
+const result = await devSandbox.execute('print(2 + 2)', policy);
+console.log(result.status); // 'success' | 'error' | 'timeout' | 'killed'`, ['@weaveintel/sandbox', '@weaveintel/core'])}
 `)}
 
 ${section('sandbox-ephemeral', 'Ephemeral Execution', `
 <p>Each call starts a fresh container, runs the code, captures stdout/stderr + output files, then destroys the container. Suitable for stateless code snippets.</p>
 
-${code('typescript', `import { createLocalCSEProvider } from '@weaveintel/sandbox';
+${code('typescript', `import { createSimulatedSandbox } from '@weaveintel/sandbox';
+import type { SandboxPolicy } from '@weaveintel/core';
 
-const sandbox = createLocalCSEProvider({ memoryMb: 512 });
+const sandbox = createSimulatedSandbox();
 
-const result = await sandbox.execute({
-  code: \`
+const policy: SandboxPolicy = {
+  id: 'py-ephemeral',
+  name: 'Ephemeral Python',
+  networkAccess:    false,
+  fileSystemAccess: 'none',
+  allowedModules:   ['json', 'math'],   // only these imports are permitted
+  limits: { maxDurationMs: 10_000, maxMemoryMb: 512 },
+  enabled: true,
+};
+
+const result = await sandbox.execute(\`
 import json, math
 data = [1, 2, 3, 4, 5]
-print(json.dumps({ "mean": sum(data)/len(data), "std": math.sqrt(sum((x - sum(data)/len(data))**2 for x in data)/len(data)) }))
-\`,
-  language: 'python',
-  timeoutMs: 10_000,
+mean = sum(data) / len(data)
+print(json.dumps({ "mean": mean, "std": math.sqrt(sum((x - mean)**2 for x in data) / len(data)) }))
+\`, policy);
 
-  // Inject input files into /workspace
-  files: [
-    { name: 'data.csv', content: 'a,b\\n1,2\\n3,4', binary: false },
-  ],
-
-  // Environment variables (no secrets — container is ephemeral but logs exist)
-  env: { MY_VAR: 'value' },
-});
-
-if (result.exitCode === 0) {
-  console.log(result.output);         // parsed stdout (JSON if valid, else string)
-  console.log(result.artifacts);      // files written to /workspace/output/
+if (result.status === 'success') {
+  console.log(result.output);         // captured stdout
+  console.log(result.artifacts);      // files written under the workspace
 } else {
-  console.error(result.error);        // stderr (first 2 KB)
+  console.error(result.error);        // stderr / failure reason
 }
-console.log(\`Ran in \${result.durationMs} ms\`);`, ['@weaveintel/sandbox'])}
+console.log(\`Ran in \${result.resourceUsage.durationMs} ms\`);`, ['@weaveintel/sandbox', '@weaveintel/core'])}
 
 ${params([
-  ['code', 'string', 'required', 'Source code to execute.'],
-  ['language', '"python" | "javascript" | "typescript" | "bash" | "shell"', 'optional', 'Defaults to <code>"python"</code>.'],
-  ['timeoutMs', 'number', 'optional', 'Per-execution timeout override. Falls back to <code>CSEConfig.timeoutMs</code>.'],
-  ['files', 'FileInput[]', 'optional', 'Files injected into <code>/workspace</code> before execution. Binary files as base-64.'],
-  ['env', 'Record&lt;string,string&gt;', 'optional', 'Extra container env vars. Do not pass secrets — use a secrets manager instead.'],
-  ['networkAccess', 'boolean', 'optional', 'Request network access. Only opens bridge if provider-level <code>networkAllowlist</code> is also set.'],
-  ['withBrowser', 'boolean', 'optional', 'Use the Playwright-enabled image instead of the execution image.'],
+  ['code', 'string', 'required', 'Source code to execute (first argument to <code>execute</code>).'],
+  ['policy.limits', 'ExecutionLimits', 'required', 'CPU/memory/wall-clock/output caps enforced on the run.'],
+  ['policy.allowedModules', 'string[]', 'optional', 'Import allowlist. Anything not listed is denied.'],
+  ['policy.deniedModules', 'string[]', 'optional', 'Explicit import denylist.'],
+  ['policy.networkAccess', 'boolean', 'required', 'Whether the container may reach the network. Default posture is isolated.'],
+  ['policy.fileSystemAccess', '"none" | "read-only" | "read-write"', 'required', 'Filesystem posture for the run.'],
 ])}
 `)}
 
-${section('sandbox-session', 'Session-Based REPL', `
-<p>Sessions keep a container alive so state (variables, installed packages, loaded files) persists across multiple code executions in the same conversation.</p>
+${section('sandbox-policy', 'Reusing an Execution Policy', `
+<p>A <code>SandboxPolicy</code> is a plain, reusable object — define it once and pass it to every <code>execute</code> call that should run under the same limits and module allowlist.</p>
 
-${code('typescript', `import { createLocalCSEProvider } from '@weaveintel/sandbox';
+${code('typescript', `import { createSimulatedSandbox } from '@weaveintel/sandbox';
+import type { SandboxPolicy } from '@weaveintel/core';
 
-const sandbox = createLocalCSEProvider({ memoryMb: 1024, sessionTtlMs: 300_000 });
+const sandbox = createSimulatedSandbox();
 
-// Create a session (one per chatId)
-const session = await sandbox.createSession('chat-abc123', {}, false);
+const dataSciencePolicy: SandboxPolicy = {
+  id: 'py-datasci',
+  name: 'Data-science Python',
+  networkAccess:    false,
+  fileSystemAccess: 'read-write',
+  allowedModules:   ['pandas', 'numpy', 'json'],
+  limits: { maxDurationMs: 30_000, maxMemoryMb: 1024 },
+  enabled: true,
+};
 
-// First turn — install a package and define a function
-await sandbox.executeInSession(session.id, {
-  code: \`
-!pip install pandas -q
+const first = await sandbox.execute(\`
 import pandas as pd
 df = pd.DataFrame({'x': [1,2,3], 'y': [4,5,6]})
 print(df.head())
-\`,
-});
+\`, dataSciencePolicy);
 
-// Second turn — the dataframe is still in memory
-const result = await sandbox.executeInSession(session.id, {
-  code: 'print(df.describe())',   // df from previous turn
-});
-console.log(result.output);
-
-// Destroy session when done
-await sandbox.destroySession(session.id);`, ['@weaveintel/sandbox'])}
+const second = await sandbox.execute('import pandas as pd; print(pd.__version__)', dataSciencePolicy);
+console.log(first.status, second.status);`, ['@weaveintel/sandbox', '@weaveintel/core'])}
 `)}
 
 ${section('sandbox-agent', 'End-to-End: Code-Interpreter Agent', `
@@ -3427,9 +3433,16 @@ ${section('sandbox-agent', 'End-to-End: Code-Interpreter Agent', `
 ${code('typescript', `import { weaveAgent } from '@weaveintel/agents';
 import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
 import { weaveContext, weaveTool, weaveToolRegistry } from '@weaveintel/core';
-import { createLocalCSEProvider } from '@weaveintel/sandbox';
+import type { SandboxPolicy } from '@weaveintel/core';
+import { createSimulatedSandbox } from '@weaveintel/sandbox';
 
-const sandbox = createLocalCSEProvider({ memoryMb: 512, timeoutMs: 30_000 });
+const sandbox = createSimulatedSandbox();
+const pyPolicy: SandboxPolicy = {
+  id: 'run-python', name: 'run_python',
+  networkAccess: false, fileSystemAccess: 'none',
+  limits: { maxDurationMs: 30_000, maxMemoryMb: 512 },
+  enabled: true,
+};
 
 const tools = weaveToolRegistry();
 tools.register(weaveTool({
@@ -3443,8 +3456,8 @@ tools.register(weaveTool({
   },
   riskLevel: 'write',
   execute: async ({ code }) => {
-    const result = await sandbox.execute({ code: code as string, language: 'python' });
-    return result.exitCode === 0
+    const result = await sandbox.execute(code as string, pyPolicy);
+    return result.status === 'success'
       ? JSON.stringify({ output: result.output })
       : JSON.stringify({ error: result.error });
   },
@@ -5892,115 +5905,107 @@ ${exlinks([
   ['113-extraction-pipeline.ts', 'Example 113 — Document Extraction Pipeline'],
 ])}
 
-${section('extraction-schema', 'Schema-Driven Extraction', `
-${code('typescript', `import { weaveExtractor } from '@weaveintel/extraction';
+${section('extraction-schema', 'Knowledge-Graph Extraction', `
+${code('typescript', `import { extractKnowledgeGraph } from '@weaveintel/extraction';
 import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
 import { weaveContext } from '@weaveintel/core';
 
-const extractor = weaveExtractor({
-  model: weaveAnthropicModel('claude-haiku-4-5-20251001'),
-  schema: {
-    type: 'object',
-    required: ['companyName', 'foundingYear', 'headcount'],
-    properties: {
-      companyName:  { type: 'string',  description: 'Legal name of the company.' },
-      foundingYear: { type: 'number',  description: 'Year the company was founded.' },
-      headcount:    { type: 'number',  description: 'Approximate number of employees.' },
-      ceo:          { type: 'string',  description: 'Name of the current CEO, if mentioned.' },
-      revenue:      { type: 'number',  description: 'Annual revenue in USD millions, if mentioned.' },
-      isPublic:     { type: 'boolean', description: 'Whether the company is publicly traded.' },
-    },
+const model = weaveAnthropicModel('claude-haiku-4-5-20251001');
+const ctx   = weaveContext({ userId: 'alice' });
+
+// extractKnowledgeGraph is model-agnostic: pass a text→text \`generate\` callback.
+const graph = await extractKnowledgeGraph(
+  \`Anthropic, founded in 2021, is an AI safety company based in San Francisco.
+   The company employs approximately 800 people and is led by CEO Dario Amodei.\`,
+  async ({ system, user, temperature, maxTokens }) => {
+    const res = await model.generate(ctx, {
+      messages: [
+        ...(system ? [{ role: 'system' as const, content: system }] : []),
+        { role: 'user' as const, content: user },
+      ],
+      temperature,
+      maxTokens,
+    });
+    return res.content;
   },
-  repair:       true,   // attempt auto-repair on malformed output
-  confidence:   true,   // add a confidence score per field
-  maxRetries:   2,
-});
+  { maxItems: 24, maxChars: 6000 },
+);
 
-const ctx = weaveContext({ userId: 'alice' });
+console.log(graph.entities);
+// [{ name: 'Anthropic', type: 'organization' }, { name: 'Dario Amodei', type: 'person' }, ...]
 
-const result = await extractor.extract(ctx, \`
-  Anthropic, founded in 2021, is an AI safety company based in San Francisco.
-  The company employs approximately 800 people and is led by CEO Dario Amodei.
-  It remains privately held and does not disclose revenue figures.
-\`);
-
-console.log(result.data);
-// { companyName: 'Anthropic', foundingYear: 2021, headcount: 800,
-//   ceo: 'Dario Amodei', revenue: null, isPublic: false }
-
-console.log(result.confidence);
-// { companyName: 0.99, foundingYear: 0.98, headcount: 0.87,
-//   ceo: 0.99, revenue: null, isPublic: 0.97 }
-
-console.log(result.flagged);  // fields with confidence < threshold`, ['@weaveintel/extraction', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
+console.log(graph.relations);
+// [{ subject: 'Dario Amodei', predicate: 'is CEO of', object: 'Anthropic' }, ...]`, ['@weaveintel/extraction', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
 `)}
 
 ${section('extraction-batch', 'Batch Extraction from Documents', `
-${code('typescript', `import { weaveExtractor, weaveBatchExtractor } from '@weaveintel/extraction';
+${code('typescript', `import { autofillProperty } from '@weaveintel/extraction';
 import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
 import { weaveContext } from '@weaveintel/core';
 
-const extractor = weaveExtractor({
-  model:  weaveAnthropicModel('claude-haiku-4-5-20251001'),
-  schema: companySchema,
+const model = weaveAnthropicModel('claude-haiku-4-5-20251001');
+const ctx   = weaveContext();
+
+const generate = async ({ system, user, temperature, maxTokens }) => {
+  const res = await model.generate(ctx, {
+    messages: [
+      ...(system ? [{ role: 'system' as const, content: system }] : []),
+      { role: 'user' as const, content: user },
+    ],
+    temperature,
+    maxTokens,
+  });
+  return res.content;
+};
+
+// Fill a whole column across many rows in one batched pass — each cell is
+// grounded in that row's context and returns the source ids it used.
+const cells = await autofillProperty({
+  property: { name: 'foundingYear', type: 'number', instruction: 'Year the company was founded.' },
+  rows: [
+    { rowId: 'anthropic', title: 'Anthropic', context: 'Anthropic, founded in 2021, is an AI safety company. [src-1]', sourceIds: ['src-1'] },
+    { rowId: 'openai',    title: 'OpenAI',    context: 'OpenAI was founded in December 2015. [src-2]',              sourceIds: ['src-2'] },
+  ],
+  generate,
 });
 
-const batchExtractor = weaveBatchExtractor({
-  extractor,
-  concurrency: 10,   // 10 parallel extraction calls
-  onProgress: (done, total) => console.log(\`\${done}/\${total}\`),
-  onError:    (doc, err)   => console.error(\`Failed on \${doc.id}:\`, err.message),
-});
-
-const ctx  = weaveContext();
-const docs = await loadDocuments('./data/companies/*.txt');
-
-const results = await batchExtractor.extractBatch(ctx, docs);
-
-// results[i] = { documentId, data, confidence, flagged, durationMs }
-const successful = results.filter(r => !r.error);
-console.log(\`Extracted: \${successful.length}/\${docs.length}\`);
-
-// Export to CSV
-const csv = results.map(r =>
-  [r.documentId, r.data.companyName, r.data.foundingYear, r.data.revenue ?? ''].join(',')
-).join('\\n');`, ['@weaveintel/extraction', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
+for (const cell of cells) {
+  console.log(cell.rowId, cell.value, cell.citations);
+  // 'anthropic' 2021 ['src-1']
+}`, ['@weaveintel/extraction', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
 `)}
 
 ${section('extraction-e2e', 'End-to-End: Research → Extract → Store', `
-${code('typescript', `import { weaveExtractor } from '@weaveintel/extraction';
+${code('typescript', `import { extractKnowledgeGraph } from '@weaveintel/extraction';
 import { weaveAgent } from '@weaveintel/agents';
-import { createBrowserToolRegistry } from '@weaveintel/tools-browser';
+import { createBrowserTools } from '@weaveintel/tools-browser';
 import { weaveTool, weaveToolRegistry, weaveContext } from '@weaveintel/core';
 import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
 
-const extractor = weaveExtractor({
-  model: weaveAnthropicModel('claude-haiku-4-5-20251001'),
-  schema: {
-    type: 'object', required: ['name', 'ticker', 'sector', 'peRatio'],
-    properties: {
-      name:    { type: 'string', description: 'Company name.' },
-      ticker:  { type: 'string', description: 'Stock ticker symbol.' },
-      sector:  { type: 'string', description: 'Industry sector.' },
-      peRatio: { type: 'number', description: 'Price-to-earnings ratio.' },
-      revenue: { type: 'number', description: 'Annual revenue in USD billions.' },
-    },
-  },
-});
+const extractModel = weaveAnthropicModel('claude-haiku-4-5-20251001');
 
-// Tool that fetches a URL and extracts structured company data
+// Tool that fetches a URL and extracts a structured knowledge graph
 const tools = weaveToolRegistry();
-const browserTools = createBrowserToolRegistry({ include: ['extract_content'] });
-browserTools.list().forEach(t => tools.register(t));
+for (const t of createBrowserTools()) tools.register(t);
 
 tools.register(weaveTool({
   name: 'extract_company_data',
-  description: 'Extract structured company financial data from a URL.',
+  description: 'Extract structured company facts (entities + relations) from a URL.',
   parameters: { type:'object', required:['url'], properties:{ url:{type:'string'} } },
   execute: async ({ url }, ctx) => {
-    const { content } = await fetch(url as string).then(r => r.text()).then(html => ({ content: html }));
-    const result = await extractor.extract(ctx, content);
-    return JSON.stringify(result.data);
+    const content = await fetch(url as string).then(r => r.text());
+    const graph = await extractKnowledgeGraph(content, async ({ system, user, temperature, maxTokens }) => {
+      const res = await extractModel.generate(ctx, {
+        messages: [
+          ...(system ? [{ role: 'system' as const, content: system }] : []),
+          { role: 'user' as const, content: user },
+        ],
+        temperature,
+        maxTokens,
+      });
+      return res.content;
+    });
+    return JSON.stringify(graph);
   },
 }));
 
