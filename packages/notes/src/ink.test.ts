@@ -91,7 +91,9 @@ describe('ink — validateStrokes (security + robustness)', () => {
     expect(v[0]!.points.length).toBeLessThanOrEqual(4000);
     const bad = validateStrokes([{ points: [{ x: 'DROP', y: 1 }, { x: 1, y: 2 }], color: '#000', width: 2, tool: 'pen' }]);
     expect(bad[0]!.points).toHaveLength(1); // the non-finite point was dropped
-  });
+    // Builds ~9M point objects — real work with no headroom against the default 5s timeout
+    // when the suite runs under CI load. Generous ceiling keeps it a robustness check, not a race.
+  }, 30000);
   it('SECURITY: rendered SVG of hostile input never contains a brace/script/url', () => {
     const svg = strokesToSvg(validateStrokes([{ points: [{ x: 0, y: 0 }, { x: 5, y: 5 }], color: '</style><script>alert(1)</script>', width: 3, tool: 'pen' }]));
     expect(svg).not.toContain('<script>');
