@@ -1,172 +1,46 @@
 # @weaveintel/a2a
 
-Agent-to-Agent (A2A) protocol v1.0 — remote HTTP-based and in-process communication between agents.
+**Let your agents talk to other agents over the Agent-to-Agent (A2A) protocol — as a client, a server, or both.**
 
-## Usage
+## Why it exists
 
-### In-Process Bus
+One agent rarely knows everything. Sometimes the right move is to delegate: hand a task to a specialist agent that lives somewhere else and wait for it to report back. A2A is the shared etiquette for that hand-off — like two colleagues agreeing on how to send a work request, check on its progress, and get notified when it's done. This package speaks that etiquette on both sides: it can hire other agents, and it can turn one of your own agents into a hireable service.
 
-```typescript
-import { weaveA2ABus } from '@weaveintel/a2a';
-import { weaveContext } from '@weaveintel/core';
-import type { A2AServer, A2ATask } from '@weaveintel/core';
+## When to reach for it
 
-const bus = weaveA2ABus();
+Reach for it when agents in *different* processes or services need to delegate tasks to each other. If you just want your agent to call plain tools (not other agents), you don't need this — use a `ToolRegistry` from `@weaveintel/core`. For a single in-process test you can skip HTTP entirely with `weaveA2ABus`.
 
-// Build and register an agent
-const summarizerServer: A2AServer = {
-  card: {
-    name: 'summarizer',
-    description: 'Summarises text',
-    version: '1.0.0',
-    skills: [{ id: 'summarize', name: 'Summarize', description: 'Summarises long text' }],
-    capabilities: { streaming: false },
-    supportedInterfaces: [{ url: 'http://localhost/api/a2a', protocolBinding: 'JSONRPC', protocolVersion: '1.0' }],
-  },
-  async handleMessage(_ctx, params): Promise<A2ATask> {
-    const text = params.message.parts.map((p) => p.text ?? '').join(' ');
-    return {
-      id: 'task-1',
-      contextId: params.message.contextId ?? 'ctx-1',
-      status: { state: 'TASK_STATE_COMPLETED', timestamp: new Date().toISOString() },
-      artifacts: [{ artifactId: 'out', name: 'output', parts: [{ text: `Summary of: ${text}` }] }],
-      history: [params.message],
-    };
-  },
-  async start() {},
-  async stop() {},
-};
+## How to use it
 
-bus.register('summarizer', summarizerServer);
-
-// Discover agents
-const card = bus.discover('summarizer');  // Returns AgentCard
-const all = bus.listAgents();            // Returns AgentCard[]
-
-// Send a task in-process
-const ctx = weaveContext({ userId: 'u1' });
-const task = await bus.send(ctx, 'summarizer', {
-  message: {
-    role: 'user',
-    parts: [{ text: 'Long article text...' }],
-    messageId: 'msg-1',
-    contextId: 'ctx-1',
-  },
-});
-console.log(task.artifacts[0]?.parts[0]?.text); // "Summary of: Long article text..."
-
-// Unregister when done
-bus.unregister('summarizer');
-```
-
-### Remote HTTP Client (JSON-RPC 2.0)
-
-```typescript
+```ts
 import { weaveA2AClient } from '@weaveintel/a2a';
 import { weaveContext } from '@weaveintel/core';
 
 const client = weaveA2AClient();
-const ctx = weaveContext({ userId: 'u1' });
+const ctx = weaveContext();
 
-// Discover remote agent
-const card = await client.discover('https://remote-agent.example.com');
-
+const card = await client.discover('https://agents.example.com/research');
 const agentUrl = card.supportedInterfaces?.[0]?.url ?? card.url!;
 
-// Send a message (synchronous — awaits full result)
 const task = await client.sendMessage(ctx, agentUrl, {
-  message: {
-    role: 'user',
-    parts: [{ text: 'Translate to French: Hello' }],
-    messageId: 'msg-1',
-    contextId: 'ctx-1',
-  },
-});
-console.log(task.status.state); // 'TASK_STATE_COMPLETED'
-
-// Stream a message (SSE)
-for await (const event of client.streamMessage(ctx, agentUrl, {
-  message: { role: 'user', parts: [{ text: 'Explain quantum computing' }], messageId: 'msg-2', contextId: 'ctx-1' },
-})) {
-  if ('artifactUpdate' in event) console.log(event.artifactUpdate.artifact.parts[0]?.text);
-  if ('task' in event) console.log('Done:', event.task.status.state);
-}
-
-// Get / list / cancel tasks
-const retrieved = await client.getTask(ctx, agentUrl, task.id);
-const page = await client.listTasks(ctx, agentUrl, { state: 'TASK_STATE_COMPLETED', pageSize: 20 });
-await client.cancelTask(ctx, agentUrl, task.id);
-```
-
-### Push Notifications
-
-```typescript
-import { weaveA2AClient } from '@weaveintel/a2a';
-import { weaveContext } from '@weaveintel/core';
-
-const client = weaveA2AClient();
-const ctx = weaveContext({ userId: 'u1' });
-
-// Register a webhook for task state changes
-const config = await client.createPushConfig(ctx, agentUrl, task.id, {
-  url: 'https://my-server.example.com/webhooks/a2a',
-  token: 'hmac-signing-secret',
-  authentication: { schemes: ['bearer'], credentials: 'my-bearer-token' },
+  message: { role: 'user', parts: [{ text: 'Summarize Q3 sales' }], messageId: 'm1', contextId: 'c1' },
 });
 
-// List / get / delete configs
-const configs = await client.listPushConfigs(ctx, agentUrl, task.id);
-const existing = await client.getPushConfig(ctx, agentUrl, task.id, config.pushConfigId);
-await client.deletePushConfig(ctx, agentUrl, task.id, config.pushConfigId);
+console.log(task.status.state);   // e.g. "TASK_STATE_COMPLETED"
 ```
 
-### HTTP Server (JSON-RPC 2.0 dispatcher)
+## What's in the box
 
-```typescript
-import { createA2ADispatcher, createInMemoryA2ATaskStore, createInMemoryPushNotificationStore } from '@weaveintel/a2a';
-import type { A2AServer } from '@weaveintel/core';
+| Export | What it does |
+| --- | --- |
+| `weaveA2AClient()` | Client: `discover`, `sendMessage`, `streamMessage`, `getTask` |
+| `weaveAgentAsA2AServer(opts)` | Turn one of your agents into an A2A-serving endpoint |
+| `weaveA2ABus()` | In-process client↔server bus (no HTTP) for tests/embedding |
+| `createA2ADispatcher`, `weaveA2AServer`, `streamToSse` | JSON-RPC 2.0 server dispatch + SSE streaming |
+| `create*A2ATaskStore` / `createSqliteA2ATaskStore` | In-memory, durable, or SQLite task persistence |
+| `signAgentCard`, `verifyAgentCard`, `createJwtValidator` | Card signing and JWT auth for trusted agents |
+| `createInMemoryPushNotificationStore`, `deliverToWebhook` | Webhook push notifications for task updates |
 
-const myServer: A2AServer = { /* ... */ };
-const taskStore = createInMemoryA2ATaskStore();
-const pushStore = createInMemoryPushNotificationStore();
+## License
 
-const dispatcher = createA2ADispatcher(myServer, taskStore, pushStore);
-
-// Wire into any HTTP framework:
-// const result = await dispatcher(ctx, { method: 'POST', body: rawBody, headers });
-// if (result.kind === 'json') res.json(result.data);
-// else for await (const chunk of streamToSse(result.events)) res.write(chunk);
-```
-
-### Agent Card Signing
-
-```typescript
-import { signAgentCard, verifyAgentCard, generateCardSigningKeyPair } from '@weaveintel/a2a';
-
-const { privateKey, publicKey } = await generateCardSigningKeyPair();
-
-const signedCard = await signAgentCard(card, privateKey, 'https://keys.example.com/jwks.json');
-
-const result = await verifyAgentCard(signedCard, async (keyId) => {
-  // fetch publicKey from JWKS endpoint identified by keyId
-  return publicKey;
-});
-console.log(result.valid); // true
-```
-
-### JWT Validation
-
-```typescript
-import { createJwtValidator, createJtiCache } from '@weaveintel/a2a';
-
-const jtiCache = createJtiCache(10_000);
-
-const validate = createJwtValidator({
-  audience: 'my-agent',
-  clockSkewSeconds: 60,
-  jtiCache,
-  // optional: getPublicKey for signature verification
-});
-
-const dispatcher = createA2ADispatcher(myServer, taskStore, pushStore, validate);
-```
+MIT.

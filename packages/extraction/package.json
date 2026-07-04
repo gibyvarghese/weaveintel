@@ -31,5 +31,6 @@
     "dist",
     "!dist/**/*.test.*",
     "!dist/**/*.spec.*"
-  ]
+  ],
+  "description": "Structured data extraction from text and documents."
 }

@@ -32,5 +32,6 @@
     "dist",
     "!dist/**/*.test.*",
     "!dist/**/*.spec.*"
-  ]
+  ],
+  "description": "Structured notes as a capability — a NoteRepository port, contract test, and doc model."
 }

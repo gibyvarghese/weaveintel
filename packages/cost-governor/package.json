@@ -91,5 +91,6 @@
     "dist",
     "!dist/**/*.test.*",
     "!dist/**/*.spec.*"
-  ]
+  ],
+  "description": "LLM spend budgets and limits — cap and govern model cost."
 }

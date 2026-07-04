@@ -1,4 +1,4 @@
-# geneWeave Desktop (weaveNotes Phase 8, G8)
+# geneWeave Desktop
 
 A **Tauri v2** desktop shell around the geneWeave **web build** — so the desktop app *is* the web app
 in a native window, with no second UI to maintain. It adds the desktop-only pieces:

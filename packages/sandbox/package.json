@@ -33,5 +33,6 @@
     "dist",
     "!dist/**/*.test.*",
     "!dist/**/*.spec.*"
-  ]
+  ],
+  "description": "Safe sandboxed execution of untrusted code and commands for tools."
 }

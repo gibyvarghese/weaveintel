@@ -1,38 +1,24 @@
 # @weaveintel/agents
 
-Agent runtime — ReAct-style tool-calling loop, hierarchical supervisor-worker orchestration, self-critique, rubric verification, and ensemble conflict resolution.
+**A tool-calling agent loop: give a model some tools and a goal, and it reasons, calls tools, checks its own work, and returns an answer.**
 
-## Exports
+## Why it exists
 
-```typescript
-import {
-  weaveAgent,          // single-agent AND supervisor-mode factory
-  weaveSupervisor,     // thin alias for weaveAgent({ workers: [...] })
-  weaveEnsemble,       // run N agents, resolve via vote / judge / arbiter
-  createVoteResolver,  // majority-vote ConflictResolver
-  createJudgeResolver, // rubric-scored ConflictResolver
-  createArbiterResolver, // model-synthesised ConflictResolver
-  createSelfCritic,    // W1 self-critique Critic
-  createRubricCritic,  // W1 rubric-scored Critic
-  weaveRubricVerifier, // W2 evaluator-optimizer Verifier
-  buildSupervisorUtilityTools, // datetime + math_eval + unit_convert
-  buildDatetimeTool,
-  mathEvalTool,
-  unitConvertTool,
-} from '@weaveintel/agents';
-```
+A language model on its own can only talk — it can't look anything up or take an action. An agent is the model plus a set of tools and a loop: it reads the question, decides "I should search the web," calls that tool, reads the result, and keeps going until it has a real answer. Think of a capable assistant who doesn't just tell you what they think — they pick up the phone, open the spreadsheet, and come back with the finished result. This package is that loop, plus the extras that make it trustworthy: a supervisor that hands work to specialist workers, a self-critique pass, a rubric verifier, and an ensemble that runs several agents and reconciles their answers.
 
----
+## When to reach for it
 
-## Quick start: single agent
+Reach for `@weaveintel/agents` when you want a single request answered start-to-finish in one process — a chat turn, a batch job, a scripted task. If instead you need agents that stay alive for days, wake on a schedule, and handle a mailbox of async messages, use `@weaveintel/live-agents`. If you want a fixed, auditable sequence of steps rather than a model deciding what to do next, use `@weaveintel/workflows`.
 
-```typescript
+## How to use it
+
+```ts
 import { weaveAgent } from '@weaveintel/agents';
 import { weaveContext, weaveRuntime } from '@weaveintel/core';
 
 const agent = weaveAgent({
-  model,                                // any @weaveintel/core Model
-  tools: toolRegistry,                  // optional ToolRegistry
+  model,                       // any @weaveintel/core Model
+  tools: toolRegistry,         // optional ToolRegistry
   systemPrompt: 'You are a helpful assistant.',
   maxSteps: 10,
   name: 'my-agent',
@@ -42,181 +28,36 @@ const ctx = weaveContext({ runtime: weaveRuntime() });
 const result = await agent.run(ctx, {
   messages: [{ role: 'user', content: 'What is 3 + 4?' }],
 });
-// result.status === 'completed' | 'failed' | 'budget_exceeded' | 'guardrail_denied' | 'needs_approval'
-// result.output — final text
-// result.steps  — full execution trace
-// result.usage  — token + step counts
+
+console.log(result.status); // 'completed' | 'failed' | 'needs_approval' | ...
+console.log(result.output); // final text
 ```
 
----
+Pre-composed patterns live under the `/recipes` subpath:
 
-## Supervisor-worker
-
-`weaveAgent` enters supervisor mode when `workers` is provided. The built-in
-`think`, `plan`, and `delegate_to_worker` tools are auto-registered along with
-the optional utility tools (`datetime`, `math_eval`, `unit_convert`).
-
-```typescript
-import { weaveAgent } from '@weaveintel/agents';
-
-const supervisor = weaveAgent({
-  model,
-  name: 'coordinator',
-  workers: [
-    {
-      name: 'researcher',
-      description: 'Searches the web and summarises findings',
-      model: fastModel,
-      tools: webSearchRegistry,
-    },
-    {
-      name: 'writer',
-      description: 'Writes and formats documents',
-      model: strongModel,
-    },
-  ],
-  maxDelegations: 8,
-  replanOnFailure: true,    // W3: inject REPLAN_REQUIRED on worker failure
-  parallelDelegation: true, // W3: enable delegate_to_workers_parallel tool
-});
+```ts
+import { createGovernedAssistant } from '@weaveintel/agents/recipes';
 ```
 
-`weaveSupervisor` is a named alias with identical behaviour:
+## What's in the box
 
-```typescript
-import { weaveSupervisor } from '@weaveintel/agents';
-const sv = weaveSupervisor({ model, workers: [...] });
-```
-
----
-
-## W1 — Reflection (self-critique loop)
-
-```typescript
-const agent = weaveAgent({
-  model,
-  reflect: {
-    maxRevisions: 2,
-    criteria: 'Is the answer accurate, concise, and directly addresses the question?',
-    minScore: 0.7,
-    // critic: createRubricCritic({ adapter, criteria }) // custom critic
-  },
-});
-```
-
-### Using a rubric critic
-
-```typescript
-import { createRubricCritic } from '@weaveintel/agents';
-
-const critic = createRubricCritic({
-  adapter: myRubricJudge,
-  criteria: [
-    { id: 'accuracy', description: 'Factually correct', weight: 0.6 },
-    { id: 'clarity', description: 'Clearly written', weight: 0.4 },
-  ],
-  minScore: 0.75,
-});
-
-const agent = weaveAgent({ model, reflect: { critic, maxRevisions: 1 } });
-```
-
----
-
-## W2 — Verify → regenerate
-
-```typescript
-import { weaveRubricVerifier } from '@weaveintel/agents';
-
-const verifier = weaveRubricVerifier(myAdapter, {
-  criteria: [{ id: 'relevance', description: 'Directly answers the question', weight: 1 }],
-  minScore: 0.8,
-});
-
-const agent = weaveAgent({
-  model,
-  verify: { verifier, maxAttempts: 2 },
-});
-```
-
----
-
-## W5 — Ensemble
-
-`weaveEnsemble` implements the `Agent` interface and can be used anywhere an
-`Agent` is expected (including as a worker inside a supervisor).
-
-```typescript
-import { weaveEnsemble, createVoteResolver, createArbiterResolver } from '@weaveintel/agents';
-
-const ensemble = weaveEnsemble({
-  agents: [agentA, agentB, agentC],
-  resolver: createVoteResolver(),   // or createJudgeResolver / createArbiterResolver
-  parallel: true,                   // run all agents concurrently
-});
-
-// Use directly
-const result = await ensemble.run(ctx, input);
-console.log(result.winner);     // which agent won
-console.log(result.candidates); // all outputs before resolution
-
-// Or as a supervisor worker
-const supervisor = weaveAgent({
-  model,
-  workers: [{ name: 'ensemble', description: 'Multi-model consensus', model: ensemble.config.model! }],
-});
-```
-
-### Conflict resolvers
-
-| Resolver | Description |
+| Export | What it does |
 |---|---|
-| `createVoteResolver()` | Majority vote; first-encountered wins ties |
-| `createJudgeResolver({ adapter, criteria })` | Rubric-scored; highest score wins |
-| `createArbiterResolver({ model, instruction? })` | Model synthesises or picks the best |
+| `weaveAgent` | The core loop. Enters supervisor mode when you pass `workers`. |
+| `weaveSupervisor` | Named alias for `weaveAgent({ workers: [...] })`. |
+| `weaveEnsemble` | Runs N agents and reconciles them via a resolver. |
+| `createVoteResolver` / `createJudgeResolver` / `createArbiterResolver` | Majority vote, rubric-scored, or model-synthesised conflict resolution. |
+| `createSelfCritic` / `createRubricCritic` | Critics for the built-in reflection (self-critique) loop. |
+| `weaveRubricVerifier` | Verify-then-regenerate gate on the final output. |
+| `buildSupervisorUtilityTools`, `buildDatetimeTool`, `mathEvalTool`, `unitConvertTool` | Pure, deterministic helper tools (date/time, arithmetic, unit conversion). |
+| `runEvalPipeline` | Multi-tier evaluation pipeline (schema → reflect → verify → ensemble). |
+| `createMemoryToolSet` / `createGraphMemoryToolSet` | Portable memory and knowledge-graph tools an agent can call. |
+| `InMemoryCheckpointStore`, `createSQLiteCheckpointStore`, `resumeFromCheckpoint` | Save a run mid-flight and resume it later. |
+| `createHumanTaskInterruptHandler` | Pause for human approval (human-in-the-loop). |
+| `buildHandoffTools`, `weaveA2AWorker`, `weaveA2ASupervisor` | Agent-to-agent handoff and delegation. |
+| `createAgentPlanCache` | Reuse structured plan templates across similar runs. |
+| `@weaveintel/agents/recipes` | Pre-wired assistants — governed, approval-driven, ACL-aware RAG, multi-tenant, eval-routed, and more. |
 
----
+## License
 
-## Approval gate (`requireApproval`)
-
-When `requireApproval: true` is set, the agent requires a `policy.approveToolCall`
-gate to be wired. Without one it immediately returns `status: 'needs_approval'`.
-
-```typescript
-const agent = weaveAgent({
-  model,
-  requireApproval: true,
-  policy: {
-    async shouldContinue() { return { continue: true }; },
-    async approveToolCall(_ctx, schema) {
-      // approve or deny each tool call
-      return { approved: schema.name !== 'dangerous_tool' };
-    },
-  },
-});
-```
-
----
-
-## Supervisor utility tools
-
-Pure, deterministic, side-effect-free tools always available at the supervisor level:
-
-| Tool | Description |
-|---|---|
-| `datetime` | Current date/time — formats: `iso`, `unix`, `unix_ms`, `date`, `human`, `time`, `weekday`, `rfc2822` |
-| `math_eval` | Arithmetic — `+`, `-`, `*`, `/`, `**`, `%`, parentheses |
-| `unit_convert` | Length, mass, volume, time, temperature conversions |
-
----
-
-## Agent result statuses
-
-| Status | Meaning |
-|---|---|
-| `completed` | Final response produced and passed all guardrails |
-| `failed` | Max steps exceeded with no terminal response |
-| `cancelled` | Context expired or policy halted the loop |
-| `budget_exceeded` | `maxTokenBudget` hit |
-| `guardrail_denied` | Output blocked by a runtime output guardrail |
-| `needs_approval` | `requireApproval: true` but no `policy.approveToolCall` gate is wired |
+MIT.

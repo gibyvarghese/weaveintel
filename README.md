@@ -2,10 +2,10 @@
 
 **A TypeScript framework for building production-grade AI applications.**
 
-weaveIntel gives you composable, vendor-neutral building blocks for everything from a single chat completion to a fleet of long-running multi-agent meshes — with tool calling, governance, observability, and resilience built in.
+weaveIntel gives you composable, vendor-neutral building blocks for everything from a single chat completion to a fleet of long-running multi-agent meshes — with tool calling, governance, observability, and resilience built in. It's **~44 focused packages** you compose like Lego bricks: take only the ones your app needs.
 
-> **New to weaveIntel?** Skip to [Quick Start](#quick-start) for a 5-minute walkthrough, then read [Core Concepts](#core-concepts) to learn the mental model.
-> **Looking for the previous README?** See [README.OLD.md](README.OLD.md).
+> **New to weaveIntel?** Skip to [Quick Start](#quick-start) for a 5-minute walkthrough, then read [Core Concepts](#core-concepts) to learn the mental model. Not sure which package to install? Jump to [Which package do I need?](#which-package-do-i-need).
+> **Renamed a package recently?** The old→new package map lives in [`MIGRATION.md`](./MIGRATION.md). For where the project is headed, see [`ROADMAP.md`](./ROADMAP.md).
 
 ---
 
@@ -15,8 +15,11 @@ weaveIntel is **open core**:
 
 - **The library** — everything under [`packages/`](packages/) (the `@weaveintel/*` modules) plus the
   brand-neutral theming engine [`@weaveintel/tokens`](clients/tokens/) — is **MIT-licensed** and
-  **published to npm**. Use it in your own projects: `npm install @weaveintel/core` (and any other module
-  you need). This is the actively-developed, reusable core.
+  **published to npm**. `@weaveintel/tokens` is the design-token engine (colours, spacing, typography,
+  light/dark, per-tenant white-label) shared by the web and native clients; it carries no product branding,
+  so anything you build on it themes cleanly. Use the library in your own projects:
+  `npm install @weaveintel/weaveintel` (the umbrella that re-exports the whole toolkit), or install just the
+  modules you need. This is the actively-developed, reusable core.
 - **The apps** — [`apps/geneweave`](apps/geneweave/) (the geneWeave server) and
   [`apps/geneweave-ui`](apps/geneweave-ui/) (its web client) — are the **open-source community edition** of the
   geneWeave product, MIT-licensed, so you can **self-host today's geneWeave**. They consume the library above.
@@ -51,7 +54,7 @@ apps happens separately**; the community edition here remains free to use and se
   - [13. Per-tenant data encryption](#13-per-tenant-data-encryption)
 - [The geneWeave Reference App](#the-geneweave-reference-app)
 - [Examples](#examples) — full catalog of 110+ runnable demos
-- [Package Map](#package-map)
+- [Which package do I need?](#which-package-do-i-need)
 - [Deployment](#deployment)
 - [Development](#development)
 
@@ -59,7 +62,7 @@ apps happens separately**; the community edition here remains free to use and se
 
 ## Why weaveIntel
 
-- **Vendor-neutral core.** `@weaveintel/core` is pure contracts and types — zero vendor SDKs. Provider packages (`provider-openai`, `provider-anthropic`, `provider-google`, `provider-ollama`, `provider-llamacpp`) are thin adapters you can swap.
+- **Vendor-neutral core.** `@weaveintel/core` is pure contracts and types — zero vendor SDKs. Provider packages (`provider-openai`, `provider-anthropic`, `provider-google`, `provider-ollama`, `provider-llamacpp`) are thin adapters you can swap. Everything is composed from **~44 focused packages**; install the umbrella `@weaveintel/weaveintel` to get them all, or cherry-pick.
 - **Capability-driven routing.** Models declare what they can do; the router picks the right one for each task and falls back automatically.
 - **Two complementary agent runtimes.** `weaveAgent` for one-shot or chat-style ReAct loops; `weaveLiveAgent` for long-lived agents that wake on a schedule, accumulate state, and coordinate across a mesh.
 - **Tools as first-class governed assets.** Every tool has a risk class, a policy, an audit trail, and goes through a shared resilience pipeline (rate limit + circuit breaker + retry-with-backoff).
@@ -112,10 +115,10 @@ Five concepts are enough to navigate the entire framework.
 | Concept | What it is | Package |
 |---|---|---|
 | **Model** | An adapter to an LLM (chat, stream, embed, vision, structured output). All models share one interface. | `provider-openai`, `provider-anthropic`, `provider-google`, `provider-ollama`, `provider-llamacpp` |
-| **Tool** | A typed function an agent can call. Has a JSON schema, a risk class, and goes through policy + resilience. | `core`, `tools`, `tools-*` |
+| **Tool** | A typed function an agent can call. Has a JSON schema, a risk class, and goes through policy + resilience. | `core`, `tools` (+ its subpaths: `tools/http`, `tools/search`, `tools/time`, …) |
 | **Agent** | An LLM-driven loop that picks tools to satisfy a goal. Two flavors: `weaveAgent` (one-shot) and `weaveLiveAgent` (long-running). | `agents`, `live-agents` |
 | **Mesh** | A group of live agents that share a state store, schedule, and event bus. Mesh = team. | `live-agents`, `live-agents-runtime` |
-| **Policy / Contract** | Declarative rules for what tools can do, when humans approve, and what evidence an agent must produce. | `tools`, `contracts`, `human-tasks` |
+| **Policy / Contract** | Declarative rules for what tools can do, when humans approve, and what evidence an agent must produce. The contract + evidence ledger lives in `@weaveintel/core/contracts`. | `tools`, `core/contracts`, `human-tasks` |
 
 Naming convention you'll see across the codebase:
 
@@ -151,7 +154,7 @@ Streaming, vision, structured output, and Anthropic / Google / Ollama / llama.cp
 #### Smart routing with fallback
 
 ```typescript
-import { weaveModel } from '@weaveintel/models';
+import { weaveModel } from '@weaveintel/core/models';
 import '@weaveintel/provider-openai';
 import '@weaveintel/provider-anthropic';
 
@@ -162,7 +165,7 @@ const model = weaveModel({
 });
 ```
 
-The router tracks endpoint health, applies weighted scoring, and explains every decision.
+The model router lives in `@weaveintel/core/models`; for capability-based routing across providers (health, weighted scoring, A/B) reach for `@weaveintel/routing`. It tracks endpoint health, applies weighted scoring, and explains every decision.
 
 > **Run it:** [`examples/14-smart-routing.ts`](examples/14-smart-routing.ts), [`examples/70-task-aware-routing.ts`](examples/70-task-aware-routing.ts)
 
@@ -266,7 +269,7 @@ That single call composes: provisioner → handler registry → model resolver �
 #### What you get for free
 
 - **Heartbeat scheduler** ticks every 10 minutes; attention policies decide what work each agent does.
-- **Contracts** ([`@weaveintel/contracts`](packages/contracts)) are the immutable evidence ledger.
+- **Contracts** ([`@weaveintel/core/contracts`](packages/core)) are the immutable evidence ledger.
 - **Cross-mesh bridges** route contracts between teams with mutual approval.
 - **Account binding** — only humans bind external accounts (Gmail, Slack); agents inherit capabilities, never self-grant.
 - **Six state-store backends**: in-memory, SQLite, Postgres, Redis, MongoDB, DynamoDB.
@@ -301,7 +304,6 @@ Global and per-tenant defaults for how agents behave are stored in the `agent_st
 
 ```typescript
 const settings = await db.getAgentStrategySettings('global');
-// Phase 7 fields (mid-2026):
 settings.hitl_threshold;          // 0.75 — risk score above which HITL approval fires
 settings.max_agent_hops;          // 5    — max A2A delegation chain depth
 settings.tool_confirmation_level; // 'high-risk-only' — when to confirm tool calls
@@ -311,7 +313,7 @@ settings.memory_policy;           // 'session' — cross-turn memory retention s
 await db.updateAgentStrategySettings('global', { hitl_threshold: 0.85, tool_confirmation_level: 'medium' });
 ```
 
-As of mid-2026, three behaviours are **on by default**: `a2a_enabled`, `reflect_enabled`, and `supervisor_parallel_delegation`. Tenant-scoped rows override global defaults on a per-field basis.
+Three behaviours are **on by default**: `a2a_enabled`, `reflect_enabled`, and `supervisor_parallel_delegation`. Tenant-scoped rows override global defaults on a per-field basis.
 
 > **Run it:** [`examples/168-agent-strategy-settings.ts`](examples/168-agent-strategy-settings.ts)
 
@@ -346,7 +348,7 @@ const result = await client.callTool('greet', { name: 'weaveIntel' });
 
 #### Pre-wired domain server
 
-[`@weaveintel/mcp-statsnz`](packages/mcp-statsnz) ships a complete Stats NZ MCP server you can launch with one call.
+The [`examples/verticals/statsnz`](examples/verticals/statsnz) vertical ships a complete Stats NZ MCP server you can launch with one call — an unpublished worked example of building a domain server on `@weaveintel/mcp-server`.
 
 > **Run it:** [`examples/05-mcp-integration.ts`](examples/05-mcp-integration.ts), [`examples/65-mcp-streamable-http-stateless.ts`](examples/65-mcp-streamable-http-stateless.ts), [`examples/66-mcp-progressive-discovery-compose-stream.ts`](examples/66-mcp-progressive-discovery-compose-stream.ts), [`examples/67-live-agents-mcp-resumable-progress.ts`](examples/67-live-agents-mcp-resumable-progress.ts)
 
@@ -435,7 +437,7 @@ What's wrapped today:
 |---|---|
 | OpenAI / Anthropic / Google REST + streams | `openai:rest`, `anthropic:rest`, `google:rest` |
 | Every tool through the policy-enforced registry | `tool:<toolName>` |
-| `tools-http` direct REST tools | per tool |
+| `@weaveintel/tools/http` direct REST tools | per tool |
 | MCP gateway (geneweave hosting MCP) — both tenancy paths | `tool:<toolName>` |
 | Live-agent tick tool calls | `tool:<toolName>` with `fail-fast` overrides so the supervisor defers next pass |
 | Generic supervisor | reads `endpoint_health` before scheduling; emits `endpoint_circuit_open` / `endpoint_rate_limited` to `live_run_events` |
@@ -494,7 +496,7 @@ const ent  = weaveEntityMemory();
 #### Knowledge graph
 
 ```typescript
-import { weaveKnowledgeGraph } from '@weaveintel/graph';
+import { weaveKnowledgeGraph } from '@weaveintel/memory';
 
 const kg = weaveKnowledgeGraph();
 await kg.addEntity('alice', { type: 'person' });
@@ -521,7 +523,7 @@ bus.on('span:end', (s) => console.log(`${s.name} ${s.duration}ms tokens=${s.usag
 Replay an entire agent run from its trace:
 
 ```typescript
-import { weaveReplay } from '@weaveintel/replay';
+import { weaveReplay } from '@weaveintel/observability/replay';
 
 await weaveReplay(traceId, { mockTools: true });
 ```
@@ -533,7 +535,7 @@ await weaveReplay(traceId, { mockTools: true });
 ### 10. Evaluation
 
 ```typescript
-import { weaveEvalRunner } from '@weaveintel/evals';
+import { weaveEvalRunner } from '@weaveintel/testing/evals';
 
 const runner = weaveEvalRunner({ model });
 const results = await runner.run({
@@ -584,7 +586,7 @@ Skills compose: activate multiple skills to union their tool sets. Skills can al
 
 ### 12. Multi-tenancy and cost governance
 
-`@weaveintel/tenancy` provides a four-layer config stack, feature entitlements, and budget enforcement. `@weaveintel/cost-governor` tracks every token and dollar at the lever level (model, tool, RAG, reasoning, cache).
+`@weaveintel/identity/tenancy` provides a four-layer config stack, feature entitlements, and budget enforcement. `@weaveintel/cost-governor` tracks every token and dollar at the lever level (model, tool, RAG, reasoning, cache).
 
 ```typescript
 import {
@@ -592,7 +594,7 @@ import {
   createGlobalScope, createTenantScope,
   createEntitlementStore, createEntitlementPolicy,
   createBudgetEnforcer,
-} from '@weaveintel/tenancy';
+} from '@weaveintel/identity/tenancy';
 import { createInMemoryCostLedger, computeUsd } from '@weaveintel/cost-governor';
 
 // 4-layer config: global defaults → org → tenant → user (later layers win)
@@ -669,8 +671,6 @@ In geneWeave, field-level encryption is activated when `WEAVE_ENCRYPTION_MASTER_
 
 > **Run it:** [`examples/packages/encryption.ts`](examples/packages/encryption.ts) (complete package walkthrough), [`examples/use-cases/multi-tenant-saas.ts`](examples/use-cases/multi-tenant-saas.ts) (encryption wired into tenant request pipeline)
 
-> **Legacy phase-by-phase examples:** [`examples/13-encryption-phase1.ts`](examples/13-encryption-phase1.ts) → [`examples/16-encryption-phase6.ts`](examples/16-encryption-phase6.ts)
-
 ---
 
 ## The geneWeave Reference App
@@ -717,12 +717,12 @@ Run any file with `npx tsx examples/<path>/<file>.ts`.
 |---|---|---|
 | [`encryption.ts`](examples/packages/encryption.ts) | `@weaveintel/encryption` | LocalKmsProvider, key hierarchy, AEAD envelope, field-level encryption, blind index, DEK rotation, hard shred |
 | `resilience.ts` | `@weaveintel/resilience` | Token bucket, circuit breaker, retry, concurrency limiter, endpoint registry |
-| `tenancy.ts` | `@weaveintel/tenancy` | Config override layers, entitlement gating, budget enforcement |
+| `tenancy.ts` | `@weaveintel/identity/tenancy` | Config override layers, entitlement gating, budget enforcement |
 | `extraction.ts` | `@weaveintel/extraction` | Document transform pipeline, metadata/entity/code/task stages |
 | `artifacts.ts` | `@weaveintel/artifacts` | Artifact CRUD, versioning, policy validation, reference resolution |
-| `collaboration.ts` | `@weaveintel/collaboration` | Shared sessions, collaboration events, handoff lifecycle |
-| `plugins.ts` | `@weaveintel/plugins` | Manifest validation, registry, lifecycle hooks, installer |
-| `tools-time.ts` | `@weaveintel/tools-time` | Time snapshot, formatting, timer/stopwatch, tool schemas |
+| `collaboration.ts` | `@weaveintel/collab` | Shared sessions, collaboration events, handoff lifecycle |
+| `plugins.ts` | `@weaveintel/core/plugins` | Manifest validation, registry, lifecycle hooks, installer |
+| `tools-time.ts` | `@weaveintel/tools/time` | Time snapshot, formatting, timer/stopwatch, tool schemas |
 | `sqlite-e2e.ts` | `@weaveintel/skills` + `@weaveintel/memory` | SQLite-backed skills + memory (custom adapter pattern) |
 
 ### Use-case examples (`examples/use-cases/`)
@@ -769,7 +769,7 @@ Run any file with `npx tsx examples/<path>/<file>.ts`.
 | 29 | [Authenticated agent + tools](examples/29-authenticated-agent-tools.ts) | Permission-gated tool execution | none |
 | 30 | [Prompt eval + optimization](examples/30-prompt-eval-optimization.ts) | Optimizer loop with rubric judge | none |
 | 30b | [Prompt versions + experiments](examples/30-prompt-version-experiments.ts) | Variant resolution at runtime | none |
-| 32 | [Phase 9 admin capability E2E](examples/32-phase9-admin-capability-e2e.ts) | DB-driven admin schema → chat | none |
+| 32 | [Admin capability E2E](examples/32-phase9-admin-capability-e2e.ts) | DB-driven admin schema → chat | none |
 | 33 | [Tool simulation harness](examples/33-tool-simulation-harness.ts) | Dry-run with full policy trace | none |
 | 34 | [Skill→policy + approval](examples/34-skill-tool-policy-approval.ts) | Skill closure + approval queue | none |
 | 35 | [Scientific validation E2E](examples/35-scientific-validation.ts) | Submit → stream → verdict → bundle | none |
@@ -778,7 +778,7 @@ Run any file with `npx tsx examples/<path>/<file>.ts`.
 | 37 | [Skills with real LLM](examples/37-skills-with-real-llm.ts) | Skills + live model | OpenAI/Anthropic |
 | 38 | [Kaggle MCP read-only](examples/38-kaggle-mcp-readonly.ts) | Kaggle MCP discovery | none |
 | 39 | [Kaggle write + validate](examples/39-kaggle-write-and-validate.ts) | Kaggle submission flow | none |
-| 39b–51 | Live-agents phases 1–13 | Iterative buildup of the live-agents framework | none |
+| 39b–51 | Live-agents buildup | Iterative buildup of the live-agents framework | none |
 | 52 | [Live agents: basic](examples/52-live-agents-basic.ts) | First long-running agent | none |
 | 53 | [Live agents: research team](examples/53-live-agents-research-team.ts) | Multi-agent mesh | none |
 | 54 | [Live agents: with account](examples/54-live-agents-with-account.ts) | Account binding for external APIs | none |
@@ -789,9 +789,9 @@ Run any file with `npx tsx examples/<path>/<file>.ts`.
 | 59 | [OAuth tool connection](examples/59-oauth-tool-connection-examples.ts) | OAuth flows for tool auth | none |
 | 60 | [Live-agents persistence E2E](examples/60-live-agents-persistence-methods-e2e.ts) | All six state stores | none |
 | 61 | [Agent persistence E2E](examples/61-agent-persistence-methods-e2e.ts) | weaveAgent persistence layers | none |
-| 62 | [Phase 7 obs/replay/eval](examples/62-phase7-observability-replay-eval-persistence-e2e.ts) | Cross-cutting observability | none |
-| 63 | [Phase 8 reliability E2E](examples/63-phase8-persistence-performance-reliability-e2e.ts) | Performance + reliability | none |
-| 64 | [Phase 9 release validator](examples/64-phase9-persistence-release-e2e.ts) | Full release scenario sweep | none |
+| 62 | [Obs/replay/eval E2E](examples/62-phase7-observability-replay-eval-persistence-e2e.ts) | Cross-cutting observability | none |
+| 63 | [Reliability E2E](examples/63-phase8-persistence-performance-reliability-e2e.ts) | Performance + reliability | none |
+| 64 | [Release validator](examples/64-phase9-persistence-release-e2e.ts) | Full release scenario sweep | none |
 | 65 | [MCP streamable HTTP stateless](examples/65-mcp-streamable-http-stateless.ts) | New MCP transport | none |
 | 66 | [MCP progressive discovery](examples/66-mcp-progressive-discovery-compose-stream.ts) | Compose multiple MCP servers | none |
 | 67 | [Live agents + MCP resumable](examples/67-live-agents-mcp-resumable-progress.ts) | Resumable progress over MCP | none |
@@ -799,9 +799,9 @@ Run any file with `npx tsx examples/<path>/<file>.ts`.
 | 69 | [MCP gateway token rotation](examples/69-mcp-gateway-token-expiry-rotation.ts) | Credential rotation | none |
 | 70 | [Task-aware routing](examples/70-task-aware-routing.ts) | Capability matrix routing | none |
 | 71 | [Tool schema translation](examples/71-tool-schema-translation.ts) | Mid-conversation provider swap | none |
-| 72 | [Routing admin Phase 4](examples/72-routing-admin-phase4.ts) | Admin CRUD for routing | none |
-| 73 | [Routing feedback Phase 5](examples/73-routing-feedback-phase5.ts) | Feedback loop into routing | none |
-| 74 | [Routing Phase 6 production](examples/74-routing-phase6-production.ts) | Cache, circuit breaker, A/B, cost-by-task | none |
+| 72 | [Routing admin](examples/72-routing-admin-phase4.ts) | Admin CRUD for routing | none |
+| 73 | [Routing feedback](examples/73-routing-feedback-phase5.ts) | Feedback loop into routing | none |
+| 74 | [Routing in production](examples/74-routing-phase6-production.ts) | Cache, circuit breaker, A/B, cost-by-task | none |
 | 75 | [Local + Gemini providers](examples/75-local-and-gemini-providers.ts) | Ollama / llama.cpp / Google | optional |
 | 76 | [Kaggle: discover + ideate](examples/76-kaggle-discover-and-ideate.ts) | Kaggle live-agent ideation | none |
 | 77 | [Kaggle: submit with approval](examples/77-kaggle-submit-with-approval.ts) | Approval-gated submission | none |
@@ -820,140 +820,131 @@ Run any file with `npx tsx examples/<path>/<file>.ts`.
 | 92 | [Live agents: DB routing](examples/92-live-agents-db-routing.ts) | DB-backed model resolver + agent overlay | none |
 | 93 | [Live agents: policy](examples/93-live-agents-policy.ts) | `weaveLiveAgentPolicy` (audit / rate-limit / approval) | none |
 | 94 | [`weaveAgent` ↔ `weaveLiveAgent` parity](examples/94-weave-live-agent-parity.ts) | Side-by-side capability parity | none |
-| 95 | [Phase 5 Kaggle-style routing](examples/95-live-agents-phase5-kaggle-style-routing.ts) | Production routing pattern | none |
+| 95 | [Kaggle-style routing](examples/95-live-agents-phase5-kaggle-style-routing.ts) | Production routing pattern | none |
 | 96 | [`weaveLiveMeshFromDb`](examples/96-live-agents-phase6-mesh-from-db.ts) | One-call DB mesh hydration | none |
 | 99 | [DB-driven triggers](examples/99-db-driven-triggers.ts) | Unified trigger dispatcher (manual / cron / webhook → workflow / webhook_out) | none |
 | 100 | [Mesh ↔ workflow binding](examples/100-mesh-workflow-binding.ts) | Workflow `outputContract` → contract bus → trigger → downstream workflow cascade | none |
 | 101 | [Workflow governance](examples/101-workflow-governance.ts) | Input validation + cost ceiling + replay determinism + capability policy precedence | none |
 | 102 | [Capability packs](examples/102-capability-packs.ts) | Versioned, exportable bundles of DB rows — manifest validation, install/uninstall via ledger | none |
-| 103 | [Cost policy binding](examples/103-cost-policy-binding.ts) | `@weaveintel/cost-governor` Phase 2 — DB-driven cost policy resolution | none |
-| 104 | [Prompt caching](examples/104-prompt-caching.ts) | Cost governor Phase 3 — prompt-caching lever (OpenAI + Anthropic stub models) | none |
-| 105 | [Model cascade](examples/105-model-cascade.ts) | Cost governor Phase 4 — L1 lever: cascade to cheaper model on failure / budget pressure | none |
-| 106 | [Tool subset](examples/106-tool-subset.ts) | Cost governor Phase 5 — L3 lever: dynamic tool subset based on run context | none |
-| 107 | [Intel-gated prompt sections](examples/107-intel-history.ts) | Cost governor Phase 6 — L4 lever: include/exclude prompt sections by intel score | none |
-| 108 | [Budget governor](examples/108-budget-governor.ts) | Cost governor Phase 7 — max steps, reasoning effort, tool-output truncation, budget gate | none |
-| 109 | [Intent-RAG tool retrieval](examples/109-intent-rag-tool-retrieval.ts) | Cost governor Phase 8 — semantic intent-RAG to auto-select the right tool subset | none |
-| 110 | [Live-agents trace tools](examples/110-live-agents-trace-tools.ts) | `@weaveintel/live-agents-trace-tools` — lazy trace retrieval and injection into agent context | none |
+| 103 | [Cost policy binding](examples/103-cost-policy-binding.ts) | `@weaveintel/cost-governor` — DB-driven cost policy resolution | none |
+| 104 | [Prompt caching](examples/104-prompt-caching.ts) | Cost governor — prompt-caching lever (OpenAI + Anthropic stub models) | none |
+| 105 | [Model cascade](examples/105-model-cascade.ts) | Cost governor L1 lever — cascade to cheaper model on failure / budget pressure | none |
+| 106 | [Tool subset](examples/106-tool-subset.ts) | Cost governor L3 lever — dynamic tool subset based on run context | none |
+| 107 | [Intel-gated prompt sections](examples/107-intel-history.ts) | Cost governor L4 lever — include/exclude prompt sections by intel score | none |
+| 108 | [Budget governor](examples/108-budget-governor.ts) | Cost governor — max steps, reasoning effort, tool-output truncation, budget gate | none |
+| 109 | [Intent-RAG tool retrieval](examples/109-intent-rag-tool-retrieval.ts) | Cost governor — semantic intent-RAG to auto-select the right tool subset | none |
+| 110 | [Live-agents trace tools](examples/110-live-agents-trace-tools.ts) | `@weaveintel/live-agents/trace-tools` — lazy trace retrieval and injection into agent context | none |
 | 111 | [Resilience patterns](examples/111-resilience.ts) | `@weaveintel/resilience` — token bucket, circuit breaker, retry, concurrency, endpoint registry, signal bus | none |
-| 112 | [Tenancy](examples/112-tenancy.ts) | `@weaveintel/tenancy` — 4-layer config override, entitlement gating, capability maps, budget enforcement | none |
+| 112 | [Tenancy](examples/112-tenancy.ts) | `@weaveintel/identity/tenancy` — 4-layer config override, entitlement gating, capability maps, budget enforcement | none |
 | 113 | [Document extraction](examples/113-extraction-pipeline.ts) | `@weaveintel/extraction` — transform pipeline with metadata / entity / code / task stages | none |
 | 114 | [Artifact lifecycle](examples/114-artifacts.ts) | `@weaveintel/artifacts` — create, version, store, policy validate, reference resolve | none |
-| 115 | [Collaboration](examples/115-collaboration.ts) | `@weaveintel/collaboration` — shared sessions, events, run subscriptions, handoff lifecycle | none |
-| 116 | [Plugins](examples/116-plugins.ts) | `@weaveintel/plugins` — manifest validation, registry, lifecycle hooks, compatibility, installer | none |
-| 117 | [Tools-time](examples/117-tools-time.ts) | `@weaveintel/tools-time` — time snapshot, formatting, timer/stopwatch state machines, tool schemas | none |
+| 115 | [Collaboration](examples/115-collaboration.ts) | `@weaveintel/collab` — shared sessions, events, run subscriptions, handoff lifecycle | none |
+| 116 | [Plugins](examples/116-plugins.ts) | `@weaveintel/core/plugins` — manifest validation, registry, lifecycle hooks, compatibility, installer | none |
+| 117 | [Tools-time](examples/117-tools-time.ts) | `@weaveintel/tools/time` — time snapshot, formatting, timer/stopwatch state machines, tool schemas | none |
 | 119 | [SQLite E2E](examples/119-sqlite-e2e.ts) | SQLite-backed conversation persistence + `@weaveintel/skills` + `@weaveintel/memory` | none |
-| 120–167 | Live-agents, A2A, checkpoints, cost-governor, compliance, vision | Phase 2–6 feature examples covering A2A supervisor, eval pipelines, dynamic workers, compliance tools, vision loops | none |
-| 168 | [Agent strategy settings](examples/168-agent-strategy-settings.ts) | Read, patch, and interpret the global/tenant `agent_strategy_settings` row (Phase 7: hitl_threshold, max_agent_hops, tool_confirmation_level, memory_policy) | none |
+| 120–167 | Live-agents, A2A, checkpoints, cost-governor, compliance, vision | Feature examples covering A2A supervisor, eval pipelines, dynamic workers, compliance tools, vision loops | none |
+| 168 | [Agent strategy settings](examples/168-agent-strategy-settings.ts) | Read, patch, and interpret the global/tenant `agent_strategy_settings` row (hitl_threshold, max_agent_hops, tool_confirmation_level, memory_policy) | none |
 
 > **All examples runnable from a fresh clone** after `npm install && npm run build`. Examples that need an API key say so in the table.
 
 ---
 
-## Package Map
+## Which package do I need?
 
-60+ packages organised by layer.
+weaveIntel is **~44 focused packages**. You don't install all of them — you pick the ones your goal calls for. Start with the umbrella, then reach for the rest as you go. Renamed something? The old→new map is in [`MIGRATION.md`](./MIGRATION.md).
 
-### Core & Models
+### Start here
 
-| Package | Role |
+| Package | Reach for it when… |
 |---|---|
-| [`@weaveintel/core`](packages/core) | Contracts, types, context, middleware, error classifier — zero vendor deps |
-| [`@weaveintel/models`](packages/models) | Unified model router with fallback, streaming, capability selection |
-| [`@weaveintel/provider-openai`](packages/provider-openai) | OpenAI adapter |
-| [`@weaveintel/provider-anthropic`](packages/provider-anthropic) | Anthropic adapter (chat, streaming, tools, thinking, vision, batches, computer use) |
-| [`@weaveintel/provider-google`](packages/provider-google) | Google Gemini adapter (2.0 / 2.5 series; Gemini 1.5 deprecated) |
-| [`@weaveintel/provider-ollama`](packages/provider-ollama) | Local LLMs via Ollama |
-| [`@weaveintel/provider-llamacpp`](packages/provider-llamacpp) | Local GGUF via llama.cpp HTTP server |
-| [`@weaveintel/testing`](packages/testing) | Fake models / embeddings / vector stores / MCP transports |
+| [`@weaveintel/weaveintel`](packages/weaveintel) | You just want to start — the umbrella that re-exports the whole toolkit. `npm install @weaveintel/weaveintel` first, then cherry-pick individual packages later if you want a smaller footprint. |
 
-### Agents & Orchestration
+### Build an agent
 
-| Package | Role |
+| Package | Reach for it when… |
 |---|---|
-| [`@weaveintel/agents`](packages/agents) | `weaveAgent` — ReAct loop, supervisor-worker hierarchies |
-| [`@weaveintel/live-agents`](packages/live-agents) | `weaveLiveAgent`, `weaveLiveMesh`, mesh, contracts, bridges, account binding, six state stores |
-| [`@weaveintel/live-agents-runtime`](packages/live-agents-runtime) | DB hydration: `weaveLiveMeshFromDb`, `weaveLiveAgentFromDb`, model resolver, attention policy, heartbeat supervisor |
-| [`@weaveintel/workflows`](packages/workflows) | Multi-step workflow engine (branching, checkpoints, compensation) |
-| [`@weaveintel/human-tasks`](packages/human-tasks) | Approval, review, escalation, decision logging |
-| [`@weaveintel/contracts`](packages/contracts) | Completion contracts + evidence ledger |
-| [`@weaveintel/prompts`](packages/prompts) | Versioned templates, fragments, frameworks, lint, strategies, output contracts |
-| [`@weaveintel/routing`](packages/routing) | Capability-based smart routing with health, scoring, A/B |
-| [`@weaveintel/skills`](packages/skills) | Reusable capability bundles: registry, activation, tool collection |
-| [`@weaveintel/capability-packs`](packages/capability-packs) | Pre-built skill bundles (web-research, data-analysis, etc.) |
-| [`@weaveintel/tool-schema`](packages/tool-schema) | Cross-provider tool-schema translation |
+| [`@weaveintel/core`](packages/core) | Always — the vendor-neutral heart: contexts, tools, types. Its subpaths hold the model router (`core/models`), completion contracts (`core/contracts`), plugin lifecycle (`core/plugins`), capability packs (`core/capability-packs`), and i18n (`core/i18n`). |
+| [`@weaveintel/agents`](packages/agents) | You want `weaveAgent` — the one-shot ReAct loop and supervisor→worker hierarchies. |
+| [`@weaveintel/provider-openai`](packages/provider-openai) | You're calling OpenAI models. |
+| [`@weaveintel/provider-anthropic`](packages/provider-anthropic) | You're calling Anthropic/Claude (chat, streaming, tools, thinking, vision, batches, computer use). |
+| [`@weaveintel/provider-google`](packages/provider-google) | You're calling Google Gemini (2.0 / 2.5 series). |
+| [`@weaveintel/provider-ollama`](packages/provider-ollama) | You're running local LLMs via Ollama. |
+| [`@weaveintel/provider-llamacpp`](packages/provider-llamacpp) | You're running local GGUF models via a llama.cpp HTTP server. |
+| [`@weaveintel/routing`](packages/routing) | You want to route between models by capability — health tracking, weighted scoring, A/B, automatic fallback. |
+| [`@weaveintel/prompts`](packages/prompts) | You need versioned prompt templates, fragments, frameworks, lint, strategies, and output contracts. |
 
-### Tools & Connectivity
+### Add tools & connect
 
-| Package | Role |
+| Package | Reach for it when… |
 |---|---|
-| [`@weaveintel/tools`](packages/tools) | Policy-enforced tool registry: enabled / circuit / risk / approval / rate-limit / audit |
-| [`@weaveintel/tools-http`](packages/tools-http) | REST client with auth, schema validation, resilience |
-| [`@weaveintel/tools-search`](packages/tools-search) | Web search (DuckDuckGo, Brave) |
-| [`@weaveintel/tools-browser`](packages/tools-browser) | URL fetch, content extraction, browser pool |
-| [`@weaveintel/tools-time`](packages/tools-time) | Datetime, timezone, timer, stopwatch, reminders |
-| [`@weaveintel/tools-webhook`](packages/tools-webhook) | Receive external events (GitHub, Stripe, Slack) |
-| [`@weaveintel/tools-filewatch`](packages/tools-filewatch) | File system monitoring |
-| [`@weaveintel/tools-enterprise`](packages/tools-enterprise) | Jira, ServiceNow (283 tools), Canva, Confluence, Salesforce, Notion |
-| [`@weaveintel/tools-social`](packages/tools-social) | Twitter/X, LinkedIn |
-| [`@weaveintel/tools-kaggle`](packages/tools-kaggle) | Kaggle competitions, datasets, kernels |
-| [`@weaveintel/tools-gmail`](packages/tools-gmail) / [`-gcal`](packages/tools-gcal) / [`-gdrive`](packages/tools-gdrive) | Google Workspace |
-| [`@weaveintel/tools-outlook`](packages/tools-outlook) / [`-outlook-cal`](packages/tools-outlook-cal) | Microsoft 365 |
-| [`@weaveintel/tools-onedrive`](packages/tools-onedrive) / [`-dropbox`](packages/tools-dropbox) | Cloud storage |
-| [`@weaveintel/tools-slack`](packages/tools-slack) / [`-imap`](packages/tools-imap) | Messaging |
-| [`@weaveintel/oauth`](packages/oauth) | OAuth client + provider toolkit |
-| [`@weaveintel/mcp-client`](packages/mcp-client) / [`-server`](packages/mcp-server) | MCP protocol |
-| [`@weaveintel/mcp-statsnz`](packages/mcp-statsnz) | Pre-wired Stats NZ MCP server |
-| [`@weaveintel/a2a`](packages/a2a) | Agent-to-agent bus (in-process + HTTP) |
-| [`@weaveintel/plugins`](packages/plugins) | Plugin lifecycle |
+| [`@weaveintel/tools`](packages/tools) | You want the policy-enforced tool registry (enabled / circuit / risk / approval / rate-limit / audit) — plus its bundled tool subpaths: `tools/http` (REST), `tools/search` (web search), `tools/time` (datetime/timers), `tools/gmail`, `tools/slack`, `tools/webhook`, `tools/filewatch`, `tools/marketdata`, `tools/news`, and more. |
+| [`@weaveintel/tools-browser`](packages/tools-browser) | You need URL fetch, content extraction, and a real browser pool. |
+| [`@weaveintel/tools-enterprise`](packages/tools-enterprise) | You need Jira, ServiceNow, Canva, Confluence, Salesforce, or Notion integrations. |
+| [`@weaveintel/mcp-client`](packages/mcp-client) | You want to consume someone else's MCP server. |
+| [`@weaveintel/mcp-server`](packages/mcp-server) | You want to expose your own tools/resources/prompts as an MCP server. |
+| [`@weaveintel/a2a`](packages/a2a) | You want agents to discover each other and delegate work over an agent-to-agent bus (in-process or HTTP). |
 
-### Knowledge & Retrieval
+### Go multiplayer / collaborate
 
-| Package | Role |
+| Package | Reach for it when… |
 |---|---|
-| [`@weaveintel/retrieval`](packages/retrieval) | Chunking (6 strategies), embedding pipeline, hybrid retrieval, reranking |
-| [`@weaveintel/memory`](packages/memory) | Conversation, semantic, entity memory |
-| [`@weaveintel/graph`](packages/graph) | Knowledge graph + entity linking |
-| [`@weaveintel/extraction`](packages/extraction) | Document extraction (entity, metadata, table, code, task) |
-| [`@weaveintel/cache`](packages/cache) | Semantic cache with TTL + LRU |
-| [`@weaveintel/artifacts`](packages/artifacts) | Versioned blob storage |
+| [`@weaveintel/collab`](packages/collab) | You need real-time co-editing, shared sessions, live presence/cursors, and human↔agent handoff (the merged co-edit + collaboration package). |
 
-### Safety, Governance, Reliability
+### Run long-lived / autonomous work
 
-| Package | Role |
+| Package | Reach for it when… |
 |---|---|
-| [`@weaveintel/guardrails`](packages/guardrails) | Risk classification, cost guards, runtime policies |
-| [`@weaveintel/redaction`](packages/redaction) | PII detection + reversible tokenisation |
-| [`@weaveintel/compliance`](packages/compliance) | Retention, GDPR/CCPA deletion, legal holds, consent, audit export |
-| [`@weaveintel/sandbox`](packages/sandbox) | Sandboxed execution + container executor |
-| [`@weaveintel/identity`](packages/identity) | Personas, ACL, deny-by-default |
-| [`@weaveintel/tenancy`](packages/tenancy) | Multi-tenant isolation, budgets, 4-layer config resolver, entitlement policies |
-| [`@weaveintel/encryption`](packages/encryption) | Per-tenant AES-256-GCM field encryption: KMS, DEK rotation, blind indexes, hard shred |
-| [`@weaveintel/reliability`](packages/reliability) | Idempotency, retry budgets, DLQ, health, backpressure |
-| [`@weaveintel/resilience`](packages/resilience) | Shared pipeline: rate-limit + circuit + retry-with-backoff + signals |
+| [`@weaveintel/live-agents`](packages/live-agents) | You need `weaveLiveAgent` / `weaveLiveMesh` — agents that run for hours/days, accumulate state, file contracts, and coordinate in a mesh across six state-store backends. (Mesh inspection lives at `live-agents/trace-tools`.) |
+| [`@weaveintel/live-agents-runtime`](packages/live-agents-runtime) | You want to hydrate meshes/agents straight from DB rows with `weaveLiveMeshFromDb`. |
+| [`@weaveintel/workflows`](packages/workflows) | You need a deterministic multi-step engine with branching, checkpoints, and compensation. |
+| [`@weaveintel/triggers`](packages/triggers) | You want manual / cron / webhook / signal-bus events to fire workflows, agents, or outbound webhooks — see its [README](packages/triggers/README.md). |
+| [`@weaveintel/skills`](packages/skills) | You want reusable capability bundles: registry, activation, per-session tool scoping. |
+| [`@weaveintel/human-tasks`](packages/human-tasks) | You need approval, review, escalation, and decision logging in the loop. |
 
-### Observability & Evaluation
+### Knowledge & memory
 
-| Package | Role |
+| Package | Reach for it when… |
 |---|---|
-| [`@weaveintel/observability`](packages/observability) | Tracer, spans, event bus, cost/usage tracking |
-| [`@weaveintel/cost-governor`](packages/cost-governor) | Cost ledger, budget enforcement, lever-based spend breakdown (model, cache, prompt, tool, RAG) |
-| [`@weaveintel/live-agents-trace-tools`](packages/live-agents-trace-tools) | Trace tools for live-agent mesh inspection and debugging |
-| [`@weaveintel/evals`](packages/evals) | Evaluation runner + 6 assertion types |
-| [`@weaveintel/replay`](packages/replay) | Trace replay |
+| [`@weaveintel/memory`](packages/memory) | You want conversation / semantic / entity memory — and knowledge-graph entity linking (folded in here). |
+| [`@weaveintel/retrieval`](packages/retrieval) | You're building RAG: chunking (6 strategies), embedding pipeline, hybrid retrieval, reranking. |
+| [`@weaveintel/cache`](packages/cache) | You want a semantic cache with TTL + LRU to avoid re-answering the same question. |
+| [`@weaveintel/notes`](packages/notes) | You're building the note/document layer — cited answers, AI visuals, spotlighting, study cards (powers weaveNotes). |
+| [`@weaveintel/extraction`](packages/extraction) | You need to pull entities / metadata / tables / code / tasks out of documents. |
+| [`@weaveintel/artifacts`](packages/artifacts) | You need versioned blob storage for generated files/outputs. |
 
-### Persistence & Apps
+### Harden for production
 
-| Package | Role |
+| Package | Reach for it when… |
 |---|---|
-| [`@weaveintel/persistence`](packages/persistence) | Persistence platform (SQLite/Postgres/Redis/Mongo/DynamoDB) |
-| [`@weaveintel/recipes`](packages/recipes) | Pre-built agent factories |
-| [`@weaveintel/devtools`](packages/devtools) | Scaffolding, inspection, mocks |
-| [`@weaveintel/ui-primitives`](packages/ui-primitives) | Streaming events + widgets (table, chart, form, code, timeline) |
-| [`@weaveintel/triggers`](packages/triggers) | Unified DB-driven triggers (manual, cron, webhook, signal-bus → workflow / agent / webhook_out) — see [README](packages/triggers/README.md) |
-| [`@weaveintel/collaboration`](packages/collaboration) | Multi-user session handoff |
-| [`@weaveintel/social-growth`](packages/social-growth) | Social growth automations |
-| [`@weaveintel/geneweave`](apps/geneweave) | Reference full-stack app |
-| [`live-agents-demo`](apps/live-agents-demo) | Live-agents reference HTTP API + UI |
+| [`@weaveintel/guardrails`](packages/guardrails) | You want runtime safety rules: risk classification, cost guards, EU AI Act / content-detection / agent-safety policies — plus PII/redaction (`guardrails/redaction`) and retention/GDPR/legal-hold compliance (`guardrails/compliance`). |
+| [`@weaveintel/resilience`](packages/resilience) | You need the shared outbound pipeline: rate-limit + circuit breaker + retry-with-backoff + signal bus (also covers idempotency, DLQ, backpressure). |
+| [`@weaveintel/encryption`](packages/encryption) | You need per-tenant AES-256-GCM field encryption: KMS, DEK rotation, blind indexes, GDPR hard-shred. |
+| [`@weaveintel/identity`](packages/identity) | You need personas / ACL / deny-by-default RBAC — plus multi-tenancy (`identity/tenancy`), OAuth (`identity/oauth`), and scope (`identity/scope`). |
+| [`@weaveintel/cost-governor`](packages/cost-governor) | You want to track and cap spend per token/dollar at the lever level (model, cache, prompt, tool, RAG). |
+| [`@weaveintel/observability`](packages/observability) | You want tracer / spans / event bus / cost-usage tracking — and full-run replay (`observability/replay`). |
+| [`@weaveintel/sandbox`](packages/sandbox) | You need to run untrusted code in a sandboxed / container executor. |
+
+### Ship to users (UI / clients)
+
+| Package | Reach for it when… |
+|---|---|
+| [`@weaveintel/client`](packages/client) | You want the front-end client runtime for a weaveIntel app. |
+| [`@weaveintel/api-client`](clients/api-client) | You want a typed API client to talk to a weaveIntel/geneWeave server. |
+| [`@weaveintel/ui-primitives`](packages/ui-primitives) | You want streaming events + ready widgets (table, chart, form, code, timeline). |
+| [`@weaveintel/a11y`](packages/a11y) | You want accessibility helpers (WCAG-aware) for your UI. |
+| [`@weaveintel/tokens`](clients/tokens) | You want the brand-neutral theming engine — the design-token source of truth (colours, spacing, typography, light/dark, per-tenant white-label) shared by web and native. |
+| [`@weaveintel/voice`](packages/voice) | You need speech-to-text / text-to-speech (Whisper stack, meeting capture). |
+| [`@weaveintel/notifications`](packages/notifications) | You need in-app / email / push notification delivery. |
+
+### Test & tooling
+
+| Package | Reach for it when… |
+|---|---|
+| [`@weaveintel/testing`](packages/testing) | You want fakes (models / embeddings / vector stores / MCP transports) — and the eval runner with 6 assertion types (`testing/evals`). |
+| [`@weaveintel/devtools`](packages/devtools) | You want scaffolding, inspection, and mocks for building on the framework. |
+| [`@weaveintel/persistence`](packages/persistence) | You need the persistence platform (SQLite / Postgres / Redis / Mongo / DynamoDB). |
+
+> **Apps (not published as library packages):** [`apps/geneweave`](apps/geneweave) (the reference full-stack app) and [`apps/live-agents-demo`](apps/live-agents-demo) (live-agents HTTP API + UI). Domain examples like the Stats NZ MCP server, equity-scoring, and social-growth live as unpublished worked examples under [`examples/verticals/`](examples/verticals).
 
 ---
 
@@ -1028,7 +1019,7 @@ npm run build --workspace @weaveintel/geneweave
 1. Create `packages/provider-<name>/` with `package.json`, `tsconfig.json`, `src/index.ts`.
 2. Implement the `Model` interface from `@weaveintel/core`.
 3. Wrap your HTTP request with `createResilientCallable({ endpoint: '<name>:rest' })`.
-4. Register at import time: `weaveRegisterModel('<name>', factory)` from `@weaveintel/models`.
+4. Register at import time: `weaveRegisterModel('<name>', factory)` from `@weaveintel/core/models`.
 5. Add a project reference to root `tsconfig.json`.
 
 ### Design principles
@@ -1085,6 +1076,15 @@ weaveIntel uses **Fabric Versioning**: each major release is named after a fabri
 ```
 
 **Current release: v1.0.0 — Aertex.** Full mapping in [VERSIONING.md](VERSIONING.md).
+
+---
+
+## Further reading
+
+- [`MIGRATION.md`](./MIGRATION.md) — the old→new package map from the ~87→~44 package consolidation. Start here if an import stopped resolving.
+- [`ROADMAP.md`](./ROADMAP.md) — forward-looking plans only (this README describes the current state).
+- [`VERSIONING.md`](./VERSIONING.md) — Fabric Versioning scheme and release history.
+- [`CONTRIBUTING.md`](./CONTRIBUTING.md) — how to build, test, and contribute.
 
 ---
 

@@ -1,7 +1,7 @@
 {
   "name": "@weaveintel/tokens",
   "version": "0.0.1",
-  "description": "geneWeave mobile brand design tokens — colors, typography, spacing, radii, elevation, motion (framework-agnostic, zero runtime deps).",
+  "description": "A brand-neutral theming engine — token schema, colour maths (WCAG-AA), a CSS-variable transform, and per-tenant white-label — that takes your palette as input.",
   "type": "module",
   "exports": {
     ".": {

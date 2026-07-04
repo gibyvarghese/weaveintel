@@ -39,5 +39,6 @@
     "dist",
     "!dist/**/*.test.*",
     "!dist/**/*.spec.*"
-  ]
+  ],
+  "description": "Scheduled and event-driven triggers for agents and workflows."
 }

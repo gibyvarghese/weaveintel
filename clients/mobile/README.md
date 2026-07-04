@@ -40,7 +40,7 @@ tree is installed.
 - **Tenant theming** with AA-contrast enforcement — a failing override degrades
   to the base theme rather than shipping unreadable colors.
 
-## Notes — offline-first editor + ink (weaveNotes Phase 7, G7)
+## Notes — offline-first editor + ink
 
 The Notes tab works **with no signal**. Every note is read from and written to an on-device cache
 first, and a durable **outbox** syncs to geneWeave the moment connectivity returns — so you can jot,
@@ -132,4 +132,4 @@ The app consumes the workspace TypeScript packages:
 
 - `@weaveintel/tokens` — brand design tokens (M1)
 - `@weaveintel/api-client` — typed `/api/me` client (M2)
-- `@weaveintel/notes` — the shared cross-platform note-document + ink model (Phase 7)
+- `@weaveintel/notes` — the shared cross-platform note-document + ink model

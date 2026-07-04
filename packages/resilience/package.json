@@ -31,5 +31,6 @@
     "dist",
     "!dist/**/*.test.*",
     "!dist/**/*.spec.*"
-  ]
+  ],
+  "description": "Per-call resilience guards (circuit breaker, rate limiter, retry) plus operational durability (idempotency, dead-letter, retry budget, health)."
 }

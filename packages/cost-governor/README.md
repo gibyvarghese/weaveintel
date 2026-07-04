@@ -1,46 +1,38 @@
 # @weaveintel/cost-governor
 
-Phase 1 of the WeaveIntel cost-control plan: **telemetry & cost ledger**.
+**Keeps LLM spend inside a budget: records what every model and tool call costs, and applies limits, cascades, and caps before the bill runs away.**
 
-This package is purely observational. It records every model and tool
-invocation with token + USD + lever attribution so downstream phases can
-measure savings against a real baseline. No behaviour change at this layer
-— the ledger never blocks, never gates, and never throws into the hot path.
+## Why it exists
 
-## What it gives you
+Token costs are invisible until the invoice arrives. One runaway agent that loops a few extra times, or quietly picks the expensive model for a trivial question, can turn a cheap task into a costly one — and you won't know until it's spent. Think of it like a prepaid phone plan: every call is metered against a balance, cheaper options get used when they'll do, and when the balance runs out the next call is stopped rather than silently overrunning. This package is that meter and that balance for your model traffic.
 
-- A typed `CostLedgerEntry` row format (run id, step id, agent id/role,
-  source, lever, subject, tokens, $).
-- `weaveCostLedger({ sink })` — user-facing factory backed by a pluggable
-  `CostLedgerSink` (e.g. one that writes `live_run_events.kind = 'cost.tick'`).
-- `wrapModelWithCostLedger(model, …)` — drops a thin wrapper around any
-  `Model` so every `generate()` / completed `stream()` emits one ledger
-  row from the provider's own `usage` block.
-- `wrapAuditEmitterWithCostLedger(…)` — wraps a `ToolAuditEmitter` so
-  every tool call also lands in the ledger as an inventory row (USD = 0
-  in Phase 1, lever = `tool`).
-- Pure helpers: `computeUsd(usage, rate)`, `aggregate(runId, entries)`.
+## When to reach for it
 
-## Levers
+Reach for it when you need to cap spend per run or per tenant, attribute cost to specific levers (model, tools, RAG, reasoning), or automatically downshift to cheaper models under budget pressure. If you need to block *unsafe* content rather than *expensive* calls, that's `@weaveintel/guardrails`; if you need retries and circuit breakers, that's `@weaveintel/resilience`.
+
+## How to use it
 
 ```ts
-type CostLever = 'model' | 'tool' | 'rag' | 'reasoning' | 'cache' | 'other';
+import { weaveCostLedger, wrapModelWithCostLedger } from '@weaveintel/cost-governor';
+
+const ledger = weaveCostLedger({ sink: myCostSink });
+const metered = wrapModelWithCostLedger(model, { ledger, runId: 'run-123' });
+
+// every generate()/stream() now emits one cost row from the provider's usage block
+const reply = await metered.generate({ messages });
 ```
 
-The model wrapper auto-attributes to `reasoning` when the response carries
-`reasoningTokens > 0`, otherwise `model`. Apps can override per-call by
-constructing entries directly.
+## What's in the box
 
-## Failure model
+- Ledger: `weaveCostLedger`, `createInMemoryCostLedger`, `wrapModelWithCostLedger`, `wrapAuditEmitterWithCostLedger`; helpers `computeUsd`, `aggregate`.
+- Policy & budgets: `resolveCostPolicy`, `TIER_PRESETS`, `weaveCostGovernor`, `weaveBudgetGate`, `CostCeilingExceededError`.
+- Spend-reducing levers: model cascade (`weaveModelCascadeResolver`), dynamic tool subset (`weaveToolSubsetFilter`, `weaveIntentRagToolSubsetFilter`), prompt caching (`weavePromptCachingShaper`), history compaction (`weaveHistoryCompactor`), reasoning effort (`wrapModelWithReasoningEffort`), tool-output truncation (`weaveToolOutputTruncator`), max-steps (`decideMaxSteps`).
+- Durable variants: `createDurableCostLedger`, `createDurableRunCostStateTracker`.
 
-- Sinks must not throw. Internal failures are swallowed.
-- Pricing lookups failing → cost recorded as `$0`; the entry still lands.
-- Missing `runId` on the resolved context → entry skipped (we never write
-  orphan rows).
+Store subpaths (each pulls in an optional peer driver):
 
-## Reference wiring
+- `@weaveintel/cost-governor/sqlite`, `/postgres`, `/mongodb`, `/redis`, `/dynamodb` — persist the ledger in your database.
 
-The reference consumer is `apps/geneweave`. The DB-backed sink writes one
-row per entry into `live_run_events` with `kind = 'cost.tick'` and the
-entry serialised in `payload_json`. The admin API aggregates those rows
-into a per-run `CostBreakdown` for the operator UI.
+## License
+
+MIT.
