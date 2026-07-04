@@ -456,21 +456,22 @@ ${code('typescript', `execute: async ({ query }) => {
 ${section('agent-memory', 'Memory Integration', `
 <p>Attach a memory store to give the agent cross-session context. Before each model call, relevant memories are retrieved and injected as additional context messages.</p>
 
-${code('typescript', `import { weaveSemanticMemory } from '@weaveintel/memory';
+${code('typescript', `import { weaveConversationMemory, weaveSemanticMemory } from '@weaveintel/memory';
 import { weaveAgent } from '@weaveintel/agents';
 
-const memory = weaveSemanticMemory({ embeddingModel, store: myStore });
+// weaveConversationMemory implements AgentMemory — pass it straight to the agent
+const memory = weaveConversationMemory({ maxHistory: 40 });
 
 const agent = weaveAgent({
   model,
   tools,
-  memory: {
-    store: memory,
-    searchK: 5,          // Inject top 5 relevant memories
-    minScore: 0.65,      // Minimum relevance threshold
-    role: 'system',      // Inject as system context (or 'user')
-  },
-});`)}
+  memory,   // the agent reads/writes conversation history through this
+});
+
+// For long-term recall, keep a semantic memory alongside and query it yourself:
+const longTerm = weaveSemanticMemory(embeddingModel, myStore);
+await longTerm.store(ctx, 'User is based in Berlin and prefers metric units.');
+const relevant = await longTerm.recall(ctx, 'where is the user based?', 5);`)}
 `)}
 
 ${section('agent-events', 'Event Bus & Observability', `
@@ -1267,45 +1268,30 @@ ${featureCards([
 
 ${code('typescript', `import {
   weaveSemanticMemory,
-  weaveConversationMemory,
-  weaveEntityMemory,
   weaveMemoryStore,
 } from '@weaveintel/memory';
+import { weaveOpenAIEmbeddingModel } from '@weaveintel/provider-openai';
+import { weaveContext } from '@weaveintel/core';
 
-// Semantic memory — remembers facts by meaning
-const semantic = weaveSemanticMemory({
-  embeddingModel: weaveOpenAIModel('text-embedding-3-small'),
-  store: weaveMemoryStore({
-    backend: 'sqlite',
-    path: './data/memory.db',
-  }),
-  extractionPolicy: {
-    minConfidence: 0.72,
-    maxMemoriesPerTurn: 5,
-    categories: ['preference', 'fact', 'instruction', 'correction'],
-  },
-  deduplication: {
-    enabled: true,
-    similarityThreshold: 0.92,  // Don't store if >92% similar to existing
-  },
-});
+// Semantic memory — remembers facts by meaning.
+// weaveSemanticMemory(embeddingModel, store?) — the store defaults to in-memory.
+const semantic = weaveSemanticMemory(
+  weaveOpenAIEmbeddingModel('text-embedding-3-small'),
+  weaveMemoryStore(),
+);
 
-// Store a memory explicitly
-await semantic.add({
-  content: 'User prefers concise bullet-point responses, not paragraphs.',
-  tags: ['preference', 'format'],
-  userId: 'alice',
-  expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000), // 90 days
-});
+const ctx = weaveContext({ userId: 'alice' });
 
-// Search — returns scored memories
-const memories = await semantic.search('response style preferences', {
-  userId: 'alice',
-  limit: 5,
-  minScore: 0.65,
-  tags: ['preference'],
-});
-// memories[0] = { id, content, score, tags, createdAt, metadata }`)}
+// Store a memory explicitly (content + optional metadata)
+await semantic.store(
+  ctx,
+  'User prefers concise bullet-point responses, not paragraphs.',
+  { tags: ['preference', 'format'] },
+);
+
+// Recall — returns the top-K most relevant memories by embedding similarity
+const memories = await semantic.recall(ctx, 'response style preferences', 5);
+// memories[0] = { id, type, content, embedding, metadata, createdAt, userId }`)}
 `)}
 
 ${section('memory-extraction', 'Automatic Extraction', `
@@ -1340,7 +1326,8 @@ import { weaveRuntime, weaveContext } from '@weaveintel/core';
 import { weaveSqlitePersistence } from '@weaveintel/persistence';
 import { weaveAgent } from '@weaveintel/agents';
 import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
-import { weaveSemanticMemory, weaveConversationMemory } from '@weaveintel/memory';
+import { weaveSemanticMemory, weaveConversationMemory, weaveRuntimeMemoryStore } from '@weaveintel/memory';
+import { weaveOpenAIEmbeddingModel } from '@weaveintel/provider-openai';
 
 // One runtime wires persistence for memory + audit + DLQ simultaneously
 const runtime = weaveRuntime({
@@ -1350,9 +1337,9 @@ const runtime = weaveRuntime({
 // Runtime-backed MemoryStore — entries survive restarts
 const store = weaveRuntimeMemoryStore({ runtime, namespace: 'mem' });
 
-// Build semantic memory on top of the durable store
+// Build semantic memory on top of the durable store (needs a real embedding model)
 const semantic = weaveSemanticMemory(
-  weaveAnthropicModel('text-embedding-3-small'),  // embedding model
+  weaveOpenAIEmbeddingModel('text-embedding-3-small'),
   store,
 );
 
@@ -1458,7 +1445,7 @@ ${code('typescript', `import { weaveEmbeddingPipeline } from '@weaveintel/retrie
 import { weaveContext } from '@weaveintel/core';
 
 const pipeline = weaveEmbeddingPipeline({
-  embeddingModel: weaveOpenAIModel('text-embedding-3-small'),
+  embeddingModel: weaveOpenAIEmbeddingModel('text-embedding-3-small'),
   vectorStore,                                            // Any VectorStore implementation
   chunkerConfig:  { strategy: 'token_aware', chunkSize: 512 },
   batchSize:      100,                                    // Embed 100 chunks per API call
@@ -1494,7 +1481,7 @@ const corpus = new Map<string, { content: string; metadata: Record<string, unkno
 for (const c of chunks) corpus.set(c.id, { content: c.content, metadata: c.metadata });
 
 const retriever = weaveHybridRetriever({
-  embeddingModel: weaveOpenAIModel('text-embedding-3-small'),
+  embeddingModel: weaveOpenAIEmbeddingModel('text-embedding-3-small'),
   vectorStore,                       // dense semantic search (any VectorStore)
   vectorWeight: 0.7,                 // 70% vector / 30% keyword
   defaultTopK:  20,
@@ -1538,7 +1525,7 @@ const bootstrapCtx = weaveContext();
 
 // 1. Chunk + embed + index documents once
 const embedPipeline = weaveEmbeddingPipeline({
-  embeddingModel: weaveOpenAIModel('text-embedding-3-small'),
+  embeddingModel: weaveOpenAIEmbeddingModel('text-embedding-3-small'),
   vectorStore, batchSize: 100,
 });
 const corpus = new Map<string, { content: string; metadata: Record<string, unknown> }>();
@@ -1549,7 +1536,7 @@ for (const doc of myDocuments) {
 
 // 2. Build hybrid retriever (dense + keyword)
 const retriever = weaveHybridRetriever({
-  embeddingModel: weaveOpenAIModel('text-embedding-3-small'),
+  embeddingModel: weaveOpenAIEmbeddingModel('text-embedding-3-small'),
   vectorStore, vectorWeight: 0.7, defaultTopK: 10, corpus,
 });
 
@@ -3095,15 +3082,24 @@ const result = await sandbox.execute('import requests; print(requests.__version_
 ${section('sec-runtime-secrets', 'Secret Resolution — Never Read process.env Directly', `
 <p>Provider API keys and other secrets MUST flow through <code>runtime.secrets</code> rather than being read from <code>process.env</code> at call sites. This lets vault, KMS, or per-tenant override resolvers plug in without touching business logic.</p>
 
-${code('typescript', `import { weaveRuntime, weaveContext, envSecretResolver, chainSecretResolvers, requireSecret } from '@weaveintel/core';
+${code('typescript', `import { weaveRuntime, weaveContext, envSecretResolver, chainSecretResolvers, inMemorySecretResolver, requireSecret } from '@weaveintel/core';
+import type { SecretResolver } from '@weaveintel/core';
 
 // Default: reads from process.env (fine for development)
 const runtime = weaveRuntime();
 const ctx = weaveContext({ runtime });
 const apiKey = await requireSecret(ctx.runtime!.secrets, 'OPENAI_API_KEY');
 
+// A SecretResolver is just { resolve(key): Promise<string | undefined> }.
+// Implement one for your secret store (Vault, AWS Secrets Manager, ...).
+const vaultSecretResolver = (opts: { path: string }): SecretResolver => ({
+  async resolve(key) {
+    const res = await vaultClient.read(\`\${opts.path}/\${key}\`);
+    return res?.data?.value;
+  },
+});
+
 // Production: chain resolvers — Vault first, fall back to env
-import { vaultSecretResolver } from './vault-resolver';
 const chainedRuntime = weaveRuntime({
   secrets: chainSecretResolvers([
     vaultSecretResolver({ path: 'secret/data/myapp' }),
@@ -3112,7 +3108,6 @@ const chainedRuntime = weaveRuntime({
 });
 
 // Provide secrets in-memory (for testing)
-import { inMemorySecretResolver } from '@weaveintel/core';
 const testRuntime = weaveRuntime({
   secrets: inMemorySecretResolver({ OPENAI_API_KEY: 'sk-test-...' }),
 });`, ['@weaveintel/core'])}
@@ -5221,7 +5216,7 @@ ${code('http', `# GET  /api/admin/artifacts                        — list with
 }`)}
 
 <h4>Artifact Retention Job</h4>
-${code('typescript', `import { startArtifactRetentionJob } from './artifact-retention-job.js';
+${code('typescript', `import { startArtifactRetentionJob } from '../../src/artifact-retention-job.js';
 
 // Runs expireArtifacts() once on startup and then every 24h (fixed interval).
 // Any artifact whose policy.retention_days has elapsed is deleted along with its versions.
@@ -5422,7 +5417,7 @@ ${code('typescript', `import {
   onArtifactStreamEvent,
   offArtifactStreamEvent,
   hasArtifactStreamListeners,
-} from './lib/artifact-stream-bus.js';
+} from '../../src/lib/artifact-stream-bus.js';
 
 // Subscribe (SSE endpoint does this internally):
 onArtifactStreamEvent(artifactId, (event) => {
@@ -5561,8 +5556,8 @@ Content-Type: application/json
 }`)}
 
 <h4>Registering a refreshFn</h4>
-${code('typescript', `import { registerArtifactRoutes } from './routes/artifacts.js';
-import type { ArtifactRow } from './db-types/artifacts.js';
+${code('typescript', `import { registerArtifactRoutes } from '../../src/routes/artifacts.js';
+import type { ArtifactRow } from '../../src/db-types/artifacts.js';
 
 registerArtifactRoutes(router, db, {
   refreshFn: async (artifact: ArtifactRow, args: Record<string, unknown>) => {
@@ -5578,7 +5573,7 @@ registerArtifactRoutes(router, db, {
 
 <h4>injectLiveToolbar(html, live)</h4>
 <p>Injects a floating toolbar into any artifact render HTML just before <code>&lt;/body&gt;&lt;/html&gt;</code>. When a live config exists, the render endpoint calls this automatically and adds <code>connect-src 'self'</code> to the CSP so the Refresh button can call <code>fetch()</code> back to the server:</p>
-${code('typescript', `import { injectLiveToolbar } from './routes/artifacts.js';
+${code('typescript', `import { injectLiveToolbar } from '../../src/routes/artifacts.js';
 
 // Manually inject a toolbar (useful for admin preview or custom routes):
 const liveHtml = injectLiveToolbar(renderedHtml, {
