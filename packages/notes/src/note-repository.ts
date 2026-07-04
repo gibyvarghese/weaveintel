@@ -1,25 +1,26 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/notes — the NoteRepository PORT (weaveNotes Phase 0).
+ * @weaveintel/notes — the NoteRepository PORT.
  *
  * --- For someone new to this ---
  * A "repository" is just the one doorway through which the rest of the app reads
- * and writes notes. Today geneWeave talks to the database directly from its HTTP
- * routes; that makes it impossible to test the notes feature on its own and hard
- * to later swap the storage for a real-time collaborative engine. So we put a
- * single, well-defined INTERFACE (the "port") in front of note storage. Anything
- * that implements this interface (an in-memory fake here, the SQL database in
- * geneWeave, and — in later phases — a CRDT co-editing relay) is an "adapter".
+ * and writes notes. A consuming application might talk to the database directly
+ * from its HTTP routes; that makes it impossible to test the notes feature on its
+ * own and hard to later swap the storage for a real-time collaborative engine. So
+ * we put a single, well-defined INTERFACE (the "port") in front of note storage.
+ * Anything that implements this interface (an in-memory fake here, the host
+ * application's SQL database, and — in later phases — a CRDT co-editing relay) is
+ * an "adapter".
  *
  * This is the classic Ports & Adapters / Hexagonal pattern: the repository is the
  * DRIVEN-port adapter, the routes depend only on the interface, and a SINGLE
  * shared contract test ({@link "./note-repository-contract"}) proves every adapter
- * behaves identically. Introducing this seam is the WHOLE job of Phase 0 — there
+ * behaves identically. Introducing this seam is the WHOLE job of this stage — there
  * is intentionally NO behaviour change; it just makes notes testable in isolation
- * and ready for the Phase 1–2 collaborative-editing relay to slot in as a new
+ * and ready for the collaborative-editing relay to slot in as a new
  * adapter behind the very same port.
  *
- * Design note (Phase 0, deliberate): the entity shapes below mirror the persisted
+ * Design note (deliberate): the entity shapes below mirror the persisted
  * / wire shape (snake_case fields) EXACTLY, so the existing API responses are
  * byte-for-byte unchanged when the routes start going through this port. A richer
  * camelCase domain model is deferred to a later phase. Zero-dependency + pure.
@@ -44,13 +45,13 @@ export interface Note {
   is_template: number;
   template_key: string | null;
   favorite: number;
-  /** weaveNotes Phase 1: the page theme this note opens in — 'pro' | 'creative' (spec §10.6). */
+  /** The page theme this note opens in — 'pro' | 'creative' (spec §10.6). */
   page_theme: string;
-  /** weaveNotes Phase 1: freeform/canvas mode flag (0/1) — drop the column grid for a creative layout. */
+  /** Freeform/canvas mode flag (0/1) — drop the column grid for a creative layout. */
   freeform_mode: number;
-  /** weaveNotes Phase 1: optional cover-image artifact id (a generated/uploaded banner). */
+  /** Optional cover-image artifact id (a generated/uploaded banner). */
   cover_image_artifact_id: string | null;
-  /** weaveNotes Phase 6: when archived/trashed (a timestamp), or null when active. */
+  /** When archived/trashed (a timestamp), or null when active. */
   archived_at: string | null;
   created_at: string;
   updated_at: string;
@@ -93,7 +94,7 @@ export interface NoteListFilter {
   favorite?: boolean;
   search?: string;
   limit?: number;
-  /** weaveNotes Phase 6: `true` = ONLY archived notes; default/false = only ACTIVE (non-archived). */
+  /** `true` = ONLY archived notes; default/false = only ACTIVE (non-archived). */
   archived?: boolean;
 }
 
@@ -130,8 +131,8 @@ export interface CreateNoteDbRowInput { id: string; database_id: string; fields_
 
 /**
  * The single seam in front of note storage. Adapters: an in-memory reference
- * ({@link createInMemoryNoteRepository}) + geneWeave's SQL adapter; both pass
- * {@link noteRepositoryContract}. The CRDT relay (Phase 2) becomes a third adapter.
+ * ({@link createInMemoryNoteRepository}) + the host application's SQL adapter; both
+ * pass {@link noteRepositoryContract}. A CRDT relay becomes a third adapter.
  */
 export interface NoteRepository {
   /** A user's own non-template notes, newest/favourite first. */
@@ -143,9 +144,9 @@ export interface NoteRepository {
   createNote(input: CreateNoteInput): Promise<void>;
   /** Update — owner-scoped; bumps `updated_at`; a no-op patch is a no-op. */
   updateNote(id: string, userId: string, patch: UpdateNotePatch): Promise<void>;
-  /** weaveNotes Phase 6: ARCHIVE (soft-delete) a note — owner-scoped; sets `archived_at`. Returns whether it changed. */
+  /** ARCHIVE (soft-delete) a note — owner-scoped; sets `archived_at`. Returns whether it changed. */
   archiveNote(id: string, userId: string, at: string): Promise<boolean>;
-  /** weaveNotes Phase 6: RESTORE an archived note — owner-scoped; clears `archived_at`. Returns whether it changed. */
+  /** RESTORE an archived note — owner-scoped; clears `archived_at`. Returns whether it changed. */
   restoreNote(id: string, userId: string): Promise<boolean>;
   /** Delete a note + its one level of sub-pages + their links. Returns whether anything was deleted. */
   deleteNote(id: string, userId: string): Promise<boolean>;

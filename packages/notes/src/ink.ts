@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/notes — the INK model + renderer (weaveNotes Phase 4).
+ * @weaveintel/notes — the INK model + renderer.
  *
- * weaveNotes lets you (and the AI) draw freehand strokes on a note — a blue underline, an arrow,
+ * The notes capability lets you (and the AI) draw freehand strokes on a note — a blue underline, an arrow,
  * a circled word, a quick sketch. A stroke is stored as plain data — a list of points plus a
  * colour, width and tool — so a drawing inked on an iPad renders identically on the web, and the
  * AI can "draw" by emitting the SAME stroke data a human's pen produces (no AI-specific format).

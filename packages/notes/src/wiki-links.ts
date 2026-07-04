@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/notes — wiki-links + unlinked-mention detection (weaveNotes Phase 5).
+ * @weaveintel/notes — wiki-links + unlinked-mention detection.
  *
  * This is the heart of a personal knowledge graph (the Obsidian/Tana idea): you
  * connect notes by writing `[[Another Note]]`, and the app builds the reverse

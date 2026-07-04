@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/notes — Public API (weaveNotes Phase 0).
+ * @weaveintel/notes — Public API.
  *
  * The seam in front of note storage: the {@link NoteRepository} PORT + an
  * in-memory reference adapter, the shared {@link noteRepositoryContract}, and pure
- * content-extraction helpers. geneWeave provides the SQL adapter; later phases add
- * a CRDT co-editing adapter behind the SAME port. See
+ * content-extraction helpers. A consuming application provides the SQL adapter;
+ * later phases add a CRDT co-editing adapter behind the SAME port. See
  * `NOTES_CRDT_AND_ARTIFACTS_ROADMAP_2026.md` for the full roadmap.
  */
 export {
@@ -38,7 +38,7 @@ export {
   extractPlainText,
 } from './extract.js';
 
-// weaveNotes Phase 5 — knowledge graph: wiki-link parsing + unlinked-mention detection.
+// Knowledge graph: wiki-link parsing + unlinked-mention detection.
 export {
   type WikiLink,
   type UnlinkedMention,
@@ -51,7 +51,7 @@ export {
   linkifyFirstMention,
 } from './wiki-links.js';
 
-// weaveNotes Phase 3 — GraphRAG quality: entity resolution/disambiguation + batching.
+// GraphRAG quality: entity resolution/disambiguation + batching.
 export {
   type EntityMention,
   type CanonicalEntity,
@@ -60,7 +60,7 @@ export {
   chunk,
 } from './entities.js';
 
-// weaveNotes Phase 5 — background memory ("second brain"): distil durable memories from notes.
+// Background memory ("second brain"): distil durable memories from notes.
 export {
   type NoteMemoryKind,
   type NoteMemory,
@@ -72,7 +72,7 @@ export {
   relativeWhen,
 } from './note-memory.js';
 
-// weaveNotes Phase 6 — typed database properties, validation + rollups.
+// Typed database properties, validation + rollups.
 export {
   type PropertyType,
   type RollupFn,
@@ -86,7 +86,7 @@ export {
   computeRollup,
 } from './note-database.js';
 
-// weaveNotes Phase 0 — the note content-node registry (shared editor schema).
+// The note content-node registry (shared editor schema).
 export {
   type NoteNodeType,
   type NoteMarkType,
@@ -100,7 +100,7 @@ export {
 // Colour-safety gate (shared by ink/diagram/creative + the app).
 export { sanitizeColor } from './color-safety.js';
 
-// weaveNotes Phase 4 — the creative INK model + renderer (freehand strokes → SVG).
+// The creative INK model + renderer (freehand strokes → SVG).
 export {
   type InkPoint,
   type InkTool,
@@ -114,7 +114,7 @@ export {
   recolorStrokes,
 } from './ink.js';
 
-// weaveNotes Phase 7 — the SHARED cross-platform note-document model (mobile ⇆ web doc_json).
+// The SHARED cross-platform note-document model (mobile ⇆ web doc_json).
 export {
   type ParagraphBlock,
   type HeadingBlock,

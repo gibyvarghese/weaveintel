@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 /**
- * Shared conformance test for any {@link NoteRepository} adapter (weaveNotes Phase 0).
- * The in-memory reference adapter and geneWeave's SQL adapter must BOTH pass it —
- * proving identical behaviour behind the one port (the Collaboration Phase 0–7
- * pattern). This is the safety net that lets us refactor geneWeave's routes onto
- * the port with confidence that behaviour did not change.
+ * Shared conformance test for any {@link NoteRepository} adapter.
+ * The in-memory reference adapter and a consuming application's SQL adapter must
+ * BOTH pass it — proving identical behaviour behind the one port (the Collaboration
+ * Phase 0–7 pattern). This is the safety net that lets us refactor the host
+ * application's routes onto the port with confidence that behaviour did not change.
  */
 import type { NoteRepository } from './note-repository.js';
 
@@ -47,7 +47,7 @@ export function noteRepositoryContract(make: () => Promise<NoteRepository> | Not
       expect(n?.is_template).toBe(0);
       expect(typeof n?.doc_json).toBe('string');        // default doc
       expect(n?.created_at).not.toBe(undefined);
-      // weaveNotes Phase 1 page-theme defaults.
+      // Page-theme defaults.
       expect(n?.page_theme).toBe('pro');
       expect(n?.freeform_mode).toBe(0);
       expect(n?.cover_image_artifact_id ?? null).toBeNull();

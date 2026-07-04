@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * note-doc.ts — the SHARED, cross-platform note-document model (weaveNotes Phase 7).
+ * note-doc.ts — the SHARED, cross-platform note-document model.
  *
  * A note is stored as a ProseMirror document (`doc_json`). The web editor (TipTap) is the rich
  * authoring surface; the MOBILE editor is a lighter surface that still has to read and write the

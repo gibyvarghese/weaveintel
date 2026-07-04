@@ -205,7 +205,7 @@ rewiring every consumer, and leaving the suite green.
 | 2d | `scheduled-agent.ts` (split: cron+budget→triggers, recipes→app) | `triggers` + app | ✅ done |
 | 2e | `rag.ts` (+ rag-citations) | `retrieval` (reconcile RRF `hybrid.ts` + `citations.ts`) | ✅ done |
 | 2f | product modules → apps (batched by UI/server coupling) | `apps/geneweave` (+ `-ui`) | ✅ done |
-| 2g | slim `index.ts`, genericize `provenance.ts`, drop the notes deferral from the no-app-brand allowlist | — | ⏳ |
+| 2g | genericize `provenance.ts`, de-brand notes, drop the notes deferral from the no-app-brand allowlist | — | ✅ done |
 
 ### 2a — `prompt-safety.ts` → `@weaveintel/guardrails/spotlighting` ✅
 
@@ -363,8 +363,30 @@ first test setup), moved `{agency, colorize, creative, diagram}` (+ tests + the 
 notes-editor bundler + tsc both build clean. Gate: **268/268** (geneweave-ui gained a test task — 33
 cluster tests); notes-deferred **51→37**. **Phase 2f is done — all product modules relocated.**
 
-Then **2g** — slim `notes/index.ts` header, genericize `provenance.ts`, de-brand the remaining notes
-strings (ink + header), and delete the notes deferral from the no-app-brand allowlist.
+### 2g — de-brand the slim notes package + drop the deferral ✅
+
+The finish line for the notes split. **Genericized `provenance.ts`**: the AI-image `generator` default
+`'geneWeave AI'` → `'weaveintel'` (brand-neutral; a consuming app passes its own product name — the app's
+callers already pass `'geneWeave AI'` explicitly, so no behaviour change). **Swept the remaining ~35
+brand mentions** (all comments/JSDoc — mostly `weaveNotes Phase N` tags + "geneWeave provides the SQL
+adapter"-style phrasing) across the 12 slim modules to neutral wording, via 2 parallel agents. Then
+**deleted the `packages/notes/` deferral** from `scripts/no-app-brand-allowlist.json`.
+
+Result: **`check:no-app-brand` PASS with notes fully scanned** — the slim `@weaveintel/notes` is now
+100% brand-free (only `clients/tokens/` remains deferred, to Phase 4). Notes retains only its port+doc
+surface + the ink data model + the color-safety gate — a clean, generic "structured notes as a
+capability" package.
+
+---
+
+## Phase 2 complete ✅
+
+`@weaveintel/notes` went from **32 modules / ~6,600 LOC** (product + framework + brand tangled together)
+to a **slim, brand-free port+doc layer**. Five framework concerns reconciled into their canonical homes
+(spotlighting→guardrails, translate→prompts, MCP→mcp-server, cron+budget→triggers, RAG→retrieval); all
+weaveNotes product modules relocated to the apps (server → `apps/geneweave`, creative/render cluster →
+`apps/geneweave-ui`); and the framework is now free of geneWeave/weaveNotes brand (enforced by
+`check:no-app-brand`). The Phase 2 gate — every `note-*` test green, slim notes brand-free — is met.
 
 ---
 

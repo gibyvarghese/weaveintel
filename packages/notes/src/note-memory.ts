@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/notes — background memory ("second brain"): distil durable memories from a note
- * (weaveNotes Phase 5).
+ * @weaveintel/notes — background memory ("second brain"): distil durable memories from a note.
  *
  * --- For someone new to this ---
  * As you write notes over time, the app can quietly build a lasting understanding of YOU — the facts,

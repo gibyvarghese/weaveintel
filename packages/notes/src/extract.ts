@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/notes — pure content-extraction helpers (weaveNotes Phase 0).
+ * @weaveintel/notes — pure content-extraction helpers.
  *
  * These walk a Tiptap/ProseMirror document tree (`doc_json`, parsed) and pull out
  * structured signals WITHOUT any I/O — so they are trivially unit-testable and
- * reusable by any host (the web app today, a mobile/CLI host tomorrow). geneWeave
- * previously inlined `extractTaskItems` inside an HTTP route; lifting it here is
- * part of the Phase 0 seam (the route now imports it).
+ * reusable by any host (the web app today, a mobile/CLI host tomorrow). The host
+ * application previously inlined `extractTaskItems` inside an HTTP route; lifting it here is
+ * part of the same seam (the route now imports it).
  *
  * --- For someone new to this ---
  * A note is stored as a tree of "nodes" (a heading node, a paragraph node, a

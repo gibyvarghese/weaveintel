@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/notes — the note content-node registry (weaveNotes Phase 0).
+ * @weaveintel/notes — the note content-node registry.
  *
  * A note is a structured document made of BLOCKS (paragraphs, headings, lists…) and richer
  * blocks the later phases add (ink, diagrams, callouts, math…). This registry is the shared,

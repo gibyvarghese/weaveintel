@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/notes — typed DATABASE properties, validation + rollups (weaveNotes Phase 6).
+ * @weaveintel/notes — typed DATABASE properties, validation + rollups.
  *
  * A "note database" is a Notion-style table: a set of typed PROPERTIES (columns) and
  * ROWS whose values conform to those types. This module is the pure, reusable core of
  * that model — property definitions, value coercion/validation, relation + rollup
  * computation, and the supported view types — with NO I/O, so it is trivially testable
- * and runs anywhere. geneWeave persists the schema in `note_databases.columns_json`
+ * and runs anywhere. The host application persists the schema in `note_databases.columns_json`
  * and the values in `note_db_rows.fields_json`.
  *
  * --- For someone new to this ---

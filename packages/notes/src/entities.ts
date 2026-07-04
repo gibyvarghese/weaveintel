@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /**
- * @weaveintel/notes — entity resolution / disambiguation for the knowledge graph (weaveNotes Phase 3).
+ * @weaveintel/notes — entity resolution / disambiguation for the knowledge graph.
  *
  * --- For someone new to this ---
  * When the AI reads your notes it pulls out the people, organisations and concepts they mention (their
