@@ -3656,30 +3656,23 @@ import { weaveInMemoryStateStore } from '@weaveintel/live-agents';
 
 const store = weaveInMemoryStateStore();
 
-// Provision a mesh with two agent roles
-const mesh = await provisionMesh({
-  store,
-  mesh: { id: 'equity-mesh', name: 'Equity Analysis Mesh', status: 'active' },
-  agents: [
-    {
-      id: 'agent-researcher', meshId: 'equity-mesh',
-      roleKey: 'equity.researcher', name: 'Researcher',
-      status: 'active', attentionPolicyKey: null,
-    },
-    {
-      id: 'agent-writer', meshId: 'equity-mesh',
-      roleKey: 'equity.writer', name: 'Report Writer',
-      status: 'active', attentionPolicyKey: null,
-    },
-  ],
+// provisionMesh(db, opts) instantiates a mesh from a stored blueprint.
+// `db` reads the mesh + agent DEFINITIONS; the runtime rows are written for you.
+const mesh = await provisionMesh(db, {
+  meshDefId:    'equity-mesh',        // or meshDefKey to look up by key
+  tenantId:     'acme',
+  ownerHumanId: 'user-alice',
+  store,                              // same StateStore the supervisor uses
 });
-console.log(mesh.agents.map(a => a.id));`, ['@weaveintel/live-agents-runtime', '@weaveintel/live-agents'])}
+
+// The result reports the ids that were created
+console.log(mesh.meshId, mesh.agentIds);`, ['@weaveintel/live-agents-runtime', '@weaveintel/live-agents'])}
 `)}
 
 ${section('la-supervisor', 'Starting the Heartbeat Supervisor', `
 <p>The supervisor manages N parallel workers that each call <code>heartbeat.tick()</code> on every interval. It auto-rebuilds workers when new roles appear in the DB.</p>
 
-${code('typescript', `import { createHeartbeatSupervisor, HandlerRegistry } from '@weaveintel/live-agents-runtime';
+${code('typescript', `import { createHeartbeatSupervisor, createDefaultHandlerRegistry } from '@weaveintel/live-agents-runtime';
 import { weaveInMemoryStateStore } from '@weaveintel/live-agents';
 import { weaveRuntime, weaveContext } from '@weaveintel/core';
 import { weaveSqlitePersistence } from '@weaveintel/persistence';
@@ -3690,11 +3683,9 @@ const runtime = weaveRuntime({
 
 const store = weaveInMemoryStateStore();
 
-const handlerRegistry = new HandlerRegistry();
-// Handlers resolve per-tick: modelFactory returns the model to use
-handlerRegistry.registerBuiltins({
-  modelFactory: async () => yourModel,
-});
+// createDefaultHandlerRegistry() ships with the built-in handler kinds
+// (agentic.react etc.) already registered.
+const handlerRegistry = createDefaultHandlerRegistry();
 
 // db must implement SupervisorDb (list meshes, agents, handler bindings)
 const supervisor = await createHeartbeatSupervisor({
@@ -3733,17 +3724,18 @@ ${code('typescript', `import {
   weaveDynamoDbStateStore,
 } from '@weaveintel/live-agents';
 
-// Development — in-memory, lost on restart
+// Development — in-memory, lost on restart (synchronous)
 const devStore = weaveInMemoryStateStore();
 
+// Durable stores are async factories (they open a connection/pool):
 // SQLite — single-process durable
-const sqliteStore = weaveSqliteStateStore({ path: './live-agents.db' });
+const sqliteStore = await weaveSqliteStateStore({ path: './live-agents.db' });
 
 // Postgres — multi-process, horizontal scale
-const pgStore = weavePostgresStateStore({ connectionString: process.env['DATABASE_URL']! });
+const pgStore = await weavePostgresStateStore({ url: process.env['DATABASE_URL']! });
 
 // Redis — low-latency, TTL-aware
-const redisStore = weaveRedisStateStore({ url: process.env['REDIS_URL']! });`, ['@weaveintel/live-agents'])}
+const redisStore = await weaveRedisStateStore({ url: process.env['REDIS_URL']! });`, ['@weaveintel/live-agents'])}
 `)}
 
 ${section('la-db-boot', 'DB-Backed Boot (Production Entry Points)', `
@@ -3752,7 +3744,7 @@ ${section('la-db-boot', 'DB-Backed Boot (Production Entry Points)', `
 ${code('typescript', `import { weaveLiveMeshFromDb, weaveLiveAgentFromDb } from '@weaveintel/live-agents-runtime';
 import { weaveSqliteStateStore } from '@weaveintel/live-agents';
 
-const store = weaveSqliteStateStore({ path: './live-agents.db' });
+const store = await weaveSqliteStateStore({ path: './live-agents.db' });
 
 // Boot an entire mesh from the database
 // db must have live_meshes + live_agents + live_agent_handler_bindings rows
@@ -3781,7 +3773,7 @@ const supervisor = await createHeartbeatSupervisor({ db, store, handlerRegistry:
 `)}
 
 ${section('la-e2e', 'End-to-End: Full Production Setup', `
-${code('typescript', `import { createHeartbeatSupervisor, HandlerRegistry, provisionMesh } from '@weaveintel/live-agents-runtime';
+${code('typescript', `import { createHeartbeatSupervisor, createDefaultHandlerRegistry, provisionMesh } from '@weaveintel/live-agents-runtime';
 import { weaveSqliteStateStore } from '@weaveintel/live-agents';
 import { weaveRuntime, weaveContext } from '@weaveintel/core';
 import { weaveSqlitePersistence } from '@weaveintel/persistence';
@@ -3792,25 +3784,18 @@ const runtime = weaveRuntime({
   persistence: weaveSqlitePersistence({ path: './app.db' }),
 });
 
-// 2. State store — separate file or DB table for agent state
-const store = weaveSqliteStateStore({ path: './agents.db' });
+// 2. State store — async factory; separate file/table for agent state
+const store = await weaveSqliteStateStore({ path: './agents.db' });
 
-// 3. Handler registry — maps handler kind → implementation
-const handlerRegistry = new HandlerRegistry();
-handlerRegistry.registerBuiltins({
-  modelFactory: async () => weaveAnthropicModel('claude-sonnet-4-6'),
-});
+// 3. Handler registry — built-in handler kinds pre-registered
+const handlerRegistry = createDefaultHandlerRegistry();
 
-// 4. Provision the initial mesh (idempotent — safe to re-run)
-await provisionMesh({
+// 4. Provision the initial mesh from its stored blueprint (idempotent)
+await provisionMesh(yourDb, {
+  meshDefId:    'equity-mesh',
+  tenantId:     'acme',
+  ownerHumanId: 'user-alice',
   store,
-  mesh:   { id: 'equity-mesh', name: 'Equity Analysis', status: 'active' },
-  agents: [
-    { id: 'researcher', meshId: 'equity-mesh', roleKey: 'equity.researcher',
-      name: 'Researcher', status: 'active', attentionPolicyKey: null },
-    { id: 'writer', meshId: 'equity-mesh', roleKey: 'equity.writer',
-      name: 'Report Writer', status: 'active', attentionPolicyKey: null },
-  ],
 });
 
 // 5. Start the supervisor — agents tick every intervalMs
@@ -3937,25 +3922,24 @@ ${params([
 ${section('dur-idempotency', 'Idempotency Keys', `
 ${code('typescript', `import { createIdempotencyStore, createDurableIdempotencyStore } from '@weaveintel/resilience';
 
-// In-memory (test / dev)
-const store = createIdempotencyStore();
+// In-memory (test / dev) — takes an IdempotencyPolicy
+const store = createIdempotencyStore({ ttlMs: 60 * 60 * 1000, maxEntries: 10_000 });
 
-// Durable (production)
-const durableStore = createDurableIdempotencyStore({
-  runtime,
-  namespace: 'payments',
-  ttlMs:     24 * 60 * 60 * 1000,   // 24 h — keys expire after this
-});
+// Durable (production) — policy + a DurableIdempotencyRepository (KV-backed)
+const durableStore = createDurableIdempotencyStore(
+  { ttlMs: 24 * 60 * 60 * 1000 },   // 24 h — keys expire after this
+  paymentsRepository,
+);
 
 // Use before any state-mutating operation
 const key = 'charge:ORD-001:attempt-3';
-const existing = await durableStore.get(key);
-if (existing) {
-  return existing.result;   // replay cached result — no duplicate charge
+const existing = await durableStore.check(key);
+if (existing.isDuplicate) {
+  return existing.previousResult;   // replay cached result — no duplicate charge
 }
 
 const result = await stripe.charge(orderId, amount);
-await durableStore.set(key, { result, completedAt: new Date().toISOString() });`, ['@weaveintel/resilience'])}
+await durableStore.record(key, result);`, ['@weaveintel/resilience'])}
 `)}
 
 ${section('dur-retry-budget', 'Retry Budget', `
@@ -4877,38 +4861,38 @@ ${featureCards([
 
 ${section('contracts-emit', 'Emitting Contracts from Workflows', `
 ${code('typescript', `import { DefaultWorkflowEngine } from '@weaveintel/workflows';
-import { DbContractEmitter } from '@weaveintel/core/contracts';
+import type { ContractEmitter } from '@weaveintel/workflows';
+import type { WorkflowDefinition } from '@weaveintel/core';
 
-// Wire a contract emitter into the workflow engine
+// ContractEmitter is a small interface: emit(contract) — back it with your DB.
+const contractEmitter: ContractEmitter = {
+  async emit(contract) {
+    await db.insertContract(contract);   // writes to the evidence ledger
+  },
+};
+
 const engine = new DefaultWorkflowEngine({
   resolverRegistry: myResolvers,
-  contractEmitter:  new DbContractEmitter({ db }),   // writes to the evidence ledger
+  contractEmitter,
 });
 
-// In your workflow definition, declare an outputContract
-const def = {
+// In your workflow definition, declare an outputContract (kind + body/evidence map)
+const def: WorkflowDefinition = {
   id: 'equity-analysis',
   name: 'Equity Analysis',
+  version: '1.0.0',
+  entryStepId: 'analyse',
+  steps: [/* ...your WorkflowStep[] ... */],
   outputContract: {
-    kind:   'recommendation',
-    fields: ['ticker', 'action', 'confidence', 'reasoning'],
-    schema: {
-      type: 'object', required: ['ticker', 'action', 'confidence'],
-      properties: {
-        ticker:     { type: 'string' },
-        action:     { type: 'string', enum: ['buy', 'sell', 'hold'] },
-        confidence: { type: 'number', minimum: 0, maximum: 1 },
-        reasoning:  { type: 'string' },
-      },
-    },
+    kind: 'recommendation',
+    bodyMap: { ticker: 'ticker', action: 'action', confidence: 'confidence', reasoning: 'reasoning' },
+    evidence: { fromHistory: true },
   },
-  steps: [/* ...your analysis steps... */],
 };
 
 await engine.createDefinition(def);
 const run = await engine.startRun('equity-analysis', { ticker: 'AAPL' });
-// After completion, a signed contract entry is appended to the evidence ledger.
-// run.metadata.__outputContract contains the emitted contract id.`, ['@weaveintel/workflows', '@weaveintel/core/contracts'])}
+// After completion, a signed contract entry is appended to the evidence ledger.`, ['@weaveintel/workflows', '@weaveintel/core'])}
 `)}
 
 ${section('contracts-query', 'Recording Completion Evidence', `
