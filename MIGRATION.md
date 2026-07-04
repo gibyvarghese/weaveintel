@@ -697,13 +697,24 @@ docstring HEADER titles (`* @weaveintel/… —`) de-phased (design-rationale pr
 samples typecheck: samples reference **zero retired package names** (they resolve) and the file compiles,
 but a full per-sample extraction harness is not built. Build + typecheck green (96 tasks).
 
-**Remaining Phase-7 tail (large, pre-existing):** `npm run test:examples` is **822 errors** — but **560 are
-a pre-existing config artifact** (54 app-integration examples reach into `apps/geneweave/src` via relative
-imports, dragging the app source graph into the examples typecheck under relaxed settings; the app's OWN
-strict build passes) and only **262 are real numbered-example API drift**. This was RED at HEAD (before the
-restructure) and is a tsconfig-design + example-content effort, not a docs-rewrite blocker. Also deferred:
-the full docs-html.ts sample-extraction-compile harness, and ~193 internal (non-docstring-title) source
-comments that still narrate design history by phase number (low-risk, non-adopter-facing).
+**Examples now typecheck — `npm run test:examples` is GREEN (0 errors, from a pre-existing 822):**
+- **Config root-cause fix:** `tsconfig.examples` was dragging the composite geneweave app SOURCE into the
+  examples typecheck (523 TS6307 "file not listed" + 43 `strict:false` discriminated-union artifacts — the
+  app's own strict build passes them). Fixed by referencing the app as a built project
+  (`references: [{path:'apps/geneweave'}]` + `skipLibCheck`) so app imports resolve to `.d.ts` not re-checked source.
+- **Retired imports rewired** in 26 example files (redaction→guardrails/redaction, evals→testing/evals,
+  tenancy/oauth→identity/*, graph→memory, reliability→resilience, recipes→agents/recipes, collaboration→collab,
+  plugins/capability-packs→core/*, replay→observability/replay, openai→provider-openai,
+  equity-scoring→examples/verticals, tools-{webhook,filewatch}→tools/*); installed `@anthropic-ai/sdk`+`openai`.
+- **216 API-drift errors fixed** across 71 files (8 parallel agents), examples-only: Model/ModelResponse shapes,
+  `createMockModel`→`weaveFakeModel`, `finishReason 'tool_use'→'tool_calls'`, ExecutionContext moved to core,
+  `createHeartbeat` needs a model, renamed fields, the Anthropic-SDK namespace move.
+- **Desktop build fix (install side effect):** the full `npm install` installed the Tauri CLI (a declared
+  devDep), so the desktop no-op guard ran `tauri build` → failed on invalid `//` keys in `tauri.conf.json`.
+  Gated the native build behind `DESKTOP_NATIVE_BUILD=1` + removed the `//` keys; turbo build green (96 tasks).
+
+**Still deferred (low-risk, non-adopter-facing):** the full docs-html.ts sample-extraction-compile harness,
+and ~193 internal (non-docstring-title) source comments that narrate design history by phase number.
 
 ---
 
