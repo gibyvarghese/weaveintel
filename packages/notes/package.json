@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/notes",
-  "version": "0.0.1",
+  "version": "0.1.1",
   "type": "module",
   "exports": {
     ".": {
@@ -18,12 +18,12 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@weaveintel/collab": "*"
+    "@weaveintel/collab": "^0.1.1"
   },
   "devDependencies": {
     "typescript": "^5.7.0",
     "vitest": "^3.2.6",
-    "@weaveintel/tokens": "^0.0.1"
+    "@weaveintel/tokens": "^0.1.1"
   },
   "publishConfig": {
     "access": "public"

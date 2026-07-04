@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/testing",
-  "version": "0.0.1",
+  "version": "0.1.1",
   "description": "Testing harnesses — fake models, fake vector stores, fake MCP servers",
   "type": "module",
   "exports": {
@@ -24,8 +24,8 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@weaveintel/core": "^0.0.1",
-    "@weaveintel/sandbox": "^0.0.1"
+    "@weaveintel/core": "^0.1.1",
+    "@weaveintel/sandbox": "^0.1.1"
   },
   "devDependencies": {
     "typescript": "^5.7.0",

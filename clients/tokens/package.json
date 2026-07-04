@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/tokens",
-  "version": "0.0.1",
+  "version": "0.1.1",
   "description": "A brand-neutral theming engine — token schema, colour maths (WCAG-AA), a CSS-variable transform, and per-tenant white-label — that takes your palette as input.",
   "type": "module",
   "exports": {

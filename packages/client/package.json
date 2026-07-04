@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/client",
-  "version": "0.0.1",
+  "version": "0.1.1",
   "description": "Browser-safe run client for the weaveIntel platform — SSE transport, progressive stream reducer, offline outbox.",
   "type": "module",
   "exports": {
@@ -24,7 +24,7 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@weaveintel/core": "^0.0.1"
+    "@weaveintel/core": "^0.1.1"
   },
   "peerDependencies": {
     "react": "^18.0.0 || ^19.0.0"

@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/tools-browser",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "exports": {
     ".": {
@@ -16,8 +16,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@weaveintel/core": "^0.0.1",
-    "@weaveintel/tools": "^0.0.1",
+    "@weaveintel/core": "^0.1.1",
+    "@weaveintel/tools": "^0.1.1",
     "playwright-core": "^1.52.0"
   },
   "devDependencies": {

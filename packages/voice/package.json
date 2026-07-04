@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/voice",
-  "version": "0.0.1",
+  "version": "0.1.1",
   "description": "Production-grade voice agent pipeline for WeaveIntel — STT, TTS, WebSocket session management and full parity with text agents",
   "type": "module",
   "main": "./dist/index.js",
@@ -18,7 +18,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@weaveintel/core": "^0.0.1",
+    "@weaveintel/core": "^0.1.1",
     "ws": "^8.0.0"
   },
   "devDependencies": {

@@ -25,14 +25,14 @@
     "worker": "tsx src/worker.ts"
   },
   "dependencies": {
-    "@weaveintel/core": "*",
-    "@weaveintel/live-agents": "*",
-    "@weaveintel/persistence": "*",
+    "@weaveintel/core": "^0.1.1",
+    "@weaveintel/live-agents": "^0.1.1",
+    "@weaveintel/persistence": "^0.1.1",
     "pg": "^8.14.1"
   },
   "devDependencies": {
     "@types/pg": "^8.11.11",
-    "@weaveintel/testing": "*"
+    "@weaveintel/testing": "^0.1.1"
   },
   "license": "MIT"
 }

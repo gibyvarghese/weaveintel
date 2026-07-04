@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/prompts",
-  "version": "0.0.1",
+  "version": "0.1.1",
   "description": "Prompt management — versioned templates, variable substitution, instruction bundles, A/B experiments, scoped resolution",
   "type": "module",
   "exports": {
@@ -19,7 +19,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@weaveintel/core": "^0.0.1"
+    "@weaveintel/core": "^0.1.1"
   },
   "devDependencies": {
     "@types/json-schema": "^7.0.15",

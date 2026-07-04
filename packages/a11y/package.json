@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/a11y",
-  "version": "0.0.1",
+  "version": "0.1.1",
   "type": "module",
   "description": "Framework-agnostic accessibility utilities for weaveIntel UIs — pure, dependency-free helpers (focus restoration across full re-renders, etc.).",
   "exports": {

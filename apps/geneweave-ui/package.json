@@ -53,9 +53,9 @@
     "@tiptap/extension-underline": "^2.11.5",
     "@tiptap/pm": "^2.11.5",
     "@tiptap/starter-kit": "^2.11.5",
-    "@weaveintel/notes": "*",
-    "@weaveintel/tokens": "*",
-    "@weaveintel/ui-primitives": "*",
+    "@weaveintel/notes": "^0.1.1",
+    "@weaveintel/tokens": "^0.1.1",
+    "@weaveintel/ui-primitives": "^0.1.1",
     "esbuild": "^0.25.0"
   },
   "license": "MIT",

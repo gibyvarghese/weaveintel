@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/routing",
-  "version": "0.0.1",
+  "version": "0.1.1",
   "description": "Model routing — policy-based routing, health tracking, weighted scoring, explainable decisions",
   "type": "module",
   "exports": {
@@ -19,7 +19,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@weaveintel/core": "^0.0.1"
+    "@weaveintel/core": "^0.1.1"
   },
   "devDependencies": {
     "typescript": "^5.7.0",

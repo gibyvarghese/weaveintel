@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/mcp-client",
-  "version": "0.0.1",
+  "version": "0.1.1",
   "description": "MCP client — connect to MCP servers and expose their tools",
   "type": "module",
   "exports": {
@@ -20,10 +20,10 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@weaveintel/core": "^0.0.1"
+    "@weaveintel/core": "^0.1.1"
   },
   "devDependencies": {
-    "@weaveintel/mcp-server": "^0.0.1",
+    "@weaveintel/mcp-server": "^0.1.1",
     "typescript": "^5.7.0",
     "vitest": "^3.2.6"
   },

@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/identity",
-  "version": "0.0.1",
+  "version": "0.1.1",
   "description": "Identity, delegation, and access-control runtime",
   "type": "module",
   "exports": {
@@ -32,8 +32,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@weaveintel/core": "^0.0.1",
-    "@weaveintel/persistence": "^0.0.1"
+    "@weaveintel/core": "^0.1.1",
+    "@weaveintel/persistence": "^0.1.1"
   },
   "devDependencies": {
     "vitest": "^3.2.6"

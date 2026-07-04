@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/mcp-server",
-  "version": "0.0.1",
+  "version": "0.1.1",
   "description": "MCP server — expose tools/resources/prompts via MCP protocol",
   "type": "module",
   "exports": {
@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@weaveintel/core": "^0.0.1"
+    "@weaveintel/core": "^0.1.1"
   },
   "devDependencies": {
     "typescript": "^5.7.0",

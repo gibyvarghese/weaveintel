@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/provider-google",
-  "version": "0.0.1",
+  "version": "0.1.1",
   "description": "Google Gemini provider for weaveIntel — chat, tool use, vision, streaming",
   "type": "module",
   "main": "./dist/index.js",
@@ -24,9 +24,9 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@weaveintel/core": "^0.0.1",
-    "@weaveintel/resilience": "^0.0.1",
-    "@weaveintel/tools": "^0.0.1"
+    "@weaveintel/core": "^0.1.1",
+    "@weaveintel/resilience": "^0.1.1",
+    "@weaveintel/tools": "^0.1.1"
   },
   "license": "MIT",
   "publishConfig": {
