@@ -1071,12 +1071,23 @@ ${exlinks([
 
 ${section('prompts-registry', 'Registry & Versioning', `
 ${code('typescript', `import { InMemoryPromptRegistry, renderPromptVersion } from '@weaveintel/prompts';
+import type { PromptDefinition, TemplatePromptVersion } from '@weaveintel/core';
 
 const registry = new InMemoryPromptRegistry();
 
-registry.register({
-  key: 'summarise-article',
+const definition: PromptDefinition = {
+  id: 'summarise-article',
+  name: 'Summarise Article',
+  currentVersion: '2.1.0',
+  tags: ['summarisation', 'editorial'],
+};
+
+const version: TemplatePromptVersion = {
+  id: 'summarise-article@2.1.0',
+  promptId: 'summarise-article',
   version: '2.1.0',
+  kind: 'template',
+  createdAt: new Date().toISOString(),
   template: \`You are a professional editor.
 
 Summarise the following article in {{language}} in no more than {{maxWords}} words.
@@ -1084,18 +1095,20 @@ Focus on: {{focusAreas}}.
 
 Article:
 {{article}}\`,
-  variables: {
-    language:   { type: 'string', default: 'English' },
-    maxWords:   { type: 'number', required: true },
-    focusAreas: { type: 'string', required: true },
-    article:    { type: 'string', required: true },
-  },
-  tags: ['summarisation', 'editorial'],
-  metadata: { author: 'content-team', approved: true },
-});
+  variables: [
+    { name: 'language',   type: 'string', required: false, defaultValue: 'English' },
+    { name: 'maxWords',   type: 'number', required: true },
+    { name: 'focusAreas', type: 'string', required: true },
+    { name: 'article',    type: 'string', required: true },
+  ],
+};
 
-// Render with variables
-const rendered = renderPromptVersion(registry.get('summarise-article', '2.1.0')!, {
+// register(definition, version) is async
+await registry.register(definition, version);
+
+// get() is async and returns the version (or null)
+const stored = await registry.get('summarise-article', '2.1.0');
+const rendered = renderPromptVersion(stored!, {
   language: 'English',
   maxWords: 150,
   focusAreas: 'key findings, business impact',
@@ -1144,17 +1157,17 @@ ${featureCards([
   ['CRITIQUE', 'Self-critique loop: model produces initial output → critiques it → revises. Improves quality on complex tasks.'],
   ['JUDGE', 'LLM-as-judge rubric. Evaluates a piece of text against named criteria with numeric scores and reasoning.'],
 ])}
-${code('typescript', `import { buildPromptFromFramework } from '@weaveintel/prompts';
+${code('typescript', `import { renderFramework, FRAMEWORK_RTCE } from '@weaveintel/prompts';
 
-const prompt = buildPromptFromFramework('RTCE', {
-  role: 'You are a senior security analyst.',
-  task: 'Review the following code diff for security vulnerabilities.',
-  context: 'This is a Node.js API endpoint that handles file uploads.',
-  examples: [
-    { input: 'app.get("/files/:name", (req, res) => res.sendFile(req.params.name))',
-      output: 'CRITICAL: Path traversal vulnerability. User input passed directly to sendFile.' },
-  ],
-});`, ['@weaveintel/prompts'])}
+// renderFramework(framework, contentMap) assembles the sections into one prompt
+const result = renderFramework(FRAMEWORK_RTCE, {
+  role:         'You are a senior security analyst.',
+  task:         'Review the following code diff for security vulnerabilities.',
+  context:      'This is a Node.js API endpoint that handles file uploads.',
+  expectations: 'Flag path traversal, injection, and auth issues; rank by severity.',
+});
+
+const prompt = result.text;`, ['@weaveintel/prompts'])}
 `)}
 
 ${section('prompts-execution', 'Execution Pipeline', `
@@ -1163,73 +1176,69 @@ ${section('prompts-execution', 'Execution Pipeline', `
 ${code('typescript', `import {
   resolvePromptRecordForExecution,
   executePromptRecord,
-  renderWithOptions,
 } from '@weaveintel/prompts';
 
-// Resolution order: requested override → active experiment variant → active published → latest published → base
-const record = await resolvePromptRecordForExecution({
-  db,
-  promptKey:    'summarise-article',
-  userId:       'alice',                 // used for experiment cohort assignment
-  tenantId:     'acme',
-  overrideKey:  undefined,               // explicit version override (e.g. from admin)
+// Feed the prompt row + its versions/experiments (loaded from your DB).
+// Resolution order: requested override → active experiment variant → active published → latest → base
+const resolved = resolvePromptRecordForExecution({
+  prompt:      promptRecord,
+  versions:    promptVersions,
+  experiments: promptExperiments,
+  options: {
+    requestedVersion: undefined,   // explicit override (e.g. from admin)
+    assignmentKey:    'alice',     // deterministic experiment cohort assignment
+  },
 });
 
-// record.resolvedVersion — which version was selected
-// record.experimentId    — which experiment it belongs to (if any)
-// record.variantId       — which variant within the experiment
+// resolved.meta.resolvedVersion / .experimentId / .selectedBy describe the choice
+console.log(resolved.meta.resolvedVersion, resolved.meta.selectedBy);
 
-// Execute the prompt record with variables and optional evaluation hooks
-const result = await executePromptRecord(record, {
-  article:      articleText,
-  maxWords:     150,
-  focusAreas:   'key findings, business impact',
+// Execute the resolved record with variables (executePromptRecord is synchronous)
+const result = executePromptRecord(resolved.record, {
+  article:    articleText,
+  maxWords:   150,
+  focusAreas: 'key findings, business impact',
 }, {
-  model,
-  ctx,
-  strategy:     'chain-of-thought',  // overrides record.executionDefaults.strategy
-  evalHooks:    [myEvalHook],        // called after each generation attempt
+  strategyKey: 'deliberate',       // execution strategy override
 });
 
-console.log(result.text);
-console.log(result.resolvedVersion, result.selectedBy);`, ['@weaveintel/prompts'])}
+console.log(result.content);
+console.log(result.strategy.resolvedKey);`, ['@weaveintel/prompts'])}
 `)}
 
 ${section('prompts-ab', 'A/B Experiments', `
 <p>Create an experiment on a prompt key. Users are randomly assigned to variants based on weights. The winning variant can be promoted with a single call — all traffic switches automatically.</p>
 
-${code('typescript', `import { createExperiment, getExperimentResults, promoteVariant } from '@weaveintel/prompts';
+${code('typescript', `import { InMemoryExperimentStore } from '@weaveintel/prompts';
+import type { PromptExperiment } from '@weaveintel/core';
 
-// Create an A/B experiment on the summarise-article prompt
-const experiment = await createExperiment({
-  db,
-  promptKey:  'summarise-article',
-  name:       'Bullet vs Paragraph Style',
+const experiments = new InMemoryExperimentStore();
+
+// Register an A/B experiment on the summarise-article prompt
+const experiment: PromptExperiment = {
+  id:       'exp-summary-style',
+  name:     'Bullet vs Paragraph Style',
+  promptId: 'summarise-article',
+  status:   'active',
   variants: [
-    {
-      id:     'control',
-      weight: 0.5,
-      versionKey: 'summarise-article@2.0.0',  // existing version
-    },
-    {
-      id:     'bullet-style',
-      weight: 0.5,
-      // Inline variant — not a separate stored version
-      template: \`You are an editor. Summarise in {{maxWords}} bullet points.\`,
-      variables: { maxWords: { type: 'number', required: true } },
-    },
+    { id: 'control',      promptId: 'summarise-article', versionId: '2.0.0',        weight: 0.5, label: 'Paragraph' },
+    { id: 'bullet-style', promptId: 'summarise-article', versionId: '2.1.0-bullet', weight: 0.5, label: 'Bullets' },
   ],
-  metrics: ['user_rating', 'engagement_time'],
-});
+};
+experiments.addExperiment(experiment);
 
-// After collecting data — get results per variant
-const results = await getExperimentResults({ db, experimentId: experiment.id });
-results.variants.forEach(v => {
-  console.log(\`\${v.id}: impressions=\${v.impressions} rating=\${v.metrics.user_rating?.mean.toFixed(2)}\`);
-});
+// At serve time: pick a variant, record an impression, then score the outcome
+const variant = await experiments.pickVariant(experiment.id);
+if (variant) {
+  await experiments.recordImpression(experiment.id, variant.id);
+  await experiments.recordScore(experiment.id, variant.id, 0.87);   // e.g. user rating
+}
 
-// Promote the winning variant — all traffic switches
-await promoteVariant({ db, experimentId: experiment.id, variantId: 'bullet-style' });`, ['@weaveintel/prompts'])}
+// Inspect accumulated results per variant
+const current = await experiments.getExperiment(experiment.id);
+for (const [variantId, r] of Object.entries(current?.results ?? {})) {
+  console.log(\`\${variantId}: impressions=\${r.impressions} score=\${r.score.toFixed(2)}\`);
+}`, ['@weaveintel/prompts'])}
 `)}`;
 }
 
