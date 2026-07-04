@@ -306,7 +306,7 @@ const agent = weaveAgent({
   maxSteps: 8,
 });
 
-const ctx = weaveContext({ userId: 'alice', sessionId: 'sess-001' });
+const ctx = weaveContext({ userId: 'alice', metadata: { sessionId: 'sess-001' } });
 const result = await agent.run(ctx, {
   messages: [{ role: 'user', content: 'What is the current price of AAPL and MSFT?' }],
 });
@@ -363,7 +363,6 @@ const researchWorker: WorkerDefinition = {
   description: 'Searches the web and retrieves relevant information on any topic.',
   model: weaveAnthropicModel('claude-haiku-4-5-20251001'),
   tools: searchToolRegistry,
-  maxSteps: 6,
 };
 
 // Worker 2: writes polished reports
@@ -372,7 +371,6 @@ const writerWorker: WorkerDefinition = {
   description: 'Takes structured notes and produces a well-formatted report.',
   model: weaveAnthropicModel('claude-sonnet-4-6'),
   // No tools — pure generation
-  maxSteps: 3,
 };
 
 const supervisor = weaveAgent({
@@ -482,19 +480,19 @@ ${code('typescript', `import { weaveEventBus, EventTypes } from '@weaveintel/cor
 
 const bus = weaveEventBus();
 
-// Stream steps to a client (e.g. SSE endpoint)
-bus.on(EventTypes.AGENT_STEP, (event) => {
-  if (event.step.type === 'tool_call') {
-    console.log(\`Tool: \${event.step.toolCall?.name}\`);
+// Stream steps to a client (e.g. SSE endpoint). All payload fields live on event.data.
+bus.on(EventTypes.AgentStepEnd, (event) => {
+  if (event.data.type === 'tool_call') {
+    console.log(\`Tool step #\${event.data.stepIndex} on agent \${event.data.agent}\`);
   }
-  if (event.step.type === 'final_answer') {
-    console.log(\`Answer: \${event.step.content}\`);
+  if (event.data.type === 'final_answer') {
+    console.log(\`Answer: \${event.data.content}\`);
   }
 });
 
-bus.on(EventTypes.MODEL_CALL, (event) => {
-  const { inputTokens, outputTokens } = event.usage ?? {};
-  console.log(\`Tokens: \${inputTokens} in / \${outputTokens} out\`);
+bus.on(EventTypes.ModelRequestEnd, (event) => {
+  const usage = event.data.usage as { inputTokens?: number; outputTokens?: number } | undefined;
+  console.log(\`Tokens: \${usage?.inputTokens} in / \${usage?.outputTokens} out\`);
 });
 
 const agent = weaveAgent({ model, tools, bus });`)}
@@ -1627,71 +1625,61 @@ ${exlinks([
 
 ${section('evals-runner', 'Basic Eval Run', `
 ${code('typescript', `import { weaveEvalRunner } from '@weaveintel/testing/evals';
-import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
+import { weaveContext } from '@weaveintel/core';
+import type { EvalDefinition, EvalCase } from '@weaveintel/core';
 
+// The runner is given an executor: it runs each case's input and returns the output dict.
 const runner = weaveEvalRunner({
-  judgeModel: weaveAnthropicModel('claude-sonnet-4-6'),
-  rubric: [
-    { criterion: 'factual_accuracy', weight: 0.40,
-      description: 'Is every factual claim verifiable and correct?',
-      scale: '1=completely wrong, 5=fully accurate' },
-    { criterion: 'completeness', weight: 0.30,
-      description: 'Does the answer address all aspects of the question?' },
-    { criterion: 'conciseness', weight: 0.20,
-      description: 'Is the answer appropriately brief without losing detail?' },
-    { criterion: 'tone', weight: 0.10,
-      description: 'Is the tone professional and appropriate?' },
-  ],
-  parallelism:      4,       // 4 concurrent judge calls
-  passingThreshold: 0.80,    // overall >= 0.80 → passed: true
+  executor: async (ctx, input) => {
+    const resp = await myAgent.run(ctx, { messages: [{ role: 'user', content: String(input['question']) }] });
+    return { answer: resp.output };
+  },
 });
 
-const dataset = [
-  { id: 'q1', input: 'What is the capital of France?',
-    expected: 'Paris, which has been France\\'s capital since the 12th century.' },
-  { id: 'q2', input: 'Explain quantum entanglement in one sentence.',
-    expected: 'Entangled particles share correlated quantum states regardless of distance.' },
+// An eval definition is a set of assertions applied to every case.
+const definition: EvalDefinition = {
+  name: 'qa-quality',
+  type: 'agent',
+  assertions: [
+    { name: 'grounded', type: 'model_graded', config: { rubric: 'Is every factual claim verifiable and correct?', threshold: 0.8 } },
+    { name: 'concise',  type: 'latency_threshold', config: { maxDurationMs: 8000 } },
+  ],
+};
+
+const cases: EvalCase[] = [
+  { id: 'q1', input: { question: 'What is the capital of France?' }, expected: { answer: 'Paris' } },
+  { id: 'q2', input: { question: 'Explain quantum entanglement in one sentence.' } },
 ];
 
-const results = await runner.run(dataset, async ({ input }) => {
-  const resp = await myAgent.run(ctx, { messages: [{ role:'user', content: input }] });
-  return resp.output;
-});
+const ctx    = weaveContext();
+const result = await runner.run(ctx, definition, cases);
 
-// Inspect results
-results.forEach(r => {
-  console.log(\`[\${r.id}] overall=\${r.overall.toFixed(3)} passed=\${r.passed}\`);
-  console.log('  reasoning:', r.reasoning.slice(0, 120));
-});
-
-// Aggregate statistics
-const passRate = results.filter(r => r.passed).length / results.length;
-const avgScore = results.reduce((s, r) => s + r.overall, 0) / results.length;
-console.log(\`Pass rate: \${Math.round(passRate * 100)}%  Mean score: \${avgScore.toFixed(3)}\`);`, ['@weaveintel/testing/evals', '@weaveintel/provider-anthropic'])}
+// EvalSuiteResult carries the aggregates + the per-case results array
+console.log(\`Passed \${result.passed}/\${result.totalCases}  mean=\${result.avgScore?.toFixed(3)}\`);
+for (const r of result.results) {
+  console.log(\`[\${r.caseId}] passed=\${r.passed} score=\${r.score?.toFixed(3)}\`);
+}`, ['@weaveintel/testing/evals', '@weaveintel/core'])}
 `)}
 
 ${section('evals-compare', 'Model Comparison', `
-${code('typescript', `import { weaveEvalRunner, compareEvalResults } from '@weaveintel/testing/evals';
+${code('typescript', `import { weaveEvalRunner } from '@weaveintel/testing/evals';
+import { weaveContext } from '@weaveintel/core';
 
-const runner = weaveEvalRunner({ judgeModel, rubric, parallelism: 4 });
+// One executor per candidate; same definition + cases for a fair comparison.
+const baseline  = weaveEvalRunner({ executor: (ctx, input) => callModel(baselineModel, input) });
+const candidate = weaveEvalRunner({ executor: (ctx, input) => callModel(candidateModel, input) });
 
-// Run the same dataset through two candidates
-const [baselineResults, candidateResults] = await Promise.all([
-  runner.run(dataset, input => callModel(baselineModel, input)),
-  runner.run(dataset, input => callModel(candidateModel, input)),
+const ctx = weaveContext();
+const [baselineResult, candidateResult] = await Promise.all([
+  baseline.run(ctx, definition, cases),
+  candidate.run(ctx, definition, cases),
 ]);
 
-const comparison = compareEvalResults(baselineResults, candidateResults);
-
-console.log(\`Baseline mean: \${comparison.baseline.meanScore.toFixed(3)}\`);
-console.log(\`Candidate mean: \${comparison.candidate.meanScore.toFixed(3)}\`);
-console.log(\`Delta: \${comparison.delta.toFixed(3)} (\${comparison.delta > 0 ? '✓ improved' : '✗ regressed'})\`);
-
-// Per-criterion breakdown
-comparison.perCriterion.forEach(({ criterion, baseline, candidate }) => {
-  const arrow = candidate > baseline ? '↑' : candidate < baseline ? '↓' : '→';
-  console.log(\`  \${criterion}: \${baseline.toFixed(3)} \${arrow} \${candidate.toFixed(3)}\`);
-});`, ['@weaveintel/testing/evals'])}
+const delta = (candidateResult.avgScore ?? 0) - (baselineResult.avgScore ?? 0);
+console.log(\`Baseline mean:  \${baselineResult.avgScore?.toFixed(3)}\`);
+console.log(\`Candidate mean: \${candidateResult.avgScore?.toFixed(3)}\`);
+console.log(\`Delta: \${delta.toFixed(3)} (\${delta > 0 ? '✓ improved' : '✗ regressed'})\`);
+console.log(\`Pass count: \${baselineResult.passed} → \${candidateResult.passed}\`);`, ['@weaveintel/testing/evals', '@weaveintel/core'])}
 `)}
 
 ${section('evals-ci', 'CI Quality Gate', `
@@ -1709,22 +1697,20 @@ const MEAN_SCORE_THRESHOLD = 0.80;   // mean score must be ≥ 0.80
 
 describe('agent quality gate', () => {
   it('meets minimum quality thresholds on the golden dataset', async () => {
-    const runner = weaveEvalRunner({
-      judgeModel:       weaveAnthropicModel('claude-sonnet-4-6'),
-      rubric:           [/* ...criteria... */],
-      passingThreshold: 0.80,
-    });
-
     const agent = weaveAgent({ model: weaveAnthropicModel('claude-haiku-4-5-20251001'), tools });
     const ctx   = weaveContext();
 
-    const results = await runner.run(goldenDataset, async ({ input }) => {
-      const r = await agent.run(ctx, { messages: [{ role:'user', content: input }] });
-      return r.output;
+    const runner = weaveEvalRunner({
+      executor: async (c, input) => {
+        const r = await agent.run(c, { messages: [{ role: 'user', content: String(input['question']) }] });
+        return { answer: r.output };
+      },
     });
 
-    const passRate  = results.filter(r => r.passed).length / results.length;
-    const meanScore = results.reduce((s, r) => s + r.overall, 0) / results.length;
+    const result = await runner.run(ctx, goldenDefinition, goldenCases);
+
+    const passRate  = result.passed / result.totalCases;
+    const meanScore = result.avgScore ?? 0;
 
     expect(passRate).toBeGreaterThanOrEqual(PASS_RATE_THRESHOLD);
     expect(meanScore).toBeGreaterThanOrEqual(MEAN_SCORE_THRESHOLD);
