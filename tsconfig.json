@@ -194,12 +194,6 @@
       "path": "packages/artifacts"
     },
     {
-      "path": "packages/reliability"
-    },
-    {
-      "path": "packages/durability"
-    },
-    {
       "path": "packages/resilience"
     },
     {

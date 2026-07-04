@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  body { margin: 0; background: #F6F8F7; overflow: hidden; }
+  * { box-sizing: border-box; }
+  ::placeholder { color: #9aa7a1; }
+  textarea, input { font-family: inherit; }
+  .gw-scroll::-webkit-scrollbar { width: 10px; }
+  .gw-scroll::-webkit-scrollbar-thumb { background: #E1E8E5; border-radius: 999px; border: 3px solid #F6F8F7; }
+</style>
+</helmet>
+
+<div style="font-family: 'Inter', sans-serif; color: #14201B; height: 100vh; display: flex; overflow: hidden;">
+
+  <!-- ============ LEFT RAIL ============ -->
+  <nav style="width: 220px; flex: none; background: #FFFFFF; border-right: 1px solid #E7ECEA; display: flex; flex-direction: column; padding: 18px 14px;">
+    <div style="display: flex; align-items: center; gap: 11px; padding: 4px 8px 22px;">
+      <svg width="26" height="26" viewBox="0 0 34 34" fill="none"><path d="M7 11 C 13 11, 13 23, 19 23 C 25 23, 25 11, 31 11" stroke="#0E9A6E" stroke-width="3.4" stroke-linecap="round"/><path d="M3 23 C 9 23, 9 11, 15 11 C 21 11, 21 23, 27 23" stroke="#14201B" stroke-width="3.4" stroke-linecap="round" opacity="0.9"/></svg>
+      <div style="font-family:'Plus Jakarta Sans',sans-serif;font-size:16px;font-weight:700;letter-spacing:-0.02em;"><span style="color:#5E6E67;font-weight:600;">gene</span>Weave</div>
+    </div>
+
+    <div class="gw-scroll" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:18px;">
+      <div style="display:flex;flex-direction:column;gap:3px;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.1em;color:#9aa7a1;padding:4px 10px;">ASSISTANT SETUP</div>
+        <sc-for list="{{ studioNav }}" as="item" hint-placeholder-count="6">
+          <div onClick="{{ item.onClick }}" style="{{ item.style }}">
+            <span style="width:7px;height:7px;border-radius:50%;background:{{ item.dot }};flex:none;"></span>
+            <span>{{ item.label }}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:2px;">
+        <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;font-size:13px;color:#5E6E67;cursor:pointer;border-radius:10px;">Workflows</div>
+        <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;font-size:13px;color:#5E6E67;cursor:pointer;border-radius:10px;">Request handling</div>
+        <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;font-size:13px;color:#5E6E67;cursor:pointer;border-radius:10px;">Rules &amp; limits</div>
+        <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;font-size:13px;color:#5E6E67;cursor:pointer;border-radius:10px;">Connected apps</div>
+      </div>
+    </div>
+
+    <div style="border-top:1px solid #E7ECEA;padding-top:12px;display:flex;flex-direction:column;gap:2px;">
+      <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;font-size:13px;color:#5E6E67;cursor:pointer;border-radius:10px;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        Switch to Daily
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;padding:9px 12px;font-size:13px;color:#14201B;border-radius:10px;">
+        <span style="width:24px;height:24px;border-radius:50%;background:#14201B;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;">G</span>
+        Giby · Admin
+      </div>
+    </div>
+  </nav>
+
+  <!-- ============ COLLECTION PANE ============ -->
+  <section style="width: 360px; flex: none; background: #FFFFFF; border-right: 1px solid #E7ECEA; display: flex; flex-direction: column;">
+    <header style="padding: 22px 22px 16px; display: flex; flex-direction: column; gap: 16px; border-bottom: 1px solid #E7ECEA;">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <div style="display:flex;align-items:baseline;gap:10px;">
+          <h1 style="font-family:'Plus Jakarta Sans',sans-serif;font-size:20px;font-weight:700;letter-spacing:-0.02em;margin:0;">Building blocks</h1>
+          <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#9aa7a1;">{{ count }}</span>
+        </div>
+        <button onClick="{{ newRecord }}" style="font-family:'Inter',sans-serif;font-size:13px;font-weight:600;color:#fff;background:#0E9A6E;border:none;border-radius:999px;padding:8px 15px;cursor:pointer;display:flex;align-items:center;gap:6px;">
+          <span style="font-size:15px;line-height:1;">+</span> New
+        </button>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <div style="flex:1;display:flex;align-items:center;gap:8px;background:#F6F8F7;border:1px solid #E7ECEA;border-radius:10px;padding:8px 12px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9aa7a1" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3-3"/></svg>
+          <span style="font-size:13px;color:#9aa7a1;">Search building blocks</span>
+        </div>
+        <button style="background:#F6F8F7;border:1px solid #E7ECEA;border-radius:10px;padding:0 11px;cursor:pointer;color:#5E6E67;display:flex;align-items:center;gap:6px;font-size:13px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 5h18M6 12h12M10 19h4"/></svg>
+        </button>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.08em;color:#9aa7a1;">
+        <span style="flex:1;">NAME</span>
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#c2cec8" stroke-width="2.5" stroke-linecap="round"><path d="m6 15 6 6 6-6"/></svg>
+        <span style="width:54px;text-align:right;">STATUS</span>
+      </div>
+    </header>
+
+    <div class="gw-scroll" style="flex:1;overflow-y:auto;padding:8px;">
+      <sc-for list="{{ rows }}" as="row" hint-placeholder-count="4">
+        <div onClick="{{ row.onClick }}" style="{{ row.rowStyle }}">
+          <span style="width:8px;height:8px;border-radius:50%;background:{{ row.statusDot }};flex:none;"></span>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;">
+            <div style="font-size:14px;font-weight:500;color:#14201B;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ row.name }}</div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#9aa7a1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ row.key }}</div>
+          </div>
+          <span style="{{ row.pillStyle }}">{{ row.pillText }}</span>
+        </div>
+      </sc-for>
+    </div>
+
+    <footer style="border-top:1px solid #E7ECEA;padding:12px 22px;display:flex;align-items:center;justify-content:space-between;">
+      <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#9aa7a1;">{{ rangeLabel }}</span>
+      <div style="display:flex;gap:4px;">
+        <button style="width:28px;height:28px;border:1px solid #E7ECEA;border-radius:8px;background:#fff;color:#c2cec8;cursor:default;">‹</button>
+        <button style="width:28px;height:28px;border:1px solid #E7ECEA;border-radius:8px;background:#fff;color:#c2cec8;cursor:default;">›</button>
+      </div>
+    </footer>
+  </section>
+
+  <!-- ============ RECORD EDITOR PANE ============ -->
+  <section style="flex:1;min-width:0;display:flex;flex-direction:column;background:#F6F8F7;">
+    <header style="background:#FFFFFF;border-bottom:1px solid #E7ECEA;padding:18px 32px;display:flex;align-items:center;justify-content:space-between;gap:16px;">
+      <div style="display:flex;flex-direction:column;gap:3px;min-width:0;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.08em;color:#9aa7a1;">{{ editorEyebrow }}</div>
+        <h2 style="font-family:'Plus Jakarta Sans',sans-serif;font-size:19px;font-weight:700;letter-spacing:-0.02em;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ sel.name }}</h2>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex:none;">
+        <button style="width:36px;height:36px;border:1px solid #E7ECEA;border-radius:10px;background:#fff;color:#5E6E67;cursor:pointer;font-size:17px;line-height:1;">⋯</button>
+      </div>
+    </header>
+
+    <div class="gw-scroll" style="flex:1;overflow-y:auto;padding:32px;">
+      <div style="max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:36px;">
+
+        <!-- IDENTITY -->
+        <div style="display:flex;flex-direction:column;gap:20px;">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.1em;color:#0E9A6E;border-bottom:1px solid #E7ECEA;padding-bottom:10px;">BASICS</div>
+          <div style="display:flex;flex-direction:column;gap:7px;">
+            <label style="font-size:13px;font-weight:600;color:#14201B;">Shortcut</label>
+            <input value="{{ sel.key }}" onChange="{{ onKey }}" style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#14201B;background:#fff;border:1px solid #E7ECEA;border-radius:10px;padding:11px 13px;outline:none;" />
+            <span style="font-size:12px;color:#5E6E67;">Drop this block into any instruction by typing <span style="font-family:'JetBrains Mono',monospace;color:#0B7A57;">{{ keyHint }}</span></span>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:7px;">
+            <label style="font-size:13px;font-weight:600;color:#14201B;">Name</label>
+            <input value="{{ sel.name }}" onChange="{{ onName }}" style="font-size:14px;color:#14201B;background:#fff;border:1px solid #E7ECEA;border-radius:10px;padding:11px 13px;outline:none;" />
+          </div>
+        </div>
+
+        <!-- CONTENT -->
+        <div style="display:flex;flex-direction:column;gap:20px;">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.1em;color:#0E9A6E;border-bottom:1px solid #E7ECEA;padding-bottom:10px;">THE BLOCK</div>
+          <div style="display:flex;flex-direction:column;gap:7px;">
+            <label style="font-size:13px;font-weight:600;color:#14201B;">What it's for</label>
+            <textarea value="{{ sel.description }}" onChange="{{ onDesc }}" rows="3" style="font-size:14px;line-height:1.6;color:#14201B;background:#fff;border:1px solid #E7ECEA;border-radius:10px;padding:11px 13px;outline:none;resize:vertical;"></textarea>
+            <span style="font-size:12px;color:#5E6E67;">A short, plain summary of what this block does.</span>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:7px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <label style="font-size:13px;font-weight:600;color:#14201B;">Block text</label>
+              <button style="font-size:11px;color:#5E6E67;background:#fff;border:1px solid #E7ECEA;border-radius:7px;padding:4px 9px;cursor:pointer;display:flex;align-items:center;gap:5px;">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+                Focus
+              </button>
+            </div>
+            <div style="background:#14201B;border-radius:10px;overflow:hidden;border:1px solid #14201B;">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-bottom:1px solid #243630;">
+                <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#6f857b;letter-spacing:0.08em;">MARKDOWN</span>
+                <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#6f857b;">{{ contentChars }} chars</span>
+              </div>
+              <textarea value="{{ sel.content }}" onChange="{{ onContent }}" rows="6" style="width:100%;display:block;font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:1.7;color:#cfe8dd;background:#14201B;border:none;padding:14px;outline:none;resize:vertical;"></textarea>
+            </div>
+          </div>
+        </div>
+
+        <!-- METADATA -->
+        <div style="display:flex;flex-direction:column;gap:20px;">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.1em;color:#0E9A6E;border-bottom:1px solid #E7ECEA;padding-bottom:10px;">DETAILS</div>
+          <!-- variables JSON -->
+          <div style="display:flex;flex-direction:column;gap:7px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <label style="font-size:13px;font-weight:600;color:#14201B;">Fill-in values</label>
+              <button onClick="{{ formatJson }}" style="font-size:11px;color:#0B7A57;background:#fff;border:1px solid #DCEFE5;border-radius:7px;padding:4px 9px;cursor:pointer;">Format</button>
+            </div>
+            <textarea value="{{ sel.variables }}" onChange="{{ onVars }}" rows="4" style="{{ jsonBoxStyle }}"></textarea>
+            <sc-if value="{{ jsonError }}" hint-placeholder-val="">
+              <span style="font-size:12px;color:#C2562B;display:flex;align-items:center;gap:6px;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg>
+                {{ jsonError }}
+              </span>
+            </sc-if>
+            <sc-if value="{{ jsonValid }}" hint-placeholder-val="">
+              <span style="font-size:12px;color:#5E6E67;">Values swapped in when the block is used · checked automatically.</span>
+            </sc-if>
+          </div>
+          <!-- tags chips -->
+          <div style="display:flex;flex-direction:column;gap:7px;">
+            <label style="font-size:13px;font-weight:600;color:#14201B;">Labels</label>
+            <div style="display:flex;flex-wrap:wrap;gap:7px;align-items:center;background:#fff;border:1px solid #E7ECEA;border-radius:10px;padding:9px 11px;">
+              <sc-for list="{{ tags }}" as="tag" hint-placeholder-count="2">
+                <span style="display:inline-flex;align-items:center;gap:6px;background:#E8F5EE;color:#0B7A57;font-size:12px;font-weight:500;padding:5px 6px 5px 11px;border-radius:999px;">
+                  {{ tag.label }}
+                  <button onClick="{{ tag.onRemove }}" style="border:none;background:#cfe8dd;color:#0B7A57;width:16px;height:16px;border-radius:50%;cursor:pointer;font-size:11px;line-height:1;display:inline-flex;align-items:center;justify-content:center;">×</button>
+                </span>
+              </sc-for>
+              <span style="font-size:13px;color:#9aa7a1;padding:5px 4px;">Type to add…</span>
+            </div>
+          </div>
+          <!-- version -->
+          <div style="display:flex;flex-direction:column;gap:7px;max-width:200px;">
+            <label style="font-size:13px;font-weight:600;color:#14201B;">Version</label>
+            <input value="{{ sel.version }}" onChange="{{ onVersion }}" style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#14201B;background:#fff;border:1px solid #E7ECEA;border-radius:10px;padding:11px 13px;outline:none;" />
+          </div>
+        </div>
+
+        <!-- STATUS -->
+        <div style="display:flex;flex-direction:column;gap:20px;">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.1em;color:#0E9A6E;border-bottom:1px solid #E7ECEA;padding-bottom:10px;">AVAILABILITY</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;background:#fff;border:1px solid #E7ECEA;border-radius:12px;padding:16px 18px;">
+            <div style="display:flex;flex-direction:column;gap:3px;">
+              <span style="font-size:14px;font-weight:600;color:#14201B;">Active</span>
+              <span style="font-size:12px;color:#5E6E67;">When off, this block is skipped when instructions are put together.</span>
+            </div>
+            <div onClick="{{ toggleEnabled }}" style="{{ toggleTrackStyle }}">
+              <span style="{{ toggleKnobStyle }}"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- danger zone -->
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border:1px solid #F0E0D5;border-radius:12px;background:#FCF7F2;">
+          <div style="display:flex;flex-direction:column;gap:3px;">
+            <span style="font-size:13px;font-weight:600;color:#A8551F;">Delete building block</span>
+            <span style="font-size:12px;color:#9c7d68;">This can't be undone.</span>
+          </div>
+          <button style="font-size:13px;font-weight:600;color:#A8551F;background:#fff;border:1px solid #EBD3C2;border-radius:999px;padding:8px 16px;cursor:pointer;">Delete</button>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- sticky action bar -->
+    <footer style="background:#FFFFFF;border-top:1px solid #E7ECEA;padding:14px 32px;display:flex;align-items:center;justify-content:space-between;gap:16px;">
+      <span style="font-size:12px;color:{{ dirtyColor }};display:flex;align-items:center;gap:7px;">
+        <span style="width:7px;height:7px;border-radius:50%;background:{{ dirtyColor }};"></span>
+        {{ dirtyLabel }}
+      </span>
+      <div style="display:flex;gap:10px;">
+        <button onClick="{{ resetRecord }}" style="font-size:14px;font-weight:600;color:#5E6E67;background:#fff;border:1px solid #E7ECEA;border-radius:999px;padding:10px 20px;cursor:pointer;">Cancel</button>
+        <button onClick="{{ save }}" style="font-size:14px;font-weight:600;color:#fff;background:#0E9A6E;border:none;border-radius:999px;padding:10px 22px;cursor:pointer;">{{ saveLabel }}</button>
+      </div>
+    </footer>
+  </section>
+
+  <!-- saved toast -->
+  <sc-if value="{{ toast }}" hint-placeholder-val="">
+    <div style="position:fixed;bottom:84px;left:50%;transform:translateX(-50%);background:#14201B;color:#fff;font-size:13px;font-weight:500;padding:11px 20px;border-radius:999px;box-shadow:0 4px 16px rgba(20,32,27,0.2);display:flex;align-items:center;gap:9px;z-index:50;">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2FD39B" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      Saved
+    </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    const records = [
+      { id: 'sysPreamble', key: 'systemPreamble', name: 'System preamble', enabled: true, version: '2.1.0',
+        description: 'Sets the assistant\u2019s identity and ground rules at the top of every assembled prompt.',
+        content: '# Identity\nYou are geneWeave, a calm and capable assistant.\nAlways prefer clarity over completeness.\n\n## Rules\n- Never expose internal tooling.\n- Keep responses in sentence case.',
+        variables: '[\n  { "name": "userName", "type": "string" },\n  { "name": "locale", "type": "string" }\n]',
+        tags: ['core', 'identity'] },
+      { id: 'critiqueRules', key: 'critiqueRules', name: 'Critique rules', enabled: true, version: '1.4.2',
+        description: 'The checklist the model uses when critiquing its own first draft before revising.',
+        content: 'When critiquing the draft, check each of:\n1. Does it answer the actual question asked?\n2. Are all claims grounded in retrieved context?\n3. Is the tone calm and plain?\n4. Flag anything uncertain rather than guessing.',
+        variables: '[\n  { "name": "strictness", "type": "enum", "values": ["low","high"] }\n]',
+        tags: ['critique', 'quality'] },
+      { id: 'outputSchema', key: 'outputSchema', name: 'Output schema', enabled: false, version: '0.9.0',
+        description: 'Constrains the final response to a structured object when downstream systems consume it.',
+        content: 'Return ONLY valid JSON matching:\n{\n  "summary": string,\n  "actions": string[],\n  "confidence": number\n}',
+        variables: '[\n  { "name": "format", "type": "string" }\n]',
+        tags: ['output', 'json'] },
+      { id: 'toneGuide', key: 'toneGuide', name: 'Tone guide', enabled: true, version: '3.0.1',
+        description: 'Voice and microcopy guidance injected for any user-facing generation.',
+        content: 'Voice: active, plain, sentence case.\nName things by what the user controls.\nEmpty states are invitations, not placeholders.\nErrors explain the fix without apologising.',
+        variables: '[]',
+        tags: ['voice', 'copy'] },
+    ];
+    this.pristine = JSON.parse(JSON.stringify(records));
+    this.state = { records, selectedId: 'critiqueRules', toast: false };
+  }
+
+  get sel() { return this.state.records.find(r => r.id === this.state.selectedId); }
+  get pristineSel() { return this.pristine.find(r => r.id === this.state.selectedId); }
+
+  patch(field, value) {
+    this.setState(s => ({
+      records: s.records.map(r => r.id === s.selectedId ? { ...r, [field]: value } : r)
+    }));
+  }
+
+  select(id) { this.setState({ selectedId: id, toast: false }); }
+
+  isDirty() {
+    const p = this.pristineSel;
+    if (!p) return true;
+    return JSON.stringify(p) !== JSON.stringify(this.sel);
+  }
+
+  validateJson(str) {
+    try { JSON.parse(str); return null; }
+    catch (e) { return 'Variables must be valid JSON \u2014 ' + e.message.replace(/^JSON\.parse:\s*/, '').toLowerCase(); }
+  }
+
+  renderVals() {
+    const sel = this.sel || {};
+    const records = this.state.records;
+    const jsonError = this.validateJson(sel.variables || '');
+    const dirty = this.isDirty();
+
+    const studio = [
+      { id: 'prompts', label: 'Instructions' },
+      { id: 'versions', label: 'Version history' },
+      { id: 'fragments', label: 'Building blocks', active: true },
+      { id: 'contracts', label: 'Response formats' },
+      { id: 'strategies', label: 'Thinking styles' },
+      { id: 'optimizers', label: 'Auto-tuning' },
+    ];
+    const studioNav = studio.map(n => ({
+      label: n.label,
+      dot: n.active ? '#0E9A6E' : 'transparent',
+      style: 'display:flex;align-items:center;gap:10px;padding:9px 12px;font-size:13px;border-radius:10px;cursor:pointer;'
+        + (n.active ? 'background:#E8F5EE;color:#0B7A57;font-weight:600;' : 'color:#5E6E67;'),
+      onClick: () => {},
+    }));
+
+    const rows = records.map(r => {
+      const active = r.id === this.state.selectedId;
+      const on = r.enabled;
+      return {
+        name: r.name,
+        key: r.key,
+        statusDot: on ? '#0E9A6E' : '#C9D6D0',
+        rowStyle: 'display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:12px;cursor:pointer;margin-bottom:2px;'
+          + (active ? 'background:#E8F5EE;box-shadow:inset 2px 0 0 #0E9A6E;' : 'background:transparent;'),
+        pillText: on ? 'On' : 'Off',
+        pillStyle: 'flex:none;font-size:11px;font-weight:600;padding:3px 10px;border-radius:999px;'
+          + (on ? 'background:#E8F5EE;color:#0B7A57;' : 'background:#F0F2F1;color:#9aa7a1;'),
+        onClick: () => this.select(r.id),
+      };
+    });
+
+    const tags = (sel.tags || []).map((t, i) => ({
+      label: t,
+      onRemove: () => this.patch('tags', sel.tags.filter((_, j) => j !== i)),
+    }));
+
+    const toggleTrackStyle = 'width:44px;height:26px;border-radius:999px;cursor:pointer;flex:none;position:relative;transition:background .18s ease;background:'
+      + (sel.enabled ? '#0E9A6E' : '#D5DEDA') + ';';
+    const toggleKnobStyle = 'position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.2);transition:transform .18s ease;transform:translateX('
+      + (sel.enabled ? '18px' : '0') + ');';
+
+    return {
+      studioNav,
+      rows,
+      count: records.length,
+      rangeLabel: '1\u2013' + records.length + ' of ' + records.length,
+      sel,
+      editorEyebrow: 'ASSISTANT SETUP / BUILDING BLOCKS',
+      keyHint: '{{>' + (sel.key || '') + '}}',
+      contentChars: (sel.content || '').length,
+      tags,
+      jsonError,
+      jsonValid: !jsonError,
+      jsonBoxStyle: 'font-family:\'JetBrains Mono\',monospace;font-size:12.5px;line-height:1.7;color:#14201B;background:#fff;border-radius:10px;padding:12px 13px;outline:none;resize:vertical;border:1px solid '
+        + (jsonError ? '#E0B49C' : '#E7ECEA') + ';',
+      toggleTrackStyle,
+      toggleKnobStyle,
+      dirtyColor: dirty ? '#D98A3D' : '#9aa7a1',
+      dirtyLabel: dirty ? 'Unsaved changes' : 'All changes saved',
+      saveLabel: dirty ? 'Save' : 'Saved',
+      toast: this.state.toast,
+
+      onKey: (e) => this.patch('key', e.target.value),
+      onName: (e) => this.patch('name', e.target.value),
+      onDesc: (e) => this.patch('description', e.target.value),
+      onContent: (e) => this.patch('content', e.target.value),
+      onVars: (e) => this.patch('variables', e.target.value),
+      onVersion: (e) => this.patch('version', e.target.value),
+      formatJson: () => {
+        try { this.patch('variables', JSON.stringify(JSON.parse(sel.variables), null, 2)); } catch (e) {}
+      },
+      toggleEnabled: () => this.patch('enabled', !sel.enabled),
+      newRecord: () => {
+        const id = 'new' + Date.now();
+        const rec = { id, key: 'newBlock', name: 'Untitled block', enabled: false, version: '0.1.0',
+          description: '', content: '', variables: '[]', tags: [] };
+        this.pristine.push(JSON.parse(JSON.stringify(rec)));
+        this.setState(s => ({ records: [...s.records, rec], selectedId: id, toast: false }));
+      },
+      resetRecord: () => {
+        const p = JSON.parse(JSON.stringify(this.pristineSel));
+        this.setState(s => ({ records: s.records.map(r => r.id === s.selectedId ? p : r) }));
+      },
+      save: () => {
+        if (jsonError) return;
+        this.pristine = this.pristine.map(r => r.id === this.state.selectedId ? JSON.parse(JSON.stringify(this.sel)) : r);
+        this.setState({ toast: true });
+        clearTimeout(this._t);
+        this._t = setTimeout(() => this.setState({ toast: false }), 2200);
+      },
+    };
+  }
+}
+</script>
+</body>
+</html>

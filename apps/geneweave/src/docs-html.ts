@@ -191,7 +191,7 @@ ${code('text', `Applications (geneweave, your app)
   └─ Integration    @weaveintel/providers · @weaveintel/mcp-client · @weaveintel/mcp-server
                     @weaveintel/tools-* · @weaveintel/sandbox · @weaveintel/oauth
   └─ Platform       @weaveintel/security · @weaveintel/tenancy · @weaveintel/compliance
-                    @weaveintel/encryption · @weaveintel/durability · @weaveintel/persistence
+                    @weaveintel/encryption · @weaveintel/resilience · @weaveintel/persistence
   └─ Contracts      @weaveintel/core  (zero runtime dependencies)`)}
 ${callout('info', '🔌', 'Where "run plumbing" lives (Collaboration Phase 0).', 'A <strong>run registry</strong> (what runs exist + their status) and a <strong>run journal</strong> (the numbered, append-only log of everything a run did, so a dropped connection can resume from "event 41") are now single <em>interfaces</em> in <code>@weaveintel/core</code>. geneWeave stores them in SQL; a key-value adapter ships in core — same interface, swappable storage, no duplicate code. The one Server-Sent-Events stream parser lives there too. New to this? Think of an interface as a power socket: anything that fits the socket (SQL, key-value) works, and nothing that plugs in needs to know what is behind the wall.')}
 ${callout('tip', '👀', 'Presence — "who else is watching this run" (Collaboration Phase 1).', 'Open a run and other viewers (and the AI agent itself!) show up live, like the avatars in a shared document. The browser of each viewer sends a tiny "still here" ping (a <strong>heartbeat</strong>) every ~15 seconds; if the pings stop for ~30 seconds, that viewer is removed. The current list is broadcast to everyone over the same live stream as a <code>presence.update</code> event and lands in the client as <code>vm.presence</code>. It is stored in a small <code>run_presence</code> table that only ever holds "who is here right now" — it is deliberately kept OUT of the permanent run log (presence is throw-away, not history). The running agent appears as a peer with a "working" status while it produces output. Your identity always comes from your login, never from the browser, so nobody can pretend to be someone else.')}
@@ -3912,12 +3912,12 @@ ${exlinks([
 function sDurability(): string {
   return `
 <div class="pkg-hdr">
-  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/durability</span></div>
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/resilience</span></div>
   <h1 class="pkg-title">Durability</h1>
   <p class="pkg-desc">Operational durability primitives: idempotency keys, dead-letter queue, retry budgets, health checks, and backpressure. All are runtime-aware — pass a <code>WeaveRuntime</code> with a persistence slot and every primitive automatically uses durable KV storage. Without a runtime, the zero-config in-memory path is the default.</p>
 </div>
 
-${callout('info', '💾', 'Canonical import.', 'Import from <code>@weaveintel/durability</code> — it is the renamed canonical package that re-exports everything from <code>@weaveintel/reliability</code>. New code should not import from reliability directly.')}
+${callout('info', '💾', 'One home for resilience.', 'These operational-durability primitives (idempotency, dead-letter queue, retry budgets, health checks, backpressure) now live in <code>@weaveintel/resilience</code>, alongside the live per-call guards (circuit breaker, rate limiter, retry policy). They used to be split across three tiny packages — <code>reliability</code>, <code>durability</code> and <code>resilience</code> — which was more names than concepts. Same behaviour, one import.')}
 
 ${featureCards([
   ['Dead-letter queue', 'Captures failed operations for manual retry or investigation. Durable variant survives process restart.'],
@@ -3935,7 +3935,7 @@ ${exlinks([
 ${section('dur-dlq', 'Dead-Letter Queue', `
 <p>The DLQ captures failed operations. The durable variant persists records to <code>runtime.persistence.kv</code> so entries survive restarts. Both sync and async interfaces are available.</p>
 
-${code('typescript', `import { createDurableDeadLetterQueue } from '@weaveintel/durability';
+${code('typescript', `import { createDurableDeadLetterQueue } from '@weaveintel/resilience';
 import { weaveRuntime } from '@weaveintel/core';
 import { weaveSqlitePersistence } from '@weaveintel/persistence';
 
@@ -3965,7 +3965,7 @@ const ok = await dlq.retry(record.id, async (payload) => {
 
 // Clear resolved records
 const removed = await dlq.clear();
-console.log(\`Cleared \${removed} resolved records\`);`, ['@weaveintel/durability', '@weaveintel/core', '@weaveintel/persistence'])}
+console.log(\`Cleared \${removed} resolved records\`);`, ['@weaveintel/resilience', '@weaveintel/core', '@weaveintel/persistence'])}
 
 ${params([
   ['runtime', 'WeaveRuntime', 'optional', 'When supplied and persistence is configured, records survive restarts. Falls back to in-memory.'],
@@ -3974,7 +3974,7 @@ ${params([
 `)}
 
 ${section('dur-idempotency', 'Idempotency Keys', `
-${code('typescript', `import { createIdempotencyStore, createDurableIdempotencyStore } from '@weaveintel/durability';
+${code('typescript', `import { createIdempotencyStore, createDurableIdempotencyStore } from '@weaveintel/resilience';
 
 // In-memory (test / dev)
 const store = createIdempotencyStore();
@@ -3994,13 +3994,13 @@ if (existing) {
 }
 
 const result = await stripe.charge(orderId, amount);
-await durableStore.set(key, { result, completedAt: new Date().toISOString() });`, ['@weaveintel/durability'])}
+await durableStore.set(key, { result, completedAt: new Date().toISOString() });`, ['@weaveintel/resilience'])}
 `)}
 
 ${section('dur-retry-budget', 'Retry Budget', `
 <p>A shared retry budget prevents a single hot code path from burning all retry capacity. Unlike per-call retry policies, the budget is a process-wide counter.</p>
 
-${code('typescript', `import { createRetryBudget } from '@weaveintel/durability';
+${code('typescript', `import { createRetryBudget } from '@weaveintel/resilience';
 
 // Shared across all callers that import this instance
 const budget = createRetryBudget({
@@ -4013,11 +4013,11 @@ const budget = createRetryBudget({
 // Every caller uses the same budget — once exhausted, retries stop
 const result = await budget.execute(async () => {
   return fetch('https://api.example.com/data');
-});`, ['@weaveintel/durability'])}
+});`, ['@weaveintel/resilience'])}
 `)}
 
 ${section('dur-health', 'Health Checks', `
-${code('typescript', `import { createHealthRegistry, createHealthCheck } from '@weaveintel/durability';
+${code('typescript', `import { createHealthRegistry, createHealthCheck } from '@weaveintel/resilience';
 
 const health = createHealthRegistry();
 
@@ -4036,7 +4036,7 @@ app.get('/health', async (req, res) => {
   const result = await health.check();
   res.status(result.status === 'healthy' ? 200 : 503).json(result);
 });
-// { status: 'healthy', checks: { database: 'healthy', redis: 'healthy' } }`, ['@weaveintel/durability'])}
+// { status: 'healthy', checks: { database: 'healthy', redis: 'healthy' } }`, ['@weaveintel/resilience'])}
 `)}`;
 }
 

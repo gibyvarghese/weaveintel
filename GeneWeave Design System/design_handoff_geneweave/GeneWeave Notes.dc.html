@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Caveat:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  body { margin: 0; background: #F6F8F7; overflow: hidden; }
+  * { box-sizing: border-box; }
+  ::placeholder { color: #9aa7a1; }
+  @keyframes gwpulse { 0%,100% { box-shadow: 0 0 0 0 rgba(14,154,110,0); } 50% { box-shadow: 0 0 0 6px rgba(14,154,110,0.10); } }
+  @keyframes gwdraw { to { stroke-dashoffset: 0; } }
+  .gw-scroll::-webkit-scrollbar { width: 10px; }
+  .gw-scroll::-webkit-scrollbar-thumb { background: #E1E8E5; border-radius: 999px; border: 3px solid transparent; background-clip: padding-box; }
+</style>
+</helmet>
+
+<div style="font-family: 'Inter', sans-serif; color: #14201B; height: 100vh; display: flex; overflow: hidden; background: #F6F8F7;">
+
+  <!-- ============ LEFT RAIL ============ -->
+  <nav style="width: 248px; flex: none; background: #FFFFFF; border-right: 1px solid #E7ECEA; display: flex; flex-direction: column; padding: 16px 12px;">
+    <div style="display:flex;align-items:center;gap:10px;padding:6px 8px 16px;">
+      <svg width="24" height="24" viewBox="0 0 34 34" fill="none"><path d="M7 11 C 13 11, 13 23, 19 23 C 25 23, 25 11, 31 11" stroke="#0E9A6E" stroke-width="3.4" stroke-linecap="round"/><path d="M3 23 C 9 23, 9 11, 15 11 C 21 11, 21 23, 27 23" stroke="#14201B" stroke-width="3.4" stroke-linecap="round" opacity="0.9"/></svg>
+      <div style="font-family:'Plus Jakarta Sans',sans-serif;font-size:15px;font-weight:700;letter-spacing:-0.02em;"><span style="color:#5E6E67;font-weight:600;">gene</span>Weave</div>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:8px;background:#F6F8F7;border:1px solid #E7ECEA;border-radius:10px;padding:8px 11px;margin-bottom:18px;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9aa7a1" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3-3"/></svg>
+      <span style="font-size:13px;color:#9aa7a1;">Search notes</span>
+      <span style="margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:10px;color:#c2cec8;border:1px solid #E7ECEA;border-radius:5px;padding:2px 5px;">⌘K</span>
+    </div>
+
+    <div class="gw-scroll" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:3px;">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.1em;color:#9aa7a1;padding:4px 10px 6px;">NOTEBOOKS</div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;font-size:13px;color:#5E6E67;border-radius:9px;cursor:pointer;">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9aa7a1" stroke-width="2.5" stroke-linecap="round"><path d="m9 6 6 6-6 6"/></svg>
+        <span>📓</span> Personal
+      </div>
+      <div style="display:flex;align-items:center;gap:9px;padding:8px 10px;font-size:13px;color:#14201B;font-weight:600;border-radius:9px;cursor:pointer;">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#5E6E67" stroke-width="2.5" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg>
+        <span>💼</span> Work
+      </div>
+      <div style="display:flex;flex-direction:column;gap:2px;padding-left:14px;border-left:1px solid #E7ECEA;margin-left:18px;">
+        <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;font-size:13px;color:#0B7A57;background:#E8F5EE;border-radius:9px;cursor:pointer;font-weight:500;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#0E9A6E" stroke-width="2" stroke-linecap="round"><path d="M4 4h12l4 4v12H4z"/><path d="M8 9h6M8 13h8M8 17h5"/></svg>
+          Matter &amp; its states
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;font-size:13px;color:#5E6E67;border-radius:9px;cursor:pointer;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9aa7a1" stroke-width="2" stroke-linecap="round"><path d="M4 4h12l4 4v12H4z"/><path d="M8 9h6M8 13h8M8 17h5"/></svg>
+          Standup notes
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;font-size:13px;color:#5E6E67;border-radius:9px;cursor:pointer;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9aa7a1" stroke-width="2" stroke-linecap="round"><path d="M4 4h12l4 4v12H4z"/><path d="M8 9h6M8 13h8M8 17h5"/></svg>
+          Ideas
+        </div>
+      </div>
+    </div>
+
+    <button style="display:flex;align-items:center;gap:9px;font-family:'Inter',sans-serif;font-size:13px;font-weight:600;color:#0B7A57;background:#fff;border:1px solid #DCEFE5;border-radius:10px;padding:10px 12px;cursor:pointer;margin-top:8px;">
+      <span style="font-size:15px;line-height:1;">+</span> New note
+      <span style="margin-left:auto;font-size:11px;color:#9aa7a1;font-weight:400;">templates</span>
+    </button>
+  </nav>
+
+  <!-- ============ CENTRE CANVAS ============ -->
+  <main style="flex:1;min-width:0;display:flex;flex-direction:column;{{ canvasBgStyle }}">
+    <!-- top bar -->
+    <header style="display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 28px;border-bottom:1px solid #E7ECEA;background:rgba(255,255,255,0.6);backdrop-filter:blur(6px);">
+      <div style="display:flex;align-items:center;gap:8px;font-size:13px;color:#9aa7a1;">
+        <span>Work</span><span style="color:#c2cec8;">/</span><span style="color:#14201B;font-weight:500;">Matter &amp; its states</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <!-- presence -->
+        <div style="display:flex;align-items:center;">
+          <span style="width:26px;height:26px;border-radius:50%;background:#14201B;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;border:2px solid #fff;">G</span>
+          <span style="width:26px;height:26px;border-radius:50%;background:#E8F5EE;display:inline-flex;align-items:center;justify-content:center;border:2px solid #fff;margin-left:-8px;">
+            <svg width="13" height="13" viewBox="0 0 34 34" fill="none"><path d="M7 11 C 13 11, 13 23, 19 23 C 25 23, 25 11, 31 11" stroke="#0E9A6E" stroke-width="3.6" stroke-linecap="round"/><path d="M3 23 C 9 23, 9 11, 15 11 C 21 11, 21 23, 27 23" stroke="#0B7A57" stroke-width="3.6" stroke-linecap="round" opacity="0.55"/></svg>
+          </span>
+        </div>
+        <!-- theme toggle -->
+        <div style="display:flex;background:#F0F2F1;border-radius:999px;padding:3px;">
+          <button onClick="{{ setPro }}" style="{{ proTabStyle }}">Pro</button>
+          <button onClick="{{ setCreative }}" style="{{ creativeTabStyle }}">Creative</button>
+        </div>
+        <button style="font-size:13px;font-weight:600;color:#fff;background:#0E9A6E;border:none;border-radius:999px;padding:8px 16px;cursor:pointer;display:flex;align-items:center;gap:6px;"><span style="font-size:14px;line-height:1;">+</span> Insert</button>
+      </div>
+    </header>
+
+    <!-- tool strip -->
+    <div style="display:flex;align-items:center;gap:6px;padding:10px 28px;border-bottom:1px solid #E7ECEA;background:rgba(255,255,255,0.4);">
+      <div style="display:flex;align-items:center;gap:2px;padding-right:10px;border-right:1px solid #E7ECEA;">
+        <span style="width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border-radius:7px;font-weight:700;font-size:14px;color:#5E6E67;cursor:pointer;">B</span>
+        <span style="width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border-radius:7px;font-style:italic;font-size:14px;color:#5E6E67;cursor:pointer;font-family:Georgia,serif;">I</span>
+        <span style="width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border-radius:7px;font-size:13px;color:#5E6E67;cursor:pointer;text-decoration:underline;">U</span>
+      </div>
+      <!-- highlighters -->
+      <div style="display:flex;align-items:center;gap:6px;padding:0 10px;border-right:1px solid #E7ECEA;">
+        <span style="width:18px;height:18px;border-radius:50%;background:#FAC775;cursor:pointer;box-shadow:0 0 0 2px #fff,0 0 0 3px #0E9A6E;"></span>
+        <span style="width:18px;height:18px;border-radius:50%;background:#F4C0D1;cursor:pointer;"></span>
+        <span style="width:18px;height:18px;border-radius:50%;background:#9FE1CB;cursor:pointer;"></span>
+        <span style="width:18px;height:18px;border-radius:50%;background:#B5D4F4;cursor:pointer;"></span>
+      </div>
+      <!-- pen / shapes -->
+      <div style="display:flex;align-items:center;gap:2px;padding:0 10px;border-right:1px solid #E7ECEA;">
+        <span style="width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border-radius:7px;cursor:pointer;color:#5E6E67;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18z"/></svg></span>
+        <span style="width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border-radius:7px;cursor:pointer;color:#5E6E67;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/></svg></span>
+        <sc-if value="{{ creativeOn }}" hint-placeholder-val="">
+          <span style="width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border-radius:7px;cursor:pointer;font-size:15px;">✨</span>
+        </sc-if>
+      </div>
+      <!-- AI -->
+      <button style="display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:#0B7A57;background:#E8F5EE;border:1px solid #DCEFE5;border-radius:8px;padding:6px 12px;cursor:pointer;margin-left:auto;">
+        <svg width="14" height="14" viewBox="0 0 34 34" fill="none"><path d="M7 11 C 13 11, 13 23, 19 23 C 25 23, 25 11, 31 11" stroke="#0E9A6E" stroke-width="3.6" stroke-linecap="round"/><path d="M3 23 C 9 23, 9 11, 15 11 C 21 11, 21 23, 27 23" stroke="#0B7A57" stroke-width="3.6" stroke-linecap="round" opacity="0.55"/></svg>
+        Ask AI
+      </button>
+    </div>
+
+    <!-- the page -->
+    <div class="gw-scroll" style="flex:1;overflow-y:auto;padding:48px 28px 120px;">
+      <article style="max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:22px;position:relative;">
+
+        <!-- title -->
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <h1 style="{{ titleStyle }}">Matter &amp; its states</h1>
+          <div style="display:flex;align-items:center;gap:10px;font-size:12px;color:#9aa7a1;">
+            <span style="font-family:'JetBrains Mono',monospace;">Edited 2m ago</span>
+            <span>·</span>
+            <span style="display:inline-flex;align-items:center;gap:5px;"><span style="width:6px;height:6px;border-radius:50%;background:#0E9A6E;"></span>geneWeave AI is here</span>
+          </div>
+        </div>
+
+        <!-- paragraph w/ highlighter underline + selection card -->
+        <div style="position:relative;">
+          <p style="font-size:16px;line-height:1.75;color:#14201B;margin:0;">Matter is anything that has mass and takes up space. It exists in distinct <span style="{{ hlStyle }}">states</span> — solid, liquid, gas, and plasma — and changes between them when energy is added or removed. The arrangement and motion of its particles is what sets each state apart.</p>
+
+          <!-- select-text AI card -->
+          <div style="position:absolute;left:8px;top:calc(100% + 10px);width:340px;background:#FFFFFF;border:1px solid #DCEFE5;border-radius:14px;box-shadow:0 8px 28px rgba(20,32,27,0.12);padding:12px;z-index:20;">
+            <div style="display:flex;align-items:center;gap:9px;padding:4px 6px 10px;border-bottom:1px solid #F0F2F1;">
+              <svg width="15" height="15" viewBox="0 0 34 34" fill="none"><path d="M7 11 C 13 11, 13 23, 19 23 C 25 23, 25 11, 31 11" stroke="#0E9A6E" stroke-width="3.6" stroke-linecap="round"/><path d="M3 23 C 9 23, 9 11, 15 11 C 21 11, 21 23, 27 23" stroke="#0B7A57" stroke-width="3.6" stroke-linecap="round" opacity="0.55"/></svg>
+              <span style="flex:1;font-size:13px;color:#9aa7a1;">Ask AI to do anything with this…</span>
+              <span style="width:24px;height:24px;border-radius:50%;background:#0E9A6E;display:inline-flex;align-items:center;justify-content:center;color:#fff;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="6 11 12 5 18 11"/></svg></span>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;padding-top:10px;">
+              <span style="font-size:12px;color:#0B7A57;background:#E8F5EE;border-radius:999px;padding:6px 11px;cursor:pointer;">Rewrite</span>
+              <span style="font-size:12px;color:#5E6E67;background:#F6F8F7;border:1px solid #E7ECEA;border-radius:999px;padding:6px 11px;cursor:pointer;">Shorten</span>
+              <span style="font-size:12px;color:#5E6E67;background:#F6F8F7;border:1px solid #E7ECEA;border-radius:999px;padding:6px 11px;cursor:pointer;">Expand</span>
+              <span style="font-size:12px;color:#5E6E67;background:#F6F8F7;border:1px solid #E7ECEA;border-radius:999px;padding:6px 11px;cursor:pointer;">Continue</span>
+              <span style="font-size:12px;color:#0B7A57;background:#E8F5EE;border-radius:999px;padding:6px 11px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;">✦ Make a diagram</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- spacer for the floating card -->
+        <div style="height:96px;"></div>
+
+        <!-- AI mind map block -->
+        <div style="border:1.5px solid #BEE3D2;border-radius:16px;background:#F4FBF7;overflow:hidden;position:relative;">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid #DCEFE5;">
+            <span style="display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:600;color:#0B7A57;">
+              <svg width="13" height="13" viewBox="0 0 34 34" fill="none"><path d="M7 11 C 13 11, 13 23, 19 23 C 25 23, 25 11, 31 11" stroke="#0E9A6E" stroke-width="3.6" stroke-linecap="round"/><path d="M3 23 C 9 23, 9 11, 15 11 C 21 11, 21 23, 27 23" stroke="#0B7A57" stroke-width="3.6" stroke-linecap="round" opacity="0.55"/></svg>
+              geneWeave AI · mind map
+            </span>
+            <span style="display:flex;gap:6px;">
+              <span style="font-size:11px;color:#5E6E67;background:#fff;border:1px solid #DCEFE5;border-radius:7px;padding:4px 9px;cursor:pointer;">Edit nodes</span>
+              <span style="font-size:11px;color:#5E6E67;background:#fff;border:1px solid #DCEFE5;border-radius:7px;padding:4px 9px;cursor:pointer;">Make mine</span>
+            </span>
+          </div>
+          <div style="position:relative;height:240px;">
+            <svg viewBox="0 0 680 240" width="100%" height="100%" style="position:absolute;inset:0;" fill="none">
+              <path d="M300 120 C 230 110, 190 70, 150 56" stroke="#7FCBAA" stroke-width="2.5" stroke-linecap="round"/>
+              <path d="M380 120 C 450 110, 500 72, 540 58" stroke="#7FCBAA" stroke-width="2.5" stroke-linecap="round"/>
+              <path d="M380 130 C 460 150, 500 178, 542 192" stroke="#7FCBAA" stroke-width="2.5" stroke-linecap="round"/>
+              <path d="M300 130 C 230 150, 188 178, 150 192" stroke="#7FCBAA" stroke-width="2.5" stroke-linecap="round"/>
+            </svg>
+            <!-- center -->
+            <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:#0E9A6E;color:#fff;font-family:'Plus Jakarta Sans',sans-serif;font-weight:700;font-size:15px;padding:12px 22px;border-radius:14px;box-shadow:0 2px 8px rgba(14,154,110,0.3);">Matter</div>
+            <!-- branches -->
+            <div style="position:absolute;left:64px;top:38px;background:#fff;border:1.5px solid #BEE3D2;color:#14201B;font-size:13px;font-weight:500;padding:8px 16px;border-radius:12px;">Solid</div>
+            <div style="position:absolute;right:64px;top:38px;background:#fff;border:1.5px solid #BEE3D2;color:#14201B;font-size:13px;font-weight:500;padding:8px 16px;border-radius:12px;">Liquid</div>
+            <div style="position:absolute;right:64px;bottom:38px;background:#fff;border:1.5px solid #BEE3D2;color:#14201B;font-size:13px;font-weight:500;padding:8px 16px;border-radius:12px;">Gas</div>
+            <div style="position:absolute;left:64px;bottom:38px;background:#fff;border:1.5px solid #BEE3D2;color:#14201B;font-size:13px;font-weight:500;padding:8px 16px;border-radius:12px;">Plasma</div>
+          </div>
+        </div>
+
+        <!-- paragraph -->
+        <p style="font-size:16px;line-height:1.75;color:#14201B;margin:0;">Adding heat to a solid loosens its rigid lattice until it flows as a liquid; more energy still frees the particles entirely into a gas. These transitions are reversible — cooling reverses each step.</p>
+
+        <!-- inline diff -->
+        <div style="border:1px solid #DCEFE5;border-radius:14px;overflow:hidden;background:#fff;">
+          <div style="display:flex;align-items:center;gap:8px;padding:9px 14px;border-bottom:1px solid #F0F2F1;background:#F4FBF7;">
+            <svg width="13" height="13" viewBox="0 0 34 34" fill="none"><path d="M7 11 C 13 11, 13 23, 19 23 C 25 23, 25 11, 31 11" stroke="#0E9A6E" stroke-width="3.6" stroke-linecap="round"/><path d="M3 23 C 9 23, 9 11, 15 11 C 21 11, 21 23, 27 23" stroke="#0B7A57" stroke-width="3.6" stroke-linecap="round" opacity="0.55"/></svg>
+            <span style="font-size:12px;font-weight:600;color:#0B7A57;">AI suggested an edit</span>
+          </div>
+          <div style="padding:14px;display:flex;flex-direction:column;gap:8px;">
+            <sc-if value="{{ diffPending }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;flex-direction:column;gap:8px;">
+                <div style="font-size:15px;line-height:1.7;color:#9c6b5c;background:#FBEFEA;border-radius:8px;padding:8px 12px;text-decoration:line-through;">Plasma is the fourth one and it's like a gas but charged.</div>
+                <div style="font-size:15px;line-height:1.7;color:#14201B;background:#E8F5EE;border-radius:8px;padding:8px 12px;">Plasma, the fourth state, forms when a gas is heated enough to strip electrons from its atoms — leaving a charged, conductive cloud, as in stars and lightning.</div>
+                <div style="display:flex;gap:8px;padding-top:2px;">
+                  <button onClick="{{ accept }}" style="display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:#fff;background:#0E9A6E;border:none;border-radius:999px;padding:7px 15px;cursor:pointer;">✓ Accept</button>
+                  <button onClick="{{ reject }}" style="display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:#5E6E67;background:#fff;border:1px solid #E7ECEA;border-radius:999px;padding:7px 15px;cursor:pointer;">✕ Reject</button>
+                </div>
+              </div>
+            </sc-if>
+            <sc-if value="{{ diffAccepted }}" hint-placeholder-val="">
+              <div style="font-size:15px;line-height:1.7;color:#14201B;">Plasma, the fourth state, forms when a gas is heated enough to strip electrons from its atoms — leaving a charged, conductive cloud, as in stars and lightning. <span style="font-size:11px;color:#0B7A57;background:#E8F5EE;border-radius:999px;padding:2px 8px;white-space:nowrap;">AI edit accepted</span></div>
+            </sc-if>
+            <sc-if value="{{ diffRejected }}" hint-placeholder-val="">
+              <div style="font-size:15px;line-height:1.7;color:#14201B;">Plasma is the fourth one and it's like a gas but charged. <span style="font-size:11px;color:#9aa7a1;background:#F0F2F1;border-radius:999px;padding:2px 8px;white-space:nowrap;">kept yours</span></div>
+            </sc-if>
+          </div>
+        </div>
+
+        <!-- human ink doodle -->
+        <div style="position:relative;align-self:flex-end;margin-right:-8px;margin-top:4px;display:flex;align-items:center;gap:10px;">
+          <svg width="96" height="48" viewBox="0 0 96 48" fill="none"><path d="M4 30 C 26 6, 54 6, 76 26" stroke="#D85A30" stroke-width="2.6" stroke-linecap="round"/><path d="M76 26 l -10 -2 M76 26 l -3 -10" stroke="#D85A30" stroke-width="2.6" stroke-linecap="round"/></svg>
+          <span style="font-family:'Caveat',cursive;font-size:26px;color:#D85A30;font-weight:600;transform:rotate(-4deg);">add an example here ✦</span>
+        </div>
+        <div style="align-self:flex-end;font-family:'JetBrains Mono',monospace;font-size:11px;color:#D85A30;margin-right:8px;">you · ink</div>
+
+      </article>
+    </div>
+  </main>
+
+  <!-- ============ RIGHT RAIL ============ -->
+  <aside style="width:300px;flex:none;background:#FFFFFF;border-left:1px solid #E7ECEA;display:flex;flex-direction:column;">
+    <div style="display:flex;gap:4px;padding:14px 16px 0;">
+      <span style="font-size:13px;font-weight:600;color:#0B7A57;padding:8px 12px;border-bottom:2px solid #0E9A6E;cursor:pointer;">Assistant</span>
+      <span style="font-size:13px;color:#9aa7a1;padding:8px 12px;cursor:pointer;">Outline</span>
+      <span style="font-size:13px;color:#9aa7a1;padding:8px 12px;cursor:pointer;">Links</span>
+    </div>
+    <div style="height:1px;background:#E7ECEA;"></div>
+
+    <div class="gw-scroll" style="flex:1;overflow-y:auto;padding:18px 16px;display:flex;flex-direction:column;gap:16px;">
+      <!-- AI participant message -->
+      <div style="display:flex;gap:9px;align-items:flex-start;">
+        <span style="flex:none;width:26px;height:26px;border-radius:50%;background:#E8F5EE;display:inline-flex;align-items:center;justify-content:center;">
+          <svg width="14" height="14" viewBox="0 0 34 34" fill="none"><path d="M7 11 C 13 11, 13 23, 19 23 C 25 23, 25 11, 31 11" stroke="#0E9A6E" stroke-width="3.6" stroke-linecap="round"/><path d="M3 23 C 9 23, 9 11, 15 11 C 21 11, 21 23, 27 23" stroke="#0B7A57" stroke-width="3.6" stroke-linecap="round" opacity="0.55"/></svg>
+        </span>
+        <div style="background:#E8F5EE;color:#14201B;font-size:13px;line-height:1.6;padding:11px 14px;border-radius:14px;border-top-left-radius:5px;">This note covers the four states well. Want me to add a short <span style="font-weight:600;">challenges &amp; transitions</span> section, or turn it into flashcards?</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;padding-left:35px;">
+        <button style="text-align:left;font-size:13px;color:#0B7A57;background:#fff;border:1px solid #DCEFE5;border-radius:10px;padding:9px 12px;cursor:pointer;">Add a transitions section</button>
+        <button style="text-align:left;font-size:13px;color:#0B7A57;background:#fff;border:1px solid #DCEFE5;border-radius:10px;padding:9px 12px;cursor:pointer;">Make flashcards</button>
+        <button style="text-align:left;font-size:13px;color:#0B7A57;background:#fff;border:1px solid #DCEFE5;border-radius:10px;padding:9px 12px;cursor:pointer;">Cite a source</button>
+      </div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#9aa7a1;display:flex;align-items:center;gap:7px;padding-left:35px;">Done · 3.1s · <span style="color:#0B7A57;cursor:pointer;">view steps ›</span></div>
+    </div>
+
+    <!-- ask composer -->
+    <div style="padding:14px 16px;border-top:1px solid #E7ECEA;">
+      <div style="display:flex;align-items:center;gap:10px;background:#F6F8F7;border:1px solid #E7ECEA;border-radius:14px;padding:11px 14px;">
+        <span style="flex:1;font-size:13px;color:#9aa7a1;">Ask this note anything…</span>
+        <span style="width:30px;height:30px;border-radius:50%;background:#0E9A6E;display:inline-flex;align-items:center;justify-content:center;color:#fff;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="6 11 12 5 18 11"/></svg></span>
+      </div>
+    </div>
+  </aside>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:&quot;100%&quot;,&quot;height&quot;:&quot;100%&quot;},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;pro&quot;,&quot;creative&quot;],&quot;default&quot;:&quot;pro&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Appearance&quot;}}">
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = {
+      theme: (props && props.theme) || 'pro',
+      diff: 'pending',
+    };
+  }
+
+  renderVals() {
+    const creativeOn = this.state.theme === 'creative';
+
+    const canvasBgStyle = creativeOn ? 'background:#FBF8F1;' : 'background:#FFFFFF;';
+
+    const titleStyle = creativeOn
+      ? "font-family:'Caveat',cursive;font-size:46px;font-weight:700;letter-spacing:0;line-height:1.1;margin:0;color:#14201B;"
+      : "font-family:'Plus Jakarta Sans',sans-serif;font-size:34px;font-weight:800;letter-spacing:-0.025em;line-height:1.15;margin:0;color:#14201B;";
+
+    const hlStyle = creativeOn
+      ? "background:linear-gradient(transparent 62%, #FAC775 62%);padding:0 1px;font-weight:600;"
+      : "background:#FCEFCF;border-radius:3px;padding:0 3px;";
+
+    const tabBase = 'font-size:12px;font-weight:600;border:none;border-radius:999px;padding:6px 14px;cursor:pointer;transition:all .15s;';
+    const proTabStyle = tabBase + (creativeOn ? 'background:transparent;color:#5E6E67;' : 'background:#fff;color:#0B7A57;box-shadow:0 1px 2px rgba(0,0,0,.08);');
+    const creativeTabStyle = tabBase + (creativeOn ? 'background:#fff;color:#0B7A57;box-shadow:0 1px 2px rgba(0,0,0,.08);' : 'background:transparent;color:#5E6E67;');
+
+    return {
+      creativeOn,
+      canvasBgStyle,
+      titleStyle,
+      hlStyle,
+      proTabStyle,
+      creativeTabStyle,
+      setPro: () => this.setState({ theme: 'pro' }),
+      setCreative: () => this.setState({ theme: 'creative' }),
+      diffPending: this.state.diff === 'pending',
+      diffAccepted: this.state.diff === 'accepted',
+      diffRejected: this.state.diff === 'rejected',
+      accept: () => this.setState({ diff: 'accepted' }),
+      reject: () => this.setState({ diff: 'rejected' }),
+    };
+  }
+}
+</script>
+</body>
+</html>

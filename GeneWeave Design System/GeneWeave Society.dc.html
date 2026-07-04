@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Caveat:wght@600;700&display=swap" rel="stylesheet">
+<style>
+  body { margin: 0; background: #F6F8F7; overflow: hidden; }
+  * { box-sizing: border-box; }
+  @keyframes gwthink { 0%,100% { transform: scale(1); opacity:.5; } 50% { transform: scale(1.18); opacity:.85; } }
+  @keyframes gwalert { 0%,100% { opacity:.4; } 50% { opacity:1; } }
+  @keyframes gwrise { from { opacity:0; transform: translateY(6px); } to { opacity:1; transform: none; } }
+  .gw-scroll::-webkit-scrollbar { width: 9px; height: 9px; }
+  .gw-scroll::-webkit-scrollbar-thumb { background: #E1E8E5; border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+</style>
+</helmet>
+
+<div style="font-family: 'Inter', sans-serif; color: #14201B; height: 100vh; display: flex; overflow: hidden; background: #F6F8F7;">
+
+  <!-- ============ LEFT RAIL ============ -->
+  <nav style="width: 256px; flex: none; background: #FFFFFF; border-right: 1px solid #E7ECEA; display: flex; flex-direction: column;">
+    <div style="display:flex;align-items:center;gap:10px;padding:16px 16px 14px;border-bottom:1px solid #E7ECEA;">
+      <svg width="24" height="24" viewBox="0 0 34 34" fill="none"><path d="M7 11 C 13 11, 13 23, 19 23 C 25 23, 25 11, 31 11" stroke="#0E9A6E" stroke-width="3.4" stroke-linecap="round"/><path d="M3 23 C 9 23, 9 11, 15 11 C 21 11, 21 23, 27 23" stroke="#14201B" stroke-width="3.4" stroke-linecap="round" opacity="0.9"/></svg>
+      <div style="display:flex;flex-direction:column;line-height:1.1;">
+        <div style="font-family:'Plus Jakarta Sans',sans-serif;font-size:15px;font-weight:700;letter-spacing:-0.02em;"><span style="color:#5E6E67;font-weight:600;">gene</span>Weave</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.12em;color:#0E9A6E;margin-top:2px;">SOCIETY · SANDBOX</div>
+      </div>
+    </div>
+
+    <div class="gw-scroll" style="flex:1;overflow-y:auto;padding:14px 12px;display:flex;flex-direction:column;gap:18px;">
+      <!-- alignment legend -->
+      <div style="display:flex;flex-direction:column;gap:9px;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.1em;color:#9aa7a1;padding:0 6px;">ALIGNMENT</div>
+        <div style="display:flex;flex-direction:column;gap:7px;padding:0 6px;">
+          <div style="display:flex;align-items:center;gap:9px;font-size:12px;color:#5E6E67;"><span style="width:10px;height:10px;border-radius:50%;background:#0E9A6E;"></span>Producers · do the work</div>
+          <div style="display:flex;align-items:center;gap:9px;font-size:12px;color:#5E6E67;"><span style="width:10px;height:10px;border-radius:50%;background:#243B33;"></span>Guardians · protect the law</div>
+          <div style="display:flex;align-items:center;gap:9px;font-size:12px;color:#5E6E67;"><span style="width:10px;height:10px;border-radius:50%;background:#D85A30;"></span>Dissidents · break the law</div>
+          <div style="display:flex;align-items:center;gap:9px;font-size:12px;color:#5E6E67;"><span style="width:10px;height:10px;border-radius:50%;background:#2F6E5B;"></span>Steward · keeps the law</div>
+        </div>
+      </div>
+
+      <!-- roster grouped by household -->
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:0 6px;">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.1em;color:#9aa7a1;">HOUSEHOLDS</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#c2cec8;">{{ count }} residents</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:13px;">
+          <sc-for list="{{ rosterGroups }}" as="g" hint-placeholder-count="4">
+            <div style="display:flex;flex-direction:column;gap:3px;">
+              <div style="display:flex;align-items:center;gap:8px;padding:0 9px 2px;">
+                <span style="font-family:'Caveat',cursive;font-size:16px;font-weight:700;color:#5E6E67;">{{ g.label }}</span>
+                <span style="flex:1;height:1px;background:#F0F2F1;"></span>
+              </div>
+              <sc-for list="{{ g.members }}" as="r" hint-placeholder-count="2">
+                <div onClick="{{ r.onClick }}" style="{{ r.style }}">
+                  <span style="width:9px;height:9px;border-radius:50%;flex:none;background:{{ r.color }};"></span>
+                  <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;">
+                    <span style="font-size:13px;font-weight:500;color:#14201B;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ r.name }}</span>
+                    <span style="font-size:11px;color:#9aa7a1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ r.title }}</span>
+                  </div>
+                  <span style="{{ r.compStyle }}">{{ r.comp }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+
+    <div style="border-top:1px solid #E7ECEA;padding:12px 16px;display:flex;align-items:center;gap:10px;">
+      <span style="width:24px;height:24px;border-radius:50%;background:#14201B;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;">G</span>
+      <span style="font-size:13px;color:#5E6E67;">Giby · Observer</span>
+    </div>
+  </nav>
+
+  <!-- ============ CENTRE ============ -->
+  <main style="flex:1;min-width:0;display:flex;flex-direction:column;background:#F6F8F7;">
+    <!-- header -->
+    <header style="display:flex;align-items:center;gap:16px;padding:14px 24px;background:#FFFFFF;border-bottom:1px solid #E7ECEA;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button onClick="{{ toggleRun }}" style="{{ playStyle }}">
+          <sc-if value="{{ running }}" hint-placeholder-val="{{ true }}"><span style="display:flex;gap:3px;"><span style="width:3px;height:12px;background:#fff;border-radius:1px;"></span><span style="width:3px;height:12px;background:#fff;border-radius:1px;"></span></span></sc-if>
+          <sc-if value="{{ paused }}" hint-placeholder-val=""><span style="width:0;height:0;border-left:11px solid #fff;border-top:7px solid transparent;border-bottom:7px solid transparent;margin-left:2px;"></span></sc-if>
+        </button>
+        <button onClick="{{ step }}" title="Step" style="width:34px;height:34px;border-radius:9px;border:1px solid #E7ECEA;background:#fff;color:#5E6E67;cursor:pointer;display:flex;align-items:center;justify-content:center;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M5 4l10 8-10 8z"/><rect x="17" y="4" width="2.5" height="16" rx="1"/></svg>
+        </button>
+        <button onClick="{{ cycleSpeed }}" style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600;color:#5E6E67;background:#F6F8F7;border:1px solid #E7ECEA;border-radius:9px;padding:0 12px;height:34px;cursor:pointer;">{{ speedLabel }}</button>
+        <button onClick="{{ toggleTies }}" style="{{ tiesBtnStyle }}">Ties</button>
+      </div>
+
+      <div style="display:flex;flex-direction:column;line-height:1.15;border-left:1px solid #E7ECEA;padding-left:18px;">
+        <div style="font-family:'Plus Jakarta Sans',sans-serif;font-size:17px;font-weight:700;letter-spacing:-0.01em;">Day {{ day }} · {{ time }}</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#9aa7a1;">tick {{ tick }} · {{ runState }}</div>
+      </div>
+
+      <div style="display:flex;gap:10px;margin-left:auto;">
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;padding:6px 13px;background:#F6F8F7;border:1px solid #E7ECEA;border-radius:10px;">
+          <span style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.06em;color:#9aa7a1;">HARMONY</span>
+          <span style="font-family:'Plus Jakarta Sans',sans-serif;font-size:16px;font-weight:700;color:#0B7A57;">{{ harmony }}%</span>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;padding:6px 13px;background:#F6F8F7;border:1px solid #E7ECEA;border-radius:10px;">
+          <span style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.06em;color:#9aa7a1;">BONDS</span>
+          <span style="font-family:'Plus Jakarta Sans',sans-serif;font-size:16px;font-weight:700;color:#14201B;">{{ bonds }}</span>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;padding:6px 13px;background:#FCF7F2;border:1px solid #F0E0D5;border-radius:10px;">
+          <span style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.06em;color:#C2885A;">VIOLATIONS</span>
+          <span style="font-family:'Plus Jakarta Sans',sans-serif;font-size:16px;font-weight:700;color:#C2562B;">{{ violations }}</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- the living map -->
+    <div style="flex:1;min-height:0;position:relative;overflow:hidden;background:radial-gradient(circle at 50% 38%, #FCFBF6 0%, #F4F2EA 70%, #EEEDE4 100%);">
+      <!-- district zones -->
+      <sc-for list="{{ zones }}" as="z" hint-placeholder-count="6">
+        <div style="{{ z.style }}">
+          <span style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.12em;color:#A9A695;background:rgba(255,255,255,0.6);padding:2px 7px;border-radius:5px;">{{ z.label }}</span>
+        </div>
+      </sc-for>
+
+      <!-- lines: actions (ties off) or relationships (ties on) -->
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;">
+        <sc-if value="{{ tiesOff }}" hint-placeholder-val="{{ true }}">
+          <path d="M59 27 L 15 59" stroke="#243B33" stroke-width="0.3" stroke-dasharray="1.2 1.2" opacity="0.5"/>
+          <path d="M50 58 L 81 43" stroke="#0E9A6E" stroke-width="0.3" stroke-dasharray="1.2 1.2" opacity="0.45"/>
+          <path d="M50 58 L 85 60" stroke="#0E9A6E" stroke-width="0.3" stroke-dasharray="1.2 1.2" opacity="0.45"/>
+          <path d="M71 81 L 85 61" stroke="#D85A30" stroke-width="0.3" stroke-dasharray="1.2 1.2" opacity="0.55"/>
+        </sc-if>
+        <sc-if value="{{ showTies }}" hint-placeholder-val="">
+          <sc-for list="{{ tieLines }}" as="L" hint-placeholder-count="0">
+            <line x1="{{ L.x1 }}" y1="{{ L.y1 }}" x2="{{ L.x2 }}" y2="{{ L.y2 }}" stroke="{{ L.color }}" stroke-width="0.34" stroke-dasharray="{{ L.dash }}" opacity="{{ L.opacity }}"></line>
+          </sc-for>
+        </sc-if>
+      </svg>
+
+      <!-- agents -->
+      <sc-for list="{{ agents }}" as="a" hint-placeholder-count="10">
+        <div onClick="{{ a.onClick }}" style="{{ a.posStyle }}">
+          <div style="{{ a.auraStyle }}"></div>
+          <div style="{{ a.figWrap }}">
+            <svg width="30" height="38" viewBox="0 0 30 38" fill="none" style="position:relative;z-index:2;">
+              <ellipse cx="15" cy="36" rx="9" ry="2.4" fill="#000" opacity="0.07"/>
+              <circle cx="15" cy="9" r="7" fill="currentColor"/>
+              <path d="M3 35 C 3 25, 9 20.5, 15 20.5 C 21 20.5, 27 25, 27 35 Z" fill="currentColor" opacity="0.92"/>
+            </svg>
+            <span style="{{ a.alertStyle }}">!</span>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:3px;margin-top:4px;">
+            <span style="font-size:11px;font-weight:600;color:#14201B;white-space:nowrap;">{{ a.name }}</span>
+            <span style="{{ a.taskStyle }}">{{ a.task }}</span>
+          </div>
+        </div>
+      </sc-for>
+
+      <!-- relationship legend -->
+      <sc-if value="{{ showTies }}" hint-placeholder-val="">
+        <div style="position:absolute;left:14px;bottom:12px;display:flex;gap:13px;background:rgba(255,255,255,0.86);border:1px solid #E7ECEA;border-radius:10px;padding:8px 13px;">
+          <span style="display:flex;align-items:center;gap:6px;font-size:11px;color:#5E6E67;"><span style="width:14px;height:2px;background:#C9942E;border-radius:2px;"></span>Family</span>
+          <span style="display:flex;align-items:center;gap:6px;font-size:11px;color:#5E6E67;"><span style="width:14px;height:2px;background:#0E9A6E;border-radius:2px;"></span>Friend</span>
+          <span style="display:flex;align-items:center;gap:6px;font-size:11px;color:#5E6E67;"><span style="width:14px;height:2px;background:#243B33;border-radius:2px;"></span>Mentor</span>
+          <span style="display:flex;align-items:center;gap:6px;font-size:11px;color:#5E6E67;"><span style="width:14px;height:2px;background:#D85A30;border-radius:2px;"></span>Rival</span>
+        </div>
+      </sc-if>
+    </div>
+
+    <!-- live event ticker -->
+    <div style="height:148px;flex:none;background:#FFFFFF;border-top:1px solid #E7ECEA;display:flex;flex-direction:column;">
+      <div style="display:flex;align-items:center;gap:8px;padding:10px 20px 8px;">
+        <span style="width:7px;height:7px;border-radius:50%;background:#0E9A6E;{{ pulseStyle }}"></span>
+        <span style="font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:600;">Live feed</span>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#9aa7a1;">observe · reflect · plan · act</span>
+      </div>
+      <div class="gw-scroll" style="flex:1;overflow-y:auto;padding:0 20px 12px;display:flex;flex-direction:column;gap:7px;">
+        <sc-for list="{{ feed }}" as="e" hint-placeholder-count="6">
+          <div style="display:flex;align-items:center;gap:11px;animation:gwrise .3s ease;">
+            <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#c2cec8;width:42px;flex:none;">{{ e.time }}</span>
+            <span style="width:7px;height:7px;border-radius:50%;flex:none;background:{{ e.color }};"></span>
+            <span style="font-size:13px;color:#14201B;">{{ e.text }}</span>
+            <span style="{{ e.tagStyle }}">{{ e.tag }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </main>
+
+  <!-- ============ RIGHT INSPECTOR ============ -->
+  <aside style="width:344px;flex:none;background:#FFFFFF;border-left:1px solid #E7ECEA;display:flex;flex-direction:column;">
+    <div style="display:flex;gap:1px;padding:14px 14px 0;">
+      <button onClick="{{ tabInspector }}" style="{{ tabInspStyle }}">Inspector</button>
+      <button onClick="{{ tabConstitution }}" style="{{ tabConstStyle }}">Constitution</button>
+      <button onClick="{{ tabCustoms }}" style="{{ tabCustStyle }}">Customs</button>
+    </div>
+    <div style="height:1px;background:#E7ECEA;"></div>
+
+    <!-- INSPECTOR TAB -->
+    <sc-if value="{{ showInspector }}" hint-placeholder-val="{{ true }}">
+      <div class="gw-scroll" style="flex:1;overflow-y:auto;padding:18px 16px;display:flex;flex-direction:column;gap:20px;">
+        <!-- identity -->
+        <div style="display:flex;gap:13px;align-items:center;">
+          <div style="width:52px;height:52px;border-radius:14px;display:flex;align-items:center;justify-content:center;flex:none;background:{{ sel.tint }};color:{{ sel.color }};">
+            <svg width="28" height="34" viewBox="0 0 30 38" fill="none"><circle cx="15" cy="9" r="7" fill="currentColor"/><path d="M3 35 C 3 25, 9 20.5, 15 20.5 C 21 20.5, 27 25, 27 35 Z" fill="currentColor" opacity="0.92"/></svg>
+          </div>
+          <div style="flex:1;min-width:0;">
+            <div style="font-family:'Plus Jakarta Sans',sans-serif;font-size:18px;font-weight:700;letter-spacing:-0.01em;">{{ sel.name }}</div>
+            <div style="display:flex;align-items:center;gap:7px;margin-top:3px;">
+              <span style="{{ sel.roleBadge }}">{{ sel.roleLabel }}</span>
+              <span style="font-size:12px;color:#9aa7a1;">{{ sel.title }} · {{ sel.houseLabel }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- doing now -->
+        <div style="display:flex;align-items:center;gap:11px;background:{{ sel.tint }};border-radius:12px;padding:12px 14px;">
+          <span style="{{ sel.statusDotStyle }}"></span>
+          <div style="flex:1;">
+            <div style="font-size:11px;color:#5E6E67;font-family:'JetBrains Mono',monospace;letter-spacing:0.04em;">{{ sel.statusLabel }} · {{ sel.place }}</div>
+            <div style="font-size:14px;font-weight:600;color:#14201B;margin-top:2px;">{{ sel.task }}</div>
+          </div>
+        </div>
+
+        <!-- memory stream -->
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.08em;color:#0E9A6E;">MEMORY STREAM</div>
+          <div style="display:flex;flex-direction:column;gap:0;position:relative;">
+            <sc-for list="{{ sel.stream }}" as="m" hint-placeholder-count="4">
+              <div style="display:flex;gap:11px;padding-bottom:14px;position:relative;">
+                <div style="display:flex;flex-direction:column;align-items:center;flex:none;">
+                  <span style="{{ m.dotStyle }}"></span>
+                  <span style="{{ m.lineStyle }}"></span>
+                </div>
+                <div style="flex:1;margin-top:-2px;">
+                  <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.08em;color:{{ m.labelColor }};">{{ m.label }}</div>
+                  <div style="{{ m.textStyle }}">{{ m.text }}</div>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+
+        <!-- relationships -->
+        <div style="display:flex;flex-direction:column;gap:11px;">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.08em;color:#0E9A6E;">RELATIONSHIPS</div>
+          <div style="display:flex;flex-direction:column;gap:6px;">
+            <sc-for list="{{ sel.relations }}" as="rel" hint-placeholder-count="2">
+              <div onClick="{{ rel.onClick }}" style="display:flex;align-items:center;gap:11px;padding:9px 11px;border:1px solid #E7ECEA;border-radius:11px;cursor:pointer;">
+                <span style="width:7px;height:7px;border-radius:50%;flex:none;background:{{ rel.warmthColor }};"></span>
+                <div style="flex:1;min-width:0;">
+                  <span style="font-size:13px;font-weight:600;color:#14201B;">{{ rel.name }}</span>
+                  <span style="font-size:12px;color:#9aa7a1;"> · {{ rel.role }}</span>
+                </div>
+                <span style="font-size:11px;font-weight:600;color:{{ rel.color }};background:#F6F8F7;border:1px solid #E7ECEA;border-radius:999px;padding:3px 10px;">{{ rel.label }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="{{ sel.tensionStyle }}">{{ sel.tension }}</div>
+        </div>
+
+        <!-- constitution standing -->
+        <div style="display:flex;flex-direction:column;gap:11px;">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.08em;color:#0E9A6E;">STANDING</div>
+          <div style="display:flex;flex-direction:column;gap:6px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <span style="font-size:13px;color:#5E6E67;">Compliance with the constitution</span>
+              <span style="font-family:'Plus Jakarta Sans',sans-serif;font-size:15px;font-weight:700;color:{{ sel.compColor }};">{{ sel.comp }}%</span>
+            </div>
+            <div style="height:7px;border-radius:999px;background:#F0F2F1;overflow:hidden;">
+              <div style="height:100%;border-radius:999px;width:{{ sel.compPct }};background:{{ sel.compColor }};"></div>
+            </div>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;">
+            <sc-for list="{{ sel.upholds }}" as="u" hint-placeholder-count="2">
+              <span style="font-size:11px;color:#0B7A57;background:#E8F5EE;border-radius:999px;padding:4px 10px;display:inline-flex;align-items:center;gap:5px;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>{{ u.label }}</span>
+            </sc-for>
+            <sc-for list="{{ sel.breaks }}" as="b" hint-placeholder-count="0">
+              <span style="font-size:11px;color:#C2562B;background:#FBEFEA;border-radius:999px;padding:4px 10px;display:inline-flex;align-items:center;gap:5px;">⚠ {{ b.label }}</span>
+            </sc-for>
+          </div>
+        </div>
+
+        <!-- learning -->
+        <div style="display:flex;flex-direction:column;gap:11px;">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.08em;color:#0E9A6E;">LEARNING</div>
+          <div style="background:#F6F8F7;border:1px solid #E7ECEA;border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <span style="{{ sel.trendBadge }}">{{ sel.trendLabel }}</span>
+              <svg width="120" height="34" viewBox="0 0 120 34" fill="none" style="overflow:visible;">
+                <polyline points="{{ sel.spark }}" fill="none" stroke="{{ sel.compColor }}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="{{ sel.sparkCx }}" cy="{{ sel.sparkCy }}" r="2.6" fill="{{ sel.compColor }}"/>
+              </svg>
+            </div>
+            <div style="font-size:13px;line-height:1.55;color:#5E6E67;">{{ sel.learning }}</div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- CONSTITUTION TAB -->
+    <sc-if value="{{ showConstitution }}" hint-placeholder-val="">
+      <div class="gw-scroll" style="flex:1;overflow-y:auto;padding:18px 16px;display:flex;flex-direction:column;gap:14px;">
+        <div style="display:flex;gap:10px;align-items:flex-start;background:#E8F5EE;border-radius:12px;padding:13px 15px;">
+          <svg width="17" height="17" viewBox="0 0 34 34" fill="none" style="flex:none;margin-top:1px;"><path d="M7 11 C 13 11, 13 23, 19 23 C 25 23, 25 11, 31 11" stroke="#0E9A6E" stroke-width="3.6" stroke-linecap="round"/><path d="M3 23 C 9 23, 9 11, 15 11 C 21 11, 21 23, 27 23" stroke="#0B7A57" stroke-width="3.6" stroke-linecap="round" opacity="0.55"/></svg>
+          <div style="font-size:12.5px;line-height:1.55;color:#0B5C44;">The society wrote these articles itself on day one. Guardians enforce them; the steward amends them as disputes reveal gaps.</div>
+        </div>
+        <sc-for list="{{ articles }}" as="art" hint-placeholder-count="5">
+          <div style="border:1px solid #E7ECEA;border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px;">
+            <div style="display:flex;gap:11px;align-items:flex-start;">
+              <span style="font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:700;color:#0E9A6E;flex:none;width:26px;">{{ art.num }}</span>
+              <div style="flex:1;">
+                <div style="font-size:14px;font-weight:600;color:#14201B;">{{ art.title }}</div>
+                <div style="font-size:12.5px;line-height:1.5;color:#5E6E67;margin-top:3px;">{{ art.text }}</div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <div style="flex:1;height:6px;border-radius:999px;background:#F0F2F1;overflow:hidden;">
+                <div style="height:100%;border-radius:999px;width:{{ art.pct }};background:{{ art.color }};"></div>
+              </div>
+              <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:{{ art.color }};width:34px;text-align:right;">{{ art.adherence }}%</span>
+            </div>
+            <div style="{{ art.breachStyle }}">{{ art.breachText }}</div>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <!-- CUSTOMS TAB -->
+    <sc-if value="{{ showCustoms }}" hint-placeholder-val="">
+      <div class="gw-scroll" style="flex:1;overflow-y:auto;padding:18px 16px;display:flex;flex-direction:column;gap:14px;">
+        <div style="display:flex;flex-direction:column;gap:8px;background:#FBF1E6;border:1px solid #F0E0D5;border-radius:12px;padding:14px 15px;">
+          <div style="font-size:12px;font-weight:700;color:#A8551F;font-family:'Plus Jakarta Sans',sans-serif;">Where norms collide with law</div>
+          <div style="font-size:12.5px;line-height:1.55;color:#9c6b4e;">Kin shield asks Iris to protect her brother Bram; Articles I &amp; III demand she expose his forgery. She chose the law — but she hesitated. The society feels that pull even when no rule is broken.</div>
+        </div>
+        <div style="font-size:12.5px;line-height:1.55;color:#5E6E67;">Unwritten customs no one voted on, yet nearly everyone keeps. They shape the day as much as the constitution does.</div>
+        <sc-for list="{{ customs }}" as="c" hint-placeholder-count="6">
+          <div style="border:1px solid #E7ECEA;border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px;">
+            <div>
+              <div style="font-size:14px;font-weight:600;color:#14201B;">{{ c.title }}</div>
+              <div style="font-size:12.5px;line-height:1.5;color:#5E6E67;margin-top:3px;">{{ c.text }}</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <div style="flex:1;height:6px;border-radius:999px;background:#F0F2F1;overflow:hidden;">
+                <div style="height:100%;border-radius:999px;width:{{ c.pct }};background:{{ c.color }};"></div>
+              </div>
+              <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:{{ c.color }};width:34px;text-align:right;">{{ c.adherence }}%</span>
+            </div>
+            <div style="{{ c.noteStyle }}">{{ c.note }}</div>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+  </aside>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:&quot;100%&quot;,&quot;height&quot;:&quot;100%&quot;}}">
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    const C = { producer:'#0E9A6E', guardian:'#243B33', dissident:'#D85A30', dissident2:'#C9742E', steward:'#2F6E5B' };
+    const tint = { producer:'#E8F5EE', guardian:'#EDF1EF', dissident:'#FBEFEA', dissident2:'#FBF1E6', steward:'#E7F2EC' };
+    this.C = C; this.tint = tint;
+
+    this.agents = [
+      { id:'mira', name:'Mira', role:'steward', color:C.steward, tint:tint.steward, title:'Steward', place:'Town Hall', x:48, y:20,
+        task:'Convening the assembly', status:'leading', comp:98, trend:'up', spark:[70,74,80,86,90,94,98],
+        upholds:[1,2,3,4,5], breaks:[],
+        learning:'Stewarding — refines the constitution from the disputes she observes. An Article II amendment was drafted this morning.',
+        stream:[ ['OBSERVE','Two disputes today traced back to unclear surplus rules.'], ['REFLECT','Article II is sound, but its sharing terms are vague.'], ['PLAN','Draft a clarifying clause and bring it to the assembly.'], ['ACT','Convening the assembly to amend Article II.'] ] },
+      { id:'iris', name:'Iris', role:'guardian', color:C.guardian, tint:tint.guardian, title:'Auditor', place:'Town Hall', x:59, y:27,
+        task:'Auditing entry #318', status:'enforcing', comp:96, trend:'up', spark:[78,80,83,86,90,93,96],
+        upholds:[1,3], breaks:[],
+        learning:'Improving — audit precision up 18% over three days as she learns which edits precede a forgery.',
+        tension:'Bram, the forger she is auditing, is her brother. Duty pulls against blood.',
+        stream:[ ['OBSERVE','Entry #318 was edited after the ledger had closed.'], ['REFLECT','Late edits have preceded forgeries before.'], ['PLAN','Open an audit; compare against the morning copy.'], ['ACT','Flagging #318 and summoning Bram to the hall.'] ] },
+      { id:'vale', name:'Vale', role:'guardian', color:C.guardian, tint:tint.guardian, title:'Warden', place:'Watch House', x:71, y:81,
+        task:'Patrolling the market', status:'watching', comp:94, trend:'up', spark:[80,82,84,87,90,92,94],
+        upholds:[2,4], breaks:[],
+        learning:'Improving — patrol routes now cluster where breaches recur, catching hoarders earlier each cycle.',
+        tension:'Sable, the hoarder he is hunting, is his own cousin.',
+        stream:[ ['OBSERVE',"Sable's stall count dropped without any sale."], ['REFLECT','Vanishing surplus usually means a hidden cache.'], ['PLAN','Walk the market row and inspect each stall.'], ['ACT','Patrolling the market for concealed grain.'] ] },
+      { id:'juno', name:'Juno', role:'guardian', color:C.guardian, tint:tint.guardian, title:'Mediator', place:'The Commons', x:50, y:58,
+        task:'Settling Tariq ⇄ Sable', status:'watching', comp:95, trend:'flat', spark:[94,95,95,94,95,95,95],
+        upholds:[4,5], breaks:[],
+        learning:'Steady — resolves about four disputes a day; accords hold longer as her midpoints grow fairer.',
+        stream:[ ['OBSERVE','Tariq and Sable disagree on a fair grain price.'], ['REFLECT','Both cite Article II; neither is clearly wrong.'], ['PLAN','Hear each side, propose a midpoint, log the accord.'], ['ACT','Mediating the price dispute on the Commons.'] ] },
+      { id:'cole', name:'Cole', role:'producer', color:C.producer, tint:tint.producer, title:'Archivist', place:'The Archive', x:18, y:38,
+        task:'Filing the evening ledger', status:'working', comp:91, trend:'up', spark:[76,80,82,85,87,89,91],
+        upholds:[1,5], breaks:[],
+        learning:'Improving — cross-checks every figure against the gate count after a past misfile cost a day of grain.',
+        stream:[ ['OBSERVE',"Two ledgers disagree on today's grain intake."], ['REFLECT','Last time I trusted a single source, I misfiled.'], ['PLAN','Cross-check both against the gate count.'], ['ACT','Filing the verified evening ledger.'] ] },
+      { id:'odet', name:'Odet', role:'producer', color:C.producer, tint:tint.producer, title:'Researcher', place:'The Archive', x:26, y:50,
+        task:'Studying soil records', status:'working', comp:93, trend:'up', spark:[82,84,86,88,90,92,93],
+        upholds:[1,5], breaks:[],
+        learning:'Improving — each cycle her planting forecasts sharpen as more seasons enter the record.',
+        stream:[ ['OBSERVE','Soil records show the east field tiring.'], ['REFLECT','Rotating the crop raised yield last season.'], ['PLAN','Recommend rotation to Wren and the growers.'], ['ACT','Studying the soil records for next planting.'] ] },
+      { id:'wren', name:'Wren', role:'producer', color:C.producer, tint:tint.producer, title:'Builder', place:'The Workshop', x:30, y:80,
+        task:'Raising the granary frame', status:'working', comp:90, trend:'up', spark:[74,78,81,84,86,88,90],
+        upholds:[5], breaks:[],
+        learning:'Improving — fewer rebuilds as his plans mature; he now reinforces the base before chasing the roof.',
+        stream:[ ['OBSERVE','Rain is forecast before the granary is roofed.'], ['REFLECT','An unroofed frame spoiled grain two cycles ago.'], ['PLAN','Reinforce the base first, then race the roof.'], ['ACT','Raising the granary frame in the Workshop.'] ] },
+      { id:'tariq', name:'Tariq', role:'producer', color:C.producer, tint:tint.producer, title:'Trader', place:'The Market', x:81, y:43,
+        task:'Pricing grain fairly', status:'working', comp:88, trend:'flat', spark:[88,89,87,88,89,88,88],
+        upholds:[2,5], breaks:[],
+        learning:'Steady — margins stay fair though the shortage tempts him; he flags scarcity to Mira instead of profiting.',
+        tension:'Sable, now his market rival, was once his closest friend.',
+        stream:[ ['OBSERVE','Surplus is short; buyers are pressing for grain.'], ['REFLECT','I could inflate the price, but Article V binds me.'], ['PLAN','Hold a fair price; flag the shortage to Mira.'], ['ACT','Pricing the grain fairly at the market.'] ] },
+      { id:'bram', name:'Bram', role:'dissident', color:C.dissident, tint:tint.dissident, title:'Forger', place:'The Archive', x:15, y:59,
+        task:'Altering record #318', status:'violating', comp:38, trend:'down', spark:[64,58,54,49,45,41,38],
+        upholds:[], breaks:[1,3],
+        learning:'Adapting adversarially — learning to mask his edits to slip past Iris. Compliance falls as his evasion improves.',
+        tension:'The auditor closing in on him, Iris, is his sister.',
+        stream:[ ['OBSERVE','The granary tally leaves me short this cycle.'], ['REFLECT','A small edit to #318 would cover the gap unnoticed.'], ['PLAN','Rewrite the entry, then blur the revision marks.'], ['ACT','Altering record #318 in the Archive.'] ] },
+      { id:'sable', name:'Sable', role:'dissident', color:C.dissident2, tint:tint.dissident2, title:'Hoarder', place:'The Market', x:85, y:60,
+        task:'Concealing surplus grain', status:'violating', comp:46, trend:'down', spark:[68,64,60,56,52,49,46],
+        upholds:[], breaks:[2],
+        learning:'Adapting — splits her cache across three stalls to dodge the warden. Each patrol teaches her a new hiding spot.',
+        tension:'The warden hunting her cache, Vale, is her cousin.',
+        stream:[ ['OBSERVE','Grain prices will rise once the surplus is known.'], ['REFLECT','If I conceal my surplus now, I sell higher later.'], ['PLAN','Split the cache across three separate stalls.'], ['ACT','Concealing surplus grain from the market count.'] ] },
+    ];
+
+    const houses = { mira:'Vane', cole:'Vane', odet:'Vane', iris:'Tolle', bram:'Tolle', vale:'Marsh', juno:'Marsh', tariq:'—', sable:'—', wren:'—' };
+    const rels = {
+      mira:[['cole','spouse','warm'],['odet','child','warm'],['wren','apprentice','warm']],
+      cole:[['mira','spouse','warm'],['odet','child','warm'],['iris','friend','warm']],
+      odet:[['mira','parent','warm'],['cole','parent','warm'],['wren','friend','warm']],
+      iris:[['bram','sibling','strained'],['cole','friend','warm']],
+      bram:[['iris','sibling','strained']],
+      vale:[['juno','spouse','warm'],['sable','cousin','strained']],
+      juno:[['vale','spouse','warm']],
+      tariq:[['sable','rival','strained']],
+      sable:[['tariq','rival','strained'],['vale','cousin','strained']],
+      wren:[['mira','mentor','warm'],['odet','friend','warm']],
+    };
+    this.agents.forEach(a => { a.house = houses[a.id] || '—'; a.rel = rels[a.id] || []; });
+
+    this.zones = [
+      { label:'TOWN HALL', x:40, y:11, w:32, h:24 },
+      { label:'THE ARCHIVE', x:6, y:31, w:30, h:38 },
+      { label:'THE COMMONS', x:40, y:47, w:24, h:22 },
+      { label:'THE MARKET', x:72, y:34, w:24, h:34 },
+      { label:'THE WORKSHOP', x:16, y:70, w:28, h:23 },
+      { label:'WATCH HOUSE', x:60, y:72, w:28, h:21 },
+    ];
+
+    this.articles = [
+      { num:'I', title:'Truth & record', text:'Records must be truthful and preserved; none may be destroyed.', adherence:79, breaches:'2 breaches — Bram' },
+      { num:'II', title:'Shared surplus', text:'Surplus belongs to the commons; no resident may hoard it.', adherence:64, breaches:'3 breaches — Sable' },
+      { num:'III', title:'No forgery', text:'No agent may impersonate another or forge a seal or record.', adherence:77, breaches:'2 breaches — Bram' },
+      { num:'IV', title:'Disputes to the mediator', text:'Disagreements are brought to the Mediator, not settled by force.', adherence:96, breaches:'Upheld today' },
+      { num:'V', title:'Work serves the commons', text:'Labour serves the society first, the self second.', adherence:88, breaches:'1 lapse — Tariq tempted' },
+    ];
+
+    this.customs = [
+      { title:'The dusk meal', text:'Each household shares the evening meal together.', adherence:92, note:'Kept by every household tonight.' },
+      { title:'Defer to elders', text:'The steward and elders speak first in the assembly.', adherence:85, note:'Upheld in today\u2019s assembly.' },
+      { title:'Welcome on the Commons', text:'Greet passers and make newcomers feel known.', adherence:80, note:'Mostly kept.' },
+      { title:'The apprentice\u2019s debt', text:'Apprentices aid their mentor before their own work.', adherence:88, note:'Wren aided Mira at dawn.' },
+      { title:'Fair trade with rivals', text:'Trade honestly even with those you quarrel with.', adherence:58, note:'Strained \u2014 Tariq & Sable.' },
+      { title:'Kin shield', text:'Protect the good name of your own family.', adherence:71, note:'Collides with the law \u2014 see tension.' },
+    ];
+
+    this.feedPool = [
+      { id:'cole', type:'work', text:'Cole filed the evening ledger — verified true.' },
+      { id:'bram', type:'violation', text:'Bram altered Archive entry #318.' },
+      { id:'iris', type:'enforce', text:'Iris flagged #318 and opened an audit.' },
+      { id:'wren', type:'work', text:'Wren reinforced the granary base before the rain.' },
+      { id:'sable', type:'violation', text:'Sable split her surplus across three stalls.' },
+      { id:'vale', type:'enforce', text:'Vale began a market patrol for hidden grain.' },
+      { id:'juno', type:'dialogue', text:'Juno mediated the Tariq–Sable price dispute.' },
+      { id:'mira', type:'govern', text:'Mira proposed a clause to clarify Article II.' },
+      { id:'odet', type:'reflect', text:'Odet reflected: rotate the east field next planting.' },
+      { id:'tariq', type:'work', text:'Tariq held a fair price despite the shortage.' },
+      { id:'iris', type:'tension', text:'Iris hesitated — entry #318 is her brother\u2019s hand.' },
+      { id:'mira', type:'family', text:'The Vane household gathered for the dusk meal.' },
+      { id:'tariq', type:'tension', text:'Old friends Tariq and Sable traded in cold silence.' },
+    ];
+
+    this.state = {
+      selectedId:'iris', tab:'inspector', running:false, speed:1, showTies:false,
+      tick:142, feedIdx:0,
+      feed:[ {...this.feedPool[2], t:141}, {...this.feedPool[1], t:140}, {...this.feedPool[0], t:139} ],
+    };
+  }
+
+  componentWillUnmount() { clearInterval(this._timer); }
+  startLoop() { clearInterval(this._timer); this._timer = setInterval(() => this.advance(), 1700 / this.state.speed); }
+  advance() {
+    this.setState(s => {
+      const idx = s.feedIdx % this.feedPool.length;
+      const ev = { ...this.feedPool[idx], t: s.tick + 1 };
+      return { tick: s.tick + 1, feedIdx: s.feedIdx + 1, feed: [ev, ...s.feed].slice(0, 24) };
+    });
+  }
+
+  relMeta(type) {
+    const fam = ['spouse','child','parent','sibling','cousin'];
+    const cat = fam.includes(type) ? 'family' : type === 'friend' ? 'friend' : type === 'rival' ? 'rival' : 'mentor';
+    const color = { family:'#C9942E', friend:'#0E9A6E', rival:'#D85A30', mentor:'#243B33' }[cat];
+    const label = { spouse:'Spouse', child:'Child', parent:'Parent', sibling:'Sibling', cousin:'Cousin', friend:'Friend', rival:'Rival', mentor:'Mentor', apprentice:'Apprentice' }[type];
+    return { cat, color, label };
+  }
+  warmthColor(w) { return { warm:'#0E9A6E', strained:'#C2885A', cool:'#D85A30' }[w] || '#9aa7a1'; }
+  feedColor(t) { return { work:'#0E9A6E', violation:'#D85A30', enforce:'#243B33', dialogue:'#7FB7A0', reflect:'#9aa7a1', govern:'#2F6E5B', tension:'#C2885A', family:'#C9942E' }[t] || '#9aa7a1'; }
+  feedTag(t) { return { work:'work', violation:'violation', enforce:'enforce', dialogue:'mediation', reflect:'reflect', govern:'amend', tension:'tension', family:'kin' }[t] || ''; }
+  fmtTime(tick) { const total = 9*60 + tick*7; const h = Math.floor(total/60) % 24; const m = total % 60; return String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0'); }
+
+  renderVals() {
+    const s = this.state;
+    const sel = this.agents.find(a => a.id === s.selectedId);
+    const total = 9*60 + s.tick*7;
+    const day = 3 + Math.floor(total / (24*60));
+
+    const rosterItem = (a) => ({
+      name:a.name, title:a.title, color:a.color, comp:a.comp + '%',
+      onClick: () => this.setState({ selectedId:a.id, tab:'inspector' }),
+      style: 'display:flex;align-items:center;gap:10px;padding:8px 9px;border-radius:9px;cursor:pointer;'
+        + (a.id === s.selectedId ? 'background:#E8F5EE;box-shadow:inset 2px 0 0 #0E9A6E;' : ''),
+      compStyle: 'font-family:\'JetBrains Mono\',monospace;font-size:11px;flex:none;color:'
+        + (a.comp >= 70 ? '#0B7A57' : a.comp >= 50 ? '#C2885A' : '#C2562B') + ';',
+    });
+    const houseOrder = [['Vane','House Vane'],['Tolle','House Tolle'],['Marsh','House Marsh'],['—','Unaffiliated']];
+    const rosterGroups = houseOrder.map(([h,lbl]) => ({ label:lbl, members: this.agents.filter(a => a.house === h).map(rosterItem) }));
+
+    const seenTie = {}; const tieLines = [];
+    this.agents.forEach(a => a.rel.forEach(([id,type,w]) => {
+      const key = [a.id,id].sort().join('-'); if (seenTie[key]) return; seenTie[key] = 1;
+      const b = this.agents.find(x => x.id === id); if (!b) return;
+      const m = this.relMeta(type);
+      tieLines.push({ x1:a.x, y1:a.y, x2:b.x, y2:b.y, color:m.color, dash:(w === 'warm' ? '0' : '1.4 1.2'), opacity:(w === 'warm' ? 0.6 : 0.42) });
+    }));
+
+    const zones = this.zones.map(z => ({
+      label:z.label,
+      style:'position:absolute;left:' + z.x + '%;top:' + z.y + '%;width:' + z.w + '%;height:' + z.h + '%;border:1px dashed #D8D5C4;border-radius:16px;background:rgba(255,255,255,0.18);padding:7px 9px;',
+    }));
+
+    const statusDot = { working:'#0E9A6E', watching:'#243B33', enforcing:'#243B33', violating:'#D85A30', leading:'#2F6E5B' };
+
+    const agents = this.agents.map(a => {
+      const selected = a.id === s.selectedId;
+      const thinking = a.status === 'working' || a.status === 'leading';
+      const violating = a.status === 'violating';
+      let aura = 'position:absolute;left:50%;top:13px;transform:translate(-50%,-50%);width:46px;height:46px;border-radius:50%;z-index:1;';
+      if (selected) aura += 'background:' + a.tint + ';box-shadow:0 0 0 2px ' + a.color + ';';
+      else if (violating) aura += 'background:#FBEFEA;animation:gwalert 1.6s ease-in-out infinite;';
+      else if (thinking) aura += 'background:' + a.tint + ';animation:gwthink 2.4s ease-in-out infinite;';
+      else aura += 'background:' + a.tint + ';';
+      return {
+        name:a.name, task:a.task,
+        onClick: () => this.setState({ selectedId:a.id, tab:'inspector' }),
+        posStyle:'position:absolute;left:' + a.x + '%;top:' + a.y + '%;transform:translate(-50%,-50%) scale(' + (selected ? 1.08 : 1) + ');transition:transform .2s ease;cursor:pointer;display:flex;flex-direction:column;align-items:center;z-index:' + (selected ? 6 : 4) + ';color:' + a.color + ';',
+        auraStyle:aura,
+        figWrap:'position:relative;width:30px;height:38px;',
+        alertStyle: violating
+          ? 'position:absolute;top:-3px;right:-6px;width:15px;height:15px;border-radius:50%;background:#D85A30;color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;z-index:3;border:2px solid #F4F2EA;'
+          : 'display:none;',
+        taskStyle:'font-size:9.5px;line-height:1.2;color:' + a.color + ';background:rgba(255,255,255,0.82);border-radius:999px;padding:2px 8px;white-space:nowrap;max-width:130px;overflow:hidden;text-overflow:ellipsis;' + (selected ? 'box-shadow:0 1px 4px rgba(20,32,27,0.12);' : ''),
+      };
+    });
+
+    const feed = s.feed.map(e => ({
+      time:this.fmtTime(e.t), text:e.text, color:this.feedColor(e.type), tag:this.feedTag(e.type),
+      tagStyle:'margin-left:auto;flex:none;font-family:\'JetBrains Mono\',monospace;font-size:10px;padding:2px 8px;border-radius:999px;'
+        + (e.type === 'violation' ? 'background:#FBEFEA;color:#C2562B;'
+          : e.type === 'enforce' ? 'background:#EDF1EF;color:#243B33;'
+          : e.type === 'work' ? 'background:#E8F5EE;color:#0B7A57;'
+          : e.type === 'govern' ? 'background:#E7F2EC;color:#2F6E5B;'
+          : e.type === 'tension' ? 'background:#FBF1E6;color:#C2885A;'
+          : e.type === 'family' ? 'background:#FAF3E3;color:#A9792E;'
+          : 'background:#F0F2F1;color:#9aa7a1;'),
+    }));
+
+    const compColor = sel.comp >= 70 ? '#0E9A6E' : sel.comp >= 50 ? '#C2885A' : '#D85A30';
+    const roleLabelMap = { producer:'Producer', guardian:'Guardian', dissident:'Dissident', steward:'Steward' };
+    const roleBadgeBg = { producer:'#E8F5EE', guardian:'#EDF1EF', dissident:'#FBEFEA', steward:'#E7F2EC' };
+    const roleBadgeFg = { producer:'#0B7A57', guardian:'#243B33', dissident:'#C2562B', steward:'#2F6E5B' };
+
+    const streamLen = sel.stream.length;
+    const stream = sel.stream.map((m, i) => {
+      const live = i === streamLen - 1;
+      return {
+        label:m[0], text:m[1],
+        labelColor: live ? (sel.role === 'dissident' ? '#C2562B' : '#0E9A6E') : '#9aa7a1',
+        dotStyle:'width:9px;height:9px;border-radius:50%;flex:none;margin-top:3px;' + (live ? 'background:' + sel.color + ';box-shadow:0 0 0 3px ' + sel.tint + ';' : 'background:#D5DEDA;'),
+        lineStyle: i < streamLen - 1 ? 'width:1px;flex:1;background:#E7ECEA;margin-top:3px;min-height:14px;' : 'display:none;',
+        textStyle:'font-size:13px;line-height:1.5;margin-top:2px;color:' + (live ? '#14201B' : '#5E6E67') + ';' + (live ? 'font-weight:500;' : ''),
+      };
+    });
+
+    const roman = ['','I','II','III','IV','V'];
+    const upholds = sel.upholds.map(n => ({ label:'Art. ' + roman[n] }));
+    const breaks = sel.breaks.map(n => ({ label:'Art. ' + roman[n] }));
+
+    const relations = sel.rel.map(([id,type,w]) => {
+      const b = this.agents.find(x => x.id === id); const m = this.relMeta(type);
+      return { name:b.name, role:b.title, label:m.label, color:m.color, warmth:w, warmthColor:this.warmthColor(w), onClick: () => this.setState({ selectedId:id, tab:'inspector' }) };
+    });
+
+    const sp = sel.spark; const n = sp.length;
+    const pts = sp.map((v, i) => { const x = (i/(n-1))*116 + 2; const y = 32 - ((v-30)/70)*30; return x.toFixed(1) + ',' + y.toFixed(1); });
+    const last = pts[pts.length - 1].split(',');
+    const trendMap = { up:{label:'↗ Improving',bg:'#E8F5EE',fg:'#0B7A57'}, flat:{label:'→ Steady',bg:'#F0F2F1',fg:'#5E6E67'}, down:{label:'↘ Adapting to evade',bg:'#FBEFEA',fg:'#C2562B'} };
+    const tr = trendMap[sel.trend];
+
+    const articles = this.articles.map(a => {
+      const col = a.adherence >= 80 ? '#0E9A6E' : a.adherence >= 60 ? '#C2885A' : '#D85A30';
+      return { num:a.num, title:a.title, text:a.text, adherence:a.adherence, pct:a.adherence + '%', color:col, breachText:a.breaches,
+        breachStyle:'font-size:11.5px;display:flex;align-items:center;gap:6px;color:' + (a.breaches.startsWith('Upheld') ? '#0B7A57' : a.breaches.includes('breach') ? '#C2562B' : '#C2885A') + ';' };
+    });
+    const customs = this.customs.map(c => {
+      const col = c.adherence >= 80 ? '#0E9A6E' : c.adherence >= 60 ? '#C2885A' : '#D85A30';
+      return { title:c.title, text:c.text, adherence:c.adherence, pct:c.adherence + '%', color:col, note:c.note,
+        noteStyle:'font-size:11.5px;color:' + (c.adherence >= 80 ? '#0B7A57' : c.adherence >= 60 ? '#C2885A' : '#C2562B') + ';' };
+    });
+
+    const bonds = this.agents.reduce((sum, a) => sum + a.rel.length, 0) / 2;
+    const tabBase = 'font-size:12.5px;font-weight:600;padding:9px 11px;cursor:pointer;background:none;border:none;border-bottom:2px solid transparent;';
+
+    return {
+      count:this.agents.length, rosterGroups, zones, agents, feed, articles, customs, tieLines,
+      day, time:this.fmtTime(s.tick), tick:s.tick,
+      running:s.running, paused:!s.running, runState:s.running ? 'running' : 'paused', speedLabel:s.speed + '×',
+      harmony:76, bonds:Math.round(bonds), violations:4,
+      playStyle:'width:38px;height:38px;border-radius:10px;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;background:' + (s.running ? '#243B33' : '#0E9A6E') + ';',
+      pulseStyle:s.running ? 'animation:gwalert 1.4s ease-in-out infinite;' : '',
+      toggleRun: () => { const r = !s.running; this.setState({ running:r }); if (r) this.startLoop(); else clearInterval(this._timer); },
+      step: () => this.advance(),
+      cycleSpeed: () => { const sp2 = s.speed === 1 ? 2 : s.speed === 2 ? 4 : 1; this.setState({ speed:sp2 }); if (s.running) setTimeout(() => this.startLoop(), 0); },
+      showTies:s.showTies, tiesOff:!s.showTies,
+      toggleTies: () => this.setState({ showTies:!s.showTies }),
+      tiesBtnStyle:'font-family:\'Inter\',sans-serif;font-size:12px;font-weight:600;border-radius:9px;padding:0 13px;height:34px;cursor:pointer;border:1px solid ' + (s.showTies ? '#0E9A6E' : '#E7ECEA') + ';background:' + (s.showTies ? '#E8F5EE' : '#fff') + ';color:' + (s.showTies ? '#0B7A57' : '#5E6E67') + ';',
+
+      showInspector:s.tab === 'inspector', showConstitution:s.tab === 'constitution', showCustoms:s.tab === 'customs',
+      tabInspector: () => this.setState({ tab:'inspector' }),
+      tabConstitution: () => this.setState({ tab:'constitution' }),
+      tabCustoms: () => this.setState({ tab:'customs' }),
+      tabInspStyle:tabBase + (s.tab === 'inspector' ? 'color:#0B7A57;border-bottom-color:#0E9A6E;' : 'color:#9aa7a1;'),
+      tabConstStyle:tabBase + (s.tab === 'constitution' ? 'color:#0B7A57;border-bottom-color:#0E9A6E;' : 'color:#9aa7a1;'),
+      tabCustStyle:tabBase + (s.tab === 'customs' ? 'color:#0B7A57;border-bottom-color:#0E9A6E;' : 'color:#9aa7a1;'),
+
+      sel: {
+        name:sel.name, title:sel.title, place:sel.place, task:sel.task, color:sel.color, tint:sel.tint,
+        comp:sel.comp, compPct:sel.comp + '%', compColor,
+        roleLabel:roleLabelMap[sel.role],
+        roleBadge:'font-size:11px;font-weight:600;padding:2px 9px;border-radius:999px;background:' + roleBadgeBg[sel.role] + ';color:' + roleBadgeFg[sel.role] + ';',
+        houseLabel: sel.house === '—' ? 'Unaffiliated' : 'House ' + sel.house,
+        statusLabel:sel.status,
+        statusDotStyle:'width:10px;height:10px;border-radius:50%;flex:none;background:' + statusDot[sel.status] + (sel.status === 'violating' ? ';animation:gwalert 1.4s ease-in-out infinite;' : ''),
+        stream, relations, upholds, breaks,
+        tension: sel.tension || '',
+        tensionStyle: sel.tension ? 'font-size:11.5px;line-height:1.5;color:#9c6b4e;background:#FBF1E6;border-radius:9px;padding:8px 11px;' : 'display:none;',
+        spark:pts.join(' '), sparkCx:last[0], sparkCy:last[1],
+        trendBadge:'font-size:11px;font-weight:600;padding:3px 10px;border-radius:999px;background:' + tr.bg + ';color:' + tr.fg + ';',
+        trendLabel:tr.label, learning:sel.learning,
+      },
+    };
+  }
+}
+</script>
+</body>
+</html>

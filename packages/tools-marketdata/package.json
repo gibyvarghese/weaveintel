@@ -21,9 +21,8 @@
   "dependencies": {
     "@weaveintel/core": "^0.0.1",
     "@weaveintel/mcp-server": "^0.0.1",
-    "@weaveintel/reliability": "^0.0.1",
-    "@weaveintel/tools": "^0.0.1",
-    "@weaveintel/resilience": "^0.0.1"
+    "@weaveintel/resilience": "^0.0.1",
+    "@weaveintel/tools": "^0.0.1"
   },
   "devDependencies": {
     "@weaveintel/mcp-client": "^0.0.1",

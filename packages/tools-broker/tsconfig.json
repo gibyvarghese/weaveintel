@@ -4,14 +4,30 @@
     "outDir": "./dist",
     "rootDir": "./src"
   },
-  "include": ["src"],
+  "include": [
+    "src"
+  ],
   "references": [
-    { "path": "../core" },
-    { "path": "../mcp-server" },
-    { "path": "../mcp-client" },
-    { "path": "../reliability" },
-    { "path": "../tools" },
-    { "path": "../tools-marketdata" },
-    { "path": "../testing" }
+    {
+      "path": "../core"
+    },
+    {
+      "path": "../mcp-server"
+    },
+    {
+      "path": "../mcp-client"
+    },
+    {
+      "path": "../resilience"
+    },
+    {
+      "path": "../tools"
+    },
+    {
+      "path": "../tools-marketdata"
+    },
+    {
+      "path": "../testing"
+    }
   ]
 }

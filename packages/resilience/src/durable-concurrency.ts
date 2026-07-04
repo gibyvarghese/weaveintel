@@ -1,19 +1,29 @@
-export interface ConcurrencyPolicy {
+// SPDX-License-Identifier: MIT
+/**
+ * @weaveintel/resilience — DURABLE (queue/reject-with-status) concurrency limiter.
+ *
+ * This is the OPERATIONAL concurrency guard (a policy + queue + observable status),
+ * merged in from the former `@weaveintel/reliability`. It is distinct from the live
+ * per-call `createConcurrencyLimiter` in `./concurrency.ts` (the pipeline limiter):
+ * this one models a bounded queue with a reject strategy and exposes `getStatus()`,
+ * for operational back-pressure. Both are exported; use whichever fits the concern.
+ */
+export interface DurableConcurrencyPolicy {
   readonly maxConcurrent: number;
   readonly maxQueued?: number;
   readonly strategy?: 'queue' | 'reject';
 }
 
-export interface ConcurrencyStatus {
+export interface DurableConcurrencyStatus {
   readonly active: number;
   readonly queued: number;
   readonly available: number;
 }
 
-export interface ConcurrencyLimiter {
+export interface DurableConcurrencyLimiter {
   acquire(): Promise<void>;
   release(): void;
-  getStatus(): ConcurrencyStatus;
+  getStatus(): DurableConcurrencyStatus;
   execute<T>(fn: () => Promise<T>): Promise<T>;
 }
 
@@ -22,7 +32,7 @@ interface Waiter {
   reject: (err: Error) => void;
 }
 
-export function createConcurrencyLimiter(policy: ConcurrencyPolicy): ConcurrencyLimiter {
+export function createDurableConcurrencyLimiter(policy: DurableConcurrencyPolicy): DurableConcurrencyLimiter {
   let active = 0;
   const queue: Waiter[] = [];
   const strategy = policy.strategy ?? 'queue';
@@ -58,7 +68,7 @@ export function createConcurrencyLimiter(policy: ConcurrencyPolicy): Concurrency
       }
     },
 
-    getStatus(): ConcurrencyStatus {
+    getStatus(): DurableConcurrencyStatus {
       return {
         active,
         queued: queue.length,

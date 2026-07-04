@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  body { margin: 0; background: #F6F8F7; overflow: hidden; }
+  * { box-sizing: border-box; }
+  ::placeholder { color: #9aa7a1; }
+  input, textarea, select { font-family: inherit; }
+  .gw-scroll::-webkit-scrollbar { width: 10px; }
+  .gw-scroll::-webkit-scrollbar-thumb { background: #E1E8E5; border-radius: 999px; border: 3px solid #F6F8F7; }
+</style>
+</helmet>
+
+<div style="font-family: 'Inter', sans-serif; color: #14201B; height: 100vh; display: flex; overflow: hidden; background: #F6F8F7;">
+
+  <!-- ============ SETTINGS NAV ============ -->
+  <nav style="width: 256px; flex: none; background: #FFFFFF; border-right: 1px solid #E7ECEA; display: flex; flex-direction: column;">
+    <div style="display:flex;align-items:center;gap:10px;padding:16px 16px 14px;border-bottom:1px solid #E7ECEA;">
+      <svg width="24" height="24" viewBox="0 0 34 34" fill="none"><path d="M7 11 C 13 11, 13 23, 19 23 C 25 23, 25 11, 31 11" stroke="#0E9A6E" stroke-width="3.4" stroke-linecap="round"/><path d="M3 23 C 9 23, 9 11, 15 11 C 21 11, 21 23, 27 23" stroke="#14201B" stroke-width="3.4" stroke-linecap="round" opacity="0.9"/></svg>
+      <div style="display:flex;flex-direction:column;line-height:1.1;">
+        <div style="font-family:'Plus Jakarta Sans',sans-serif;font-size:15px;font-weight:700;letter-spacing:-0.02em;"><span style="color:#5E6E67;font-weight:600;">gene</span>Weave</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.12em;color:#0E9A6E;margin-top:2px;">SETTINGS</div>
+      </div>
+    </div>
+
+    <div class="gw-scroll" style="flex:1;overflow-y:auto;padding:14px 12px;display:flex;flex-direction:column;gap:18px;">
+      <sc-for list="{{ navGroups }}" as="g" hint-placeholder-count="3">
+        <div style="display:flex;flex-direction:column;gap:3px;">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.1em;color:#9aa7a1;padding:2px 10px 4px;">{{ g.label }}</div>
+          <sc-for list="{{ g.items }}" as="it" hint-placeholder-count="4">
+            <div onClick="{{ it.onClick }}" style="{{ it.style }}">
+              <span style="flex:none;display:flex;">{{ it.icon }}</span>
+              <span style="flex:1;">{{ it.label }}</span>
+              <sc-if value="{{ it.badge }}" hint-placeholder-val="">
+                <span style="{{ it.badgeStyle }}">{{ it.badge }}</span>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="border-top:1px solid #E7ECEA;padding:12px;">
+      <div style="display:flex;align-items:center;gap:11px;padding:8px 9px;border-radius:11px;background:#F6F8F7;">
+        <span style="width:34px;height:34px;border-radius:50%;background:#14201B;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;flex:none;">G</span>
+        <div style="flex:1;min-width:0;line-height:1.25;">
+          <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Giby Varghese</div>
+          <div style="font-size:11px;color:#9aa7a1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Weaveland Labs</div>
+        </div>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9aa7a1" stroke-width="2" stroke-linecap="round"><path d="m18 15-6-6-6 6"/></svg>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ============ CONTENT ============ -->
+  <main class="gw-scroll" style="flex:1;min-width:0;overflow-y:auto;">
+    <div style="max-width:760px;margin:0 auto;padding:38px 40px 90px;display:flex;flex-direction:column;gap:30px;">
+
+      <!-- header -->
+      <div style="display:flex;flex-direction:column;gap:6px;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.1em;color:#0E9A6E;">{{ sec.eyebrow }}</div>
+        <h1 style="font-family:'Plus Jakarta Sans',sans-serif;font-size:28px;font-weight:800;letter-spacing:-0.025em;margin:0;">{{ sec.title }}</h1>
+        <p style="font-size:14px;line-height:1.6;color:#5E6E67;margin:0;">{{ sec.desc }}</p>
+      </div>
+
+      <!-- ===== PROFILE ===== -->
+      <sc-if value="{{ isProfile }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;flex-direction:column;gap:22px;">
+          <!-- avatar + identity band -->
+          <div style="background:#fff;border:1px solid #E7ECEA;border-radius:16px;padding:22px;display:flex;gap:20px;align-items:center;">
+            <div style="position:relative;flex:none;">
+              <span style="width:76px;height:76px;border-radius:50%;background:linear-gradient(135deg,#14201B,#2F6E5B);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:28px;font-weight:700;font-family:'Plus Jakarta Sans',sans-serif;">G</span>
+              <span style="position:absolute;bottom:0;right:0;width:26px;height:26px;border-radius:50%;background:#fff;border:1px solid #E7ECEA;display:flex;align-items:center;justify-content:center;cursor:pointer;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#5E6E67" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></span>
+            </div>
+            <div style="flex:1;">
+              <div style="display:flex;align-items:center;gap:10px;">
+                <span style="font-family:'Plus Jakarta Sans',sans-serif;font-size:20px;font-weight:700;letter-spacing:-0.01em;">Giby Varghese</span>
+                <span style="font-size:11px;font-weight:600;color:#0B7A57;background:#E8F5EE;border-radius:999px;padding:3px 10px;">Admin</span>
+              </div>
+              <div style="font-size:13px;color:#5E6E67;margin-top:3px;">Head of Platform · Weaveland Labs</div>
+              <div style="display:flex;align-items:center;gap:8px;margin-top:10px;">
+                <span style="width:8px;height:8px;border-radius:50%;background:#0E9A6E;"></span>
+                <span style="font-size:12px;color:#14201B;">Focusing · back at 2:00</span>
+                <span style="font-size:12px;color:#0B7A57;cursor:pointer;margin-left:4px;">Change status</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+            <div style="display:flex;flex-direction:column;gap:7px;">
+              <label style="font-size:13px;font-weight:600;">Display name</label>
+              <input value="Giby Varghese" style="font-size:14px;background:#fff;border:1px solid #E7ECEA;border-radius:10px;padding:11px 13px;outline:none;"/>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:7px;">
+              <label style="font-size:13px;font-weight:600;">Pronouns</label>
+              <input value="they/them" style="font-size:14px;background:#fff;border:1px solid #E7ECEA;border-radius:10px;padding:11px 13px;outline:none;"/>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:7px;">
+              <label style="font-size:13px;font-weight:600;">Role / title</label>
+              <input value="Head of Platform" style="font-size:14px;background:#fff;border:1px solid #E7ECEA;border-radius:10px;padding:11px 13px;outline:none;"/>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:7px;">
+              <label style="font-size:13px;font-weight:600;">Working hours</label>
+              <input value="9:00 – 17:00 · GMT+5:30" style="font-size:14px;background:#fff;border:1px solid #E7ECEA;border-radius:10px;padding:11px 13px;outline:none;"/>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:7px;grid-column:1 / -1;">
+              <label style="font-size:13px;font-weight:600;">About</label>
+              <textarea rows="3" style="font-size:14px;line-height:1.6;background:#fff;border:1px solid #E7ECEA;border-radius:10px;padding:11px 13px;outline:none;resize:vertical;">Building the surface people live in all day. Care about calm software and clear rules.</textarea>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== SECURITY ===== -->
+      <sc-if value="{{ isSecurity }}" hint-placeholder-val="">
+        <div style="display:flex;flex-direction:column;gap:16px;">
+          <div style="background:#fff;border:1px solid #E7ECEA;border-radius:14px;padding:6px 18px;">
+            <sc-for list="{{ securityRows }}" as="r" hint-placeholder-count="3">
+              <div style="{{ r.rowStyle }}">
+                <div style="flex:1;">
+                  <div style="font-size:14px;font-weight:600;">{{ r.label }}</div>
+                  <div style="font-size:12.5px;color:#5E6E67;margin-top:2px;">{{ r.value }}</div>
+                </div>
+                <span style="{{ r.pillStyle }}">{{ r.pill }}</span>
+                <button style="font-size:13px;font-weight:600;color:#5E6E67;background:#fff;border:1px solid #E7ECEA;border-radius:9px;padding:8px 14px;cursor:pointer;">{{ r.action }}</button>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:11px;">
+            <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.08em;color:#0E9A6E;padding-left:2px;">ACTIVE SESSIONS</div>
+            <div style="background:#fff;border:1px solid #E7ECEA;border-radius:14px;padding:6px 18px;">
+              <sc-for list="{{ sessions }}" as="s" hint-placeholder-count="3">
+                <div style="{{ s.rowStyle }}">
+                  <span style="flex:none;color:#5E6E67;display:flex;">{{ s.icon }}</span>
+                  <div style="flex:1;">
+                    <div style="font-size:13.5px;font-weight:500;">{{ s.device }}</div>
+                    <div style="font-size:12px;color:#9aa7a1;margin-top:1px;">{{ s.meta }}</div>
+                  </div>
+                  <span style="{{ s.tagStyle }}">{{ s.tag }}</span>
+                </div>
+              </sc-for>
+            </div>
+            <button style="align-self:flex-start;font-size:13px;font-weight:600;color:#C2562B;background:#fff;border:1px solid #EBD3C2;border-radius:9px;padding:9px 15px;cursor:pointer;">Sign out all other sessions</button>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== PREFERENCES ===== -->
+      <sc-if value="{{ isPrefs }}" hint-placeholder-val="">
+        <div style="display:flex;flex-direction:column;gap:22px;">
+          <div style="display:flex;flex-direction:column;gap:10px;">
+            <span style="font-size:14px;font-weight:600;">Default theme</span>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+              <div onClick="{{ setPro }}" style="{{ proCardStyle }}">
+                <div style="height:56px;border-radius:9px;background:#FFFFFF;border:1px solid #E7ECEA;display:flex;align-items:center;padding:0 12px;gap:7px;"><span style="width:34px;height:6px;border-radius:3px;background:#14201B;"></span></div>
+                <div style="display:flex;align-items:center;gap:8px;"><span style="{{ proRadio }}"></span><span style="font-size:13px;font-weight:600;">Pro</span><span style="font-size:12px;color:#9aa7a1;">Clean &amp; focused</span></div>
+              </div>
+              <div onClick="{{ setCreative }}" style="{{ creativeCardStyle }}">
+                <div style="height:56px;border-radius:9px;background:#FBF8F1;border:1px solid #ECE4D5;display:flex;align-items:center;padding:0 12px;gap:7px;"><span style="width:34px;height:8px;border-radius:3px;background:#C9942E;"></span></div>
+                <div style="display:flex;align-items:center;gap:8px;"><span style="{{ creativeRadio }}"></span><span style="font-size:13px;font-weight:600;">Creative</span><span style="font-size:12px;color:#9aa7a1;">Warm &amp; playful</span></div>
+              </div>
+            </div>
+          </div>
+          <div style="background:#fff;border:1px solid #E7ECEA;border-radius:14px;padding:6px 18px;">
+            <sc-for list="{{ prefRows }}" as="p" hint-placeholder-count="4">
+              <div style="{{ p.rowStyle }}">
+                <div style="flex:1;"><div style="font-size:14px;font-weight:600;">{{ p.label }}</div><div style="font-size:12.5px;color:#5E6E67;margin-top:2px;">{{ p.desc }}</div></div>
+                <div style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;color:#14201B;background:#F6F8F7;border:1px solid #E7ECEA;border-radius:9px;padding:8px 13px;cursor:pointer;">{{ p.value }}<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9aa7a1" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg></div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== NOTIFICATIONS ===== -->
+      <sc-if value="{{ isNotifs }}" hint-placeholder-val="">
+        <div style="background:#fff;border:1px solid #E7ECEA;border-radius:14px;overflow:hidden;">
+          <div style="display:grid;grid-template-columns:1fr 66px 66px 66px;gap:0;padding:13px 18px;border-bottom:1px solid #E7ECEA;background:#F6F8F7;">
+            <span style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:0.06em;color:#9aa7a1;">EVENT</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#9aa7a1;text-align:center;">IN-APP</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#9aa7a1;text-align:center;">EMAIL</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#9aa7a1;text-align:center;">PUSH</span>
+          </div>
+          <sc-for list="{{ notifRows }}" as="n" hint-placeholder-count="5">
+            <div style="{{ n.rowStyle }}">
+              <div style="min-width:0;"><div style="font-size:14px;font-weight:500;">{{ n.label }}</div><div style="font-size:12px;color:#9aa7a1;margin-top:1px;">{{ n.desc }}</div></div>
+              <div style="display:flex;justify-content:center;"><span style="{{ n.c1 }}"></span></div>
+              <div style="display:flex;justify-content:center;"><span style="{{ n.c2 }}"></span></div>
+              <div style="display:flex;justify-content:center;"><span style="{{ n.c3 }}"></span></div>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <!-- ===== MEMBERS ===== -->
+      <sc-if value="{{ isMembers }}" hint-placeholder-val="">
+        <div style="display:flex;flex-direction:column;gap:16px;">
+          <div style="display:flex;gap:10px;">
+            <div style="flex:1;display:flex;align-items:center;gap:9px;background:#fff;border:1px solid #E7ECEA;border-radius:10px;padding:9px 13px;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9aa7a1" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3-3"/></svg>
+              <span style="font-size:13px;color:#9aa7a1;">Search 23 people</span>
+            </div>
+            <button style="font-size:13px;font-weight:600;color:#fff;background:#0E9A6E;border:none;border-radius:10px;padding:0 16px;cursor:pointer;display:flex;align-items:center;gap:7px;"><span style="font-size:15px;">+</span> Invite people</button>
+          </div>
+          <div style="background:#fff;border:1px solid #E7ECEA;border-radius:14px;overflow:hidden;">
+            <sc-for list="{{ members }}" as="m" hint-placeholder-count="5">
+              <div style="{{ m.rowStyle }}">
+                <span style="{{ m.avStyle }}">{{ m.initials }}</span>
+                <div style="flex:1;min-width:0;"><div style="font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ m.name }}</div><div style="font-size:12px;color:#9aa7a1;">{{ m.email }}</div></div>
+                <span style="{{ m.statusStyle }}">{{ m.status }}</span>
+                <span style="font-size:13px;color:#5E6E67;display:flex;align-items:center;gap:6px;background:#F6F8F7;border:1px solid #E7ECEA;border-radius:8px;padding:6px 11px;cursor:pointer;">{{ m.role }}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#9aa7a1" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg></span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== ADMIN / GOVERNANCE ===== -->
+      <sc-if value="{{ isAdmin }}" hint-placeholder-val="">
+        <div style="display:flex;flex-direction:column;gap:16px;">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+            <sc-for list="{{ adminCards }}" as="c" hint-placeholder-count="4">
+              <div style="background:#fff;border:1px solid #E7ECEA;border-radius:14px;padding:17px;display:flex;flex-direction:column;gap:9px;">
+                <div style="display:flex;align-items:center;gap:10px;">
+                  <span style="width:32px;height:32px;border-radius:9px;background:{{ c.tint }};color:{{ c.color }};display:flex;align-items:center;justify-content:center;flex:none;">{{ c.icon }}</span>
+                  <span style="font-size:14px;font-weight:600;">{{ c.title }}</span>
+                  <span style="{{ c.pillStyle }}">{{ c.pill }}</span>
+                </div>
+                <div style="font-size:12.5px;line-height:1.5;color:#5E6E67;">{{ c.desc }}</div>
+                <span style="font-size:13px;font-weight:600;color:#0B7A57;cursor:pointer;margin-top:2px;">{{ c.cta }} ›</span>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:11px;">
+            <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.08em;color:#0E9A6E;padding-left:2px;">AUDIT LOG</div>
+            <div style="background:#fff;border:1px solid #E7ECEA;border-radius:14px;padding:6px 18px;">
+              <sc-for list="{{ auditRows }}" as="a" hint-placeholder-count="4">
+                <div style="{{ a.rowStyle }}">
+                  <span style="width:8px;height:8px;border-radius:50%;flex:none;background:{{ a.dot }};"></span>
+                  <div style="flex:1;min-width:0;"><span style="font-size:13.5px;color:#14201B;">{{ a.text }}</span></div>
+                  <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#9aa7a1;flex:none;">{{ a.time }}</span>
+                </div>
+              </sc-for>
+            </div>
+            <span style="font-size:13px;font-weight:600;color:#0B7A57;cursor:pointer;padding-left:2px;">Open full audit log ›</span>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== BILLING ===== -->
+      <sc-if value="{{ isBilling }}" hint-placeholder-val="">
+        <div style="display:flex;flex-direction:column;gap:16px;">
+          <div style="background:linear-gradient(120deg,#14201B,#22332C);border-radius:16px;padding:22px;color:#fff;display:flex;align-items:center;gap:20px;">
+            <div style="flex:1;">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.08em;color:#7FB7A0;">CURRENT PLAN</div>
+              <div style="font-family:'Plus Jakarta Sans',sans-serif;font-size:24px;font-weight:800;letter-spacing:-0.02em;margin-top:4px;">Enterprise</div>
+              <div style="font-size:13px;color:#B9C7C1;margin-top:3px;">Billed annually · renews Jan 12, 2027</div>
+            </div>
+            <div style="text-align:right;">
+              <div style="font-family:'Plus Jakarta Sans',sans-serif;font-size:26px;font-weight:700;">$14,400<span style="font-size:14px;font-weight:500;color:#B9C7C1;">/yr</span></div>
+              <button style="margin-top:10px;font-size:13px;font-weight:600;color:#14201B;background:#fff;border:none;border-radius:9px;padding:9px 16px;cursor:pointer;">Manage plan</button>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+            <div style="background:#fff;border:1px solid #E7ECEA;border-radius:14px;padding:17px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;"><span style="font-size:13px;color:#5E6E67;">Seats used</span><span style="font-size:13px;font-weight:600;color:#14201B;">18 / 25</span></div>
+              <div style="height:8px;border-radius:999px;background:#F0F2F1;overflow:hidden;margin-top:10px;"><div style="height:100%;width:72%;border-radius:999px;background:#0E9A6E;"></div></div>
+              <div style="font-size:12px;color:#9aa7a1;margin-top:9px;">7 seats available · $600/seat/yr</div>
+            </div>
+            <div style="background:#fff;border:1px solid #E7ECEA;border-radius:14px;padding:17px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;"><span style="font-size:13px;color:#5E6E67;">AI usage this month</span><span style="font-size:13px;font-weight:600;color:#14201B;">3.2M / 5M</span></div>
+              <div style="height:8px;border-radius:999px;background:#F0F2F1;overflow:hidden;margin-top:10px;"><div style="height:100%;width:64%;border-radius:999px;background:#0E9A6E;"></div></div>
+              <div style="font-size:12px;color:#9aa7a1;margin-top:9px;">Assistant tokens · resets in 12 days</div>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:11px;">
+            <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:0.08em;color:#0E9A6E;padding-left:2px;">INVOICES</div>
+            <div style="background:#fff;border:1px solid #E7ECEA;border-radius:14px;padding:6px 18px;">
+              <sc-for list="{{ invoices }}" as="inv" hint-placeholder-count="3">
+                <div style="{{ inv.rowStyle }}">
+                  <div style="flex:1;"><span style="font-size:13.5px;font-weight:500;">{{ inv.date }}</span></div>
+                  <span style="font-size:13px;color:#5E6E67;flex:none;width:90px;text-align:right;">{{ inv.amount }}</span>
+                  <span style="font-size:11px;font-weight:600;color:#0B7A57;background:#E8F5EE;border-radius:999px;padding:3px 10px;flex:none;">Paid</span>
+                  <span style="font-size:13px;font-weight:600;color:#0B7A57;cursor:pointer;flex:none;">PDF</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+    </div>
+  </main>
+
+  <!-- sticky save bar -->
+  <div style="position:absolute;bottom:0;left:256px;right:0;background:rgba(255,255,255,0.92);backdrop-filter:blur(6px);border-top:1px solid #E7ECEA;padding:12px 40px;display:flex;align-items:center;justify-content:flex-end;gap:10px;">
+    <button style="font-size:14px;font-weight:600;color:#5E6E67;background:#fff;border:1px solid #E7ECEA;border-radius:999px;padding:10px 20px;cursor:pointer;">Cancel</button>
+    <button style="font-size:14px;font-weight:600;color:#fff;background:#0E9A6E;border:none;border-radius:999px;padding:10px 22px;cursor:pointer;">Save changes</button>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:&quot;100%&quot;,&quot;height&quot;:&quot;100%&quot;}}">
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { section: 'profile', theme: 'pro' };
+    this.ic = {
+      user:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>',
+      lock:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>',
+      sliders:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h13M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>',
+      bell:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg>',
+      users:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3.3 2.7-5 6-5s6 1.7 6 5"/><path d="M16 5.5a3.5 3.5 0 0 1 0 6.5M17.5 15c2.2.4 3.5 1.9 3.5 4.5"/></svg>',
+      shield:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></svg>',
+      card:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18"/></svg>',
+      laptop:'<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 20h20"/></svg>',
+      phone:'<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/></svg>',
+      key:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15" r="4"/><path d="M11 12l7-7 3 3M15 8l2 2"/></svg>',
+      book:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M8 3v14"/></svg>',
+      weave:'<svg width="15" height="15" viewBox="0 0 34 34" fill="none"><path d="M7 11 C 13 11, 13 23, 19 23 C 25 23, 25 11, 31 11" stroke="#0E9A6E" stroke-width="3.6" stroke-linecap="round"/><path d="M3 23 C 9 23, 9 11, 15 11 C 21 11, 21 23, 27 23" stroke="#0B7A57" stroke-width="3.6" stroke-linecap="round" opacity="0.55"/></svg>',
+    };
+  }
+
+  svg(s, color) { return React.createElement('span', { style:{display:'flex',color:color||'inherit'}, dangerouslySetInnerHTML:{ __html: s } }); }
+
+  renderVals() {
+    const s = this.state;
+    const svg = (x, c) => this.svg(x, c);
+    const sections = {
+      profile:   { eyebrow:'ACCOUNT', title:'Profile', desc:'How you appear across geneWeave to your team and the assistant.' },
+      security:  { eyebrow:'ACCOUNT', title:'Account & security', desc:'Your sign-in, two-factor, and the devices with access.' },
+      prefs:     { eyebrow:'ACCOUNT', title:'Preferences', desc:'Theme, language, and formatting defaults for your account.' },
+      notifs:    { eyebrow:'ACCOUNT', title:'Notifications', desc:'Choose what reaches you, and where.' },
+      members:   { eyebrow:'WORKSPACE', title:'People', desc:'Everyone in Weaveland Labs and the access they hold.' },
+      admin:     { eyebrow:'WORKSPACE', title:'Admin & governance', desc:'Sign-in, compliance, and the rules the assistant works within.' },
+      billing:   { eyebrow:'WORKSPACE', title:'Plan & billing', desc:'Your subscription, seats, usage, and invoices.' },
+    };
+
+    const navDef = [
+      ['ACCOUNT', [ ['profile','Profile','user'], ['security','Account & security','lock'], ['prefs','Preferences','sliders'], ['notifs','Notifications','bell'] ]],
+      ['WORKSPACE', [ ['members','People','users'], ['admin','Admin & governance','shield','3'], ['billing','Plan & billing','card'] ]],
+    ];
+    const navGroups = navDef.map(([label, items]) => ({
+      label,
+      items: items.map(([id, lbl, icon, badge]) => {
+        const active = s.section === id;
+        return {
+          label: lbl, badge: badge || '',
+          icon: svg(this.ic[icon], active ? '#0B7A57' : '#5E6E67'),
+          onClick: () => this.setState({ section: id }),
+          style: 'display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:10px;font-size:13.5px;cursor:pointer;'
+            + (active ? 'background:#E8F5EE;color:#0B7A57;font-weight:600;' : 'color:#5E6E67;'),
+          badgeStyle: 'font-size:10px;font-weight:600;color:#C2562B;background:#FBEFEA;border-radius:999px;padding:1px 7px;',
+        };
+      }),
+    }));
+
+    const divRow = (i, n, base) => base + (i < n - 1 ? 'border-bottom:1px solid #F0F2F1;' : '');
+
+    // security
+    const secDefs = [
+      { label:'Email', value:'giby@weaveland.io', pill:'Verified', action:'Change' },
+      { label:'Password', value:'Last changed 3 months ago', pill:'', action:'Update' },
+      { label:'Two-factor authentication', value:'Authenticator app', pill:'On', action:'Manage' },
+    ];
+    const securityRows = secDefs.map((r, i) => ({
+      label:r.label, value:r.value, pill:r.pill, action:r.action,
+      rowStyle: divRow(i, secDefs.length, 'display:flex;align-items:center;gap:14px;padding:15px 0;'),
+      pillStyle: r.pill ? 'font-size:11px;font-weight:600;color:#0B7A57;background:#E8F5EE;border-radius:999px;padding:3px 10px;' : 'display:none;',
+    }));
+    const sessDefs = [
+      { device:'MacBook Pro · Chrome', meta:'Bengaluru · this device', tag:'Active now', icon:'laptop', cur:true },
+      { device:'iPhone 15 · geneWeave app', meta:'Bengaluru · 2 hours ago', tag:'', icon:'phone', cur:false },
+      { device:'Windows · Edge', meta:'Mumbai · 3 days ago', tag:'', icon:'laptop', cur:false },
+    ];
+    const sessions = sessDefs.map((r, i) => ({
+      device:r.device, meta:r.meta, tag:r.cur ? 'Active now' : 'Sign out', icon:svg(this.ic[r.icon]),
+      rowStyle: divRow(i, sessDefs.length, 'display:flex;align-items:center;gap:13px;padding:14px 0;'),
+      tagStyle: r.cur ? 'font-size:11px;font-weight:600;color:#0B7A57;background:#E8F5EE;border-radius:999px;padding:3px 10px;'
+        : 'font-size:13px;font-weight:600;color:#C2562B;cursor:pointer;',
+    }));
+
+    // prefs
+    const prefDefs = [
+      { label:'Language', desc:'Interface language', value:'English (US)' },
+      { label:'Timezone', desc:'Used for reminders and activity', value:'GMT+5:30 · Kolkata' },
+      { label:'Date format', desc:'How dates are shown', value:'12 Jan 2027' },
+      { label:'Start of week', desc:'First day in calendars', value:'Monday' },
+    ];
+    const prefRows = prefDefs.map((p, i) => ({
+      label:p.label, desc:p.desc, value:p.value,
+      rowStyle: divRow(i, prefDefs.length, 'display:flex;align-items:center;gap:14px;padding:15px 0;'),
+    }));
+
+    // notifications
+    const notifDefs = [
+      { label:'Mentions', desc:'When someone @mentions you', on:[1,1,1] },
+      { label:'Shares', desc:'A note is shared with you', on:[1,1,0] },
+      { label:'Comments', desc:'Replies on your notes', on:[1,1,0] },
+      { label:'Assistant finished', desc:'When the AI completes a task', on:[1,0,0] },
+      { label:'Weekly digest', desc:'A summary every Monday', on:[0,1,0] },
+    ];
+    const dot = (on) => 'width:22px;height:14px;border-radius:999px;position:relative;display:inline-block;background:'
+      + (on ? '#0E9A6E' : '#D5DEDA') + ';';
+    const notifRows = notifDefs.map((n, i) => ({
+      label:n.label, desc:n.desc,
+      rowStyle: divRow(i, notifDefs.length, 'display:grid;grid-template-columns:1fr 66px 66px 66px;gap:0;align-items:center;padding:14px 18px;'),
+      c1: this.toggle(n.on[0]), c2: this.toggle(n.on[1]), c3: this.toggle(n.on[2]),
+    }));
+
+    // members
+    const memDefs = [
+      { name:'Giby Varghese', email:'giby@weaveland.io', role:'Admin', status:'You', color:'#14201B' },
+      { name:'Mira Vane', email:'mira@weaveland.io', role:'Editor', status:'Active', color:'#2F6E5B' },
+      { name:'Cole Vane', email:'cole@weaveland.io', role:'Editor', status:'Active', color:'#0E9A6E' },
+      { name:'Iris Tolle', email:'iris@weaveland.io', role:'Commenter', status:'Active', color:'#243B33' },
+      { name:'newhire@weaveland.io', email:'Invitation sent', role:'Viewer', status:'Invited', color:'#9aa7a1' },
+    ];
+    const members = memDefs.map((m, i) => {
+      const initials = m.name.includes('@') ? '?' : m.name.split(' ').map(x => x[0]).join('').slice(0,2);
+      return {
+        name:m.name, email:m.email, role:m.role, status:m.status, initials,
+        rowStyle: divRow(i, memDefs.length, 'display:flex;align-items:center;gap:13px;padding:13px 18px;'),
+        avStyle: 'width:34px;height:34px;border-radius:50%;flex:none;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:#fff;background:' + m.color + ';',
+        statusStyle: m.status === 'Invited'
+          ? 'font-size:11px;font-weight:600;color:#C2885A;background:#FBF1E6;border-radius:999px;padding:3px 10px;'
+          : m.status === 'You'
+          ? 'font-size:11px;font-weight:600;color:#5E6E67;background:#F0F2F1;border-radius:999px;padding:3px 10px;'
+          : 'font-size:11px;font-weight:600;color:#0B7A57;background:#E8F5EE;border-radius:999px;padding:3px 10px;',
+      };
+    });
+
+    // admin cards
+    const adminDefs = [
+      { title:'Single sign-on', icon:'key', color:'#243B33', tint:'#EDF1EF', pill:'SAML', desc:'SSO via Okta. SCIM provisioning is active for 18 members.', cta:'Configure SSO' },
+      { title:'AI governance', icon:'weave', color:'#0B7A57', tint:'#E8F5EE', pill:'Builder', desc:'Which models the assistant may use, data boundaries, and DLP on its output.', cta:'Open in Builder' },
+      { title:'Data & retention', icon:'shield', color:'#3E6E8F', tint:'#E9F0F5', pill:'', desc:'Notes retained 3 years. Data residency: EU. eDiscovery export enabled.', cta:'Manage retention' },
+      { title:'Knowledge sources', icon:'book', color:'#C9742E', tint:'#FBF1E6', pill:'6', desc:'The connected sources the assistant is allowed to read and cite.', cta:'Review sources' },
+    ];
+    const adminCards = adminDefs.map(c => ({
+      title:c.title, desc:c.desc, cta:c.cta, color:c.color, tint:c.tint, icon:svg(this.ic[c.icon], c.color),
+      pill:c.pill, pillStyle: c.pill ? 'margin-left:auto;font-size:10px;font-weight:600;color:#5E6E67;background:#F0F2F1;border-radius:999px;padding:2px 8px;' : 'display:none;',
+    }));
+    const auditDefs = [
+      { text:'Iris Tolle was granted Commenter access', dot:'#0E9A6E', time:'12m ago' },
+      { text:'AI governance policy “No external models” enabled', dot:'#2F6E5B', time:'1h ago' },
+      { text:'newhire@weaveland.io was invited as Viewer', dot:'#C2885A', time:'3h ago' },
+      { text:'SSO enforcement turned on for all members', dot:'#243B33', time:'Yesterday' },
+    ];
+    const auditRows = auditDefs.map((a, i) => ({
+      text:a.text, dot:a.dot, time:a.time,
+      rowStyle: divRow(i, auditDefs.length, 'display:flex;align-items:center;gap:12px;padding:13px 0;'),
+    }));
+
+    // billing
+    const invDefs = [ { date:'Jan 12, 2026', amount:'$14,400.00' }, { date:'Jan 12, 2025', amount:'$12,000.00' }, { date:'Jan 12, 2024', amount:'$9,600.00' } ];
+    const invoices = invDefs.map((v, i) => ({
+      date:v.date, amount:v.amount,
+      rowStyle: divRow(i, invDefs.length, 'display:flex;align-items:center;gap:14px;padding:14px 0;'),
+    }));
+
+    const themeCard = (active) => 'border:1.5px solid ' + (active ? '#0E9A6E' : '#E7ECEA') + ';border-radius:13px;padding:13px;display:flex;flex-direction:column;gap:11px;cursor:pointer;background:#fff;'
+      + (active ? 'box-shadow:0 0 0 3px #E8F5EE;' : '');
+    const radio = (active) => 'width:16px;height:16px;border-radius:50%;flex:none;border:2px solid ' + (active ? '#0E9A6E' : '#C9D6D0') + ';background:'
+      + (active ? 'radial-gradient(circle, #0E9A6E 0 42%, #fff 46%)' : '#fff') + ';';
+
+    return {
+      navGroups,
+      sec: sections[s.section] || sections.profile,
+      isProfile: s.section === 'profile', isSecurity: s.section === 'security', isPrefs: s.section === 'prefs',
+      isNotifs: s.section === 'notifs', isMembers: s.section === 'members', isAdmin: s.section === 'admin', isBilling: s.section === 'billing',
+      securityRows, sessions, prefRows, notifRows, members, adminCards, auditRows, invoices,
+      setPro: () => this.setState({ theme: 'pro' }), setCreative: () => this.setState({ theme: 'creative' }),
+      proCardStyle: themeCard(s.theme === 'pro'), creativeCardStyle: themeCard(s.theme === 'creative'),
+      proRadio: radio(s.theme === 'pro'), creativeRadio: radio(s.theme === 'creative'),
+    };
+  }
+
+  toggle(on) {
+    const pos = on ? '25px' : '9px';
+    const track = on ? '#0E9A6E' : '#D5DEDA';
+    return 'width:34px;height:20px;border-radius:999px;display:inline-block;flex:none;'
+      + 'background:radial-gradient(circle 7px at ' + pos + ' 10px, #fff 0 96%, transparent 0), ' + track + ';';
+  }
+}
+</script>
+</body>
+</html>

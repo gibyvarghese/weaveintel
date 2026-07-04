@@ -2,7 +2,7 @@
  * Resilience wrapper for the Kaggle adapter.
  *
  * Two layered defences against Kaggle's strict per-account rate limits:
- *   1. Bounded exponential retry via `createRetryBudget` (@weaveintel/reliability).
+ *   1. Bounded exponential retry via `createRetryBudget` (@weaveintel/resilience).
  *   2. Per-username circuit breaker via `createCircuitBreaker` (@weaveintel/resilience).
  *
  * Phase 5 — the bespoke BreakerState Map is replaced by `createCircuitBreaker`
@@ -12,7 +12,7 @@
 // `createRetryBudget` + `createCircuitBreaker` from the canonical packages — no
 // local re-implementation; basename triggers the lint, hence the per-file allow.)
 
-import { createRetryBudget } from '@weaveintel/reliability';
+import { createRetryBudget } from '@weaveintel/resilience';
 import { createCircuitBreaker } from '@weaveintel/resilience';
 import type { KaggleAdapter, KaggleCredentials } from './kaggle.js';
 

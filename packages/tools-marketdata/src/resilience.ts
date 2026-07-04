@@ -10,7 +10,7 @@
 // `createRetryBudget` + `createCircuitBreaker` from the canonical packages —
 // no local re-implementation; basename triggers the lint, hence the per-file allow.)
 
-import { createRetryBudget } from '@weaveintel/reliability';
+import { createRetryBudget } from '@weaveintel/resilience';
 import { createCircuitBreaker } from '@weaveintel/resilience';
 import type { MarketDataAdapter } from './adapter.js';
 
