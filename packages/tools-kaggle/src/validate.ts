@@ -1,5 +1,5 @@
 /**
- * @weaveintel/tools-kaggle — pure-TS submission validator
+ * ./index.js — pure-TS submission validator
  *
  * In-process pre-checks for a Kaggle submission CSV. Runs locally with no
  * subprocess or container; meant as a cheap fail-fast guard before paying for

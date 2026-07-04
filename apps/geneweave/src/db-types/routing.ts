@@ -137,7 +137,7 @@ export interface ProviderToolAdapterRow {
   id: string;
   provider: string;
   display_name: string;
-  /** Module path (e.g. '@weaveintel/tool-schema/anthropic'). */
+  /** Module path (e.g. '@weaveintel/tools/schema/anthropic'). */
   adapter_module: string;
   /** 'anthropic_xml' | 'openai_json' | 'google_function' | 'mistral_function' | 'custom'. */
   tool_format: string;

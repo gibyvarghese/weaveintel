@@ -1,5 +1,5 @@
 /**
- * @weaveintel/tools-kaggle — pure-TS validator tests
+ * ./index.js — pure-TS validator tests
  */
 import { describe, it, expect } from 'vitest';
 import { validateSubmissionCsv } from './validate.js';

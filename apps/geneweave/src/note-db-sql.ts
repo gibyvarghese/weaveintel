@@ -12,14 +12,14 @@
  *
  * Auto-fill gathers each row's context from three places — the PAGE (the row's own fields),
  * the WORKSPACE (related rows via the database's relations), and the WEB (a best-effort
- * `@weaveintel/tools-search` query) — labels every source, asks the model to fill the column
+ * `@weaveintel/tools/search` query) — labels every source, asks the model to fill the column
  * AND cite which sources it used, then coerces the value to the column type.
  *
  * Databases are owner-scoped (the existing `getNoteDatabase(id, userId)` gate).
  */
 import { parseSchema, coerceValue, computeRollup, isViewType, type PropertyDef, type DatabaseViewType } from '@weaveintel/notes';
 import { autofillProperty, type AutofillRow } from '@weaveintel/extraction';
-import { createSearchRouter, type SearchProviderConfig } from '@weaveintel/tools-search';
+import { createSearchRouter, type SearchProviderConfig } from '@weaveintel/tools/search';
 import { redactText } from '@weaveintel/artifacts';
 import { newUUIDv7 } from '@weaveintel/core';
 import { createNoteSettingsService } from './note-settings-sql.js';

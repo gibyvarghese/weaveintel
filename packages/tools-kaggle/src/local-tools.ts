@@ -1,5 +1,5 @@
 /**
- * @weaveintel/tools-kaggle — local container-backed scoring helpers
+ * ./index.js — local container-backed scoring helpers
  *
  * These helpers wrap @weaveintel/sandbox's ContainerExecutor so the
  * `kaggle.local.score_cv` MCP tool can run a sandboxed Python scorer

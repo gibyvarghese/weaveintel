@@ -1,5 +1,5 @@
 /**
- * @weaveintel/tools-kaggle — Kaggle MCP server (Phase K1, read-only)
+ * ./index.js — Kaggle MCP server (Phase K1, read-only)
  *
  * Exposes Kaggle REST operations as MCP tools. Credentials are supplied by the
  * MCP caller via _meta.executionContext.metadata (kaggleUsername, kaggleKey).

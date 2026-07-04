@@ -23,7 +23,7 @@
  *     • @weaveintel/redaction  — PII masking (if enabled in settings)
  *     • @weaveintel/evals      — Post-response quality evaluation
  *     • @weaveintel/observability — Trace recording for the Traces admin tab
- *     • @weaveintel/tools-search  — Web search via DuckDuckGo HTML fallback, Brave, Tavily
+ *     • @weaveintel/tools/search  — Web search via DuckDuckGo HTML fallback, Brave, Tavily
  *     • @weaveintel/oauth         — Google OAuth 2.0 SSO sign-in
  *
  *   createGeneWeave() is the single entry point. It:
@@ -59,7 +59,7 @@
  *      — including web_search, delegate_to_worker, plan, think, calculator, etc.
  *
  *   3. Web search with DuckDuckGo HTML fallback
- *      The built-in web_search tool uses @weaveintel/tools-search with the
+ *      The built-in web_search tool uses @weaveintel/tools/search with the
  *      DuckDuckGoProvider. Previously, the Instant Answer API was used — it often
  *      returns zero results for real-world queries (e.g. event tickets, tour dates).
  *      Now the provider automatically falls back to parsing DuckDuckGo's public HTML

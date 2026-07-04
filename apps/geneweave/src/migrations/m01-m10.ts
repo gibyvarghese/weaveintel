@@ -1134,7 +1134,7 @@ export function applyM01_M10(db: BetterSqlite3.Database): void {
 
   // M4 — Provider tool-format adapter configuration. Replaces hardcoded
   // buildAnthropicTools / buildOpenAITools logic with DB-driven mapping rules
-  // consumed by @weaveintel/tool-schema (Phase 3).
+  // consumed by @weaveintel/tools/schema (Phase 3).
   safeExec(db, `
     CREATE TABLE IF NOT EXISTS provider_tool_adapters (
       id                        TEXT PRIMARY KEY,

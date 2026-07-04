@@ -1,8 +1,9 @@
 {
   "name": "@weaveintel/tools",
   "version": "0.0.1",
-  "description": "Extended tool registry with MCP bridge, risk classification, health tracking, and test harnesses",
+  "description": "The weaveIntel tool library: a core tool registry + risk/policy/health machinery, plus ready-made integrations (Gmail, Slack, market data, …) behind tree-shakeable subpath imports.",
   "type": "module",
+  "sideEffects": false,
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -10,6 +11,106 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./schema": {
+      "types": "./dist/schema/index.d.ts",
+      "import": "./dist/schema/index.js",
+      "default": "./dist/schema/index.js"
+    },
+    "./http": {
+      "types": "./dist/http/index.d.ts",
+      "import": "./dist/http/index.js",
+      "default": "./dist/http/index.js"
+    },
+    "./time": {
+      "types": "./dist/time/index.d.ts",
+      "import": "./dist/time/index.js",
+      "default": "./dist/time/index.js"
+    },
+    "./search": {
+      "types": "./dist/search/index.d.ts",
+      "import": "./dist/search/index.js",
+      "default": "./dist/search/index.js"
+    },
+    "./gmail": {
+      "types": "./dist/gmail/index.d.ts",
+      "import": "./dist/gmail/index.js",
+      "default": "./dist/gmail/index.js"
+    },
+    "./gcal": {
+      "types": "./dist/gcal/index.d.ts",
+      "import": "./dist/gcal/index.js",
+      "default": "./dist/gcal/index.js"
+    },
+    "./gdrive": {
+      "types": "./dist/gdrive/index.d.ts",
+      "import": "./dist/gdrive/index.js",
+      "default": "./dist/gdrive/index.js"
+    },
+    "./imap": {
+      "types": "./dist/imap/index.d.ts",
+      "import": "./dist/imap/index.js",
+      "default": "./dist/imap/index.js"
+    },
+    "./outlook": {
+      "types": "./dist/outlook/index.d.ts",
+      "import": "./dist/outlook/index.js",
+      "default": "./dist/outlook/index.js"
+    },
+    "./outlook-cal": {
+      "types": "./dist/outlook-cal/index.d.ts",
+      "import": "./dist/outlook-cal/index.js",
+      "default": "./dist/outlook-cal/index.js"
+    },
+    "./onedrive": {
+      "types": "./dist/onedrive/index.d.ts",
+      "import": "./dist/onedrive/index.js",
+      "default": "./dist/onedrive/index.js"
+    },
+    "./dropbox": {
+      "types": "./dist/dropbox/index.d.ts",
+      "import": "./dist/dropbox/index.js",
+      "default": "./dist/dropbox/index.js"
+    },
+    "./slack": {
+      "types": "./dist/slack/index.d.ts",
+      "import": "./dist/slack/index.js",
+      "default": "./dist/slack/index.js"
+    },
+    "./webhook": {
+      "types": "./dist/webhook/index.d.ts",
+      "import": "./dist/webhook/index.js",
+      "default": "./dist/webhook/index.js"
+    },
+    "./filewatch": {
+      "types": "./dist/filewatch/index.d.ts",
+      "import": "./dist/filewatch/index.js",
+      "default": "./dist/filewatch/index.js"
+    },
+    "./news": {
+      "types": "./dist/news/index.d.ts",
+      "import": "./dist/news/index.js",
+      "default": "./dist/news/index.js"
+    },
+    "./social": {
+      "types": "./dist/social/index.d.ts",
+      "import": "./dist/social/index.js",
+      "default": "./dist/social/index.js"
+    },
+    "./marketdata": {
+      "types": "./dist/marketdata/index.d.ts",
+      "import": "./dist/marketdata/index.js",
+      "default": "./dist/marketdata/index.js"
+    },
+    "./altdata": {
+      "types": "./dist/altdata/index.d.ts",
+      "import": "./dist/altdata/index.js",
+      "default": "./dist/altdata/index.js"
+    },
+    "./broker": {
+      "types": "./dist/broker/index.d.ts",
+      "import": "./dist/broker/index.js",
+      "default": "./dist/broker/index.js"
     }
   },
   "files": [
@@ -25,7 +126,14 @@
   },
   "dependencies": {
     "@weaveintel/core": "^0.0.1",
+    "@weaveintel/mcp-client": "^0.0.1",
+    "@weaveintel/mcp-server": "^0.0.1",
     "@weaveintel/resilience": "^0.0.1"
+  },
+  "devDependencies": {
+    "@weaveintel/testing": "^0.0.1",
+    "esbuild": "^0.21.5",
+    "vitest": "^3.2.6"
   },
   "license": "MIT",
   "publishConfig": {

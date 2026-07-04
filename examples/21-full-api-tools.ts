@@ -14,7 +14,7 @@
  *
  * WeaveIntel packages used:
  *   @weaveintel/tools-enterprise — Jira, ServiceNow, Canva + Universal Auth
- *   @weaveintel/tools-social     — Facebook, Instagram
+ *   @weaveintel/tools/social     — Facebook, Instagram
  *   @weaveintel/core             — ExecutionContext, weaveTool()
  *
  * Run: npx tsx examples/21-full-api-tools.ts
@@ -34,7 +34,7 @@ import {
 
 import {
   createSocialTools,
-} from '@weaveintel/tools-social';
+} from '@weaveintel/tools/social';
 
 import type { ExecutionContext, ToolInput, ToolOutput } from '@weaveintel/core';
 

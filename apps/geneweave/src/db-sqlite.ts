@@ -6623,14 +6623,14 @@ export class SQLiteAdapter implements DatabaseAdapter {
     const toolReg: Omit<ToolRegistryRow, 'created_at' | 'updated_at'>[] = [
       {
         id: '66c73c20-622c-47a3-a21d-210bd8a2eb91', name: 'Web Search Tools', description: 'Search provider toolkit with multi-engine routing',
-        package_name: '@weaveintel/tools-search', version: '1.0.0', category: 'search', risk_level: 'low',
+        package_name: '@weaveintel/tools/search', version: '1.0.0', category: 'search', risk_level: 'low',
         tags: JSON.stringify(['search', 'web', 'retrieval']),
         config: JSON.stringify({ defaultProvider: 'duckduckgo', maxResults: 10 }),
         requires_approval: 0, max_execution_ms: 15000, rate_limit_per_min: 30, enabled: 1,
       },
       {
         id: '2891e86c-a4d0-4fbc-8a6c-ede1c717ba89', name: 'HTTP Endpoint Tools', description: 'Dynamic HTTP request toolkit with auth, retry, and transforms',
-        package_name: '@weaveintel/tools-http', version: '1.0.0', category: 'integration', risk_level: 'medium',
+        package_name: '@weaveintel/tools/http', version: '1.0.0', category: 'integration', risk_level: 'medium',
         tags: JSON.stringify(['http', 'api', 'rest']),
         config: JSON.stringify({ defaultRetries: 2, defaultTimeout: 10000 }),
         requires_approval: 0, max_execution_ms: 20000, rate_limit_per_min: 30, enabled: 1,
@@ -6644,7 +6644,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
       },
       {
         id: '212ad0f7-2ad2-43e1-94d0-49be0a73d2bf', name: 'Social Platform Tools', description: 'Slack, Discord, and GitHub integrations',
-        package_name: '@weaveintel/tools-social', version: '1.0.0', category: 'social', risk_level: 'medium',
+        package_name: '@weaveintel/tools/social', version: '1.0.0', category: 'social', risk_level: 'medium',
         tags: JSON.stringify(['slack', 'discord', 'github', 'social']),
         config: null,
         requires_approval: 0, max_execution_ms: 10000, rate_limit_per_min: 20, enabled: 1,
@@ -6976,7 +6976,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
       },
       {
         id: '0146baef-15d0-40ec-98f0-40c88f34b9b3', name: 'Web Search Plugin', description: 'Integrate external search providers for web search capabilities',
-        plugin_type: 'official', package_name: '@weaveintel/tools-search', version: '1.0.0',
+        plugin_type: 'official', package_name: '@weaveintel/tools/search', version: '1.0.0',
         capabilities: JSON.stringify(['web-search', 'news-search']),
         trust_level: 'official', auto_update: 1,
         config: JSON.stringify({ defaultProvider: '897b8e52-dc64-4854-ac39-65b92e00ccd8' }), enabled: 1,
@@ -7449,7 +7449,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         {
           provider: 'openai',
           display_name: 'OpenAI Chat Completions / Responses',
-          adapter_module: '@weaveintel/tool-schema/openai',
+          adapter_module: '@weaveintel/tools/schema/openai',
           tool_format: 'openai_json',
           tool_call_response_format: 'tool_calls_array',
           tool_result_format: 'tool_message',
@@ -7461,7 +7461,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         {
           provider: 'anthropic',
           display_name: 'Anthropic Messages',
-          adapter_module: '@weaveintel/tool-schema/anthropic',
+          adapter_module: '@weaveintel/tools/schema/anthropic',
           tool_format: 'anthropic_xml',
           tool_call_response_format: 'tool_use_block',
           tool_result_format: 'tool_result_block',
@@ -7473,7 +7473,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         {
           provider: 'google',
           display_name: 'Google Gemini',
-          adapter_module: '@weaveintel/tool-schema/google',
+          adapter_module: '@weaveintel/tools/schema/google',
           tool_format: 'google_function',
           tool_call_response_format: 'function_call',
           tool_result_format: 'function_response',

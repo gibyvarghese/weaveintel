@@ -1,5 +1,5 @@
 /**
- * Example 117 — @weaveintel/tools-time end-to-end (no API keys, in-memory only).
+ * Example 117 — @weaveintel/tools/time end-to-end (no API keys, in-memory only).
  *
  * PROBLEM THIS PACKAGE SOLVES
  * ----------------------------
@@ -9,7 +9,7 @@
  * multiple timezones, format switching, or stateful countdown/stopwatch
  * management.
  *
- * @weaveintel/tools-time provides:
+ * @weaveintel/tools/time provides:
  *
  *   - **getTimezoneSnapshot()** — a single call that returns the localised date,
  *     time, and human-readable string for any IANA timezone.  Agents embed this
@@ -50,7 +50,7 @@ import {
   type TimezoneSnapshot,
   type TimerRecord,
   type StopwatchRecord,
-} from '@weaveintel/tools-time';
+} from '@weaveintel/tools/time';
 import { weaveContext } from '@weaveintel/core';
 
 // ── Presentation helpers ──────────────────────────────────────────────────────
@@ -76,7 +76,7 @@ const FIXED_NOW = new Date('2026-05-27T12:00:00.000Z');
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
-  console.log('\n@weaveintel/tools-time — full surface-area example\n');
+  console.log('\n@weaveintel/tools/time — full surface-area example\n');
 
   // ════════════════════════════════════════════════════════════════════════════
   // 1. getTimezoneSnapshot() — multiple timezones
@@ -389,9 +389,9 @@ async function main(): Promise<void> {
   ok(`createTimeTools() returned ${tools.length} Tool objects`);
 
   for (const tool of tools) {
-    // Each Tool from @weaveintel/tools-time has a .schema object (ToolSchema)
+    // Each Tool from @weaveintel/tools/time has a .schema object (ToolSchema)
     // with .name, .description, and .parameters (JSON Schema), plus an .invoke()
-    // method. The .schema shape matches what @weaveintel/tool-schema uses when
+    // method. The .schema shape matches what @weaveintel/tools/schema uses when
     // translating for Anthropic/OpenAI/Google formats.
     const schema = tool.schema as { name: string; description: string; parameters: Record<string, unknown> };
     assert.ok(typeof schema.name === 'string' && schema.name.length > 0, `Tool missing name`);
@@ -417,7 +417,7 @@ async function main(): Promise<void> {
   // Done
   // ════════════════════════════════════════════════════════════════════════════
   console.log(`\n${'═'.repeat(62)}`);
-  console.log('  All @weaveintel/tools-time assertions passed.');
+  console.log('  All @weaveintel/tools/time assertions passed.');
   console.log(`${'═'.repeat(62)}\n`);
 }
 

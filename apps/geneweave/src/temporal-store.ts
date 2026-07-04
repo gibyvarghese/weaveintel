@@ -1,5 +1,5 @@
 import type { DatabaseAdapter } from './db.js';
-import type { TemporalStore, TimerRecord, StopwatchRecord, ReminderRecord } from '@weaveintel/tools-time';
+import type { TemporalStore, TimerRecord, StopwatchRecord, ReminderRecord } from '@weaveintel/tools/time';
 
 export function createTemporalStore(db: DatabaseAdapter): TemporalStore {
   return {

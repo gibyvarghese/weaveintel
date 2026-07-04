@@ -56,7 +56,7 @@ import {
   type AttentionPolicy,
 } from '@weaveintel/live-agents';
 import { weaveRealMCPTransport } from '@weaveintel/mcp-server';
-import { liveGmailAdapter, type GmailCredentials, type GmailMessage } from '@weaveintel/tools-gmail';
+import { liveGmailAdapter, type GmailCredentials, type GmailMessage } from '@weaveintel/tools/gmail';
 
 const TARGET_SENDER = 'giby.varghese@tech-lunch.com';
 const ENABLE_EMAIL_SEND = process.env['GMAIL_ENABLE_SEND'] === '1';

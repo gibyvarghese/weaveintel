@@ -17,7 +17,7 @@ import { createHash } from 'node:crypto';
 import { weaveTool } from '@weaveintel/core';
 import type { Tool } from '@weaveintel/core';
 import type { ContainerExecutor, ContainerRunSpec } from '@weaveintel/sandbox';
-import { httpRequest } from '@weaveintel/tools-http';
+import { httpRequest } from '@weaveintel/tools/http';
 
 const EXECUTOR_VERSION = '1';
 

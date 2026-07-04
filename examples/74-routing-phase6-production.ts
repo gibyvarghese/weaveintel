@@ -28,8 +28,8 @@ import {
   safeTranslate,
   resetTranslatorBreaker,
   getTranslatorBreakerSnapshot,
-} from '@weaveintel/tool-schema';
-import type { ProviderToolAdapter } from '@weaveintel/tool-schema';
+} from '@weaveintel/tools/schema';
+import type { ProviderToolAdapter } from '@weaveintel/tools/schema';
 import { pickExperimentCandidate } from '../apps/geneweave/src/routing-experiments.js';
 import { newUUIDv7 } from '../apps/geneweave/src/lib/uuid.js';
 

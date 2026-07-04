@@ -23,7 +23,7 @@ import {
   type ModelResponse,
 } from '@weaveintel/core';
 import { weaveOpenAIModel } from '@weaveintel/provider-openai';
-import { createSearchRouter, createSearchTools, type SearchResult } from '@weaveintel/tools-search';
+import { createSearchRouter, createSearchTools, type SearchResult } from '@weaveintel/tools/search';
 import { ComputeSandboxEngine, createCSETools } from '@weaveintel/sandbox';
 import {
   createActionExecutor,

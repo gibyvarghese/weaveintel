@@ -1,5 +1,5 @@
 /**
- * @weaveintel/tools-kaggle — fixture tests
+ * ./index.js — fixture tests
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { weaveFakeTransport } from '@weaveintel/testing';
@@ -23,7 +23,7 @@ const READONLY_TOOL_NAMES = [
   'kaggle.kernels.output',
 ];
 
-describe('@weaveintel/tools-kaggle (fixture)', () => {
+describe('./index.js (fixture)', () => {
   let callTool: (name: string, args: Record<string, unknown>) => Promise<{ content: Array<{ type: string; text: string }> }>;
   let listTools: () => Promise<Array<{ name: string }>>;
 
@@ -170,7 +170,7 @@ import {
   kaggleRunnerImagePolicyEntry,
 } from './local-tools.js';
 
-describe('@weaveintel/tools-kaggle K2 (fixture write tools)', () => {
+describe('./index.js K2 (fixture write tools)', () => {
   let callTool: (name: string, args: Record<string, unknown>) => Promise<{ content: Array<{ type: string; text: string }> }>;
 
   beforeEach(async () => {
@@ -260,7 +260,7 @@ describe('@weaveintel/tools-kaggle K2 (fixture write tools)', () => {
   });
 });
 
-describe('@weaveintel/tools-kaggle K2 (sandboxed score_cv)', () => {
+describe('./index.js K2 (sandboxed score_cv)', () => {
   it('errors clearly when no containerExecutor was wired', async () => {
     const adapter = fixtureKaggleAdapter();
     const server = createKaggleMCPServer({ adapter });
@@ -321,7 +321,7 @@ describe('@weaveintel/tools-kaggle K2 (sandboxed score_cv)', () => {
   });
 });
 
-describe('@weaveintel/tools-kaggle K7a (blend)', () => {
+describe('./index.js K7a (blend)', () => {
   it('errors clearly when blend is called without containerExecutor', async () => {
     const adapter = fixtureKaggleAdapter();
     const server = createKaggleMCPServer({ adapter });
@@ -397,7 +397,7 @@ describe('@weaveintel/tools-kaggle K7a (blend)', () => {
 
 // ─── Live-sandbox tests (env-gated) ──────────────────────────
 
-describe('@weaveintel/tools-kaggle (live-sandbox)', () => {
+describe('./index.js (live-sandbox)', () => {
   if (!process.env['TEST_LIVE_SANDBOX'] || !process.env['KAGGLE_USERNAME'] || !process.env['KAGGLE_KEY']) {
     it.skip('skipped — set TEST_LIVE_SANDBOX=1 plus KAGGLE_USERNAME and KAGGLE_KEY to run', () => {});
     return;

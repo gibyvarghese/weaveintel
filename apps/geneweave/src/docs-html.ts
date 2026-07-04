@@ -441,7 +441,7 @@ tools.register(weaveTool({
 }));
 
 // Or register a pre-built pack (e.g. tools-time)
-import { createTimeTools } from '@weaveintel/tools-time';
+import { createTimeTools } from '@weaveintel/tools/time';
 createTimeTools({ defaultTimezone: 'UTC' }).forEach(t => tools.register(t));`)}
 
 ${callout('warn', '⚠️', 'Tool description quality matters.', 'The model uses descriptions to decide <em>when</em> to call a tool. Vague descriptions like "does stuff" cause missed calls. Start with the trigger: <em>"Use this when…"</em> or <em>"Call this to…"</em>')}
@@ -2313,7 +2313,7 @@ console.log(result.output);   // "15% of 847.50 is 127.125"`, ['@weaveintel/core
 function sToolsTime(): string {
   return `
 <div class="pkg-hdr">
-  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/tools-time</span></div>
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/tools/time</span></div>
   <h1 class="pkg-title">tools-time</h1>
   <p class="pkg-desc">16 time-aware tools: datetime retrieval, timezone conversion, arithmetic, named timers, stopwatches, and scheduled reminders. Fully stateful with a pluggable <code>TemporalStore</code> backend.</p>
 </div>
@@ -2323,7 +2323,7 @@ ${exlinks([
 ])}
 
 ${section('tools-time-setup', 'Setup', `
-${code('typescript', `import { createTimeTools, createInMemoryTemporalStore } from '@weaveintel/tools-time';
+${code('typescript', `import { createTimeTools, createInMemoryTemporalStore } from '@weaveintel/tools/time';
 
 const tools = createTimeTools({
   defaultTimezone: 'Pacific/Auckland',
@@ -4726,7 +4726,7 @@ const result = await agent.run(ctx, {
 function sToolsSearch(): string {
   return `
 <div class="pkg-hdr">
-  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/tools-search</span></div>
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/tools/search</span></div>
   <h1 class="pkg-title">Search Tools</h1>
   <p class="pkg-desc">Multi-provider web search with automatic failover. 9 search providers supported. A single <code>web_search</code> tool tries providers in order and returns results from the first that succeeds — no call-site changes needed to swap providers.</p>
 </div>
@@ -4739,7 +4739,7 @@ ${featureCards([
 ])}
 
 ${section('search-setup', 'Setup', `
-${code('typescript', `import { createSearchToolRegistry } from '@weaveintel/tools-search';
+${code('typescript', `import { createSearchToolRegistry } from '@weaveintel/tools/search';
 import { weaveAgent } from '@weaveintel/agents';
 import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
 import { weaveContext } from '@weaveintel/core';
@@ -4766,7 +4766,7 @@ const ctx    = weaveContext();
 const result = await agent.run(ctx, {
   messages: [{ role: 'user', content: 'What are the top 3 AI safety papers published in 2025?' }],
 });
-console.log(result.output);`, ['@weaveintel/tools-search', '@weaveintel/agents', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
+console.log(result.output);`, ['@weaveintel/tools/search', '@weaveintel/agents', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
 
 ${params([
   ['providers', '{ kind, apiKey }[]', 'required', 'Ordered list of providers to try. First available is used; others are failovers.'],
@@ -4777,7 +4777,7 @@ ${params([
 `)}
 
 ${section('search-e2e', 'End-to-End: Research Agent', `
-${code('typescript', `import { createSearchToolRegistry } from '@weaveintel/tools-search';
+${code('typescript', `import { createSearchToolRegistry } from '@weaveintel/tools/search';
 import { createBrowserToolRegistry } from '@weaveintel/tools-browser';
 import { weaveAgent } from '@weaveintel/agents';
 import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
@@ -4807,7 +4807,7 @@ const ctx    = weaveContext();
 const result = await agent.run(ctx, {
   messages: [{ role: 'user', content: 'Research the current state of multi-modal AI models.' }],
 });
-console.log(result.output);`, ['@weaveintel/tools-search', '@weaveintel/tools-browser', '@weaveintel/agents', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
+console.log(result.output);`, ['@weaveintel/tools/search', '@weaveintel/tools-browser', '@weaveintel/agents', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
 `)}`;
 }
 

@@ -30,9 +30,9 @@ import {
   alphaVantageAdapter,
   fixtureMarketDataAdapter,
   compositeAdapter,
-} from '@weaveintel/tools-marketdata';
-import { fixtureNewsAdapter } from '@weaveintel/tools-news';
-import { fixtureAltDataAdapter } from '@weaveintel/tools-altdata';
+} from '@weaveintel/tools/marketdata';
+import { fixtureNewsAdapter } from '@weaveintel/tools/news';
+import { fixtureAltDataAdapter } from '@weaveintel/tools/altdata';
 import { scoreUniverse, strategies } from '@weaveintel/equity-scoring';
 import type { InputBundle } from '@weaveintel/equity-scoring';
 

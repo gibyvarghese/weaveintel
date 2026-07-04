@@ -29,7 +29,7 @@ import {
   parseRetryAfterMs,
 } from '@weaveintel/core';
 import { weaveRegisterModel, weaveRegisterEmbedding } from '@weaveintel/core/models';
-import { openaiAdapter, translate } from '@weaveintel/tool-schema';
+import { openaiAdapter, translate } from '@weaveintel/tools/schema';
 import { openaiFetch, openaiFetchStream } from './_fetch.js';
 
 // ─── Configuration ───────────────────────────────────────────
@@ -306,7 +306,7 @@ function buildOpenAIMessages(messages: ModelRequest['messages']): unknown[] {
 
 function buildOpenAITools(tools: ModelRequest['tools']): unknown[] | undefined {
   if (!tools?.length) return undefined;
-  // Delegate to the shared @weaveintel/tool-schema translator so the
+  // Delegate to the shared @weaveintel/tools/schema translator so the
   // OpenAI tool-format definition lives in one DB-driven place. The output
   // shape is byte-equivalent to the prior inline implementation.
   return translate(tools, openaiAdapter);
