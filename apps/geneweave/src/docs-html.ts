@@ -429,7 +429,7 @@ tools.register(weaveTool({
     },
   },
   requiresApproval: true,     // Human must approve before execution
-  riskLevel: 'medium',
+  riskLevel: 'external-side-effect',
   tags: ['communication', 'slack'],
   execute: async ({ channel, message, urgent = false }, ctx) => {
     // ctx.userId, ctx.traceId, ctx.metadata available here
@@ -512,10 +512,10 @@ ${featureCards([
   ['Memory policy', '<code>memory_policy</code> decides how the agent\'s working memory is handled across turns. <code>\'none\'</code> — start fresh every turn (great for privacy-sensitive deployments); <code>\'session\'</code> — remember within a session, forget when it ends; <code>\'persistent\'</code> — remember across sessions indefinitely. Default: <code>\'session\'</code>.'],
 ])}
 
-${code('typescript', `import { SQLiteAdapter } from '@weaveintel/persistence';
+${code('typescript', `import { SqlitePersistenceAdapter } from '@weaveintel/persistence';
 
-const db = new SQLiteAdapter('./app.db');
-await db.initialize();
+const db = new SqlitePersistenceAdapter();
+await db.connect();
 
 // Read the global defaults
 const settings = await db.getAgentStrategySettings('global');
@@ -4881,56 +4881,36 @@ function sRouting(): string {
 ${callout('info', '🔀', 'Prefer routing over hardcoded model IDs.', 'Hardcoding a model ID means a single failing model breaks the feature. The router selects from a pool and tracks health — a degraded model is skipped automatically.')}
 
 ${section('routing-setup', 'Setup & Usage', `
-${code('typescript', `import { SmartModelRouter, ModelHealthTracker } from '@weaveintel/routing';
-import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
-import { weaveOpenAIModel } from '@weaveintel/provider-openai';
-import { weaveOllamaModel } from '@weaveintel/provider-ollama';
-import { weaveAgent } from '@weaveintel/agents';
-import { weaveContext } from '@weaveintel/core';
+${code('typescript', `import { SmartModelRouter } from '@weaveintel/routing';
 
-const tracker = new ModelHealthTracker();
-const router  = new SmartModelRouter({
-  healthTracker: tracker,
-  models: [
-    {
-      key:          'fast',
-      model:        weaveAnthropicModel('claude-haiku-4-5-20251001'),
-      capabilities: ['text', 'tool_calling'],
-      costPerMToken: 0.25,
-      priority:      1,       // try first (lowest cost)
-    },
-    {
-      key:          'smart',
-      model:        weaveAnthropicModel('claude-sonnet-4-6'),
-      capabilities: ['text', 'tool_calling', 'vision', 'long_context'],
-      costPerMToken: 3.00,
-      priority:      2,
-    },
-    {
-      key:          'local',
-      model:        weaveOllamaModel('llama3.2'),
-      capabilities: ['text'],
-      costPerMToken: 0,
-      priority:      0,       // free — use when no capabilities needed
-    },
+// Declare the candidate pool + cost table. The router tracks health internally.
+const router = new SmartModelRouter({
+  candidates: [
+    { modelId: 'claude-haiku-4-5-20251001', providerId: 'anthropic', capabilities: ['text', 'tool_calling'] },
+    { modelId: 'claude-sonnet-4-6',         providerId: 'anthropic', capabilities: ['text', 'tool_calling', 'vision', 'long_context'] },
+    { modelId: 'llama3.2',                  providerId: 'ollama',    capabilities: ['text'] },
+  ],
+  costs: [
+    { modelId: 'claude-haiku-4-5-20251001', providerId: 'anthropic', inputCostPer1M: 0.25, outputCostPer1M: 1.25 },
+    { modelId: 'claude-sonnet-4-6',         providerId: 'anthropic', inputCostPer1M: 3.00, outputCostPer1M: 15.0 },
+    { modelId: 'llama3.2',                  providerId: 'ollama',    inputCostPer1M: 0,    outputCostPer1M: 0 },
   ],
 });
 
-// Route by declared capability requirements
-const chatModel   = router.select({ requiredCapabilities: ['text'] });                  // → local (free, lowest priority)
-const agentModel  = router.select({ requiredCapabilities: ['text', 'tool_calling'] });  // → fast (cheapest with tools)
-const visionModel = router.select({ requiredCapabilities: ['text', 'vision'] });        // → smart (only one with vision)
-const budgetModel = router.select({ requiredCapabilities: ['text'], maxCostPerMToken: 1.0 }); // → fast ($0.25 < $1.00)
+// route(request, policy) returns a RoutingDecision (modelId + providerId + reason).
+const base = { strategy: 'cost-optimized' as const, enabled: true };
+const chat   = await router.route({ prompt: 'Say hi.' },        { ...base, id: 'chat',   name: 'chat',   constraints: { requiredCapabilities: ['text'] } });
+const agent  = await router.route({ prompt: 'Use a tool.' },    { ...base, id: 'agent',  name: 'agent',  constraints: { requiredCapabilities: ['text', 'tool_calling'] } });
+const vision = await router.route({ prompt: 'Describe image.' },{ ...base, id: 'vision', name: 'vision', constraints: { requiredCapabilities: ['text', 'vision'] } });
+const budget = await router.route({ prompt: 'Cheap task.' },    { ...base, id: 'budget', name: 'budget', constraints: { requiredCapabilities: ['text'], maxCostPerRequest: 1.0 } });
 
-// Use the selected model in an agent
-const agent = weaveAgent({ model: agentModel, tools });
-const ctx   = weaveContext();
-const result = await agent.run(ctx, { messages });`, ['@weaveintel/routing', '@weaveintel/provider-anthropic', '@weaveintel/provider-openai', '@weaveintel/provider-ollama', '@weaveintel/agents', '@weaveintel/core'])}
+// The decision names the model + provider to instantiate for this request
+console.log(agent.modelId, agent.providerId, agent.reason);`, ['@weaveintel/routing'])}
 
 ${params([
-  ['requiredCapabilities', 'string[]', 'required', 'Capabilities the selected model must have. Available: <code>text</code>, <code>tool_calling</code>, <code>vision</code>, <code>long_context</code>, <code>embedding</code>.'],
-  ['maxCostPerMToken', 'number', 'optional', 'Maximum cost per million tokens in USD. Models over this threshold are excluded.'],
-  ['excludeKeys', 'string[]', 'optional', 'Model keys to skip for this request (e.g. when a model has circuit-opened).'],
+  ['constraints.requiredCapabilities', 'string[]', 'optional', 'Capabilities the selected model must have. Available: <code>text</code>, <code>tool_calling</code>, <code>vision</code>, <code>long_context</code>, <code>embedding</code>.'],
+  ['constraints.maxCostPerRequest', 'number', 'optional', 'Maximum estimated cost per request in USD. Models over this threshold are excluded.'],
+  ['constraints.excludeModels', 'string[]', 'optional', 'Model IDs to skip for this request (e.g. when a model has circuit-opened).'],
 ])}
 `)}`;
 }
@@ -5119,7 +5099,7 @@ ${code('typescript', `// Tenant artifact settings are resolved by the ChatEngine
 // and passed into createToolRegistry() as resolvedArtifactSettings.
 // You can pass them manually in custom agent setups:
 
-import { createToolRegistry } from '@weaveintel/geneweave';
+import { createToolRegistry } from '@weaveintel/geneweave-api';
 
 const registry = await createToolRegistry(['emit_artifact'], [], {
   actorPersona: 'tenant_user',
@@ -5135,7 +5115,7 @@ const registry = await createToolRegistry(['emit_artifact'], [], {
 
 // If emit_enabled=false, or the type is not in allowed_types, or the data
 // exceeds max_size_bytes, the tool returns { ok: false, error: "..." }
-// without writing to the database.`, ['@weaveintel/geneweave'])}
+// without writing to the database.`, ['@weaveintel/geneweave-api'])}
 
 <h4>Chat UI: Type-Aware Cards & Preview Panel</h4>
 <p>The geneWeave chat UI automatically renders type-aware artifact cards after each agent turn.
@@ -5156,7 +5136,7 @@ ${section('artifacts-phase3', 'DB Persistence, Admin API & Versioning', `
 <p>This wires artifact storage into the geneWeave database (SQLite, m77 migration), exposes a full admin REST API, and adds artifact version history. Every artifact emitted by an agent is persisted across server restarts, browsable in the admin panel, and downloadable on demand.</p>
 
 <h4>DB Adapter methods (m77)</h4>
-${code('typescript', `import { SQLiteAdapter } from '@weaveintel/geneweave';
+${code('typescript', `import { SQLiteAdapter } from '@weaveintel/geneweave-api';
 
 const db = new SQLiteAdapter('./geneweave.db');
 await db.initialize();  // runs all migrations including m77
@@ -5199,7 +5179,7 @@ const v1 = await db.getArtifactVersion!(row.id, 1);
 await db.deleteArtifact!(row.id);
 
 // Run retention — deletes artifacts past their policy's retention_days
-const deletedCount = await db.expireArtifacts!();`, ['@weaveintel/geneweave'])}
+const deletedCount = await db.expireArtifacts!();`, ['@weaveintel/geneweave-api'])}
 
 <h4>Admin REST API (/api/admin/artifacts)</h4>
 <p>All six admin endpoints are registered by <code>registerArtifactRoutes()</code> in <code>server-admin.ts</code>. Endpoints require authentication (<code>platform_admin</code> or <code>tenant_admin</code> persona).</p>
@@ -5241,11 +5221,11 @@ ${code('http', `# GET  /api/admin/artifacts                        — list with
 }`)}
 
 <h4>Artifact Retention Job</h4>
-${code('typescript', `import { startArtifactRetentionJob } from '@weaveintel/geneweave/artifact-retention-job';
+${code('typescript', `import { startArtifactRetentionJob } from './artifact-retention-job.js';
 
-// Runs expireArtifacts() once on startup and then every retentionIntervalMs (default 24h).
+// Runs expireArtifacts() once on startup and then every 24h (fixed interval).
 // Any artifact whose policy.retention_days has elapsed is deleted along with its versions.
-const handle = startArtifactRetentionJob(db, { retentionIntervalMs: 24 * 60 * 60 * 1000 });
+const handle = startArtifactRetentionJob(db);
 
 // Stop when server shuts down
 process.on('SIGTERM', () => handle.stop());`)}
