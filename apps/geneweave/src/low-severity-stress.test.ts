@@ -75,15 +75,16 @@ describe('L-2 — rate limiter warns in cluster environments', () => {
 // ── L-3: setStoredHost only written when host came from env ─────────────────
 
 describe('L-3 — auth-controller host persistence', () => {
-  it('source file only persists host when it came from env', async () => {
-    const { readFileSync } = await import('node:fs');
+  it('source file only persists host when it came from env', async (ctx) => {
+    const { readFileSync, existsSync } = await import('node:fs');
     const { fileURLToPath } = await import('node:url');
     const { dirname, join } = await import('node:path');
     const dir = dirname(fileURLToPath(import.meta.url));
-    const src = readFileSync(
-      join(dir, '../../../clients/mobile/src/lib/auth/auth-controller.ts'),
-      'utf8',
-    );
+    const target = join(dir, '../../../clients/mobile/src/lib/auth/auth-controller.ts');
+    // The mobile client is a sibling workspace in the monorepo. When the app is consumed
+    // standalone (apps-only, framework from npm), that source isn't present — skip rather than fail.
+    if (!existsSync(target)) return ctx.skip();
+    const src = readFileSync(target, 'utf8');
     // Must guard setStoredHost with a hostFromEnv check
     expect(src).toContain('hostFromEnv');
     expect(src).toMatch(/if\s*\(hostFromEnv\)\s*await\s*setStoredHost/);
@@ -93,15 +94,15 @@ describe('L-3 — auth-controller host persistence', () => {
 // ── L-6: appearance preferences use async store (not hardware-backed) ────────
 
 describe('L-6 — appearance store uses createAsyncStoreKv', () => {
-  it('appearance-provider imports createAsyncStoreKv not createSecureStoreKv', async () => {
-    const { readFileSync } = await import('node:fs');
+  it('appearance-provider imports createAsyncStoreKv not createSecureStoreKv', async (ctx) => {
+    const { readFileSync, existsSync } = await import('node:fs');
     const { fileURLToPath } = await import('node:url');
     const { dirname, join } = await import('node:path');
     const dir = dirname(fileURLToPath(import.meta.url));
-    const src = readFileSync(
-      join(dir, '../../../clients/mobile/src/native/providers/appearance-provider.tsx'),
-      'utf8',
-    );
+    const target = join(dir, '../../../clients/mobile/src/native/providers/appearance-provider.tsx');
+    // Sibling workspace; skip when the app is consumed standalone (see L-3 above).
+    if (!existsSync(target)) return ctx.skip();
+    const src = readFileSync(target, 'utf8');
     expect(src).toContain('createAsyncStoreKv');
     expect(src).not.toContain('createSecureStoreKv');
   });

@@ -1,0 +1,73 @@
+# Cross-repo integration: does the PUBLISHED framework still satisfy the geneWeave app?
+#
+# The in-repo `Test` workflow builds the app against the LOCAL `packages/*` (workspace symlinks).
+# This one is the opposite check: it stands the app up on its own — apps only, every `@weaveintel/*`
+# pulled from the npm registry — exactly how an outside adopter (or the private commercial repo) uses
+# it. It is the regression net that protects the app if/when the community app moves to its own repo.
+#
+# It runs the released packages, so it can't validate an unpublished PR change; it answers
+# "the framework that is on npm right now builds + tests the real app end to end." Run it on a
+# schedule, after a release, or on demand. (To validate CURRENT source pre-publish, the next step is
+# to publish the workspace to a local registry — e.g. verdaccio — and point --version at it.)
+
+name: Integration — npm consumer
+
+on:
+  workflow_dispatch:
+    inputs:
+      framework_version:
+        description: '@weaveintel/* version or dist-tag to test (blank = the app default, ^0.1.1)'
+        required: false
+        default: ''
+  schedule:
+    - cron: '0 6 * * *' # nightly, 06:00 UTC
+  # Re-check right after a release publishes new package versions.
+  workflow_run:
+    workflows: ['Release']
+    types: [completed]
+
+concurrency:
+  group: integration-npm-consume-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  npm-consumer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Materialise the apps as a standalone, npm-consuming workspace (no packages/).
+      # The generator is pure Node — no install needed to run it.
+      - name: Generate standalone npm-consumer
+        run: |
+          node scripts/make-npm-consumer.mjs "$RUNNER_TEMP/consumer" \
+            ${{ github.event.inputs.framework_version && format('--version {0}', github.event.inputs.framework_version) || '' }}
+
+      - name: Install @weaveintel/* from the npm registry
+        working-directory: ${{ runner.temp }}/consumer
+        run: npm install --no-audit --no-fund
+
+      - name: Prove the framework is resolved from the registry (not a workspace)
+        working-directory: ${{ runner.temp }}/consumer
+        run: |
+          test ! -d packages || (echo "unexpected packages/ dir" && exit 1)
+          node -e "const p=require('@weaveintel/core/package.json'); console.log('@weaveintel/core resolved from registry @', p.version)"
+
+      - name: Build
+        working-directory: ${{ runner.temp }}/consumer
+        run: npx turbo build
+
+      - name: Type check
+        working-directory: ${{ runner.temp }}/consumer
+        run: npx turbo typecheck
+
+      - name: Unit + integration tests
+        working-directory: ${{ runner.temp }}/consumer/apps/geneweave
+        run: npx vitest run
+        env:
+          JWT_SECRET: ci-test-secret
+      # Playwright e2e need a running server; run them in a dedicated job as the app repo grows.
