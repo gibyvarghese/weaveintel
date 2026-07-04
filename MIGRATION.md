@@ -463,8 +463,37 @@ tests. `agent-peer` and `coedit-doc` exported from the collab barrel.
 Gate: **suite green (collab 252, geneweave-api 2103); all RGA convergence/contract tests pass unchanged;
 exactly ONE presence model exports; no-app-brand PASS.**
 
-**Remaining Phase 3:** 3f `docs/adapters.md` (how a Yjs adapter implements the `CoeditDoc` port — no Yjs
-dependency).
+### 3f — the adapters doc + a real, testable conformance contract ✅
+
+Documented the escape hatch AND made it enforceable. **Research-grounded** in the live Yjs API
+([Document Updates](https://docs.yjs.dev/api/document-updates): `encodeStateAsUpdate`/`applyUpdate`/
+`encodeStateVector`; [Relative Positions](https://docs.yjs.dev/api/relative-positions) for cursor
+anchoring; tombstone-delete semantics). Three deliverables:
+
+1. **`coedit-doc-contract.ts`** (new, exported): `coeditDocContract(make, t)` — the dependency-injected
+   conformance suite EVERY `CoeditDoc` adapter must pass (insert/delete, convergence under concurrent
+   cross-applied edits, idempotent `applyOps`, snapshot round-trip, `opsSince` delta, fork isolation,
+   anchor/resolve cursor stability). Follows the `note-repository-contract.ts` house pattern (no
+   test-runner dependency in `src`). This turns "the engine is swappable" from a claim into a
+   guarantee. `coedit-doc.test.ts` now runs the RGA reference adapter THROUGH this contract (+ keeps the
+   agent-peer-through-port and spy-doc tests).
+2. **`packages/collab/docs/adapters.md`** (new): plain-language WHAT/WHY/WHEN, a method-by-method
+   RGA↔Yjs map, a complete worked Yjs adapter (`createYjsDoc`) that lives in the ADOPTER's app (we add
+   NO Yjs dependency — collab stays zero-dep), and "run the contract to prove it".
+3. **`packages/collab/README.md`** (new — the package had none): full adopter-friendly README per the
+   restructure doc-quality bar (WHAT one sentence / WHY as a story / WHEN + when-not / HOW runnable
+   example), leading with the `CoeditDoc` port + swap-the-engine section, both co-editing and
+   multiplayer surfaces tabulated, unified from the two pre-merge READMEs.
+
+Also added one layman "the engine is swappable (a port, not a hard-wire)" callout to the app’s
+`docs-html.ts`, tying into its existing "power socket" metaphor.
+
+Gate: **collab 253 green (RGA passes the shared contract; contract exported); geneweave-api build +
+typecheck green (docs-html unchanged behaviour); no Yjs dependency added.**
+
+**Phase 3 COMPLETE.** One `@weaveintel/collab` with: a `CoeditDoc` port, the RGA as its zero-dependency
+reference adapter, a shared conformance contract, `agent-peer` against the port, one presence model,
+`note-export` moved to notes, and the adapters doc.
 
 ---
 

@@ -38,6 +38,14 @@ export {
   type CoeditStateVector,
 } from './coedit-doc.js';
 
+// The conformance contract every CoeditDoc adapter must pass (RGA today, Yjs tomorrow).
+// Adopters run this against their own adapter to prove it co-edits identically. See docs/adapters.md.
+export {
+  coeditDocContract,
+  type CoeditDocFactory,
+  type CoeditContractTestApi,
+} from './coedit-doc-contract.js';
+
 // The ONE presence vocabulary (shared by ephemeral awareness + durable presence).
 export {
   type PresenceStatus,
