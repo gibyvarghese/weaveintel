@@ -92,12 +92,65 @@ export interface SkillDomainSection {
   readonly tags?: readonly string[];
 }
 
+/**
+ * Composition interface — a skill's typed "wiring" so skills can be chained safely.
+ *
+ * We model inputs/outputs as small **capability tokens** (plain strings like
+ * `dataset.loaded` or `analysis.done`) rather than JS predicates, so the whole graph
+ * stays declarative, serialisable, and DB-storable (and can't smuggle in code).
+ */
+export interface SkillPrecondition {
+  /** Capability tokens that must be available (from context, or produced by an earlier skill). */
+  readonly requires?: readonly string[];
+  /** Human-readable note about when this skill applies (shown to the model). */
+  readonly narrative?: string;
+}
+
+export interface SkillTermination {
+  /** The skill's work is complete once ALL these capability tokens are present. */
+  readonly satisfiedWhen?: readonly string[];
+  /** Hard cap on passes/iterations, so a composing runtime can't loop forever. */
+  readonly maxIterations?: number;
+  readonly narrative?: string;
+}
+
 export interface SkillDefinition {
   readonly id: string;
   readonly name: string;
   readonly version?: string;
   readonly enabled?: boolean;
   readonly category?: SkillCategory;
+
+  // ── Composition (Phase 1) ──────────────────────────────────────────────────
+  /** Capability tokens this skill PRODUCES (its typed effects/outputs). */
+  readonly provides?: readonly string[];
+  /** Applicability condition — the typed inputs this skill needs before it can run. */
+  readonly precondition?: SkillPrecondition;
+  /** When this skill's work is done (declarative, runtime-checkable). */
+  readonly termination?: SkillTermination;
+  /** Skill ids this skill REQUIRES — hard dependencies, auto-pulled in and ordered before it. */
+  readonly requires?: readonly string[];
+  /** Skill ids that pair well — a soft suggestion, pulled in if present, never required. */
+  readonly composesWith?: readonly string[];
+  /** Skill ids that must NOT be active alongside this one (mutually exclusive). */
+  readonly conflictsWith?: readonly string[];
+  /**
+   * Privilege level (0 = default). A skill may only pull in dependencies whose `trust` is
+   * ≤ its own — so a low-trust skill cannot escalate by requiring a high-trust one.
+   * Formalised into the T1–T4 trust tiers in Phase 3.
+   */
+  readonly trust?: number;
+
+  // ── Lifecycle governance (Phase 4) ─────────────────────────────────────────
+  /** Where this skill sits in its life: draft → active → deprecated → retired. Defaults to 'active'. */
+  readonly lifecycle?: import('./skill-evaluation.js').SkillLifecycleState;
+  /** Set when a skill is deprecated — why, and what to use instead. */
+  readonly deprecation?: import('./skill-evaluation.js').SkillDeprecation;
+  /**
+   * The kinds of input this skill can handle (Phase 6). Omitted = text only. Lets the runtime avoid
+   * offering an image-only skill for a text request, and vice-versa.
+   */
+  readonly inputModalities?: readonly import('./skill-mining.js').SkillModality[];
 
   readonly summary: string;
   readonly purpose?: string;
@@ -223,6 +276,13 @@ export interface SkillActivationOptions {
   selector?: SkillReasoningSelector;
   policyEvaluator?: SkillPolicyEvaluator;
   hooks?: SkillLifecycleHooks;
+  /**
+   * Optional candidate retriever (lexical / embedding / hybrid). When set, it replaces
+   * the built-in lexical scoring for the *candidate* stage — so meaning-based (embedding)
+   * or hybrid retrieval can surface paraphrased matches. Omit to keep the default lexical
+   * behaviour unchanged. See `retrieval.ts`.
+   */
+  retriever?: import('./retrieval.js').SkillRetriever;
 }
 
 export interface SkillActivationResult {
