@@ -649,6 +649,22 @@ Run it locally with [`scripts/start-geneweave.sh`](scripts/start-geneweave.sh) (
 
 The full local DB is `./geneweave.db`. Reset with `rm geneweave.db` and restart — schema and seeds are recreated.
 
+**Running on Postgres.** geneWeave defaults to a single SQLite file (zero setup). When you need a real
+server database — many concurrent writers, a database on its own host, backups, or embeddings next to
+your data via `pgvector` — switch to Postgres with two environment variables, no code changes:
+
+```bash
+export WEAVE_DB=postgres
+export DATABASE_URL="postgres://user:password@localhost:5432/geneweave"
+# Unset WEAVE_DB to stay on SQLite (optionally WEAVE_DB_PATH).
+```
+
+The Postgres adapter is pinned so a row reads back **identically** to SQLite (byte-order sorting,
+integer on/off flags, matching timestamp format), verified by a parity suite against a real Postgres
+plus a real-LLM round-trip. Postgres support is rolling out in stages — the core chat + skills tables
+(`users`, `chats`, `messages`, `skills`) are available now at full parity; areas not yet ported raise a
+clear error the instant they're used, so stay on SQLite for complete coverage today.
+
 ---
 
 ## Examples
