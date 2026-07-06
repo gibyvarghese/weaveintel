@@ -48,7 +48,7 @@ import { weavePgVectorMemoryStore as _weavePgVectorMemoryStore } from './memory-
 
 // ── Re-export per-backend factories ──────────────────────────────────────────
 // Backward-compatible named re-exports so callers continue to work unchanged.
-export { weavePostgresMemoryStore } from './memory-postgres.js';
+export { weavePostgresMemoryStore, type PostgresMemoryStoreOptions } from './memory-postgres.js';
 export { weaveRedisMemoryStore } from './memory-redis.js';
 export { weaveSqliteMemoryStore } from './memory-sqlite.js';
 export { weaveMongoDbMemoryStore } from './memory-mongodb.js';

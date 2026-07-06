@@ -29,6 +29,7 @@ const recent = await memory.getMessages(ctx, 10); // last 10 turns, ready to re-
 
 - **Conversation** — `weaveConversationMemory`, `createConfiguredConversationMemory`.
 - **Stores (pick a backend)** — `weaveMemoryStore`, `weaveRuntimeMemoryStore`, `weaveSqliteMemoryStore`, `weavePostgresMemoryStore`, `weavePgVectorMemoryStore`, `weaveRedisMemoryStore`, `weaveMongoDbMemoryStore`, `weaveCloudNoSqlMemoryStore`, plus `createConfiguredMemoryStore` / `…Async`.
+  - **Sharing one Postgres pool:** the Postgres stores take either a connection string *or* an existing pool — `weavePostgresMemoryStore({ url })` **or** `weavePostgresMemoryStore({ pool })` (same for `weavePgVectorMemoryStore`). Pass a shared `pool` (e.g. from `weaveSharedPostgres` in `@weaveintel/persistence`) so your whole app runs on one connection instead of each store opening its own. When you inject a pool, the store leaves it open on `close()` — you own its lifecycle.
 - **Semantic & entity** — `weaveSemanticMemory`, `weaveEntityMemory`, `fusedMemorySearch` (recency × importance × relevance fusion).
 - **Working memory & context** — `weaveWorkingMemory`, `createContextAssembler`, compressor registry.
 - **Lifecycle** — `deduplicateExact`/`deduplicateByKey`, `recordCorrection`/`supersede`, `enforceRetention`/`forgetUser`/`forgetSession`, `weaveMemoryConsolidator`.

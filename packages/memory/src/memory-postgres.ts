@@ -2,10 +2,19 @@
 
 import type { MemoryFilter } from '@weaveintel/core';
 import { Pool } from 'pg';
-import { type DurableMemoryStore, applyMemoryQuery, parseStoredMemoryRow } from './memory-internal.js';
+import {
+  type DurableMemoryStore,
+  type MemoryPgConnection,
+  applyMemoryQuery,
+  parseStoredMemoryRow,
+  resolveMemoryPool,
+} from './memory-internal.js';
 
-export function weavePostgresMemoryStore(opts: { url: string }): DurableMemoryStore {
-  const pool = new Pool({ connectionString: opts.url });
+/** Connection options for the plain Postgres memory store: a `url` OR a shared `pool`. */
+export type PostgresMemoryStoreOptions = MemoryPgConnection;
+
+export function weavePostgresMemoryStore(opts: PostgresMemoryStoreOptions): DurableMemoryStore {
+  const { pool, ownsPool } = resolveMemoryPool(opts, (url) => new Pool({ connectionString: url }));
 
   // M-22: Gate to ensure the schema is created exactly once per process
   // lifetime, not on every query or write call.
@@ -94,7 +103,9 @@ export function weavePostgresMemoryStore(opts: { url: string }): DurableMemorySt
       }
     },
     async close(): Promise<void> {
-      await pool.end();
+      // Only close the pool if this store opened it (from a `url`). An injected/shared
+      // pool is owned by the caller (e.g. weaveSharedPostgres) and left untouched.
+      if (ownsPool) await pool.end();
     },
   };
 }

@@ -15,10 +15,14 @@
 import type { MemoryEntry, MemoryType, MemoryQuery, ExecutionContext } from '@weaveintel/core';
 import type { GraphRetriever } from './index.js';
 import { Pool } from 'pg';
-import { type DurableMemoryStore, computeImportance } from './memory-internal.js';
+import {
+  type DurableMemoryStore,
+  type MemoryPgConnection,
+  computeImportance,
+  resolveMemoryPool,
+} from './memory-internal.js';
 
-export interface PgVectorMemoryStoreOptions {
-  url: string;
+export interface PgVectorMemoryStoreOptions extends MemoryPgConnection {
   /** Embedding vector dimensions. Must match your model. Defaults to 1536. */
   dimensions?: number;
   /** Table name. Defaults to 'memory_vec'. */
@@ -125,7 +129,7 @@ function pgRowToMemoryEntry(row: Record<string, unknown>): MemoryEntry {
 }
 
 export function weavePgVectorMemoryStore(opts: PgVectorMemoryStoreOptions): DurableMemoryStore {
-  const pool = new Pool({ connectionString: opts.url });
+  const { pool, ownsPool } = resolveMemoryPool(opts, (url) => new Pool({ connectionString: url }));
   const dims   = opts.dimensions     ?? 1536;
   const table  = opts.tableName      ?? 'memory_vec';
 
@@ -445,7 +449,9 @@ export function weavePgVectorMemoryStore(opts: PgVectorMemoryStoreOptions): Dura
     },
 
     async close(): Promise<void> {
-      await pool.end();
+      // Only close the pool if this store opened it (from a `url`). An injected/shared
+      // pool is owned by the caller (e.g. weaveSharedPostgres) and left untouched.
+      if (ownsPool) await pool.end();
     },
   };
 }

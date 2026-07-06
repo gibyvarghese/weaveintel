@@ -87,3 +87,18 @@ export {
   type ContractCheck,
   type PersistenceContractOptions,
 } from './persistence-contract.js';
+// Phase 2 — the shared-Postgres composition root: one connection, one pool, wired to every runtime
+// store (memory / workflows / live-agents / triggers) plus durable KV slots.
+export {
+  weaveSharedPostgres,
+  type SharedPostgres,
+  type SharedPostgresOptions,
+} from './shared-postgres.js';
+// Coexistence contract — prove all those stores + slots safely share ONE Postgres before you cut over.
+export {
+  runSharedPostgresCoexistence,
+  coexistenceReport,
+  type CoexistenceCheck,
+  type CoexistenceOptions,
+  type StoreProbe,
+} from './shared-postgres-coexistence.js';

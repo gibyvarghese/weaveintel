@@ -352,8 +352,30 @@ async function hydrateInMemoryState(inMemory: StateStore, client: PoolClient): P
   }
 }
 
-export async function weavePostgresStateStore(opts: { url: string }): Promise<PostgresStateStore> {
-  const pool = new Pool({ connectionString: opts.url });
+/**
+ * How the Postgres state store connects.
+ *
+ * Give *one* of:
+ *   • `url`  — a connection string; the store opens its own pool and closes it for you.
+ *   • `pool` — an existing pool you already opened (e.g. from `weaveSharedPostgres` in
+ *              `@weaveintel/persistence`) so your whole app shares ONE connection. An injected
+ *              pool is left open on `close()` — you own its lifecycle.
+ */
+export interface WeavePostgresStateStoreOptions {
+  /** A Postgres connection string, e.g. `postgresql://user:pass@host:5432/db`. */
+  url?: string;
+  /** An existing `pg.Pool` to share. When given, the store will NOT close it on `close()`. */
+  pool?: Pool;
+}
+
+export async function weavePostgresStateStore(
+  opts: WeavePostgresStateStoreOptions,
+): Promise<PostgresStateStore> {
+  if (!opts.pool && !opts.url) {
+    throw new Error('weavePostgresStateStore: provide either { url } (a connection string) or a shared { pool }.');
+  }
+  const ownsPool = !opts.pool;
+  const pool = opts.pool ?? new Pool({ connectionString: opts.url });
   const inMemory = weaveInMemoryStateStore();
 
   const initialize = async (): Promise<void> => {
@@ -367,7 +389,9 @@ export async function weavePostgresStateStore(opts: { url: string }): Promise<Po
   };
 
   const close = async (): Promise<void> => {
-    await pool.end();
+    // Only close the pool if this store opened it (from a `url`). An injected/shared pool is
+    // owned by the caller (e.g. weaveSharedPostgres) and left untouched.
+    if (ownsPool) await pool.end();
   };
 
   const store = new Proxy(inMemory as StateStore, {
