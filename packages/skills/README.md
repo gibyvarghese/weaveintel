@@ -139,16 +139,28 @@ skillPackageToDefinition(pkg);   // → a normal SkillDefinition, so it flows th
 
 **Running a bundled script safely.** This package never runs code itself — it hands the script to a
 sandbox *you* provide (typically `@weaveintel/sandbox`, which isolates it in a container). You stay in
-charge of the isolation policy; the engine enforces safe defaults around whatever sandbox it's given:
+charge of the isolation policy; the engine enforces **least privilege from the package's own manifest**,
+so it's safe even if you never ran the install-time security checks (defense in depth):
 
-- **network is off by default** — a script can't phone home unless the package explicitly declares a
-  network tool *and* the caller opts in;
+- **the manifest is the source of truth.** What a package may do is declared in its `SKILL.md` header —
+  `network:` (the exact hosts it may reach), `execution:` (whether it runs code at all), `secrets:`,
+  `filesystem:`. The engine enforces *that*, not a guess from tool names.
+- **network is off by default** — a script gets egress only when the caller opts in **and** the manifest
+  lists hosts; then **only those hosts** are passed to the sandbox as an allowlist (a proxy-capable
+  sandbox restricts egress to exactly them, per the NVIDIA/OWASP egress model). No declared hosts → no
+  network, even if a tool is *named* `web_fetch`.
+- **`execution: false` is honoured at run time** — a package that says it doesn't run code can never
+  have a bundled script executed, and it won't even advertise a “run” tool.
 - **no escaping the package** — path traversal (`../`) and absolute paths are rejected;
 - **no host execution** — with no sandbox, it refuses to run rather than fall back to your machine;
 - **bounded concurrency** — wrap the sandbox with `limitScriptConcurrency` so a burst of script calls
   can't exhaust the host.
 
 ```ts
+// SKILL.md header declaring least privilege:
+//   network: [api.rates.example.com]      # the only host its script may reach
+//   execution: true                        # (implied when scripts/ exist; set false to forbid)
+
 // Adapt your sandbox to the tiny runner seam (this is the whole adapter):
 const runner = { run: (spec) => myComputeSandbox.run(spec) };
 
@@ -160,6 +172,21 @@ result.stdout;  // "revenue=45.00 top=A"
 
 // Or expose the two Level-3 tools to your agent runtime directly:
 const tools = skillFileTools(pkg, runner);  // → [read_skill_file, run_skill_script]
+```
+
+**Reaching a package's files after activation.** A package compiles to a normal `SkillDefinition`, so it
+flows through retrieval and activation like any other skill — and it *keeps* its least-privilege manifest
+on `definition.package`. To turn an activated skill back into its Level-3 tools, build a
+`SkillPackageIndex` once and call `toolsFor` — it returns `[]` for plain (non-package) skills, so you can
+call it over every activated skill without checking:
+
+```ts
+import { createSkillPackageIndex } from '@weaveintel/skills';
+
+const index = createSkillPackageIndex(myPackages);   // built once
+// … retrieve → activate → for the winning skills:
+const fileTools = activated.flatMap((skill) => index.toolsFor(skill, runner));
+// skill.package?.manifest.network  → inspect what a skill may reach *before* you grant anything
 ```
 
 ## Trusting a skill before you run it (security)

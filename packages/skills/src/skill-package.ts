@@ -59,6 +59,33 @@ export interface SkillPackage {
   readonly manifest: SkillCapabilityManifest;
 }
 
+/**
+ * A lightweight pointer from a bridged `SkillDefinition` back to its package. Carries the
+ * least-privilege manifest and the *names* of the bundled files (not their contents) so an activated
+ * skill advertises its permission posture and its Level-3 files. The contents are resolved on demand
+ * through a `SkillPackageIndex` (see `skill-loader.ts`) — the definition stays small.
+ */
+export interface SkillPackageRef {
+  /** The package name (its stable id — matches the folder and the `SkillDefinition.id`). */
+  readonly name: string;
+  /** The declared least-privilege manifest (network/filesystem/secrets/tools/execution). */
+  readonly manifest: SkillCapabilityManifest;
+  /** Names of bundled reference files (Level-3 read). */
+  readonly resources: readonly string[];
+  /** Names of bundled runnable scripts (Level-3 execute). */
+  readonly scripts: readonly string[];
+}
+
+/** Build the lightweight `SkillPackageRef` for a package (manifest + file names, no contents). */
+export function skillPackageRef(pkg: SkillPackage): SkillPackageRef {
+  return {
+    name: pkg.name,
+    manifest: pkg.manifest,
+    resources: Object.keys(pkg.resources).sort(),
+    scripts: Object.keys(pkg.scripts).sort(),
+  };
+}
+
 export class SkillPackageError extends Error {}
 
 const NAME_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
@@ -186,5 +213,8 @@ export function skillPackageToDefinition(pkg: SkillPackage): SkillDefinition {
     executionGuidance: pkg.body || undefined,
     toolNames: pkg.allowedTools,
     tags: pkg.tags,
+    // Carry the package pointer so the activated skill keeps its least-privilege manifest and the app
+    // can reach its Level-3 files (via a SkillPackageIndex) without re-parsing.
+    package: skillPackageRef(pkg),
   });
 }

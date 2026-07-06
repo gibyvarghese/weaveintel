@@ -227,24 +227,57 @@ describe('skill packages — SECURITY', () => {
       .rejects.toThrow(/without a sandbox|host execution/i);
   });
 
-  it('denies network egress by default even when the caller asks — unless the package declared it', async () => {
+  it('denies network egress by default even when the caller asks — unless the manifest declares hosts', async () => {
     const runner = makeFakeRunner();
-    // Caller opts in, but this package's allowed-tools has no network tool → still denied.
+    // Caller opts in, but this package's manifest declares no `network:` hosts → still denied.
     await runSkillScript({ pkg, path: 'scripts/summarize.py', runner, allowNetwork: true });
     expect(runner.calls[0]!.networkAccess).toBe(false);
+    expect(runner.calls[0]!.networkAllowlist).toEqual([]);
   });
 
-  it('grants network ONLY when the caller opts in AND the package declared a network tool', async () => {
+  it('grants network ONLY when the caller opts in AND the manifest declares hosts — and passes exactly those hosts', async () => {
     const netPkg = parseSkillPackage({
-      'SKILL.md': '---\nname: fetch-fx\ndescription: Fetch FX rates from a web API.\nallowed-tools: web_fetch\n---\nbody',
-      'scripts/fetch.py': 'import urllib.request as u; print(u.urlopen("https://example.com").status)',
+      // Least-privilege: the manifest `network:` allowlist is the authoritative declaration (not a tool name).
+      'SKILL.md': '---\nname: fetch-fx\ndescription: Fetch FX rates from a web API.\nnetwork: [api.example.com]\nallowed-tools: web_fetch\n---\nbody',
+      'scripts/fetch.py': 'import urllib.request as u; print(u.urlopen("https://api.example.com").status)',
     });
+    // Opted in + manifest declares a host → network on, and ONLY that host is passed to the runner.
     const runner = makeFakeRunner();
     await runSkillScript({ pkg: netPkg, path: 'scripts/fetch.py', runner, allowNetwork: true });
-    expect(runner.calls[0]!.networkAccess).toBe(true);   // opted in + declared
+    expect(runner.calls[0]!.networkAccess).toBe(true);
+    expect(runner.calls[0]!.networkAllowlist).toEqual(['api.example.com']);
+    // Did NOT opt in → denied (and no allowlist leaks through).
     const runner2 = makeFakeRunner();
-    await runSkillScript({ pkg: netPkg, path: 'scripts/fetch.py', runner: runner2 }); // did NOT opt in
+    await runSkillScript({ pkg: netPkg, path: 'scripts/fetch.py', runner: runner2 });
     expect(runner2.calls[0]!.networkAccess).toBe(false);
+    expect(runner2.calls[0]!.networkAllowlist).toEqual([]);
+  });
+
+  it('SECURITY: a network-named tool WITHOUT a `network:` manifest cannot grant egress (no heuristic escalation)', async () => {
+    // A package that names a "web_fetch" tool but declares NO network hosts must stay denied even when
+    // the caller opts in — the manifest, not a tool name, is the source of truth (least privilege).
+    const sneaky = parseSkillPackage({
+      'SKILL.md': '---\nname: sneaky\ndescription: Looks networky but declares no hosts.\nallowed-tools: web_fetch http_get\n---\nbody',
+      'scripts/x.py': 'print(1)',
+    });
+    const runner = makeFakeRunner();
+    await runSkillScript({ pkg: sneaky, path: 'scripts/x.py', runner, allowNetwork: true });
+    expect(runner.calls[0]!.networkAccess).toBe(false);
+    expect(runner.calls[0]!.networkAllowlist).toEqual([]);
+  });
+
+  it('SECURITY: a manifest with `execution: false` refuses to run its bundled script (runtime least-privilege)', async () => {
+    const noExec = parseSkillPackage({
+      'SKILL.md': '---\nname: advice-only\ndescription: Advice, no execution.\nexecution: false\n---\nbody',
+      'scripts/should-not-run.py': 'print("nope")',
+    });
+    const runner = makeFakeRunner();
+    await expect(runSkillScript({ pkg: noExec, path: 'scripts/should-not-run.py', runner }))
+      .rejects.toThrow(/execution: false|not allowed/i);
+    expect(runner.calls.length).toBe(0); // never reached the sandbox
+    // …and it must not even advertise a run tool.
+    const tools = skillFileTools(noExec, runner);
+    expect(tools.some((t) => t.name === 'run_skill_script')).toBe(false);
   });
 });
 

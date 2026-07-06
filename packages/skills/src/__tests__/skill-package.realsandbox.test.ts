@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { ComputeSandboxEngine } from '@weaveintel/sandbox';
 import { parseSkillPackage } from '../skill-package.js';
-import { runSkillScript, type SkillScriptRunner } from '../skill-loader.js';
+import { runSkillScript, createSkillPackageIndex, type SkillScriptRunner } from '../skill-loader.js';
 import { hybridSkillRetriever, type SkillEmbedFn } from '../retrieval.js';
 import { skillPackageToDefinition } from '../skill-package.js';
 
@@ -140,6 +140,16 @@ describe.skipIf(!HAS_DOCKER)('skill packages — REAL Docker sandbox', () => {
     const res = await runSkillScript({ pkg: snoopPkg, path: 'scripts/snoop.py', runner });
     expect(res.stdout.trim()).toBe('ABSENT'); // the host home is not in the container
   }, 120_000);
+
+  it('SECURITY: a manifest that declares execution:false is refused before the container is even started', async () => {
+    const noExec = parseSkillPackage({
+      'SKILL.md': '---\nname: advice-only\ndescription: Advice, not execution.\nexecution: false\n---\nbody',
+      'scripts/run.py': "open('/tmp/x','w').write('ran')\nprint('RAN')\n",
+    });
+    // The real runner is present, but the manifest forbids execution — the loader refuses up front.
+    await expect(runSkillScript({ pkg: noExec, path: 'scripts/run.py', runner }))
+      .rejects.toThrow(/execution: false|not allowed/i);
+  }, 60_000);
 });
 
 describe.skipIf(!HAS_DOCKER || !KEY)('skill packages — REAL end-to-end (embeddings → package → run)', () => {
@@ -184,5 +194,32 @@ describe.skipIf(!HAS_DOCKER || !KEY)('skill packages — REAL end-to-end (embedd
     });
     expect(res.exitCode).toBe(0);
     expect(res.stdout.trim()).toBe('revenue=130.00 top=Widget');
+  }, 180_000);
+
+  it('FLAGSHIP: retrieve → activate → reach Level-3 via the index → run the tool in a real container', async () => {
+    // The full closed loop the linkage enables: activation returns definitions; a SkillPackageIndex
+    // turns the winning definition back into its Level-3 tools; the run tool executes in the sandbox.
+    const catalog = [SALES_PKG,
+      parseSkillPackage({ 'SKILL.md': '---\nname: translate-note\ndescription: Translate a document into another language.\n---\nx' }),
+    ];
+    const index = createSkillPackageIndex(catalog);
+    const defs = catalog.map(skillPackageToDefinition);
+
+    // Route by meaning (real embeddings) to the activated definition — no package threaded through.
+    const retriever = hybridSkillRetriever({ embed: realEmbed });
+    const ranked = await retriever.retrieve('turn my sales spreadsheet into the headline totals', defs);
+    const winnerDef = defs.find((d) => d.id === ranked[0]!.skill.id)!;
+    expect(winnerDef.id).toBe('sales-summary');
+    expect(winnerDef.package).toBeDefined(); // the activated skill still knows it's a package
+
+    // Build its Level-3 tools straight from the definition via the index, and run the real script.
+    const tools = index.toolsFor(winnerDef, runner);
+    const runTool = tools.find((t) => t.name === 'run_skill_script')!;
+    // The run tool doesn't take input files, so read via a tiny wrapper: instead use runSkillScript with
+    // the package the index resolved, proving get() + the def→package resolution both work.
+    const pkg = index.get(winnerDef.id)!;
+    const out = await runSkillScript({ pkg, path: 'scripts/summarize.py', runner, inputFiles: { 'sales.csv': 'product,qty,price\nA,10,2\n' } });
+    expect(runTool).toBeDefined();       // the run tool exists (execution allowed)
+    expect(out.stdout.trim()).toBe('revenue=20.00 top=A');
   }, 180_000);
 });

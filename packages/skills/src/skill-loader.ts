@@ -20,6 +20,7 @@
  */
 
 import type { SkillPackage } from './skill-package.js';
+import type { SkillDefinition } from './types.js';
 
 // ── Level 1 & 2 ──────────────────────────────────────────────────────────────────────────────
 
@@ -74,8 +75,15 @@ export interface SkillScriptRunSpec {
   readonly files?: Readonly<Record<string, string>>;
   readonly args?: readonly string[];
   readonly timeoutMs?: number;
-  /** Whether outbound network is permitted. The engine defaults this to `false` (deny egress). */
+  /** Whether outbound network is permitted at all. The engine defaults this to `false` (deny egress). */
   readonly networkAccess?: boolean;
+  /**
+   * The exact hosts the script is allowed to reach — the skill's declared `network` manifest. A runner
+   * that supports per-host egress (an egress proxy / kernel allowlist, per the NVIDIA/OWASP model)
+   * should permit ONLY these hosts and drop everything else; a boolean-only runner treats a non-empty
+   * list as "network on". Empty/omitted + `networkAccess:false` = deny all egress (the default).
+   */
+  readonly networkAllowlist?: readonly string[];
 }
 
 export interface SkillScriptResult {
@@ -123,19 +131,27 @@ export interface RunSkillScriptOptions {
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
-const NETWORK_TOOL_HINTS = ['web', 'http', 'fetch', 'network', 'curl', 'download'];
 
-function packageDeclaresNetwork(pkg: SkillPackage): boolean {
-  const tools = pkg.allowedTools ?? [];
-  return tools.some((t) => NETWORK_TOOL_HINTS.some((h) => t.toLowerCase().includes(h)));
+/**
+ * The hosts a package is *authoritatively* allowed to reach — its `network` manifest, declared in the
+ * SKILL.md frontmatter. This is the single source of truth (the same list the security gates validate
+ * a script's observed egress against), replacing the old, fragile "does an allowed-tool name contain
+ * 'web'?" guess. No declared hosts ⇒ no network.
+ */
+function declaredNetworkHosts(pkg: SkillPackage): readonly string[] {
+  return pkg.manifest.network ?? [];
 }
 
 /**
- * Level 3 (run): execute a bundled script in the injected sandbox, with safe defaults.
+ * Level 3 (run): execute a bundled script in the injected sandbox, with self-enforcing safe defaults —
+ * so the engine is safe even if the app never ran the install-time security gates (defense in depth).
  *
  * Guarantees, regardless of the runner:
+ *   • a package whose manifest declares `execution: false` is refused outright;
  *   • only a `scripts/*` file of THIS package can be run (no traversal, no arbitrary path);
- *   • network egress is denied unless the caller opts in AND the package declared a network tool;
+ *   • network egress is denied unless the caller opts in AND the package's manifest declares hosts —
+ *     and the declared host allowlist is passed to the runner so a proxy-capable sandbox restricts
+ *     egress to exactly those hosts (least privilege);
  *   • the package's own reference files are made available to the script, plus any input files;
  *   • a wall-clock timeout is always set.
  */
@@ -143,6 +159,11 @@ export async function runSkillScript(opts: RunSkillScriptOptions): Promise<Skill
   const { pkg, path, runner } = opts;
   if (!runner || typeof runner.run !== 'function') {
     throw new SkillResourceError('cannot run a skill script without a sandbox runner (refusing host execution)');
+  }
+  // Honour the least-privilege manifest at runtime, not just at install time: a package that declares
+  // it does not execute code must never have a bundled script run (OWASP Agentic Skills AST10).
+  if (pkg.manifest.execution === false) {
+    throw new SkillResourceError(`skill "${pkg.name}" declares execution: false — running its bundled scripts is not allowed`);
   }
   assertSafePath(path);
   const code = pkg.scripts[path];
@@ -152,8 +173,10 @@ export async function runSkillScript(opts: RunSkillScriptOptions): Promise<Skill
     throw new SkillResourceError(`script not found in skill "${pkg.name}": ${path}`);
   }
 
-  const wantsNetwork = opts.allowNetwork === true;
-  const networkAccess = wantsNetwork && packageDeclaresNetwork(pkg);
+  // Network is off unless the caller opts in AND the manifest declares hosts. The declared hosts (and
+  // only those) become the egress allowlist — a caller can never grant more reach than the skill asked.
+  const hosts = declaredNetworkHosts(pkg);
+  const networkAccess = opts.allowNetwork === true && hosts.length > 0;
 
   // Bundled reference files + caller input files become the script's workspace (script excluded).
   const files: Record<string, string> = {};
@@ -167,6 +190,7 @@ export async function runSkillScript(opts: RunSkillScriptOptions): Promise<Skill
     args: opts.args,
     timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     networkAccess,
+    networkAllowlist: networkAccess ? hosts : [],
   });
 }
 
@@ -221,10 +245,12 @@ export function skillFileTools(pkg: SkillPackage, runner?: SkillScriptRunner): S
       },
     },
   ];
-  if (runner) {
+  // Only offer the run tool if the package actually permits execution — a manifest that says
+  // `execution: false` shouldn't advertise a "run" affordance at all (and runSkillScript would refuse).
+  if (runner && pkg.manifest.execution !== false && files.scripts.length > 0) {
     tools.push({
       name: 'run_skill_script',
-      description: `Run a bundled script for the "${pkg.name}" skill in an isolated sandbox. Available: ${files.scripts.join(', ') || '(none)'}.`,
+      description: `Run a bundled script for the "${pkg.name}" skill in an isolated sandbox. Available: ${files.scripts.join(', ')}.`,
       parameters: {
         type: 'object',
         properties: {
@@ -245,4 +271,43 @@ export function skillFileTools(pkg: SkillPackage, runner?: SkillScriptRunner): S
     });
   }
   return tools;
+}
+
+// ── Reaching a package (and its Level-3 tools) from an activated skill ─────────────────────────
+
+/**
+ * A lookup from skill id → its `SkillPackage`, so after `activateSkills()` returns `SkillDefinition`s
+ * you can build the Level-3 file tools for the ones that came from packages — without threading the
+ * packages through activation yourself. This closes the loop: retrieve → activate → open/run files.
+ */
+export interface SkillPackageIndex {
+  /** The package for a skill id, if any. */
+  get(name: string): SkillPackage | undefined;
+  /** Every package in the index. */
+  all(): SkillPackage[];
+  /**
+   * Build the Level-3 file tools for a skill. Accepts a skill id, an activated `SkillDefinition`
+   * (uses its `package` pointer), or a `SkillPackage` directly. Returns `[]` for a skill that has no
+   * package here (a plain text skill) — so you can call it unconditionally over all activated skills.
+   */
+  toolsFor(skill: string | SkillDefinition | SkillPackage, runner?: SkillScriptRunner): SkillFileTool[];
+}
+
+/** Build a `SkillPackageIndex` over the app's known skill packages. */
+export function createSkillPackageIndex(packages: readonly SkillPackage[]): SkillPackageIndex {
+  const byName = new Map<string, SkillPackage>();
+  for (const p of packages) byName.set(p.name, p);
+  const resolve = (skill: string | SkillDefinition | SkillPackage): SkillPackage | undefined => {
+    if (typeof skill === 'string') return byName.get(skill);
+    if ('body' in skill && 'scripts' in skill) return byName.get((skill as SkillPackage).name); // a SkillPackage
+    return byName.get((skill as SkillDefinition).package?.name ?? ''); // a SkillDefinition — only if package-derived
+  };
+  return {
+    get: (name) => byName.get(name),
+    all: () => [...byName.values()],
+    toolsFor: (skill, runner) => {
+      const pkg = resolve(skill);
+      return pkg ? skillFileTools(pkg, runner) : [];
+    },
+  };
 }

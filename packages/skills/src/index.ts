@@ -42,8 +42,8 @@ export { resolveSkillGraph, detectRequiresCycle, isSkillTerminated } from './ski
 export type { SkillGraphNode, SkillGraphResult, SkillGraphOptions } from './skill-graph.js';
 
 // Skill packages — the open SKILL.md folder format (frontmatter + body + bundled files/scripts).
-export { parseSkillPackage, skillPackageToDefinition, SkillPackageError } from './skill-package.js';
-export type { SkillPackage, SkillCapabilityManifest } from './skill-package.js';
+export { parseSkillPackage, skillPackageToDefinition, skillPackageRef, SkillPackageError } from './skill-package.js';
+export type { SkillPackage, SkillCapabilityManifest, SkillPackageRef } from './skill-package.js';
 
 // Skill security — trust tiers, Ed25519 signing, and the four verification gates (OWASP AST10).
 export {
@@ -78,6 +78,7 @@ export {
   inferSkillScriptLanguage,
   limitScriptConcurrency,
   skillFileTools,
+  createSkillPackageIndex,
   SkillResourceError,
 } from './skill-loader.js';
 export type {
@@ -86,6 +87,7 @@ export type {
   SkillScriptRunner,
   RunSkillScriptOptions,
   SkillFileTool,
+  SkillPackageIndex,
 } from './skill-loader.js';
 
 // Skill evaluation & lifecycle — quality scoring, eval-gated tier promotion, deprecate/retire.

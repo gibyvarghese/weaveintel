@@ -152,6 +152,14 @@ export interface SkillDefinition {
    */
   readonly inputModalities?: readonly import('./skill-mining.js').SkillModality[];
 
+  /**
+   * Set when this skill was compiled from a `SKILL.md` package (Phase 2). A lightweight pointer — the
+   * least-privilege manifest plus the names of the bundled reference files and scripts — so an
+   * activated skill carries its permission posture and the app can build the Level-3 file tools for it
+   * (via a `SkillPackageIndex`) without re-parsing. The file *contents* stay in the package, not here.
+   */
+  readonly package?: import('./skill-package.js').SkillPackageRef;
+
   readonly summary: string;
   readonly purpose?: string;
   readonly whenToUse?: string;
