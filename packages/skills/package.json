@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/skills",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Agent Skills capability — reusable named capability bundles that agents discover and apply automatically",
   "type": "module",
   "exports": {
