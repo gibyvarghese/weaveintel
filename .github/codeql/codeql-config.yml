@@ -1,0 +1,19 @@
+name: "weaveintel CodeQL config"
+
+# Scan only the shipped library source. examples/, scripts/, docs/, and per-package
+# demo apps are developer-facing samples and one-off tooling — not published runtime
+# code — so their findings (e.g. clear-text logging of demo values, command lines built
+# from local args) are noise for a library security gate. Test files and build output
+# (dist/) are likewise not shipped.
+paths:
+  - packages
+
+paths-ignore:
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+  - "**/*.realsandbox.test.ts"
+  - "**/dist/**"
+  - "**/node_modules/**"
+
+queries:
+  - uses: security-extended

@@ -218,7 +218,7 @@ export function locateQuote(source: string, quote: string): { start: number; end
   // Ellipsis quotes ("the start … the end") are wildcards: locate the first + last segment and
   // return the ENCLOSING span (both must be present, in order). Models elide the middle of a quote.
   if (/\.\.\.|…/.test(q)) {
-    const segs = q.split(/\s*(?:\.\.\.|…)\s*/).map((s) => s.replace(/\s+/g, ' ').trim().toLowerCase()).filter((s) => s.length >= 3);
+    const segs = q.split(/\.\.\.|…/).map((s) => s.replace(/\s+/g, ' ').trim().toLowerCase()).filter((s) => s.length >= 3);
     if (segs.length >= 2) {
       const head = norm.indexOf(segs[0]!);
       const tailSeg = segs[segs.length - 1]!;
@@ -293,7 +293,7 @@ Return ONLY this JSON: {"queries":["…","…"],"hypothetical":"…"}`;
 export function parseExpandedQueries(reply: string, original: string, opts: { max?: number } = {}): ExpandedQueries {
   const max = Math.max(1, Math.min(opts.max ?? MAX_QUERY_VARIANTS, MAX_QUERY_VARIANTS));
   let obj: Record<string, unknown> = {};
-  try { const m = (reply ?? '').match(/\{[\s\S]*\}/); if (m) obj = JSON.parse(m[0]) as Record<string, unknown>; } catch { /* */ }
+  try { const r = reply ?? ''; const a = r.indexOf('{'); const b = r.lastIndexOf('}'); if (a !== -1 && b > a) obj = JSON.parse(r.slice(a, b + 1)) as Record<string, unknown>; } catch { /* */ }
   const rawList = Array.isArray(obj['queries']) ? obj['queries'] : [];
   const seen = new Set<string>();
   const variants: string[] = [];
@@ -315,8 +315,8 @@ export function parseExpandedQueries(reply: string, original: string, opts: { ma
 export function parseCitedAnswer(reply: string): { answer: string; citations: RawCitation[] } {
   let obj: Record<string, unknown> = {};
   try {
-    const m = (reply ?? '').match(/\{[\s\S]*\}/);
-    if (m) obj = JSON.parse(m[0]) as Record<string, unknown>;
+    const r = reply ?? ''; const a = r.indexOf('{'); const b = r.lastIndexOf('}');
+    if (a !== -1 && b > a) obj = JSON.parse(r.slice(a, b + 1)) as Record<string, unknown>;
   } catch { /* fall through */ }
   const answer = typeof obj['answer'] === 'string' ? obj['answer'] : (reply ?? '').trim();
   const raw = Array.isArray(obj['citations']) ? obj['citations'] : [];

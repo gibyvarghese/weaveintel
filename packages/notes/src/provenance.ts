@@ -130,7 +130,7 @@ export function provenanceToXmp(p: ImageProvenance): string {
  */
 export function embedXmpInSvg(svg: string, p: ImageProvenance): string {
   if (typeof svg !== 'string' || !/<svg[\s>]/i.test(svg)) return svg;
-  const stripped = svg.replace(/<metadata id="gw-provenance">[\s\S]*?<\/metadata>/i, '');
+  const stripped = svg.replace(/<metadata id="gw-provenance">[\s\S]{0,50000}?<\/metadata>/i, '');
   const block = `<metadata id="gw-provenance">\n${provenanceToXmp(p)}\n</metadata>`;
   // Insert right after the opening <svg ...> tag.
   return stripped.replace(/(<svg[^>]*>)/i, `$1${block}`);

@@ -27,7 +27,7 @@ export interface WikiLink {
   raw: string;
 }
 
-const WIKI_LINK_RE = /\[\[([^\]|]+?)(?:\|([^\]]+?))?\]\]/g;
+const WIKI_LINK_RE = /\[\[([^\]|]{1,200}?)(?:\|([^\]]{1,200}?))?\]\]/g;
 
 /**
  * Parse all `[[wiki-links]]` from a note's text/Markdown. Supports `[[Title]]` and

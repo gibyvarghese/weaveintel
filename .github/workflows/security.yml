@@ -30,7 +30,9 @@ jobs:
         uses: github/codeql-action/init@v3
         with:
           languages: ${{ matrix.language }}
-          queries: security-extended
+          # Scope the scan to shipped library source (packages/, minus tests/dist) and keep the
+          # security-extended query suite. See .github/codeql/codeql-config.yml for the rationale.
+          config-file: ./.github/codeql/codeql-config.yml
 
       - name: Autobuild
         uses: github/codeql-action/autobuild@v3
@@ -131,6 +133,10 @@ jobs:
           severity: CRITICAL,HIGH
           exit-code: '1'
           format: table
+          # Only fail on vulnerabilities that have a fix available — mirrors the npm-audit gate's
+          # policy that upstream-unfixed build-chain highs (Expo/mobile toolchain) must not block
+          # releases. Fixable highs (e.g. undici) still fail the gate and must be remediated.
+          ignore-unfixed: true
 
   # ── SBOM generation (CycloneDX) ────────────────────────────────────────────
   sbom:
