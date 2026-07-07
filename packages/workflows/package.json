@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/workflows",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Workflow engine — definition builder, step execution, scheduling, compensation, checkpointing",
   "type": "module",
   "exports": {
