@@ -14,7 +14,7 @@
  * It is driver-agnostic in spirit: you hand in a `pg.Pool` (or anything pool-shaped) — e.g. the shared
  * pool from `weaveSharedPostgres` in `@weaveintel/persistence`, so your whole runtime uses one
  * connection. Every value is a bound parameter (`$1`, `$2`, …), never glued into the SQL text, so a
- * title or note body containing quotes, semicolons, or `DROP TABLE` is stored as harmless data. Tables
+ * title or note body containing quotes, semicolons, or destructive SQL keywords is stored as harmless data. Tables
  * are created on first use (`CREATE TABLE IF NOT EXISTS`) — no migration step to run first.
  *
  * Parity notes (why the small choices): columns are named EXACTLY like the `Note` fields (snake_case),

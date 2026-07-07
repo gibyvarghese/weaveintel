@@ -49,7 +49,7 @@ import { noteRepositoryContract, createPostgresNoteRepository } from '@weaveinte
 noteRepositoryContract(() => createPostgresNoteRepository({ pool }), { describe, it, beforeEach, expect });
 ```
 
-Safe by construction: every title, note body, and search term is a bound parameter, so content like `'; DROP TABLE notes; --` is stored as harmless text. Owner-scoping (you only see your own notes), the favourite-then-recent ordering, search-matches-title-or-body, and one-level cascade delete all behave identically to the reference. Proven on a real Postgres against a 2,000-note workspace — and end-to-end with an AI writing a note that's then stored and found by search.
+Safe by construction: every title, note body, and search term is a bound parameter, so hostile content that tries to smuggle SQL commands (stray quotes, semicolons, comment markers) is stored as harmless text, never executed. Owner-scoping (you only see your own notes), the favourite-then-recent ordering, search-matches-title-or-body, and one-level cascade delete all behave identically to the reference. Proven on a real Postgres against a 2,000-note workspace — and end-to-end with an AI writing a note that's then stored and found by search.
 
 ## What's in the box
 

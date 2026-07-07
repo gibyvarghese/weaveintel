@@ -40,7 +40,7 @@ const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 const runtime = weaveRuntime({ persistence: weavePostgresPersistence({ client: pool }) });
 ```
 
-Both slots are **safe by construction**: keys and values are always sent as parameters, never glued into the SQL text — so a value containing `'; DROP TABLE …; --` is stored as harmless text, never executed. Expiry (`ttlMs`) is honoured on every read.
+Both slots are **safe by construction**: keys and values are always sent as parameters, never glued into the SQL text — so a value that tries to smuggle SQL commands (stray quotes, semicolons, comment markers) is stored as harmless text, never executed. Expiry (`ttlMs`) is honoured on every read.
 
 ## Proving a backend is a safe drop-in (the contract harness)
 

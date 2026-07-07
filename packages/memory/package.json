@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/memory",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Memory implementations — conversation, semantic, entity",
   "type": "module",
   "exports": {

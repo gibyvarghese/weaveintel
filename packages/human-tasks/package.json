@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/human-tasks",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Human-in-the-loop orchestration — approval tasks, review queues, escalation, SLA enforcement",
   "type": "module",
   "exports": {

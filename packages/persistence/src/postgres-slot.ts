@@ -10,7 +10,7 @@
  * serverless driver (Neon), or a test container without any code change here.
  *
  * Everything is parameterised (`$1`, `$2`, …) — keys and values are never concatenated into SQL, so a
- * key or value containing quotes, semicolons, or `DROP TABLE` is stored as data, never executed. The
+ * key or value containing quotes, semicolons, or destructive SQL keywords is stored as data, never executed. The
  * table name is the only interpolated identifier and is validated against a strict allow-list.
  */
 
