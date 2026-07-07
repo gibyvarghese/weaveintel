@@ -256,11 +256,19 @@ export function createDrizzleRunQueue(deps: { db: NodePgDatabase; table: PgRunQu
 // ─── Audit log ───────────────────────────────────────────────────────────────────
 export function createDrizzleAuditLog(deps: { db: NodePgDatabase; table: PgAudit; exec: DrizzleExec }): WorkflowAuditLog {
   const { db, table, exec } = deps;
+  // Audit rows are read back ordered by (timestamp, id). Callers routinely hand us equal ISO
+  // timestamps for events appended in the same millisecond, so the id must break those ties in append
+  // order — the insertion-order semantics the original rowid-based store had. newUUIDv7 is not
+  // monotonic within a millisecond (its low bits are random), so prefix a strictly-increasing,
+  // lexicographically-sortable clock; the UUID suffix keeps ids globally unique. asc(id) then equals
+  // append order on both Postgres and SQLite.
+  const seq = monotonicIso();
+  const nextId = () => `${seq()}-${newUUIDv7()}`;
   const toEvent = (r: { id: string; runId: string; workflowId: string; type: string; timestamp: string; payloadJson: Record<string, unknown> }): WorkflowAuditEvent =>
     ({ id: r.id, runId: r.runId, workflowId: r.workflowId, type: r.type, timestamp: r.timestamp, ...r.payloadJson });
   return {
     async append(event) {
-      const full = { ...event, id: newUUIDv7() };
+      const full = { ...event, id: nextId() };
       const { id, runId, workflowId, type, timestamp, ...payload } = full;
       await exec.run(db.insert(table).values({ id, runId, workflowId, type, timestamp, payloadJson: payload }));
     },
