@@ -213,6 +213,12 @@ export function createPgRunQueueDequeue(db: NodePgDatabase, table: PgRunQueue): 
 export function createDrizzleRunQueue(deps: { db: NodePgDatabase; table: PgRunQueue; exec: DrizzleExec; dequeue?: (workflowId: string) => Promise<RunQueueEntry | null> }): WorkflowRunQueue {
   const { db, table, exec } = deps;
   const order = runQueueOrder(table);
+  // FIFO tiebreak within a priority must be deterministic. A plain wall-clock `queuedAt`
+  // ties when two entries are enqueued in the same millisecond, which then falls through to
+  // `asc(id)` — but a UUIDv7 id is NOT monotonic within a millisecond (its low bits are random),
+  // so same-ms entries could dequeue out of insertion order. A strictly-increasing clock makes
+  // `queuedAt` itself the total order, so the id tiebreak never decides FIFO.
+  const queuedAtClock = monotonicIso();
   // Default (SQLite / single-writer): select the top entry then delete it by id.
   const defaultDequeue = async (workflowId: string): Promise<RunQueueEntry | null> => {
     const rows = await exec.all<RunQueueRow>(db.select().from(table).where(eq(table.workflowId, workflowId)).orderBy(...order).limit(1));
@@ -222,7 +228,7 @@ export function createDrizzleRunQueue(deps: { db: NodePgDatabase; table: PgRunQu
   };
   return {
     async enqueue(entry) {
-      const full: RunQueueEntry = { ...entry, id: newUUIDv7(), queuedAt: nowIso() };
+      const full: RunQueueEntry = { ...entry, id: newUUIDv7(), queuedAt: queuedAtClock() };
       await exec.run(db.insert(table).values({ id: full.id, runId: full.runId, workflowId: full.workflowId, inputJson: full.input, priority: full.priority, queuedAt: full.queuedAt, optsJson: full.opts }));
       return full;
     },
