@@ -37,8 +37,85 @@ Main entry (`@weaveintel/identity`):
 Subpath exports:
 
 - `@weaveintel/identity/oauth` — OAuth flows and token handling, with a durable variant.
-- `@weaveintel/identity/tenancy` — tenant resolution and isolation helpers.
+- `@weaveintel/identity/tenancy` — tenant resolution, isolation helpers, and the tenant hierarchy (below).
 - `@weaveintel/identity/scope` — scope definitions and default scope sets.
+
+## Tenant hierarchy — real tenants with a parent/child tree
+
+A **tenant** is one isolated customer, company, or workspace using your product. Most apps begin with
+exactly one. But real customers grow: a company acquires regional subsidiaries, an agency resells to
+its own clients, an enterprise splits into departments. When that happens you need tenants to be
+*real things with parents and children* — not just a text label on a row.
+
+This gives you that tree, in a form that runs the same on a little SQLite file or a big Postgres
+cluster.
+
+```ts
+import { createInMemoryTenantHierarchy } from '@weaveintel/identity';
+
+const org = createInMemoryTenantHierarchy();
+
+const acme = await org.create({ name: 'Acme Corp' });                       // a top-level tenant
+const emea = await org.create({ name: 'EMEA', parentTenantId: acme.id });   // a child
+const uk   = await org.create({ name: 'Acme UK', parentTenantId: emea.id }); // a grandchild
+
+await org.ancestors(uk.id);     // [Acme Corp, EMEA]  — walk up (e.g. to bill the parent company)
+await org.descendants(acme.id); // [EMEA, Acme UK]    — everything under a customer
+await org.children(acme.id);    // [EMEA]             — just the direct reports
+```
+
+### Moving branches (acquisitions, reorgs)
+
+Move a tenant and its **whole subtree** in one call. It's safe: it refuses to make a tenant its own
+ancestor (no loops).
+
+```ts
+await org.reparent(uk.id, acme.id); // Acme UK now reports straight to Acme Corp
+```
+
+### Just one tenant? It stays out of your way
+
+If you only ever have one customer, call `ensureDefault()` and forget the tree exists — there are no
+parents, no children, and every query collapses to "just me."
+
+```ts
+const me = await org.ensureDefault({ name: 'My Company' }); // idempotent single-org starting point
+```
+
+### Backing it with a real database (SQLite or Postgres)
+
+The same store, over SQL. It uses one tiny `SqlClient` seam (`query(text, params) → { rows }`) — a
+`pg.Pool` already fits it; for SQLite, wrap `better-sqlite3` in a few lines.
+
+```ts
+import { createSqlTenantHierarchy, tenantHierarchyDdl } from '@weaveintel/identity';
+import pg from 'pg';
+
+const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+const org = createSqlTenantHierarchy({ client: pool, dialect: 'postgres' }); // creates the table on first use
+// (Or manage the schema yourself with `tenantHierarchyDdl()` + `{ ensureSchema: false }`.)
+```
+
+### How it works (in one paragraph)
+
+Each tenant stores its lineage as a string called a **path**, like `/acme/emea/uk/`. From that single
+column everything is cheap and portable: its depth is the number of segments, its ancestors are the
+path's prefixes, and its descendants are every row whose path *starts with* its own. Moving a branch
+is one string-rewrite `UPDATE`. There's no database-specific magic (no `ltree`, no recursive queries),
+which is why SQLite and Postgres behave identically — verified by the same conformance test running
+against an in-memory store, a real SQLite file, and a real Postgres.
+
+### Adding it to an existing app (e.g. geneWeave)
+
+If today `tenant_id` is just a text label on your tables, adopting this is a relabel, not a data move:
+
+1. Create the `tenants` table (`tenantHierarchyDdl()`).
+2. Turn each distinct `tenant_id` you already have into a **root** tenant; map blank/`NULL` to one
+   synthetic **default** tenant (`ensureDefault()`), so single-org installs behave exactly as before.
+3. Point your existing `tenant_id` columns at it (a foreign key, once the rows exist).
+
+Nothing else changes until you *want* a hierarchy — at which point `reparent`, `ancestors`, and
+`descendants` are waiting.
 
 ## License
 

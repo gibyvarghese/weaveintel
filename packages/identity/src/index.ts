@@ -51,3 +51,9 @@ export type { CatalogSource, AccessCheck, CatalogCache, SurfaceCatalogResolverOp
 // Phase 6 — RuntimeIdentitySlot adapter for weaveRuntime({ identity }).
 export { createRuntimeIdentityAdapter } from './runtime-identity-adapter.js';
 export type { RuntimeIdentityAdapterOptions } from './runtime-identity-adapter.js';
+
+// Tenant hierarchy (realm Phase 0) — turn "tenant" from a label into a real entity with a tree.
+export * from './tenancy/hierarchy-path.js';
+export * from './tenancy/tenant-hierarchy.js';
+export * from './tenancy/tenant-hierarchy-sql.js';
+export * from './tenancy/tenant-hierarchy-contract.js';
