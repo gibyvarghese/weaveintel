@@ -204,7 +204,10 @@ describe('skill retrieval — STRESS & scaling', () => {
     // the index and rescanning). A dev box holds the tight 50ms bound.
     const p95Ceiling = Number(process.env['SKILLS_P95_CEILING_MS'] ?? (process.env['CI'] ? 500 : 50));
     expect(p95).toBeLessThan(p95Ceiling);
-  });
+    // 1,000 sequential retrievals over a 5k catalog run well under a second on a dev box but can
+    // exceed vitest's default 5s budget on a slow shared CI runner — give it room (this is a stress
+    // test, not a latency gate; the p95 ceiling above is the perf guard).
+  }, 60_000);
 
   it('index.sync only re-embeds NEW/CHANGED skills (cache proven)', async () => {
     let embedCalls = 0;

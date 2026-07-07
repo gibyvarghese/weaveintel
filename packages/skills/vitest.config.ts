@@ -10,5 +10,9 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     fileParallelism: false,
+    // The scale/stress suites (5k-skill catalogs, 1k-retrieval loops, real-embedding benchmarks) are
+    // comfortably sub-second on a dev box but can crawl on a shared 2-core CI runner. Raise the
+    // default per-test budget above vitest's 5s so a slow runner never times out a passing test.
+    testTimeout: 30_000,
   },
 });
