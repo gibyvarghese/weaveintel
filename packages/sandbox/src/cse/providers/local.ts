@@ -17,7 +17,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { writeFile, mkdir, rm, readdir, readFile, mkdtemp } from 'node:fs/promises';
+import { writeFile, mkdir, rm, readdir, readFile, mkdtemp, chmod } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { newUUIDv7 } from '@weaveintel/core';
@@ -223,6 +223,11 @@ export class LocalDockerProvider implements ContainerProvider {
   async execute(request: ExecutionRequest, config: CSEConfig): Promise<ExecutionResult> {
     const executionId = newUUIDv7();
     const workDir = await mkdtemp(join(tmpdir(), 'cse-'));
+    // mkdtemp gives an unpredictable dir (0700) — that randomness is the symlink/race protection.
+    // The container runs as `nobody` (uid 65534) and mounts workDir read-only, so it must be
+    // world-readable to read the injected code; the output subdir is mounted read-write, so nobody
+    // must be able to write there. The random parent name keeps the whole tree unguessable.
+    await chmod(workDir, 0o755);
     const outputDir = join(workDir, 'output');
     const lang = request.language ?? 'python';
     const ext = languageExt(lang);
@@ -230,6 +235,7 @@ export class LocalDockerProvider implements ContainerProvider {
 
     try {
       await mkdir(outputDir, { recursive: true });
+      await chmod(outputDir, 0o777);
 
       // Write code — for Python, auto-wrap bare last expressions in print() so
       // the model always gets visible output even if it forgets to print().
