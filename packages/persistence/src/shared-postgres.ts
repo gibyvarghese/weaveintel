@@ -86,7 +86,7 @@ const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /** Turn a friendly slot name ("cost-meter", "DLQ") into a safe table suffix ("cost_meter", "dlq"). */
 function sanitizeName(name: string): string {
-  const cleaned = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  const cleaned = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
   if (!cleaned) throw new Error(`weaveSharedPostgres.slot: name "${name}" has no letters or digits to make a table name from.`);
   return cleaned;
 }

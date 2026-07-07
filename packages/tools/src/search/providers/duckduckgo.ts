@@ -88,11 +88,11 @@ export class DuckDuckGoProvider extends BaseSearchProvider {
   private cleanHtml(input: string): string {
     return input
       .replace(/<[^>]+>/g, ' ')
-      .replace(/&amp;/g, '&')
       .replace(/&quot;/g, '"')
       .replace(/&#39;/g, "'")
       .replace(/&lt;/g, '<')
       .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&')
       .replace(/\s+/g, ' ')
       .trim();
   }

@@ -79,7 +79,7 @@ export function parseSchema(columnsJson: string | unknown[]): PropertyDef[] {
   return out;
 }
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,255}\.[^\s@]{1,255}$/;
 
 /** Coerce a raw value to its property type. Returns the cleaned value, or null when invalid/empty. */
 export function coerceValue(value: unknown, def: Pick<PropertyDef, 'type' | 'options'>): unknown {

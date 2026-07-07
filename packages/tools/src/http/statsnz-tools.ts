@@ -174,11 +174,11 @@ function parseName(names?: Record<string, string>): string {
 
 function decodeXmlEntities(input: string): string {
   return input
-    .replaceAll('&amp;', '&')
     .replaceAll('&lt;', '<')
     .replaceAll('&gt;', '>')
     .replaceAll('&quot;', '"')
-    .replaceAll('&apos;', "'");
+    .replaceAll('&apos;', "'")
+    .replaceAll('&amp;', '&');
 }
 
 function getAttr(xmlFragment: string, attr: string): string | null {

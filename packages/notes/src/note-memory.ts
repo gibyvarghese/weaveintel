@@ -68,7 +68,7 @@ interface RawMem { content?: unknown; kind?: unknown; importance?: unknown; subj
  */
 export function parseMemoryExtraction(reply: string): NoteMemory[] {
   const trimmed = (reply ?? '').trim();
-  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const fenced = trimmed.match(/```(?:json)?([\s\S]*?)```/i);
   const body = fenced ? fenced[1]! : trimmed;
   const s = body.indexOf('{'); const e = body.lastIndexOf('}');
   const jsonText = s >= 0 && e > s ? body.slice(s, e + 1) : body;

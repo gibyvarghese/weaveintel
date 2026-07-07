@@ -17,7 +17,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { writeFile, mkdir, rm, readdir, readFile } from 'node:fs/promises';
+import { writeFile, mkdir, rm, readdir, readFile, mkdtemp } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { newUUIDv7 } from '@weaveintel/core';
@@ -222,14 +222,13 @@ export class LocalDockerProvider implements ContainerProvider {
 
   async execute(request: ExecutionRequest, config: CSEConfig): Promise<ExecutionResult> {
     const executionId = newUUIDv7();
-    const workDir = join(tmpdir(), `cse_${executionId}`);
+    const workDir = await mkdtemp(join(tmpdir(), 'cse-'));
     const outputDir = join(workDir, 'output');
     const lang = request.language ?? 'python';
     const ext = languageExt(lang);
     const codeFile = join(workDir, `code.${ext}`);
 
     try {
-      await mkdir(workDir, { recursive: true });
       await mkdir(outputDir, { recursive: true });
 
       // Write code — for Python, auto-wrap bare last expressions in print() so

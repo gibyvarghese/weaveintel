@@ -20,7 +20,7 @@
   "dependencies": {
     "@weaveintel/core": "^0.1.1",
     "@weaveintel/mcp-server": "^0.1.1",
-    "undici": "^6.0.0"
+    "undici": "^6.27.0"
   },
   "devDependencies": {
     "typescript": "^5.7.0",

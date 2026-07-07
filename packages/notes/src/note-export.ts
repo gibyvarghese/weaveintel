@@ -181,7 +181,7 @@ export function parseNoteExportBundle(raw: string | NoteExportBundle | null | un
 
 /** A filesystem-safe slug for the download filename. */
 function slug(title: string): string {
-  const s = (title || 'note').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+  const s = (title || 'note').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
   return s || 'note';
 }
 
