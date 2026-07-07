@@ -19,7 +19,7 @@
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { readFile, writeFile, readdir, stat } from 'node:fs/promises';
+import { readFile, writeFile, readdir } from 'node:fs/promises';
 import { weaveToolRegistry, weaveTool } from '@weaveintel/core';
 import type { ToolRegistry } from '@weaveintel/core';
 
@@ -267,12 +267,19 @@ function makeTextEditorTool(opts: CuaToolRegistryOptions) {
       switch (command) {
         case 'view': {
           try {
-            const s = await stat(resolvedPath);
-            if (s.isDirectory()) {
-              const entries = await readdir(resolvedPath);
-              return `Directory: ${resolvedPath}\n${entries.map(e => `  ${e}`).join('\n')}`;
+            // Read the file directly rather than stat-then-read: a check-then-use gap lets the path
+            // change type/target between the two calls (TOCTOU). Reading first is atomic; a directory
+            // surfaces as EISDIR, which we then list.
+            let content: string;
+            try {
+              content = await readFile(resolvedPath, 'utf-8');
+            } catch (err: unknown) {
+              if ((err as NodeJS.ErrnoException).code === 'EISDIR') {
+                const entries = await readdir(resolvedPath);
+                return `Directory: ${resolvedPath}\n${entries.map(en => `  ${en}`).join('\n')}`;
+              }
+              throw err;
             }
-            const content = await readFile(resolvedPath, 'utf-8');
             const lines = content.split('\n');
             return lines.map((l, i) => `${String(i + 1).padStart(4)}: ${l}`).join('\n');
           } catch (e: unknown) {
