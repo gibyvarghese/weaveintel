@@ -27,9 +27,33 @@ const patched = await repo.update(note.id, { title: 'Launch plan (v2)' });
 console.log(patched?.title); // → "Launch plan (v2)"
 ```
 
+## Store it in a real database (Postgres)
+
+The in-memory adapter is perfect for tests, but your notes need to survive a restart. `createPostgresNoteRepository` is the same doorway (`NoteRepository`) backed by Postgres — so you swap it in and nothing else changes. You hand it a `pg.Pool` (share one across your whole app — e.g. the pool from `weaveSharedPostgres` in `@weaveintel/persistence`), and it creates its tables on first use. No migration step to run first.
+
+```ts
+import pg from 'pg';
+import { createPostgresNoteRepository } from '@weaveintel/notes';
+
+const repo = createPostgresNoteRepository({ pool: new pg.Pool({ connectionString: process.env.DATABASE_URL }) });
+
+await repo.createNote({ id: 'n1', owner_user_id: 'u1', title: 'Launch plan' });
+const note = await repo.getNote('n1', 'u1');
+const mine = await repo.listNotes('u1', { search: 'launch', favorite: true });
+```
+
+How do you know it behaves *exactly* like the in-memory version? The same **contract test** runs against both:
+
+```ts
+import { noteRepositoryContract, createPostgresNoteRepository } from '@weaveintel/notes';
+noteRepositoryContract(() => createPostgresNoteRepository({ pool }), { describe, it, beforeEach, expect });
+```
+
+Safe by construction: every title, note body, and search term is a bound parameter, so content like `'; DROP TABLE notes; --` is stored as harmless text. Owner-scoping (you only see your own notes), the favourite-then-recent ordering, search-matches-title-or-body, and one-level cascade delete all behave identically to the reference. Proven on a real Postgres against a 2,000-note workspace — and end-to-end with an AI writing a note that's then stored and found by search.
+
 ## What's in the box
 
-- **The port & adapter** — `NoteRepository` (interface), `createInMemoryNoteRepository`, and input/patch types (`CreateNoteInput`, `UpdateNotePatch`, `NoteListFilter`, …).
+- **The port & adapters** — `NoteRepository` (interface), `createInMemoryNoteRepository` (tests), and `createPostgresNoteRepository` (durable), plus input/patch types (`CreateNoteInput`, `UpdateNotePatch`, `NoteListFilter`, …).
 - **Contract test** — `noteRepositoryContract`: run it against any adapter to prove identical behaviour.
 - **Content extraction** — `extractPlainText`, `extractTaskItems`.
 - **Wiki-links & entities** — `parseWikiLinks`, `findUnlinkedMentions`, `buildLinkSuggestions`, `resolveEntities`, `canonicalizeEntityName`.

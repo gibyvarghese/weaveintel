@@ -64,6 +64,10 @@ export {
   type FeedContractTestApi,
   notificationFeedStoreContract,
 } from './feed-contract.js';
+export {
+  type PostgresFeedStoreOptions,
+  createPostgresNotificationFeedStore,
+} from './feed-postgres.js';
 
 // Bus subscriptions
 export {

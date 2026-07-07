@@ -27,6 +27,9 @@ import { weavePgVectorMemoryStore } from '@weaveintel/memory';
 import { weavePostgresCheckpointStore } from '@weaveintel/workflows';
 import { weavePostgresStateStore, type HeartbeatTick } from '@weaveintel/live-agents';
 import { weavePostgresTriggerStore, type Trigger } from '@weaveintel/triggers';
+import { createPostgresNoteRepository } from '@weaveintel/notes';
+import { createPostgresNotificationFeedStore } from '@weaveintel/notifications';
+import { createPostgresHumanTaskRepository } from '@weaveintel/human-tasks';
 import { weaveSharedPostgres, type SqlClient } from './shared-postgres.js';
 import { runSharedPostgresCoexistence, coexistenceReport, type StoreProbe } from './shared-postgres-coexistence.js';
 
@@ -84,12 +87,15 @@ describe.skipIf(!HAS_DOCKER)('weaveSharedPostgres — the whole runtime on ONE P
     expect(health.ok).toBe(true);
   }, 60_000);
 
-  it('FLAGSHIP: memory + workflows + live-agents + triggers + KV all coexist on the one pool', async () => {
-    // Build the four REAL domain stores — all pointed at the SAME shared pool.
+  it('FLAGSHIP: all seven stores (memory, workflows, live-agents, triggers, notes, notifications, human-tasks) + KV coexist on the one pool', async () => {
+    // Build the seven REAL domain stores — all pointed at the SAME shared pool.
     const checkpoints = await weavePostgresCheckpointStore({ pool });
     const triggers = await weavePostgresTriggerStore({ pool });
     const agents = await weavePostgresStateStore({ pool }); // auto-initialises (creates la_entities)
     const memory = weavePgVectorMemoryStore({ pool, dimensions: 8, tableName: 'memory_vec', indexType: 'none' });
+    const notes = createPostgresNoteRepository({ pool });            // Phase 3
+    const feed = createPostgresNotificationFeedStore({ pool });      // Phase 3
+    const humanTasks = createPostgresHumanTaskRepository({ pool });  // Phase 3
 
     const ctx = weaveContext({ tenantId: 'acme', userId: 'u-1', metadata: { sessionId: 's-1' } });
 
@@ -149,6 +155,39 @@ describe.skipIf(!HAS_DOCKER)('weaveSharedPostgres — the whole runtime on ONE P
           if (!rows.some((r) => r.id === 'mem-coexist')) throw new Error(`memory reload mismatch: ${JSON.stringify(rows)}`);
         },
       },
+      {
+        name: 'notes.repository',
+        expectedTables: ['notes', 'note_links', 'note_databases', 'note_db_rows'],
+        roundTrip: async () => {
+          await notes.createNote({ id: 'note-coexist', owner_user_id: 'u-1', title: 'Coexistence note' });
+          const got = await notes.getNote('note-coexist', 'u-1');
+          if (got?.title !== 'Coexistence note') throw new Error(`note reload mismatch: ${JSON.stringify(got)}`);
+        },
+      },
+      {
+        name: 'notifications.feed',
+        expectedTables: ['notification_feed'],
+        roundTrip: async () => {
+          await feed.append({
+            id: 'ntf-coexist', tenantId: 'acme', principalId: 'u-1', category: 'run',
+            title: 'Run finished', priority: 'normal', createdAt: Date.now(), readAt: null,
+            dedupeKey: 'coexist-1', // idempotent so the isolation re-run doesn't duplicate
+          });
+          if (await feed.unreadCount('acme', 'u-1') !== 1) throw new Error('feed unread count mismatch');
+        },
+      },
+      {
+        name: 'human-tasks.repository',
+        expectedTables: ['human_tasks'],
+        roundTrip: async () => {
+          await humanTasks.save({
+            id: 'task-coexist', type: 'approval', title: 'Approve coexistence', status: 'pending',
+            priority: 'high', createdAt: new Date().toISOString(),
+          });
+          const got = await humanTasks.get('task-coexist');
+          if (got?.title !== 'Approve coexistence') throw new Error(`task reload mismatch: ${JSON.stringify(got)}`);
+        },
+      },
     ];
 
     const results = await runSharedPostgresCoexistence({ hub, probes });
@@ -156,9 +195,9 @@ describe.skipIf(!HAS_DOCKER)('weaveSharedPostgres — the whole runtime on ONE P
     // Surface any failure detail before asserting.
     expect(report.failures.map((f) => `${f.tier}/${f.name}: ${f.detail}`), report.failures.map((f) => `${f.tier}/${f.name}: ${f.detail}`).join('\n')).toEqual([]);
     expect(report.ok).toBe(true);
-    // Sanity: we actually exercised all four tiers.
-    expect(report.byTier.positive.total).toBe(4);
-    expect(report.byTier.isolation.total).toBe(4);
+    // Sanity: we actually exercised all seven stores across the tiers.
+    expect(report.byTier.positive.total).toBe(7);
+    expect(report.byTier.isolation.total).toBe(7);
     expect(report.byTier['kv-slot'].passed).toBe(1);
 
     await memory.close();
