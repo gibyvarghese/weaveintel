@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/persistence",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Shared persistence contracts and adapter scaffolding for weaveIntel runtimes",
   "type": "module",
   "main": "./dist/index.js",
@@ -29,6 +29,9 @@
     "@weaveintel/memory": "^0.1.1"
   },
   "devDependencies": {
+    "@testcontainers/postgresql": "^11.0.0",
+    "@types/pg": "^8.11.0",
+    "pg": "^8.13.0",
     "vitest": "^3.2.6"
   },
   "publishConfig": {

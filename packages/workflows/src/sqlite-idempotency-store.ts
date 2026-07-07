@@ -1,9 +1,15 @@
+// SPDX-License-Identifier: MIT
 /**
- * SQLite-backed StepIdempotencyStore.
- * Single table `wf_idempotency` keyed by composite (stepId:key).
+ * SQLite-backed StepIdempotencyStore. Phase 4: the query logic is shared with the Postgres adapter via
+ * one Drizzle implementation — this file just creates the table and wires in the Drizzle SQLite handle.
  */
 import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/better-sqlite3';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { StepIdempotencyStore } from './idempotency-store.js';
+import { sqliteIdempotency, type PgIdempotency } from './drizzle-workflow-schema.js';
+import { createDrizzleIdempotencyStore } from './drizzle-workflow-stores.js';
+import { sqliteExec } from './drizzle-exec.js';
 
 const MIGRATIONS_SQL = `
 CREATE TABLE IF NOT EXISTS wf_idempotency (
@@ -21,29 +27,11 @@ export interface WeaveSqliteIdempotencyStoreOptions {
 export function weaveSqliteIdempotencyStore(
   opts: WeaveSqliteIdempotencyStoreOptions = {},
 ): StepIdempotencyStore {
-  const db = opts.database ?? new Database(opts.databasePath ?? ':memory:');
-  db.exec(MIGRATIONS_SQL);
-
-  const upsert = db.prepare(
-    'INSERT INTO wf_idempotency (key, output_json) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET output_json = excluded.output_json',
-  );
-  const get = db.prepare('SELECT output_json FROM wf_idempotency WHERE key = ?');
-  const del = db.prepare('DELETE FROM wf_idempotency WHERE key = ?');
-  const delPrefix = db.prepare("DELETE FROM wf_idempotency WHERE key LIKE ? || '%'");
-
-  return {
-    async get(key) {
-      const row = get.get(key) as { output_json: string } | undefined;
-      return row ? (JSON.parse(row.output_json) as unknown) : undefined;
-    },
-    async set(key, output) {
-      upsert.run(key, JSON.stringify(output ?? null));
-    },
-    async delete(key) {
-      del.run(key);
-    },
-    async clearPrefix(prefix) {
-      delPrefix.run(prefix);
-    },
-  };
+  const sqlite = opts.database ?? new Database(opts.databasePath ?? ':memory:');
+  sqlite.exec(MIGRATIONS_SQL);
+  return createDrizzleIdempotencyStore({
+    db: drizzle(sqlite) as unknown as NodePgDatabase,
+    table: sqliteIdempotency as unknown as PgIdempotency,
+    exec: sqliteExec,
+  });
 }

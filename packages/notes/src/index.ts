@@ -34,6 +34,11 @@ export {
 } from './note-repository-contract.js';
 
 export {
+  type PostgresNoteRepositoryOptions,
+  createPostgresNoteRepository,
+} from './note-repository-postgres.js';
+
+export {
   extractTaskItems,
   extractPlainText,
 } from './extract.js';

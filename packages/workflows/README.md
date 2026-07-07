@@ -46,6 +46,29 @@ console.log(finished.status); // 'completed' | 'failed' | 'waiting' | ...
 | `buildEmittedContract`, `ContractEmitter` | Publish a run's `outputContract` so downstream triggers or agents can react. |
 | `weaveSqlite*`, `weavePostgres*`, `weaveMongoDb*`, `weaveRedis*`, `weaveDynamoDb*` stores | DB-backed adapters for checkpoints, definitions, runs, idempotency, payloads, sleep, locks, rate limits, queues, and audit — one set per backend. |
 
+## One source of truth for SQL storage
+
+The SQL adapters used to be written twice — once for Postgres, once for SQLite — and, like any copy, they slowly drifted apart (`$1` vs `?`, `jsonb` vs text, `NOW()` vs `CURRENT_TIMESTAMP`). That's now fixed for **all ten SQL-backed stores** — checkpoints, definitions, runs, idempotency, payloads, sleeps, step-locks, the run queue, rate limits, and the audit log. For each one, **the query logic is written once** with [Drizzle](https://orm.drizzle.team/) and reused for both databases. Every `weavePostgres*` / `weaveSqlite*` factory keeps the exact same API — they're just thin wrappers around one shared implementation now, so there's nothing left to drift.
+
+Nothing changed for you as a caller:
+
+```ts
+import pg from 'pg';
+import { weavePostgresCheckpointStore, weaveSqliteCheckpointStore } from '@weaveintel/workflows';
+
+// Production: Postgres
+const pgStore = await weavePostgresCheckpointStore({ pool: new pg.Pool({ connectionString: process.env.DATABASE_URL }) });
+// Edge / local / tests: SQLite — same behaviour, proven by the same tests
+const liteStore = weaveSqliteCheckpointStore({ databasePath: './workflows.db' });
+
+const cp = await pgStore.save('run-1', 'step-1', workflowState);
+await pgStore.latest('run-1'); // resume from the newest checkpoint
+```
+
+There's exactly one place the two databases genuinely differ, and it's handled honestly: **draining the run queue.** Postgres uses `FOR UPDATE SKIP LOCKED` so a hundred workers can pull jobs in parallel without ever grabbing the same one; SQLite has a single writer so it doesn't need it. Everything else is identical.
+
+How do we know both databases behave the same? The SQLite side is covered by the existing store tests, and the Postgres side runs the same operations against a real Postgres (Testcontainers) — including a 1,000-job concurrent queue drain where no job is ever handed out twice, and a durable "resume after a crash" where an agent checkpoints a real model's result to Postgres and a fresh process picks up exactly where it left off.
+
 ## License
 
 MIT.

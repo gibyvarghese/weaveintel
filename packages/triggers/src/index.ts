@@ -18,6 +18,8 @@ export * from './binding.js';
 // DB-backed TriggerStore adapters (parity across all 5 backends).
 export { weaveSqliteTriggerStore, type WeaveSqliteTriggerStoreOptions } from './sqlite-trigger-store.js';
 export { weavePostgresTriggerStore, type WeavePostgresTriggerStoreOptions } from './postgres-trigger-store.js';
+export { createDrizzleTriggerStore } from './drizzle-trigger-store.js';
+export { triggerStoreContract, type TriggerContractTestApi } from './trigger-store-contract.js';
 export { weaveMongoDbTriggerStore, type WeaveMongoDbTriggerStoreOptions } from './mongodb-trigger-store.js';
 export { weaveRedisTriggerStore, type WeaveRedisTriggerStoreOptions } from './redis-trigger-store.js';
 export { weaveDynamoDbTriggerStore, type WeaveDynamoDbTriggerStoreOptions } from './dynamodb-trigger-store.js';

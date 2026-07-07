@@ -4,5 +4,7 @@
     "outDir": "./dist",
     "rootDir": "./src"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "//": "The coexistence e2e imports sibling packages (memory/workflows/live-agents/triggers) that sit ABOVE persistence in the stack — pulling them into the typed build would create a dependency cycle. It is Docker-gated and run by vitest (esbuild), which resolves those imports from the workspace root at runtime.",
+  "exclude": ["src/shared-postgres-coexistence.realsandbox.test.ts"]
 }

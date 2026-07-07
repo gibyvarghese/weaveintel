@@ -18,7 +18,7 @@
 
 import { spawn } from 'node:child_process';
 import { writeFile, mkdir, rm, readdir, readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { newUUIDv7 } from '@weaveintel/core';
 import type { ContainerProvider } from './base.js';
@@ -237,10 +237,13 @@ export class LocalDockerProvider implements ContainerProvider {
       const codeToWrite = lang === 'python' ? wrapPythonLastExpr(request.code) : request.code;
       await writeFile(codeFile, codeToWrite, 'utf8');
 
-      // Write injected files
+      // Write injected files. Sanitize the name (strips `..`, so a file can't escape the
+      // workspace) and create parent directories so bundled files under subfolders — e.g. a
+      // skill package's `references/guide.md` — land at the right path.
       if (request.files) {
         for (const f of request.files) {
-          const dest = join(workDir, f.name);
+          const dest = join(workDir, sanitizeWorkspaceFileName(f.name));
+          await mkdir(dirname(dest), { recursive: true });
           await writeFile(dest, f.binary ? Buffer.from(f.content, 'base64') : f.content);
         }
       }
@@ -284,6 +287,9 @@ export class LocalDockerProvider implements ContainerProvider {
         // Mount workspace read-only, output dir read-write
         '-v', `${workDir}:/workspace:ro`,
         '-v', `${outputDir}:/workspace/output:rw`,
+        // Run from /workspace so scripts can read injected files by relative path (e.g.
+        // `open('data.csv')`) — matching the session executor's working directory.
+        '-w', '/workspace',
       ];
 
       appendContainerEnvArgs(dockerArgs, pythonContainerEnv('/tmp'));
@@ -440,9 +446,11 @@ export class LocalDockerProvider implements ContainerProvider {
       for (const file of request.files) {
         const fileName = sanitizeWorkspaceFileName(file.name);
         const remotePath = `/workspace/${fileName}`;
+        // Create parent directories so files nested under subfolders (e.g. `references/guide.md`)
+        // can be written inside the session container.
         const writeFileResult = await run('docker', [
           'exec', '-i', ...execEnvArgs, session.handle,
-          'sh', '-c', `cat > ${remotePath}`,
+          'sh', '-c', `mkdir -p "$(dirname "${remotePath}")" && cat > ${remotePath}`,
         ], {
           stdin: file.binary ? Buffer.from(file.content, 'base64') : file.content,
         });

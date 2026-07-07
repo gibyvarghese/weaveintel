@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/memory",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Memory implementations — conversation, semantic, entity",
   "type": "module",
   "exports": {
@@ -26,12 +26,14 @@
     "better-sqlite3": "^11.10.0",
     "mongodb": "^6.16.0",
     "pg": "^8.13.1",
-    "redis": "^4.7.0"
+    "redis": "^4.7.0",
+    "drizzle-orm": "^0.45.2"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "typescript": "^5.7.0",
-    "vitest": "^3.2.6"
+    "vitest": "^3.2.6",
+    "@testcontainers/postgresql": "^11.0.0"
   },
   "publishConfig": {
     "access": "public"

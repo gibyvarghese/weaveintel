@@ -1,14 +1,18 @@
+// SPDX-License-Identifier: MIT
 /**
  * SQLite-backed CheckpointStore.
  *
- * Single table `wf_checkpoints` keyed by checkpoint UUID, with secondary index
- * on `run_id` for `latest()`/`list()`/`delete()`. Payload (the full
- * `WorkflowState` snapshot) is stored as JSON text.
+ * Phase 4: the query logic now lives ONCE in `createDrizzleCheckpointStore` (shared with the Postgres
+ * adapter) — this file just creates the table and wires the Drizzle SQLite handle in. The full
+ * `WorkflowState` snapshot is stored as JSON text; ordering is deterministic via a strictly-increasing
+ * `created_at`.
  */
 import Database from 'better-sqlite3';
-import type { WorkflowCheckpoint, WorkflowState } from '@weaveintel/core';
-import { newUUIDv7 } from '@weaveintel/core';
+import { drizzle } from 'drizzle-orm/better-sqlite3';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { CheckpointStore } from './checkpoint-store.js';
+import { sqliteCheckpoints, type CheckpointTable } from './drizzle-checkpoint-schema.js';
+import { createDrizzleCheckpointStore, sqliteExec } from './drizzle-checkpoint-store.js';
 
 const MIGRATIONS_SQL = `
 CREATE TABLE IF NOT EXISTS wf_checkpoints (
@@ -27,71 +31,15 @@ export interface WeaveSqliteCheckpointStoreOptions {
   databasePath?: string;
 }
 
-interface Row {
-  id: string;
-  run_id: string;
-  workflow_id: string | null;
-  step_id: string;
-  payload_json: string;
-  created_at: string;
-}
-
-function rowToCheckpoint(row: Row): WorkflowCheckpoint {
-  const wf = row.workflow_id;
-  const cp: WorkflowCheckpoint = {
-    id: row.id,
-    runId: row.run_id,
-    stepId: row.step_id,
-    state: JSON.parse(row.payload_json) as WorkflowState,
-    createdAt: row.created_at,
-    ...(wf ? { workflowId: wf } : {}),
-  };
-  return cp;
-}
-
 export function weaveSqliteCheckpointStore(opts: WeaveSqliteCheckpointStoreOptions = {}): CheckpointStore {
-  const db = opts.database ?? new Database(opts.databasePath ?? ':memory:');
-  db.exec(MIGRATIONS_SQL);
-
-  const insertStmt = db.prepare(
-    'INSERT INTO wf_checkpoints (id, run_id, workflow_id, step_id, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-  );
-  const selectByIdStmt = db.prepare('SELECT * FROM wf_checkpoints WHERE id = ?');
-  const selectLatestStmt = db.prepare(
-    'SELECT * FROM wf_checkpoints WHERE run_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1',
-  );
-  const selectListStmt = db.prepare(
-    'SELECT * FROM wf_checkpoints WHERE run_id = ? ORDER BY created_at ASC, rowid ASC',
-  );
-  const deleteStmt = db.prepare('DELETE FROM wf_checkpoints WHERE run_id = ?');
-
-  return {
-    async save(runId, stepId, state, workflowId) {
-      const cp: WorkflowCheckpoint = {
-        id: newUUIDv7(),
-        runId,
-        stepId,
-        state: structuredClone(state),
-        createdAt: new Date().toISOString(),
-        ...(workflowId ? { workflowId } : {}),
-      };
-      insertStmt.run(cp.id, cp.runId, cp.workflowId ?? null, cp.stepId, JSON.stringify(cp.state), cp.createdAt);
-      return cp;
-    },
-    async load(checkpointId) {
-      const row = selectByIdStmt.get(checkpointId) as Row | undefined;
-      return row ? rowToCheckpoint(row) : null;
-    },
-    async latest(runId) {
-      const row = selectLatestStmt.get(runId) as Row | undefined;
-      return row ? rowToCheckpoint(row) : null;
-    },
-    async list(runId) {
-      const rows = selectListStmt.all(runId) as Row[];
-      return rows.map(rowToCheckpoint);
-    },
-    async delete(runId) {
-      deleteStmt.run(runId);
-    },
-  };
+  const sqlite = opts.database ?? new Database(opts.databasePath ?? ':memory:');
+  sqlite.exec(MIGRATIONS_SQL);
+  const db = drizzle(sqlite);
+  // Drizzle's SQLite and Postgres db/table types are deliberately incompatible; the runtime query API
+  // is identical, so we bridge the two at this single, well-understood boundary (see the store module).
+  return createDrizzleCheckpointStore({
+    db: db as unknown as NodePgDatabase,
+    table: sqliteCheckpoints as unknown as CheckpointTable,
+    exec: sqliteExec,
+  });
 }

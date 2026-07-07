@@ -1,4 +1,23 @@
 // SPDX-License-Identifier: MIT
+/**
+ * @weaveintel/persistence — runtime persistence: a **capability registry** + **durable KV slots**.
+ *
+ * IMPORTANT: this package is NOT a general "store everything" data layer, and `PersistenceAdapter` is
+ * NOT a repository/ORM. weaveIntel follows ports-and-adapters: each domain package owns its OWN storage
+ * port (e.g. `@weaveintel/memory`'s `DurableMemoryStore`, `@weaveintel/workflows`'s `CheckpointStore`,
+ * an app's `DatabaseAdapter`) and ships real backends. This package provides two orthogonal things:
+ *
+ *   1. A **backend capability registry** — `PersistenceAdapter` / `createPersistenceAdapter` describe
+ *      what a backend *supports* (transactions, TTL, pub/sub, JSON query) so the runtime can negotiate.
+ *      These are capability descriptors, not CRUD.
+ *   2. **Durable runtime KV slots** — `weaveSqlitePersistence` / `weavePostgresPersistence` give the
+ *      runtime a real key/value store (with TTL) for the dead-letter queue, cost meter, and
+ *      step-idempotency. Both implement the same `RuntimeKvStore` contract, verifiable with
+ *      `runPersistenceContract` — so Postgres is a proven drop-in for SQLite.
+ *
+ * If you want to store an app's tables in Postgres, that belongs behind that app's own port (see the
+ * persistence architecture review), not here.
+ */
 export type {
   PersistenceAdapter,
   PersistenceBackendConfig,
@@ -54,3 +73,44 @@ export {
   weaveSqlitePersistence,
   type SqliteRuntimePersistenceOptions,
 } from './runtime-slot.js';
+// Postgres-backed runtime persistence slot (parity with the SQLite one) — driver-agnostic via an
+// injected SqlClient (pg.Pool / Neon / a test container all satisfy it).
+export {
+  weavePostgresPersistence,
+  type PostgresRuntimePersistenceOptions,
+  type SqlClient,
+} from './postgres-slot.js';
+// Shared conformance harness — prove any backend behaves identically before you migrate to it.
+export {
+  runPersistenceContract,
+  contractPassed,
+  type ContractCheck,
+  type PersistenceContractOptions,
+} from './persistence-contract.js';
+// Phase 2 — the shared-Postgres composition root: one connection, one pool, wired to every runtime
+// store (memory / workflows / live-agents / triggers) plus durable KV slots.
+export {
+  weaveSharedPostgres,
+  type SharedPostgres,
+  type SharedPostgresOptions,
+} from './shared-postgres.js';
+// Coexistence contract — prove all those stores + slots safely share ONE Postgres before you cut over.
+export {
+  runSharedPostgresCoexistence,
+  coexistenceReport,
+  type CoexistenceCheck,
+  type CoexistenceOptions,
+  type StoreProbe,
+} from './shared-postgres-coexistence.js';
+// Phase 5 — the cutover toolkit: move the runtime's durable KV state between backends with zero loss.
+// Dual-write (expand) → backfill (migrate) → verify (reconcile) → cut over, all behind the KV port.
+export {
+  migrateKv,
+  reconcileKv,
+  weaveDualWriteKv,
+  type MigrateKvOptions,
+  type MigrateKvResult,
+  type ReconcileKvOptions,
+  type ReconcileKvReport,
+  type DualWriteKvOptions,
+} from './kv-cutover.js';

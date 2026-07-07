@@ -29,6 +29,16 @@ export {
   type HumanTaskRepository,
 } from './repository.js';
 
+// Postgres adapter + the shared conformance contract (Phase 3 — persistence review).
+export {
+  createPostgresHumanTaskRepository,
+  type PostgresHumanTaskRepositoryOptions,
+} from './repository-postgres.js';
+export {
+  humanTaskRepositoryContract,
+  type HumanTaskContractTestApi,
+} from './repository-contract.js';
+
 // Phase 4 — durable runtime-backed repository.
 export {
   createDurableHumanTaskRepository,

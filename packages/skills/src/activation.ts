@@ -10,6 +10,7 @@ import type {
 } from './types.js';
 import { applySkillOverlays } from './types.js';
 import { semanticScore, semanticRationale } from './matching.js';
+import { candidatesToMatches } from './retrieval.js';
 
 export function collectSkillTools(matches: readonly SkillMatch[]): string[] {
   const tools = new Set<string>();
@@ -60,26 +61,36 @@ export async function activateSkills(
   const minScore = opts.minScore ?? 0.12;
 
   const overlaid = applySkillOverlays(skills, opts.overlays);
-
-  const considered: SkillMatch[] = overlaid
+  const eligible = overlaid
     .filter((skill) => skill.enabled !== false)
-    .filter((skill) => keepIfCategory(skill, opts.categories))
-    .map((skill) => ({
-      skill,
-      score: semanticScore(query, skill),
-      matchedPatterns: [] as string[],
-      rationale: semanticRationale(skill, query),
-      source: 'semantic' as const,
-    }))
-    .filter((match) => match.score >= minScore)
-    .sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      const pa = a.skill.priority ?? 0;
-      const pb = b.skill.priority ?? 0;
-      if (pb !== pa) return pb - pa;
-      return a.skill.name.localeCompare(b.skill.name);
-    })
-    .slice(0, maxCandidates);
+    .filter((skill) => keepIfCategory(skill, opts.categories));
+
+  let considered: SkillMatch[];
+  if (opts.retriever) {
+    // Pluggable candidate stage (embedding / hybrid). Keeps the rest of the pipeline
+    // (selector → policy) identical; only *how candidates are found* changes.
+    const cands = await opts.retriever.retrieve(query, eligible, { limit: maxCandidates, minScore });
+    considered = candidatesToMatches(cands);
+  } else {
+    // Default: built-in lexical (word-overlap / TF-cosine) scoring.
+    considered = eligible
+      .map((skill) => ({
+        skill,
+        score: semanticScore(query, skill),
+        matchedPatterns: [] as string[],
+        rationale: semanticRationale(skill, query),
+        source: 'semantic' as const,
+      }))
+      .filter((match) => match.score >= minScore)
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        const pa = a.skill.priority ?? 0;
+        const pb = b.skill.priority ?? 0;
+        if (pb !== pa) return pb - pa;
+        return a.skill.name.localeCompare(b.skill.name);
+      })
+      .slice(0, maxCandidates);
+  }
 
   if (!considered.length) {
     const emptyResult: SkillActivationResult = {
