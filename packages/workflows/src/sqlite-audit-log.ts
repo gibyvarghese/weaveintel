@@ -1,9 +1,15 @@
+// SPDX-License-Identifier: MIT
 /**
- * SQLite-backed WorkflowAuditLog. Append-only.
+ * SQLite-backed WorkflowAuditLog (append-only). Phase 4: the query logic is shared with the Postgres
+ * adapter via one Drizzle implementation — this file creates the table and wires the SQLite handle.
  */
 import Database from 'better-sqlite3';
-import type { WorkflowAuditEvent, WorkflowAuditLog } from '@weaveintel/core';
-import { newUUIDv7 } from '@weaveintel/core';
+import { drizzle } from 'drizzle-orm/better-sqlite3';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import type { WorkflowAuditLog } from '@weaveintel/core';
+import { sqliteAudit, type PgAudit } from './drizzle-workflow-schema.js';
+import { createDrizzleAuditLog } from './drizzle-workflow-stores.js';
+import { sqliteExec } from './drizzle-exec.js';
 
 const MIGRATIONS_SQL = `
 CREATE TABLE IF NOT EXISTS wf_audit_events (
@@ -14,8 +20,8 @@ CREATE TABLE IF NOT EXISTS wf_audit_events (
   timestamp TEXT NOT NULL,
   payload_json TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_wf_audit_run ON wf_audit_events(run_id, timestamp ASC, id ASC);
-CREATE INDEX IF NOT EXISTS idx_wf_audit_wf ON wf_audit_events(workflow_id, timestamp ASC, id ASC);
+CREATE INDEX IF NOT EXISTS idx_wf_audit_run ON wf_audit_events(run_id, timestamp, id);
+CREATE INDEX IF NOT EXISTS idx_wf_audit_wf ON wf_audit_events(workflow_id, timestamp, id);
 `;
 
 export interface WeaveSqliteAuditLogOptions {
@@ -23,57 +29,12 @@ export interface WeaveSqliteAuditLogOptions {
   databasePath?: string;
 }
 
-interface Row {
-  id: string;
-  run_id: string;
-  workflow_id: string;
-  type: string;
-  timestamp: string;
-  payload_json: string;
-}
-
-function toEvent(r: Row): WorkflowAuditEvent {
-  const extra = JSON.parse(r.payload_json) as Record<string, unknown>;
-  return {
-    id: r.id,
-    runId: r.run_id,
-    workflowId: r.workflow_id,
-    type: r.type as WorkflowAuditEvent['type'],
-    timestamp: r.timestamp,
-    ...extra,
-  } as WorkflowAuditEvent;
-}
-
 export function weaveSqliteAuditLog(opts: WeaveSqliteAuditLogOptions = {}): WorkflowAuditLog {
-  const db = opts.database ?? new Database(opts.databasePath ?? ':memory:');
-  db.exec(MIGRATIONS_SQL);
-
-  const insert = db.prepare(
-    'INSERT INTO wf_audit_events (id, run_id, workflow_id, type, timestamp, payload_json) VALUES (?, ?, ?, ?, ?, ?)',
-  );
-  const listRun = db.prepare(
-    'SELECT * FROM wf_audit_events WHERE run_id = ? ORDER BY timestamp ASC, rowid ASC',
-  );
-  const listWf = db.prepare(
-    'SELECT * FROM wf_audit_events WHERE workflow_id = ? ORDER BY timestamp ASC, rowid ASC',
-  );
-  const listAllStmt = db.prepare(
-    'SELECT * FROM wf_audit_events ORDER BY timestamp ASC, rowid ASC',
-  );
-
-  return {
-    async append(event) {
-      const id = newUUIDv7();
-      const { runId, workflowId, type, timestamp, ...rest } = event as WorkflowAuditEvent;
-      insert.run(id, runId, workflowId, type, timestamp, JSON.stringify(rest));
-    },
-    async list(runId) {
-      return (listRun.all(runId) as Row[]).map(toEvent);
-    },
-    async listAll(o) {
-      const rows = (o?.workflowId ? listWf.all(o.workflowId) : listAllStmt.all()) as Row[];
-      const mapped = rows.map(toEvent);
-      return o?.limit ? mapped.slice(-o.limit) : mapped;
-    },
-  };
+  const sqlite = opts.database ?? new Database(opts.databasePath ?? ':memory:');
+  sqlite.exec(MIGRATIONS_SQL);
+  return createDrizzleAuditLog({
+    db: drizzle(sqlite) as unknown as NodePgDatabase,
+    table: sqliteAudit as unknown as PgAudit,
+    exec: sqliteExec,
+  });
 }

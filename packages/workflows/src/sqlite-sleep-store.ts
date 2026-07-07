@@ -1,9 +1,15 @@
+// SPDX-License-Identifier: MIT
 /**
- * SQLite-backed DurableSleepStore.
- * Single table `wf_sleeps` keyed by runId.
+ * SQLite-backed DurableSleepStore. Phase 4: the query logic is shared with the Postgres adapter via one
+ * Drizzle implementation — this file just creates the table and wires in the SQLite handle.
  */
 import Database from 'better-sqlite3';
-import type { SleepRecord, DurableSleepStore } from '@weaveintel/core';
+import type { DurableSleepStore } from '@weaveintel/core';
+import { drizzle } from 'drizzle-orm/better-sqlite3';
+import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { sqliteSleeps, type PgSleeps } from './drizzle-workflow-schema.js';
+import { createDrizzleSleepStore } from './drizzle-workflow-stores.js';
+import { sqliteExec } from './drizzle-exec.js';
 
 const MIGRATIONS_SQL = `
 CREATE TABLE IF NOT EXISTS wf_sleeps (
@@ -19,41 +25,12 @@ export interface WeaveSqliteSleepStoreOptions {
   databasePath?: string;
 }
 
-interface Row {
-  run_id: string;
-  wake_at: number;
-  created_at: string;
-}
-
-function toRecord(r: Row): SleepRecord {
-  return { runId: r.run_id, wakeAt: r.wake_at, createdAt: r.created_at };
-}
-
 export function weaveSqliteSleepStore(opts: WeaveSqliteSleepStoreOptions = {}): DurableSleepStore {
-  const db = opts.database ?? new Database(opts.databasePath ?? ':memory:');
-  db.exec(MIGRATIONS_SQL);
-
-  const upsert = db.prepare(
-    'INSERT INTO wf_sleeps (run_id, wake_at, created_at) VALUES (?, ?, ?) ON CONFLICT(run_id) DO UPDATE SET wake_at = excluded.wake_at',
-  );
-  const cancel = db.prepare('DELETE FROM wf_sleeps WHERE run_id = ?');
-  const due = db.prepare('SELECT * FROM wf_sleeps WHERE wake_at <= ? ORDER BY wake_at ASC, run_id ASC');
-  const all = db.prepare('SELECT * FROM wf_sleeps ORDER BY wake_at ASC, run_id ASC');
-
-  return {
-    async schedule(runId, wakeAt) {
-      upsert.run(runId, wakeAt, new Date().toISOString());
-    },
-    async cancel(runId) {
-      cancel.run(runId);
-    },
-    async getDue(now = Date.now()) {
-      const rows = due.all(now) as Row[];
-      return rows.map(toRecord);
-    },
-    async list() {
-      const rows = all.all() as Row[];
-      return rows.map(toRecord);
-    },
-  };
+  const sqlite = opts.database ?? new Database(opts.databasePath ?? ':memory:');
+  sqlite.exec(MIGRATIONS_SQL);
+  return createDrizzleSleepStore({
+    db: drizzle(sqlite) as unknown as NodePgDatabase,
+    table: sqliteSleeps as unknown as PgSleeps,
+    exec: sqliteExec,
+  });
 }

@@ -21,8 +21,11 @@ import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { newUUIDv7, type WorkflowCheckpoint, type WorkflowState } from '@weaveintel/core';
 import type { CheckpointStore } from './checkpoint-store.js';
 import { pgCheckpoints, type CheckpointTable } from './drizzle-checkpoint-schema.js';
+import { type DrizzleExec, pgExec, sqliteExec, monotonicIso } from './drizzle-exec.js';
 
 export type { CheckpointTable };
+// Re-exported for backward compatibility (these used to live here before Phase 4's shared exec module).
+export { pgExec, sqliteExec, type DrizzleExec };
 
 /** A checkpoint row as Drizzle reads it back (identical column names on both dialects). */
 interface CheckpointRow {
@@ -32,37 +35,6 @@ interface CheckpointRow {
   stepId: string;
   payloadJson: WorkflowState;
   createdAt: string | Date;
-}
-
-/**
- * The one dialect seam: node-postgres' Drizzle runs on `await`; better-sqlite3's is synchronous and
- * runs on `.all()` / `.run()`. Each driver supplies its own tiny adapter so the store logic is shared.
- */
-export interface DrizzleExec {
-  all(builder: unknown): Promise<CheckpointRow[]>;
-  run(builder: unknown): Promise<void>;
-}
-
-/** node-postgres: the query builder is a thenable — awaiting it executes the query. */
-export const pgExec: DrizzleExec = {
-  all: (builder) => builder as Promise<CheckpointRow[]>,
-  run: (builder) => (builder as Promise<unknown>).then(() => undefined),
-};
-
-/** better-sqlite3: synchronous — `.all()` returns rows, `.run()` executes. Wrapped to look async. */
-export const sqliteExec: DrizzleExec = {
-  all: (builder) => Promise.resolve((builder as { all(): CheckpointRow[] }).all()),
-  run: (builder) => { (builder as { run(): unknown }).run(); return Promise.resolve(); },
-};
-
-/** Strictly-increasing ISO clock so `created_at` never ties → deterministic ordering on any dialect. */
-function monotonicIso(): () => string {
-  let last = 0;
-  return () => {
-    const t = Math.max(Date.now(), last + 1);
-    last = t;
-    return new Date(t).toISOString();
-  };
 }
 
 function rowToCheckpoint(row: CheckpointRow): WorkflowCheckpoint {
@@ -122,19 +94,19 @@ export function createDrizzleCheckpointStore(deps: DrizzleCheckpointStoreDeps): 
     },
 
     async load(checkpointId) {
-      const rows = await exec.all(db.select().from(table).where(eq(table.id, checkpointId)).limit(1));
+      const rows = await exec.all<CheckpointRow>(db.select().from(table).where(eq(table.id, checkpointId)).limit(1));
       return rows[0] ? rowToCheckpoint(rows[0]) : null;
     },
 
     async latest(runId) {
-      const rows = await exec.all(
+      const rows = await exec.all<CheckpointRow>(
         db.select().from(table).where(eq(table.runId, runId)).orderBy(desc(table.createdAt), desc(table.id)).limit(1),
       );
       return rows[0] ? rowToCheckpoint(rows[0]) : null;
     },
 
     async list(runId) {
-      const rows = await exec.all(
+      const rows = await exec.all<CheckpointRow>(
         db.select().from(table).where(eq(table.runId, runId)).orderBy(asc(table.createdAt), asc(table.id)),
       );
       return rows.map(rowToCheckpoint);
