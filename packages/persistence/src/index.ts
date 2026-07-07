@@ -102,3 +102,15 @@ export {
   type CoexistenceOptions,
   type StoreProbe,
 } from './shared-postgres-coexistence.js';
+// Phase 5 — the cutover toolkit: move the runtime's durable KV state between backends with zero loss.
+// Dual-write (expand) → backfill (migrate) → verify (reconcile) → cut over, all behind the KV port.
+export {
+  migrateKv,
+  reconcileKv,
+  weaveDualWriteKv,
+  type MigrateKvOptions,
+  type MigrateKvResult,
+  type ReconcileKvOptions,
+  type ReconcileKvReport,
+  type DualWriteKvOptions,
+} from './kv-cutover.js';

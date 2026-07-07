@@ -122,6 +122,33 @@ console.log(coexistenceReport(results)); // { ok: true, passed: N, byTier: { …
 
 The repo runs this for real against a throwaway Postgres container with all four stores wired up — plus a real-embeddings leg where a semantic memory search runs in the *same* database as the workflow and agent state.
 
+## Moving to a new database without losing anything (cutover)
+
+Deciding to run on Postgres is one thing; *moving the data you already have* is another. Your dead-letter queue, cost meter, and idempotency records are sitting in SQLite (or an old Postgres) right now, and you can't afford to drop a single one. This package includes a small toolkit that turns the switch into a checklist instead of a leap of faith. It follows the standard, boring, safe playbook the industry uses for zero-downtime migrations — **write to both, copy the rest, prove they match, then flip** — and it works over the same KV interface every backend already implements, so it doesn't care what you're moving between.
+
+```ts
+import { weaveSqlitePersistence, weavePostgresPersistence, weaveDualWriteKv, migrateKv, reconcileKv } from '@weaveintel/persistence';
+
+const oldStore = weaveSqlitePersistence({ path: './weave.db' }).kv;      // where you are today
+const newStore = weavePostgresPersistence({ client: pool }).kv;          // where you're going
+
+// 1) EXPAND — send new writes to both databases, but keep reading the old one.
+const live = weaveDualWriteKv(oldStore, newStore);
+// …point your runtime's persistence at `live` for a while…
+
+// 2) BACKFILL — copy everything that was there before you turned dual-writes on.
+await migrateKv(oldStore, newStore, { onProgress: (done, total) => console.log(`${done}/${total}`) });
+
+// 3) VERIFY — compare key by key. `ok: true` is your green light.
+const report = await reconcileKv(oldStore, newStore);
+if (!report.ok) console.error('not equal yet:', report.missingInTarget, report.valueMismatches);
+
+// 4) CUT OVER — point reads at `newStore`. Keep the old one as a warm standby for a bit
+//    (run `weaveDualWriteKv(newStore, oldStore)`) so you can roll back if anything looks off.
+```
+
+The three tools map one-to-one to the steps: **`weaveDualWriteKv`** keeps the new database current from the moment you start (it can also "shadow read" a fraction of requests from the new store and tell you if the two ever disagree); **`migrateKv`** copies the history (idempotent, batched, with a dry-run mode to see what *would* move); and **`reconcileKv`** is the safety gate — it lists exactly what's missing, extra, or different, so you never cut over on unequal data. Proven end-to-end on a real Postgres: a full SQLite→Postgres cutover, a 50,000-key migration, injection-safe keys/values, drift detection, and a real cost-and-idempotency ledger (built from live model calls) moved without losing a record. One caveat: the KV interface doesn't expose remaining expiry, so migrated keys are copied without a TTL — migrate durable state (DLQ, cost meter, idempotency) and re-set any short-lived TTLs on the new side afterwards.
+
 ## The capability registry (advanced)
 
 The other half of the package answers "what can this backend do?" rather than "store this row". `createPersistenceAdapter({ backend: { kind } })` returns a descriptor with `connect()` / `disconnect()` / `health()` and a `capabilities` flag set (`transactions`, `ttl`, `pubsub`, `jsonQuery`). The runtime uses this to negotiate behaviour. These are capability descriptors — **not** a CRUD/repository API — which is why the real storage lives in each feature's own port.
@@ -134,6 +161,7 @@ The other half of the package answers "what can this backend do?" rather than "s
 | `runPersistenceContract` / `contractPassed` | Run the conformance battery against any KV backend and prove it's a safe drop-in. |
 | `weaveSharedPostgres` | One shared Postgres connection for the whole runtime — hands the same pool to memory/workflows/live-agents/triggers, and mints per-table KV slots on it. |
 | `runSharedPostgresCoexistence` / `coexistenceReport` | Prove all those stores + KV slots safely share one Postgres (each works, no table clashes, no cross-contamination) before you cut over. |
+| `weaveDualWriteKv` / `migrateKv` / `reconcileKv` | The cutover toolkit — write to both while you migrate, backfill the history, and verify the two are identical before you switch. |
 | `SqlClient` (type) | The tiny `query()` surface the Postgres slot needs — `pg.Pool` and serverless drivers satisfy it. |
 | `createPersistenceAdapter` + adapters | Backend **capability registry** (transactions/TTL/pubsub/jsonQuery) — descriptors, not CRUD. |
 | `createPhase7RuntimePersistence`, `createPhase8PersistenceBenchmark` | Persisted traces/eval runs/checkpoints + latency/throughput benchmarking. |
