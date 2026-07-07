@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+export { memoryStoreContract, type MemoryContractTestApi } from './memory-store-contract.js';
 export {
   weaveMemoryStore,
   weaveRuntimeMemoryStore,

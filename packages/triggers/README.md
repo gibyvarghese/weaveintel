@@ -61,7 +61,7 @@ await dispatcher.dispatch({
 | `ManualSourceAdapter`, `CronSourceAdapter`, `SignalBusSourceAdapter`, `MeshContractSourceAdapter` | Built-in event sources — admin/test fire, cron, signal bus, and workflow-contract emissions. |
 | `WebhookOutTargetAdapter`, `CallbackTargetAdapter` | Built-in targets — POST JSON outbound, or wrap any async app-level action. |
 | `InMemoryTriggerStore` | In-memory store for tests and examples. |
-| `weaveSqliteTriggerStore`, `weavePostgresTriggerStore`, `weaveMongoDbTriggerStore`, `weaveRedisTriggerStore`, `weaveDynamoDbTriggerStore` | DB-backed stores, one per supported backend. |
+| `weaveSqliteTriggerStore`, `weavePostgresTriggerStore`, `weaveMongoDbTriggerStore`, `weaveRedisTriggerStore`, `weaveDynamoDbTriggerStore` | DB-backed stores, one per supported backend. The SQL two (SQLite + Postgres) now share **one** implementation, so they can't drift; `triggerStoreContract` proves the in-memory, SQLite, and Postgres versions all behave the same. |
 | `createDurableTriggerRateLimiter` | Per-trigger rate-limit windows backed by durable KV. |
 | `createReminderTrigger`, `rescheduleReminder`, `ReminderBusTargetAdapter` | Reminder ergonomics on top of triggers. |
 | `isValidCron`, `cronMatches`, `cronNextRun`, `isValidTimezone` | Timezone-aware cron schedule evaluation. |
