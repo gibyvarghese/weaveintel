@@ -34,6 +34,17 @@ export {
   type CheckpointStore,
   type DurableCheckpointStoreOptions,
 } from './checkpoint-store.js';
+// Phase 4 — one Drizzle-backed implementation shared by the Postgres + SQLite checkpoint adapters,
+// plus the shared conformance contract that proves every adapter behaves identically.
+export {
+  createDrizzleCheckpointStore,
+  pgExec,
+  sqliteExec,
+  type DrizzleExec,
+  type DrizzleCheckpointStoreDeps,
+} from './drizzle-checkpoint-store.js';
+export { pgCheckpoints, sqliteCheckpoints, type CheckpointTable } from './drizzle-checkpoint-schema.js';
+export { checkpointStoreContract, type CheckpointContractTestApi } from './checkpoint-store-contract.js';
 
 // Run repository
 export {

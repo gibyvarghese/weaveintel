@@ -46,6 +46,27 @@ console.log(finished.status); // 'completed' | 'failed' | 'waiting' | ...
 | `buildEmittedContract`, `ContractEmitter` | Publish a run's `outputContract` so downstream triggers or agents can react. |
 | `weaveSqlite*`, `weavePostgres*`, `weaveMongoDb*`, `weaveRedis*`, `weaveDynamoDb*` stores | DB-backed adapters for checkpoints, definitions, runs, idempotency, payloads, sleep, locks, rate limits, queues, and audit — one set per backend. |
 
+## One source of truth for SQL storage (checkpoints)
+
+The two SQL adapters used to be written twice — once for Postgres, once for SQLite — and, like any copy, they slowly drifted apart (`$1` vs `?`, `jsonb` vs text, `NOW()` vs `CURRENT_TIMESTAMP`). The checkpoint store now fixes that: **the query logic is written once** with [Drizzle](https://orm.drizzle.team/) and reused for both databases. `weavePostgresCheckpointStore` and `weaveSqliteCheckpointStore` keep the exact same API — they're just thin wrappers around one shared implementation now, so there's nothing left to drift.
+
+Nothing changed for you as a caller:
+
+```ts
+import pg from 'pg';
+import { weavePostgresCheckpointStore, weaveSqliteCheckpointStore } from '@weaveintel/workflows';
+
+// Production: Postgres
+const pgStore = await weavePostgresCheckpointStore({ pool: new pg.Pool({ connectionString: process.env.DATABASE_URL }) });
+// Edge / local / tests: SQLite — same behaviour, proven by the same test
+const liteStore = weaveSqliteCheckpointStore({ databasePath: './workflows.db' });
+
+const cp = await pgStore.save('run-1', 'step-1', workflowState);
+await pgStore.latest('run-1'); // resume from the newest checkpoint
+```
+
+How do we know both databases really behave the same? One shared **contract test** (`checkpointStoreContract`) runs against the in-memory reference, the SQLite adapter, and a real Postgres — they all must pass it. It's proven end-to-end with a durable "resume after a crash": an agent extracts a value with a real model, checkpoints it to Postgres, and a fresh store picks up exactly where it left off. This is the template the other SQL-backed stores follow.
+
 ## License
 
 MIT.
