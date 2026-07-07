@@ -23,7 +23,7 @@
     "check:no-adhoc-resilience": "node scripts/check-no-adhoc-resilience.mjs",
     "check:no-app-brand": "node scripts/check-no-app-brand.mjs",
     "check:vocab-w9": "node scripts/check-vocab-w9.mjs --w9-only",
-    "test:examples": "tsc --noEmit --project tsconfig.examples.json",
+    "test:examples": "turbo build && tsc --noEmit --project tsconfig.examples.json",
     "lint": "turbo lint",
     "clean": "turbo clean",
     "typecheck": "turbo typecheck",

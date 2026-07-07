@@ -26,6 +26,12 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
+      # Typecheck the examples against the built workspace so a breaking API change
+      # in a package is caught by its example. (test:examples runs `turbo build` first,
+      # so the reference app in apps/ is present — cached from the Build step above.)
+      - name: Typecheck examples
+        run: npm run test:examples
+
       - name: Public API Boundary Check
         run: npm run check:api-boundaries
 
