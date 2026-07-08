@@ -222,11 +222,12 @@ export function createSqlRealmStore<T extends Payload = Payload>(opts: SqlRealmS
       return getRow(id);
     },
     async listAll(logicalKeys) {
+      await ensure(); // create the schema before the first read too (reconcile reads an empty store first)
       const rows = logicalKeys && logicalKeys.length > 0
         ? await client.query(
             `SELECT * FROM ${table} WHERE logical_key IN (${logicalKeys.map((_, i) => (dialect === 'postgres' ? `$${i + 1}` : '?')).join(', ')})`,
             logicalKeys,
-          ).then((r) => (ensure(), r.rows))
+          ).then((r) => r.rows)
         : (await q`SELECT * FROM ${T}`);
       return (rows as Array<Record<string, unknown>>).map(toRecord);
     },
