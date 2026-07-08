@@ -101,6 +101,61 @@ import pg from 'pg';
 const store = createSqlRealmStore({ client: new pg.Pool({ connectionString: process.env.DATABASE_URL }), dialect: 'postgres' });
 ```
 
+## Shipping updates without clobbering edits (the version log + reconcile)
+
+Here's the problem every product with built-in defaults eventually hits. You ship a set of default
+prompts (or guardrails, or skills). An operator edits a few to suit their organisation. Then you ship a
+new release that improves some of those same defaults. Now what? Overwrite and lose their edits? Skip
+and leave them on an old version forever? Neither is acceptable.
+
+This is the exact problem your operating system's package manager solved decades ago. When a new package
+version wants to replace a config file in `/etc`, it doesn't guess — it remembers the version it shipped
+last time (the **baseline**) and compares three things: what it shipped before, what's on disk now, and
+what the new package wants. Then it only bothers you when *both* sides changed.
+
+`@weaveintel/realm` gives you the same machinery for config records:
+
+- A **version log** (`createInMemoryVersionLog` / `createSqlVersionLog`) records every default you
+  publish. It's the baseline — kept separate from the live record, so an operator's edit never erases it.
+- **`reconcile(store, log, family, desiredDefaults)`** compares your new release against what's stored
+  and sorts every default into one of six buckets:
+
+| bucket | meaning | what reconcile does |
+|---|---|---|
+| `in_sync` | nobody changed it | nothing |
+| `customized` | operator edited it; you didn't change it | **keeps theirs** |
+| `stale` | operator didn't touch it; you shipped a change | **adopts the new default** automatically |
+| `diverged` | both changed | leaves it, flags for review (a real merge) |
+| `new` | you ship a default not in the store yet | publishes it |
+| `removed` | the store has a default you no longer ship | flags it, never auto-deletes |
+
+```ts
+import { createInMemoryRealmStore, createInMemoryVersionLog, reconcile } from '@weaveintel/realm';
+
+const store = createInMemoryRealmStore();     // or the SQL store
+const log = createInMemoryVersionLog();       // or createSqlVersionLog
+
+// Your release's current defaults:
+const defaults = [
+  { logicalKey: 'assistant.general', payload: { template: 'You are a helpful assistant.' } },
+  { logicalKey: 'assistant.legal',   payload: { template: 'You are a careful legal assistant.' } },
+];
+
+const { report, applied, needsReview } = await reconcile(store, log, 'prompts', defaults);
+// report.summary → { in_sync, customized, stale, diverged, new, removed }
+// applied        → what it published/adopted automatically
+// needsReview    → what a human should look at (the customized/diverged ones)
+```
+
+The first run publishes everything (`new`). Re-running the same release is a clean no-op — the version
+log is content-addressed, so re-seeding never inflates history. And a `reconcile` **is** the seeding
+mechanism: first seed and later upgrade are the same call.
+
+When an operator decides a `diverged` default should just take the shipped version, `resyncToDesired`
+records that choice and drift returns to `in_sync` — the equivalent of "install the package maintainer's
+version". `publishToRealm` publishes a single global default plus its version, for an admin "save"
+button.
+
 ## License
 
 MIT.
