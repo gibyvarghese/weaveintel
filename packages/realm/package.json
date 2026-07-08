@@ -1,0 +1,30 @@
+{
+  "name": "@weaveintel/realm",
+  "version": "0.1.0",
+  "description": "Realm configuration — resolve the effective config record for a tenant across a global→tenant hierarchy, with provenance and git-style drift.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js", "default": "./dist/index.js" } },
+  "files": ["dist", "!dist/**/*.test.*", "!dist/**/*.spec.*"],
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@weaveintel/core": "^0.1.1",
+    "@weaveintel/identity": "^0.1.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.6",
+    "better-sqlite3": "^11.8.0",
+    "@types/better-sqlite3": "^7.6.11",
+    "pg": "^8.13.0",
+    "@types/pg": "^8.11.0",
+    "@testcontainers/postgresql": "^11.0.0"
+  }
+}
