@@ -156,6 +156,35 @@ records that choice and drift returns to `in_sync` — the equivalent of "instal
 version". `publishToRealm` publishes a single global default plus its version, for an admin "save"
 button.
 
+## Turning a built-in off (or reprioritising it) without copying it
+
+Sometimes a tenant doesn't want a *different* prompt or skill — it just wants to switch a built-in **off**
+for itself, bump its **priority**, or **pin** it to a specific version. Making a full private copy just
+to flip a switch would be wasteful and create edits to track forever. So there's a thin sidecar for
+exactly this: a per-tenant **overlay** that stores only what the tenant changed, and leaves everything
+else inherited — the same idea as a per-tenant feature flag, or a Kustomize overlay patched over a base.
+
+```ts
+import { createInMemoryStateStore, resolveStateFor } from '@weaveintel/realm';
+// (or createSqlStateStore + realmTenantStateDdl for SQLite/Postgres)
+
+const state = createInMemoryStateStore();
+
+// A parent company turns a skill OFF for its whole org…
+await state.setState('skills', 'skill.web-search', 'acme', { enabled: false });
+// …but one subsidiary turns it back on just for itself.
+await state.setState('skills', 'skill.web-search', 'acme-uk', { enabled: true });
+
+const uk = { tenantId: 'acme-uk', depth: 1, lineage: [{ tenantId: 'acme', depth: 0 }, { tenantId: 'acme-uk', depth: 1 }] };
+(await resolveStateFor(state, 'skills', 'skill.web-search', uk)).active;   // true — the child's override wins
+```
+
+Resolution is **per field, nearest wins**: for each of `enabled` / `priority` / `pinnedVersion`, the
+closest tenant on the lineage that set a value wins, so a parent org can set policy for its whole subtree
+and a child can still override just the one field it cares about. Only an explicit `enabled: false`
+turns something off (`null`/`true` keep it on), and setting every field back to `null` removes the
+overlay entirely. Nothing is ever forked — the shared default stays exactly as shipped.
+
 ## License
 
 MIT.
