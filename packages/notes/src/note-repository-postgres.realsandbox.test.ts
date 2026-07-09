@@ -41,6 +41,7 @@ describe.skipIf(!HAS_DOCKER)('Postgres NoteRepository (real Postgres via Testcon
   beforeAll(async () => {
     container = await new PostgreSqlContainer('postgres:16').start();
     pool = new pg.Pool({ connectionString: container.getConnectionUri() });
+    pool.on('error', () => {}); // swallow idle-client disconnects (e.g. 57P01) at container teardown
     // Create the schema once up front so the shared contract's fresh-repo-per-test is quick.
     createPostgresNoteRepository({ pool });
     await pool.query('SELECT 1'); // warm the pool

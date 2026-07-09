@@ -47,6 +47,7 @@ describe.skipIf(!HAS_DOCKER)('Drizzle checkpoint store → real Postgres (Testco
   beforeAll(async () => {
     container = await new PostgreSqlContainer('postgres:16').start();
     pool = new pg.Pool({ connectionString: container.getConnectionUri() });
+    pool.on('error', () => {}); // swallow idle-client disconnects (e.g. 57P01) at container teardown
     await weavePostgresCheckpointStore({ pool }); // create the schema once
   }, 180_000);
 

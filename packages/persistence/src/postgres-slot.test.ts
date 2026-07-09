@@ -46,6 +46,7 @@ describe.skipIf(!HAS_DOCKER)('Postgres runtime persistence slot (real Postgres v
     // pgvector image so the same container serves the KV contract AND the vector e2e.
     container = await new PostgreSqlContainer('pgvector/pgvector:pg16').start();
     pool = new pg.Pool({ connectionString: container.getConnectionUri() });
+    pool.on('error', () => {}); // swallow idle-client disconnects (e.g. 57P01) at container teardown
   }, 180_000);
 
   afterAll(async () => {

@@ -59,6 +59,7 @@ describe.skipIf(!HAS_DOCKER)('weaveSharedPostgres — the whole runtime on ONE P
   beforeAll(async () => {
     container = await new PostgreSqlContainer('pgvector/pgvector:pg16').start();
     pool = new pg.Pool({ connectionString: container.getConnectionUri() });
+    pool.on('error', () => {}); // swallow idle-client disconnects (e.g. 57P01) at container teardown
     // The ONE shared connection. The domain stores get the same underlying pool.
     hub = weaveSharedPostgres({ client: asSqlClient(pool) });
   }, 180_000);

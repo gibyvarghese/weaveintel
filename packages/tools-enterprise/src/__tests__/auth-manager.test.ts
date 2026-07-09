@@ -331,7 +331,10 @@ describe('AuthManager — refreshToken', () => {
 describe('AuthManager — setTokenState', () => {
   it('manually sets token state', async () => {
     const mgr = new AuthManager([oauthProfile()]);
-    const ts: TokenState = { accessToken: 'manual-token', refreshToken: 'manual-rt', expiresAt: Date.now() + 60_000 };
+    // Expire well beyond the 60s refresh buffer. A +60_000 expiry sits exactly on the buffer edge
+    // (isExpired = Date.now() > expiresAt - 60_000 = Date.now() > testStart), so it flips to "expired"
+    // and auto-refreshes the instant the two Date.now() calls land in different milliseconds — a flake.
+    const ts: TokenState = { accessToken: 'manual-token', refreshToken: 'manual-rt', expiresAt: Date.now() + 3_600_000 };
     mgr.setTokenState('test-oauth', ts);
 
     const headers = await mgr.getHeaders('test-oauth');

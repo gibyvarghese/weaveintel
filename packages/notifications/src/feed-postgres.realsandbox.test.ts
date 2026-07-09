@@ -35,6 +35,7 @@ describe.skipIf(!HAS_DOCKER)('Postgres NotificationFeedStore (real Postgres via 
   beforeAll(async () => {
     container = await new PostgreSqlContainer('postgres:16').start();
     pool = new pg.Pool({ connectionString: container.getConnectionUri() });
+    pool.on('error', () => {}); // swallow idle-client disconnects (e.g. 57P01) at container teardown
     await pool.query('SELECT 1');
   }, 180_000);
 
