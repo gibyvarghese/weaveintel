@@ -34,6 +34,9 @@ describe.skipIf(!HAS_DOCKER)('Postgres HumanTaskRepository (real Postgres via Te
   beforeAll(async () => {
     container = await new PostgreSqlContainer('postgres:16').start();
     pool = new pg.Pool({ connectionString: container.getConnectionUri(), max: 20 });
+    // Swallow idle-client disconnects (e.g. FATAL 57P01 when the container stops at teardown) so a
+    // torn-down connection can't surface as an unhandled error that fails an otherwise-green run.
+    pool.on('error', () => {});
     await pool.query('SELECT 1');
   }, 180_000);
 

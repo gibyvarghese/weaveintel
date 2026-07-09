@@ -47,6 +47,7 @@ describe.skipIf(!HAS_DOCKER)('Drizzle memory store → real Postgres (Testcontai
   beforeAll(async () => {
     container = await new PostgreSqlContainer('postgres:16').start();
     pool = new pg.Pool({ connectionString: container.getConnectionUri() });
+    pool.on('error', () => {}); // swallow idle-client disconnects (e.g. 57P01) at container teardown
     await pool.query('CREATE TABLE IF NOT EXISTS memory_entries (id TEXT PRIMARY KEY, payload_json JSONB NOT NULL, updated_at TEXT NOT NULL)');
   }, 180_000);
 

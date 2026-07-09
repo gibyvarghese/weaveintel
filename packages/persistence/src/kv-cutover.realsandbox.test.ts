@@ -49,6 +49,7 @@ describe.skipIf(!HAS_DOCKER)('KV cutover → real Postgres (Testcontainers)', ()
   beforeAll(async () => {
     container = await new PostgreSqlContainer('postgres:16').start();
     pool = new pg.Pool({ connectionString: container.getConnectionUri(), max: 20 });
+    pool.on('error', () => {}); // swallow idle-client disconnects (e.g. 57P01) at container teardown
     await pool.query('SELECT 1');
   }, 180_000);
 

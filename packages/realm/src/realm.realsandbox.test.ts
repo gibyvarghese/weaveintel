@@ -42,6 +42,7 @@ describe.skipIf(!HAS_DOCKER)('Realm on REAL Postgres (Testcontainers)', () => {
   beforeAll(async () => {
     container = await new PostgreSqlContainer('postgres:16').start();
     pool = new pg.Pool({ connectionString: container.getConnectionUri(), max: 16 });
+    pool.on('error', () => {}); // swallow idle-client disconnects (e.g. 57P01) at container teardown
   }, 120_000);
   afterAll(async () => {
     await pool?.end().catch(() => {});
