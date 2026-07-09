@@ -185,6 +185,48 @@ and a child can still override just the one field it cares about. Only an explic
 turns something off (`null`/`true` keep it on), and setting every field back to `null` removes the
 overlay entirely. Nothing is ever forked — the shared default stays exactly as shipped.
 
+## Sharing down the org tree, and promoting a good idea up
+
+A parent company customises a prompt and wants its subsidiaries to use it too. A subsidiary comes up with
+a great tweak that everyone should have. Realm handles both directions.
+
+**Sharing down.** A record's `shareMode` controls how far a tenant's copy reaches its descendants:
+`private` (just you), `children` (direct children), or `subtree` (your whole branch). Resolution already
+walks the tenant lineage, so a child that hasn't made its own copy inherits the nearest shared ancestor's
+— proven at depth against a real tenant tree.
+
+Before you flip a share on, preview its **blast radius** — exactly who is affected:
+
+```ts
+import { blastRadius } from '@weaveintel/realm';
+
+// `descendants` come from your tenant hierarchy (@weaveintel/identity's `hierarchy.descendants(id)`).
+const radius = blastRadius(
+  ownerDepth,          // the sharing tenant's depth in the tree
+  descendants,         // [{ tenantId, depth }, …]
+  'subtree',           // 'private' | 'children' | 'subtree'
+  new Set(['acme-uk']),// descendants that already have their OWN copy → won't be affected
+);
+radius.inheriting; // who will start using your record
+radius.shadowed;   // who keeps their own copy instead
+radius.outOfScope; // descendants the share doesn't reach
+```
+
+This is the same "know who's affected before a change propagates, review the high-impact ones" discipline
+change-management tools apply — so a `Share` is never a shot in the dark.
+
+**Promoting up.** When a tenant's customisation is good enough to be everyone's default, `promoteFork`
+publishes its content as the new global original (and records a version, so drift keeps working):
+
+```ts
+import { promoteFork } from '@weaveintel/realm';
+await promoteFork(store, versionLog, 'prompts', acmesFork);
+// every tenant without its own copy now gets Acme's version as the shared default
+```
+
+The tenant's own copy is left untouched; you decide whether to retire it afterwards so they fall back to
+the (now identical) global.
+
 ## License
 
 MIT.
