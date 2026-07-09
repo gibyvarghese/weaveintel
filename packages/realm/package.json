@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/realm",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Realm configuration — resolve the effective config record for a tenant across a global→tenant hierarchy, with provenance and git-style drift.",
   "type": "module",
   "main": "./dist/index.js",
