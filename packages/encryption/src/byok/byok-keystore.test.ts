@@ -53,6 +53,15 @@ const { privateKey: TEST_PRIV_2048, publicKey: TEST_PUB_2048 } = generateKeyPair
   privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
 });
 
+// A SECOND RSA-4096 key, generated once at module load (like the ones above) rather than inside a
+// timed test body — RSA-4096 keygen is slow and occasionally exceeds vitest's per-test timeout under
+// CI load, which is what made the "different fingerprints" test flaky. Generating it here removes that.
+const { publicKey: TEST_PUB_4096_B } = generateKeyPairSync('rsa', {
+  modulusLength: 4096,
+  publicKeyEncoding: { type: 'spki', format: 'pem' },
+  privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+});
+
 function encryptWith4096(plaintext: Buffer): Buffer {
   const pub = loadByokPublicKey(TEST_PUB_4096 as string);
   return publicEncrypt(
@@ -111,17 +120,10 @@ describe('fingerprintPublicKey', () => {
   });
 
   it('returns different fingerprints for different keys', () => {
-    // RSA-4096 vs RSA-2048 should differ even if 2048 is loaded via the key object
-    const pub4096 = loadByokPublicKey(TEST_PUB_4096 as string);
-    const fp1 = fingerprintPublicKey(pub4096);
-    // Generate a second 4096 key
-    const { publicKey: otherPub } = generateKeyPairSync('rsa', {
-      modulusLength: 4096,
-      publicKeyEncoding: { type: 'spki', format: 'pem' },
-      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
-    });
-    const pub4096b = loadByokPublicKey(otherPub);
-    const fp2 = fingerprintPublicKey(pub4096b);
+    // Two DIFFERENT RSA-4096 keys must fingerprint differently. Both keys are generated once at module
+    // load (TEST_PUB_4096 / TEST_PUB_4096_B) so this test does no slow keygen and can't time out.
+    const fp1 = fingerprintPublicKey(loadByokPublicKey(TEST_PUB_4096 as string));
+    const fp2 = fingerprintPublicKey(loadByokPublicKey(TEST_PUB_4096_B as string));
     expect(fp1).not.toBe(fp2);
   });
 
