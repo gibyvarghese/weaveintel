@@ -131,6 +131,9 @@
       "path": "packages/triggers"
     },
     {
+      "path": "packages/upgrade"
+    },
+    {
       "path": "packages/ui-primitives"
     },
     {
