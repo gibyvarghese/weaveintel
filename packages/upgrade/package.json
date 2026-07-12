@@ -27,10 +27,16 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "license": "MIT",
+  "dependencies": {
+    "@weaveintel/encryption": "^0.1.1",
+    "semver": "^7.7.4",
+    "zod": "^4.3.6"
+  },
   "devDependencies": {
     "typescript": "^5.7.0",
     "vitest": "^3.2.6",
     "better-sqlite3": "^11.8.0",
-    "@types/better-sqlite3": "^7.6.11"
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/semver": "^7.5.8"
   }
 }
