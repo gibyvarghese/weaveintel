@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/upgrade",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Self-upgrade engine primitives — priority banding for a reconcile review queue, pre-upgrade database snapshots, and a structured id-keyed three-way merge.",
   "type": "module",
   "main": "./dist/index.js",
