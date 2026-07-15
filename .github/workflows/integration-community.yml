@@ -44,7 +44,12 @@ jobs:
       - name: Prove the framework is resolved from the registry (not vendored)
         run: |
           test ! -d packages || (echo "unexpected packages/ dir in the app repo" && exit 1)
-          node -e "const p=require('@weaveintel/core/package.json'); console.log('@weaveintel/core resolved from registry @', p.version)"
+          # @weaveintel/core's "exports" map intentionally does NOT expose ./package.json, so a bare
+          # `require('@weaveintel/core/package.json')` is blocked by Node (ERR_PACKAGE_PATH_NOT_EXPORTED).
+          # Resolve the package's real install directory and read its manifest by file path instead —
+          # this bypasses the exports restriction and still proves the framework was installed from the
+          # registry (the `packages/` check above already rules out a vendored copy).
+          node -e "const path=require('path'),fs=require('fs');let d=path.dirname(require.resolve('@weaveintel/core'));while(!(fs.existsSync(path.join(d,'package.json'))&&JSON.parse(fs.readFileSync(path.join(d,'package.json'),'utf8')).name==='@weaveintel/core')){const u=path.dirname(d);if(u===d){console.error('could not locate @weaveintel/core package.json');process.exit(1);}d=u;}console.log('@weaveintel/core resolved from registry @',JSON.parse(fs.readFileSync(path.join(d,'package.json'),'utf8')).version,'->',d);"
 
       - name: Build
         run: npx turbo build
