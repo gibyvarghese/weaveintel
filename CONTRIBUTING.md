@@ -61,6 +61,19 @@ Scopes match the app or package name (`geneweave`, `compliance`, `workflows`, et
 - [ ] Security-sensitive changes include a note in the PR description
 - [ ] Breaking API changes are documented in the PR body
 - [ ] New environment variables are documented in `deploy/server.ts` header JSDoc
+- [ ] **A changeset is included** for any change to a published `@weaveintel/*` package (`npx changeset`)
+
+## Releasing
+
+The `@weaveintel/*` libraries are published to npm **independently** with [Changesets](.changeset/README.md); the
+geneWeave product versions separately (see [`VERSIONING.md`](VERSIONING.md)).
+
+- **In your PR:** run `npx changeset`, pick the package(s) you changed and the bump type (`major` = breaking,
+  `minor` = feature, `patch` = fix), and commit the generated `.changeset/*.md`. No changeset ⇒ that package
+  won't release.
+- **After merge (automated):** the Release workflow opens a **"Version Packages" PR** that applies the pending
+  changesets; merging it **publishes** the bumped packages to npm via **Trusted Publishing (OIDC)** with a
+  provenance attestation — no tokens, nothing to run by hand. See [`.changeset/README.md`](.changeset/README.md).
 
 ## Reporting Bugs
 

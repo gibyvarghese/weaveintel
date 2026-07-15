@@ -7,5 +7,5 @@
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
-  "ignore": ["@weaveintel/geneweave-api", "@weaveintel/geneweave-ui", "@weaveintel/live-agents-demo", "@geneweave/desktop", "@geneweave/mobile"]
+  "ignore": ["@weaveintel/live-agents-demo"]
 }
