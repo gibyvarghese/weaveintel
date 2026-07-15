@@ -1,131 +1,110 @@
 # weaveIntel Versioning
 
-weaveIntel follows **Fabric Versioning** — a semantic versioning scheme where each
-major release is named after a fabric, assigned alphabetically from A to Z.
+weaveIntel versions **two things on two independent tracks**, because they have two different audiences:
 
-## Version Format
+| Track | What | Scheme | Source of truth |
+|---|---|---|---|
+| **Libraries** | the published `@weaveintel/*` framework packages | **independent SemVer**, managed with **Changesets** | [`.changeset/`](.changeset/README.md) |
+| **Product** | the **geneWeave** application (community + private editions) | **coordinated SemVer** with a **fabric codename on majors**, both editions in lockstep | the geneWeave repos' `package.json` + release tags |
 
-```
-<major>.<minor>.<patch>  —  "<Fabric Name>"
-```
+> A library and the product move at their own pace: it is normal for `@weaveintel/realm` to be `0.4.0` while the
+> geneWeave product is `1.0.0`. They are not the same number and are never bumped together.
 
-| Component | Meaning |
-|-----------|---------|
-| **Major** | Breaking changes, new architecture. Named after the next alphabetical fabric. |
-| **Minor** | New features, backward-compatible additions within the current fabric release. |
-| **Patch** | Bug fixes, security patches, documentation corrections. |
+---
 
-## Fabric Codenames
+## Track 1 — Libraries (`@weaveintel/*`)
 
-Each major version is assigned a unique single-word fabric name from the
-[Wikipedia List of Fabrics](https://en.wikipedia.org/wiki/List_of_fabrics),
-progressing alphabetically.
+Each published package carries its **own** SemVer `MAJOR.MINOR.PATCH` and advances **independently**:
 
-| Major | Codename       | Fabric Origin |
-|------:|----------------|---------------|
-|     1 | **Aertex**     | Lightweight woven mesh fabric, invented in 1888 |
-|     2 | **Batiste**    | Fine, sheer cotton or linen fabric |
-|     3 | **Calico**     | Plain-woven textile from unbleached cotton |
-|     4 | **Damask**     | Reversible figured fabric with a pattern woven into it |
-|     5 | **Etamine**    | Loosely woven open-mesh fabric |
-|     6 | **Flannel**    | Soft woven fabric, typically brushed for warmth |
-|     7 | **Gauze**      | Thin, translucent fabric with an open weave |
-|     8 | **Habutai**    | Smooth, lightweight Japanese silk |
-|     9 | **Intarsia**   | Colorwork knitting technique producing patterned fabric |
-|    10 | **Jersey**     | Soft, stretchy knit fabric |
-|    11 | **Knit**       | Fabric produced by interlocking loops of yarn |
-|    12 | **Linen**      | Strong, lustrous natural fiber fabric |
-|    13 | **Muslin**     | Lightweight plain-weave cotton |
-|    14 | **Nankeen**    | Durable buff-colored cotton cloth |
-|    15 | **Organza**    | Thin, crisp, sheer fabric |
-|    16 | **Percale**    | Closely woven plain-weave fabric |
-|    17 | **Rinzu**      | Japanese figured silk |
-|    18 | **Satin**      | Glossy smooth fabric with a lustrous surface |
-|    19 | **Taffeta**    | Crisp, smooth woven fabric with a slight sheen |
-|    20 | **Ultrasuede** | Synthetic ultra-microfiber material |
-|    21 | **Velvet**     | Soft, dense-pile woven fabric |
-|    22 | **Wadmal**     | Coarse, thick Scandinavian woolen fabric |
-|    23 | **Zephyr**     | Light, fine-quality gingham or fabric |
+| Component | Meaning (for that package's API) |
+|-----------|----------------------------------|
+| **Major** | breaking API change |
+| **Minor** | backward-compatible feature |
+| **Patch** | backward-compatible fix |
 
-> Letters X and Y are skipped due to limited single-word fabric options.
-> If we ever reach v23, we've had a good run.
+- **Managed by Changesets.** To record a change: `npx changeset` (pick the packages + bump type). To release:
+  `npx changeset version` (applies bumps + writes changelogs) then `npx changeset publish`. See
+  [`.changeset/README.md`](.changeset/README.md). Apps (`geneweave-api`, `geneweave-ui`, `desktop`, `mobile`,
+  `live-agents-demo`) are in the changesets `ignore` list — they are not published to npm.
+- **Tags** are per-package: `@weaveintel/<pkg>@x.y.z`.
+- **Pre-1.0 today.** The framework is intentionally on `0.x` while its public surface is still settling — under
+  SemVer, `0.x` signals the API may change between minors. Individual packages graduate to `1.0.0` when their API
+  is declared stable; there is **no** requirement to bump them all together.
+- **Supply chain:** packages are published from CI with **npm provenance** (Trusted Publishing) so consumers can
+  verify which workflow run produced each artifact.
 
-## How It Works
+There is **no** fabric codename on library versions.
 
-### Major Release (new fabric)
+---
 
-A major release introduces breaking changes or a significant architectural shift.
-The version number increments and the codename advances to the next alphabet letter.
+## Track 2 — Product (geneWeave)
+
+The geneWeave application versions as **one product**, and **both editions share the same version number**:
 
 ```
-1.0.0  "Aertex"   →  First stable release
-2.0.0  "Batiste"  →  Second major release (breaking changes)
-3.0.0  "Calico"   →  Third major release
+<major>.<minor>.<patch>   —   majors also carry a fabric codename
 ```
 
-### Minor Release (same fabric)
+| Component | Meaning (for the product) |
+|-----------|---------------------------|
+| **Major** | breaking change / new architecture / a data or deploy migration that isn't backward-compatible. Advances the **fabric codename**. |
+| **Minor** | new features, backward-compatible. |
+| **Patch** | fixes, security, docs — always backward-compatible. |
 
-Minor releases add features without breaking backward compatibility.
-They stay under the same fabric codename.
+**Editions share the version.** *Community* and *private (enterprise)* release the **same `x.y.z`**; the edition
+is a **separate field**, not part of the version number. This lockstep is what lets the in-app **Upgrade Center**
+line up its edition check and version compare (`computeBumpType` maps directly onto the Major/Minor/Patch meanings
+above, and the anti-rollback floor is a straight SemVer comparison).
 
-```
-1.0.0  "Aertex"   →  Initial release
-1.1.0  "Aertex"   →  Added model pricing sync
-1.2.0  "Aertex"   →  Added workflow engine
-1.3.0  "Aertex"   →  Added knowledge graph
-```
-
-### Patch Release
-
-Patch releases fix bugs and are always backward compatible.
+**Codenames apply to product *majors* only** — never to minors, patches, or libraries:
 
 ```
-1.1.0  "Aertex"   →  Feature release
-1.1.1  "Aertex"   →  Fixed memory leak in model router
-1.1.2  "Aertex"   →  Security patch for JWT validation
+1.0.0  "Aertex"    →  First GA
+1.1.0  "Aertex"    →  Feature release (same fabric)
+1.1.1  "Aertex"    →  Patch (same fabric)
+2.0.0  "Batiste"   →  Next major (new fabric)
 ```
 
-## GitHub Release Tags
+### Fabric codenames (product majors)
 
-Releases are tagged and published on GitHub with the following convention:
+Each product major is named after a single-word fabric from the
+[Wikipedia List of Fabrics](https://en.wikipedia.org/wiki/List_of_fabrics), alphabetically:
 
-```
-Tag:    v1.0.0
-Title:  v1.0.0 — Aertex
-Body:   Release notes (generated from CHANGELOG.md)
-```
+| Major | Codename | Major | Codename | Major | Codename |
+|------:|----------|------:|----------|------:|----------|
+| 1 | **Aertex** | 9 | Intarsia | 17 | Rinzu |
+| 2 | Batiste | 10 | Jersey | 18 | Satin |
+| 3 | Calico | 11 | Knit | 19 | Taffeta |
+| 4 | Damask | 12 | Linen | 20 | Ultrasuede |
+| 5 | Etamine | 13 | Muslin | 21 | Velvet |
+| 6 | Flannel | 14 | Nankeen | 22 | Wadmal |
+| 7 | Gauze | 15 | Organza | 23 | Zephyr |
+| 8 | Habutai | 16 | Percale | | |
 
-Minor releases:
+> Letters X and Y are skipped (limited single-word fabric options). If we ever reach v23 "Zephyr", we've had a
+> good run.
 
-```
-Tag:    v1.1.0
-Title:  v1.1.0 — Aertex
-```
+### Release tags & the Upgrade Center
 
-## Release Process
+A product release is a **`v<x.y.z>` git tag** with a **GitHub Release** carrying an **Ed25519-signed
+`manifest.json`** (its `version`, `edition`, `layers.code.repoTag = the tag`, `fileManifestDigest`, plus schema
+and content layers). The running instance's Upgrade Center discovers, verifies, applies, and reconciles that
+release. The end-to-end publisher steps live in the geneWeave repos' **`docs/RUNBOOKS.md` → *Publisher runbook —
+cutting a release*** (and the engine itself in **`docs/UPGRADE_ENGINE.md`**); this document defines only the
+*numbering* scheme.
 
-1. **Update `CHANGELOG.md`** — Add entries under the new version heading
-2. **Bump versions** — Run `npm run release:bump -- <major|minor|patch>`
-3. **Tag and push** — Run `npm run release:tag`
-4. **GitHub Release** — The CI workflow creates a GitHub release automatically from the tag
+---
 
-## Current Release
+## Current state
 
-| Version | Codename | Status |
-|---------|----------|--------|
-| 1.0.0   | Aertex   | Planned — not yet released |
+| Track | Where | State |
+|---|---|---|
+| Libraries | `@weaveintel/*` on npm | independent SemVer, **`0.x`** (e.g. `realm 0.4.0`, `upgrade 0.2.0`, most `0.1.x`) via Changesets |
+| Product | geneWeave (community + private) | **`1.0.0` "Aertex"** — the first GA product line |
 
-### Package Version State (as of audit 2026-05-15)
+## Further reading
 
-The codebase is pre-release. Individual packages have not yet been bumped to v1.0.0:
-
-| Package count | Version | Notes |
-|--------------|---------|-------|
-| 53 packages  | 0.0.1   | Initial scaffolding |
-| 18 packages  | 0.1.0   | Feature-complete drafts |
-| 2 apps       | —       | geneweave, live-agents-demo |
-
-The v1.0.0 "Aertex" release requires all packages to be bumped in concert via
-`npm run release:bump -- major`. Until then, treat all package versions as
-unstable pre-release. See the refactor roadmap in `CODEBASE_AUDIT_2026.md` for
-the work items blocking the first stable release.
+- [`.changeset/README.md`](.changeset/README.md) — the library (Changesets) release flow.
+- geneWeave `docs/RUNBOOKS.md` — the *Publisher runbook* for cutting a signed product release.
+- geneWeave `docs/UPGRADE_ENGINE.md` — how an instance consumes a release.
+- [`VERSIONING_REVIEW_AND_ROADMAP_2026.md`](VERSIONING_REVIEW_AND_ROADMAP_2026.md) — the review + phased rollout that established this scheme.

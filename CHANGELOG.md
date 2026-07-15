@@ -2,8 +2,9 @@
 
 All notable changes to weaveIntel will be documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Fabric Versioning](VERSIONING.md).
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The `@weaveintel/*` libraries
+follow **independent SemVer via Changesets**; see [`VERSIONING.md`](VERSIONING.md) for the full two-track scheme
+(the geneWeave *product* versions separately, with fabric codenames on majors).
 
 ---
 
