@@ -21,7 +21,9 @@ On push to `main`, the [Release workflow](../.github/workflows/release.yml) runs
 
 1. If changesets are pending, it opens/updates a **"Version Packages"** PR that runs `npm run ci:version`
    (`changeset version`) — bumping versions + writing `CHANGELOG.md`s.
-2. Merging that PR runs `npm run ci:publish` (`changeset publish`), publishing the bumped packages to npm.
+2. Merging that PR runs `npm run ci:publish` — a small guard (`scripts/ci-publish.mjs`) that publishes
+   only the packages whose version isn't yet on npm (delegating to `changeset publish`), so an ordinary
+   push with nothing to release is a clean no-op instead of erroring on already-published versions.
 
 Publishing uses **npm Trusted Publishing (OIDC)** — no `NPM_TOKEN`; npm mints a short-lived token from the
 workflow's identity and attaches a **provenance** attestation (`NPM_CONFIG_PROVENANCE`). One-time owner setup on
