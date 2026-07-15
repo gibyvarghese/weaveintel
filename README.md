@@ -1069,13 +1069,15 @@ npx tsx examples/12-geneweave.ts
 
 ## Versioning
 
-weaveIntel uses **Fabric Versioning**: each major release is named after a fabric, alphabetically A → Z.
+weaveIntel versions on **two independent tracks**:
 
-```
-<major>.<minor>.<patch>  —  "<Fabric Name>"
-```
+- **Libraries** — the published `@weaveintel/*` packages use **independent SemVer** managed with **Changesets**
+  (each package advances on its own; currently on `0.x` while the framework API settles).
+- **Product** — the **geneWeave** app uses **coordinated SemVer** with a **fabric codename on majors** (both
+  editions share the version). Currently **`1.0.0 — Aertex`**.
 
-**Current release: v1.0.0 — Aertex.** Full mapping in [VERSIONING.md](VERSIONING.md).
+Full scheme, the fabric codename table, and the release-tag ↔ Upgrade Center contract are in
+[`VERSIONING.md`](VERSIONING.md).
 
 ---
 
@@ -1083,7 +1085,7 @@ weaveIntel uses **Fabric Versioning**: each major release is named after a fabri
 
 - [`MIGRATION.md`](./MIGRATION.md) — the old→new package map from the ~87→~44 package consolidation. Start here if an import stopped resolving.
 - [`ROADMAP.md`](./ROADMAP.md) — forward-looking plans only (this README describes the current state).
-- [`VERSIONING.md`](./VERSIONING.md) — Fabric Versioning scheme and release history.
+- [`VERSIONING.md`](./VERSIONING.md) — the two-track versioning scheme (library SemVer + product fabric codenames).
 - [`CONTRIBUTING.md`](./CONTRIBUTING.md) — how to build, test, and contribute.
 
 ---
