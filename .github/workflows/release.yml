@@ -1,84 +1,69 @@
+# Release — publishes the @weaveintel/* libraries to npm via Changesets.
+#
+# HOW IT WORKS
+#   • Contributors add a changeset in their PR (`npx changeset`); see .changeset/README.md.
+#   • On push to main, the Changesets action either:
+#       (a) opens/updates a "Version Packages" PR (applies pending changesets, bumps versions,
+#           writes CHANGELOGs) when changesets are pending, or
+#       (b) publishes the freshly-bumped packages to npm when that PR is merged (no changesets left).
+#   • Each published package is versioned INDEPENDENTLY (SemVer). See VERSIONING.md.
+#
+# TRUSTED PUBLISHING (OIDC) — no NPM_TOKEN
+#   Publishing uses npm Trusted Publishing (GA July 2025): the `id-token: write` permission lets npm
+#   mint a short-lived, workflow-scoped token from GitHub's OIDC identity, and NPM_CONFIG_PROVENANCE
+#   attaches a signed provenance attestation to every publish. Requires Node ≥22 / npm ≥11.5.1.
+#
+#   ONE-TIME OWNER SETUP (on npmjs.com, per package or org — cannot be automated here):
+#     For each @weaveintel/* package → Settings → "Trusted Publishing" → add a GitHub Actions publisher:
+#       Repository: gibyvarghese/weaveintel   Workflow: release.yml   Environment: (leave blank)
+#     Until this is configured owner-side, `changeset publish` will fall back to token auth and fail.
+
 name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - main
 
-permissions:
-  contents: write
+# Least privilege at the top; the job widens only what it needs.
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # create tags/commits + the Version Packages PR branch
+      pull-requests: write # open/update the Version Packages PR
+      id-token: write # OIDC → npm Trusted Publishing + provenance
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Changesets needs full history to compute what changed
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22 # Trusted Publishing needs Node ≥22 / npm ≥11.5.1
+          registry-url: https://registry.npmjs.org
 
-      - name: Extract version info
-        id: version
-        run: |
-          TAG="${GITHUB_REF#refs/tags/}"
-          VERSION="${TAG#v}"
-          MAJOR=$(echo "$VERSION" | cut -d. -f1)
+      # Ensure npm is new enough for OIDC Trusted Publishing.
+      - name: Upgrade npm
+        run: npm install -g npm@latest
 
-          # Fabric codename lookup
-          FABRICS=(Aertex Batiste Calico Damask Etamine Flannel Gauze Habutai Intarsia Jersey Knit Linen Muslin Nankeen Organza Percale Rinzu Satin Taffeta Ultrasuede Velvet Wadmal Zephyr)
-          IDX=$((MAJOR - 1))
-          if [ $IDX -ge 0 ] && [ $IDX -lt ${#FABRICS[@]} ]; then
-            CODENAME="${FABRICS[$IDX]}"
-          else
-            CODENAME="v${MAJOR}"
-          fi
-
-          MINOR=$(echo "$VERSION" | cut -d. -f2)
-          if [ "$MINOR" = "0" ] && [ "$(echo "$VERSION" | cut -d. -f3)" = "0" ]; then
-            PRERELEASE=false
-            RELEASE_TYPE="major"
-          else
-            PRERELEASE=false
-            RELEASE_TYPE="minor"
-          fi
-
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "codename=$CODENAME" >> "$GITHUB_OUTPUT"
-          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
-          echo "release_type=$RELEASE_TYPE" >> "$GITHUB_OUTPUT"
-
-      - name: Extract changelog for this version
-        id: changelog
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          # Extract the section for this version from CHANGELOG.md
-          NOTES=$(awk "/^## \[${VERSION}\]/{found=1;next} /^## \[/{if(found)exit} found{print}" CHANGELOG.md)
-          if [ -z "$NOTES" ]; then
-            NOTES="Release ${VERSION} — ${{ steps.version.outputs.codename }}"
-          fi
-          # Use delimiter for multiline output
-          echo "notes<<CHANGELOG_EOF" >> "$GITHUB_OUTPUT"
-          echo "$NOTES" >> "$GITHUB_OUTPUT"
-          echo "CHANGELOG_EOF" >> "$GITHUB_OUTPUT"
+      - name: Install dependencies
+        run: npm ci
 
       - name: Build
-        run: |
-          npm ci
-          npm run build
+        run: npm run build
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Create Release PR or publish to npm
+        uses: changesets/action@v1
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: "${{ steps.version.outputs.tag }} — ${{ steps.version.outputs.codename }}"
-          body: |
-            # ${{ steps.version.outputs.tag }} — ${{ steps.version.outputs.codename }}
-
-            ${{ steps.changelog.outputs.notes }}
-
-            ---
-            *Fabric Versioning: Major releases are named after fabrics A→Z. See [VERSIONING.md](https://github.com/gibyvarghese/weaveintel/blob/main/VERSIONING.md) for details.*
-          prerelease: ${{ steps.version.outputs.prerelease }}
-          generate_release_notes: false
+          version: npm run ci:version # applies changesets (opens the Version Packages PR)
+          publish: npm run ci:publish # publishes when there are no pending changesets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_CONFIG_PROVENANCE: "true" # attach provenance attestation on publish

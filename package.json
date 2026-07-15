@@ -29,8 +29,9 @@
     "typecheck": "turbo typecheck",
     "format": "prettier --write \"{packages,apps}/*/src/**/*.ts\"",
     "format:check": "prettier --check \"{packages,apps}/*/src/**/*.ts\"",
-    "release:bump": "node scripts/bump-version.mjs",
-    "release:tag": "node scripts/tag-release.mjs"
+    "changeset": "changeset",
+    "ci:version": "changeset version",
+    "ci:publish": "changeset publish"
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
