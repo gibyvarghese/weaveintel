@@ -8,15 +8,18 @@
 #       (b) publishes the freshly-bumped packages to npm when that PR is merged (no changesets left).
 #   • Each published package is versioned INDEPENDENTLY (SemVer). See VERSIONING.md.
 #
-# TRUSTED PUBLISHING (OIDC) — no NPM_TOKEN
-#   Publishing uses npm Trusted Publishing (GA July 2025): the `id-token: write` permission lets npm
-#   mint a short-lived, workflow-scoped token from GitHub's OIDC identity, and NPM_CONFIG_PROVENANCE
-#   attaches a signed provenance attestation to every publish. Requires Node ≥22 / npm ≥11.5.1.
+# AUTH — token now, Trusted Publishing (OIDC) later
+#   TODAY: publishing authenticates with the `NPM_TOKEN` Actions secret (setup-node wires it into
+#   .npmrc via NODE_AUTH_TOKEN). NPM_CONFIG_PROVENANCE + `id-token: write` still attach a signed
+#   provenance attestation. This is the interim path until Trusted Publishing is configured.
 #
-#   ONE-TIME OWNER SETUP (on npmjs.com, per package or org — cannot be automated here):
-#     For each @weaveintel/* package → Settings → "Trusted Publishing" → add a GitHub Actions publisher:
-#       Repository: gibyvarghese/weaveintel   Workflow: release.yml   Environment: (leave blank)
-#     Until this is configured owner-side, `changeset publish` will fall back to token auth and fail.
+#   TARGET (drop NPM_TOKEN once done): npm Trusted Publishing (GA July 2025) lets npm mint a
+#   short-lived, workflow-scoped token from GitHub's OIDC identity — no long-lived secret to rotate.
+#     ONE-TIME OWNER SETUP (on npmjs.com, per package or org — cannot be automated here):
+#       For each @weaveintel/* package → Settings → "Trusted Publishing" → add a GitHub Actions
+#       publisher: Repository gibyvarghese/weaveintel, Workflow release.yml, Environment (blank).
+#     After that, delete the NODE_AUTH_TOKEN line + the NPM_TOKEN secret and OIDC takes over.
+#   Requires Node ≥22 / npm ≥11.5.1 either way.
 
 name: Release
 
@@ -67,3 +70,4 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_CONFIG_PROVENANCE: "true" # attach provenance attestation on publish
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }} # interim auth; remove once Trusted Publishing is set up

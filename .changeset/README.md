@@ -25,6 +25,7 @@ On push to `main`, the [Release workflow](../.github/workflows/release.yml) runs
    only the packages whose version isn't yet on npm (delegating to `changeset publish`), so an ordinary
    push with nothing to release is a clean no-op instead of erroring on already-published versions.
 
-Publishing uses **npm Trusted Publishing (OIDC)** — no `NPM_TOKEN`; npm mints a short-lived token from the
-workflow's identity and attaches a **provenance** attestation (`NPM_CONFIG_PROVENANCE`). One-time owner setup on
-npmjs.com (linking the repo/workflow as a trusted publisher) is documented in the workflow header.
+Publishing currently authenticates with the `NPM_TOKEN` Actions secret (interim) and attaches a **provenance**
+attestation (`NPM_CONFIG_PROVENANCE`). The target is **npm Trusted Publishing (OIDC)** — npm minting a short-lived
+token from the workflow's identity, with no long-lived secret to rotate. The one-time owner setup on npmjs.com and
+the switch-over (drop `NPM_TOKEN`) are documented in the workflow header.
