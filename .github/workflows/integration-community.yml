@@ -34,7 +34,7 @@ jobs:
           repository: gibyvarghese/geneweave-community
           ref: main
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '20'
 
