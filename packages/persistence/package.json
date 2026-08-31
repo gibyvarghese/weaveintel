@@ -30,8 +30,8 @@
   },
   "devDependencies": {
     "@testcontainers/postgresql": "^11.0.0",
-    "@types/pg": "^8.11.0",
-    "pg": "^8.13.0",
+    "@types/pg": "^8.23.1",
+    "pg": "^8.23.0",
     "vitest": "^3.2.6"
   },
   "publishConfig": {

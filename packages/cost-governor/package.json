@@ -48,11 +48,11 @@
   },
   "peerDependencies": {
     "better-sqlite3": "^11.10.0",
-    "pg": "^8.13.1",
+    "pg": "^8.23.0",
     "mongodb": "^6.16.0",
     "redis": "^4.7.0",
-    "@aws-sdk/client-dynamodb": "^3.810.0",
-    "@aws-sdk/lib-dynamodb": "^3.810.0"
+    "@aws-sdk/client-dynamodb": "^3.1120.0",
+    "@aws-sdk/lib-dynamodb": "^3.1120.0"
   },
   "peerDependenciesMeta": {
     "better-sqlite3": {
@@ -78,11 +78,11 @@
     "typescript": "^5.7.0",
     "vitest": "^3.2.6",
     "better-sqlite3": "^11.10.0",
-    "pg": "^8.13.1",
+    "pg": "^8.23.0",
     "mongodb": "^6.16.0",
     "redis": "^4.7.0",
-    "@aws-sdk/client-dynamodb": "^3.810.0",
-    "@aws-sdk/lib-dynamodb": "^3.810.0"
+    "@aws-sdk/client-dynamodb": "^3.1120.0",
+    "@aws-sdk/lib-dynamodb": "^3.1120.0"
   },
   "publishConfig": {
     "access": "public"

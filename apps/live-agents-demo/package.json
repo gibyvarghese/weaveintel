@@ -28,10 +28,10 @@
     "@weaveintel/core": "^0.1.1",
     "@weaveintel/live-agents": "^0.1.1",
     "@weaveintel/persistence": "^0.1.1",
-    "pg": "^8.14.1"
+    "pg": "^8.23.0"
   },
   "devDependencies": {
-    "@types/pg": "^8.11.11",
+    "@types/pg": "^8.23.1",
     "@weaveintel/testing": "^0.1.1"
   },
   "license": "MIT"
