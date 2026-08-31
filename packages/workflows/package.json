@@ -19,20 +19,20 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@aws-sdk/client-dynamodb": "^3.810.0",
-    "@aws-sdk/lib-dynamodb": "^3.810.0",
+    "@aws-sdk/client-dynamodb": "^3.1120.0",
+    "@aws-sdk/lib-dynamodb": "^3.1120.0",
     "@weaveintel/core": "^0.1.1",
     "@weaveintel/human-tasks": "^0.1.1",
     "@weaveintel/observability": "^0.1.1",
     "better-sqlite3": "^11.10.0",
     "drizzle-orm": "^0.45.2",
     "mongodb": "^6.16.0",
-    "pg": "^8.13.1",
+    "pg": "^8.23.0",
     "redis": "^4.7.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
-    "@types/pg": "^8.11.10",
+    "@types/pg": "^8.23.1",
     "typescript": "^5.7.0",
     "vitest": "^3.2.6",
     "@testcontainers/postgresql": "^11.0.0"

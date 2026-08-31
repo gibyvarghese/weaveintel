@@ -29,8 +29,8 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@aws-sdk/client-dynamodb": "^3.810.0",
-    "@aws-sdk/lib-dynamodb": "^3.810.0",
+    "@aws-sdk/client-dynamodb": "^3.1120.0",
+    "@aws-sdk/lib-dynamodb": "^3.1120.0",
     "@weaveintel/agents": "^0.1.1",
     "@weaveintel/core": "^0.1.1",
     "@weaveintel/identity": "^0.1.1",
@@ -40,7 +40,7 @@
     "@weaveintel/tools": "^0.1.1",
     "better-sqlite3": "^11.10.0",
     "mongodb": "^6.16.0",
-    "pg": "^8.13.1",
+    "pg": "^8.23.0",
     "redis": "^4.7.0",
     "drizzle-orm": "^0.45.2"
   },

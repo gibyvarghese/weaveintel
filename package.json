@@ -34,15 +34,15 @@
     "ci:publish": "node scripts/ci-publish.mjs"
   },
   "devDependencies": {
-    "@anthropic-ai/sdk": "^0.110.0",
+    "@anthropic-ai/sdk": "^0.122.0",
     "@changesets/cli": "^2.27.0",
     "@types/ws": "^8.18.1",
     "@vitest/coverage-v8": "^3.2.6",
     "dotenv": "^17.4.2",
     "openai": "^6.45.0",
-    "prettier": "^3.3.0",
-    "tsx": "^4.21.0",
-    "turbo": "^2.3.0",
+    "prettier": "^3.9.6",
+    "tsx": "^4.23.12",
+    "turbo": "^2.10.12",
     "typescript": "^5.7.0",
     "vitest": "^3.2.6"
   },
