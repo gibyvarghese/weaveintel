@@ -28,7 +28,7 @@
     "drizzle-orm": "^0.45.2",
     "mongodb": "^6.16.0",
     "pg": "^8.13.1",
-    "redis": "^4.7.0"
+    "redis": "^6.2.1"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

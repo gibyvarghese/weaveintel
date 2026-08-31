@@ -50,7 +50,7 @@
     "better-sqlite3": "^11.10.0",
     "pg": "^8.13.1",
     "mongodb": "^6.16.0",
-    "redis": "^4.7.0",
+    "redis": "^6.2.1",
     "@aws-sdk/client-dynamodb": "^3.810.0",
     "@aws-sdk/lib-dynamodb": "^3.810.0"
   },
@@ -80,7 +80,7 @@
     "better-sqlite3": "^11.10.0",
     "pg": "^8.13.1",
     "mongodb": "^6.16.0",
-    "redis": "^4.7.0",
+    "redis": "^6.2.1",
     "@aws-sdk/client-dynamodb": "^3.810.0",
     "@aws-sdk/lib-dynamodb": "^3.810.0"
   },
