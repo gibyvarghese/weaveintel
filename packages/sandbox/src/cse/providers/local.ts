@@ -17,12 +17,12 @@
  */
 
 import { spawn } from 'node:child_process';
-import { writeFile, mkdir, rm, readdir, readFile, mkdtemp, chmod } from 'node:fs/promises';
+import { writeFile, mkdir, readdir, readFile, mkdtemp, chmod } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { newUUIDv7 } from '@weaveintel/core';
 import type { ContainerProvider } from './base.js';
-import { buildRunCommand, languageExt, tryParseOutput } from './base.js';
+import { buildRunCommand, discardScratchFolder, languageExt, tryParseOutput } from './base.js';
 import type {
   CSEConfig,
   CSEHealthStatus,
@@ -327,7 +327,10 @@ export class LocalDockerProvider implements ContainerProvider {
         providerInfo: { provider: 'local', containerId: `cse_${executionId}` },
       };
     } finally {
-      await rm(workDir, { recursive: true, force: true });
+      // A TIDY-UP MUST NEVER TURN A COMPLETED RUN INTO A FAILED ONE. See `discardScratchFolder`: a
+      // throw from a `finally` replaces the value this function was about to return, so a momentary
+      // refusal to delete a temporary folder was being reported as the code having failed to run.
+      await discardScratchFolder(workDir);
     }
   }
 
