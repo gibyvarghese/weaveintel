@@ -28,6 +28,7 @@ function hostInRules(host: string, rules: string[]): boolean {
 }
 
 function isPrivateIPv4(ip: string): boolean {
+  if (ip === '0.0.0.0' || ip.startsWith('0.')) return true; // F17: 0.0.0.0/8 routes to localhost
   if (ip.startsWith('127.')) return true;
   if (ip.startsWith('10.')) return true;
   if (ip.startsWith('192.168.')) return true;
@@ -40,7 +41,8 @@ function isPrivateIPv4(ip: string): boolean {
 
 function isPrivateIPv6(ip: string): boolean {
   const normalized = ip.toLowerCase();
-  if (normalized === '::1') return true;
+  if (normalized === '::1' || normalized === '::') return true; // F17: loopback + unspecified
+
   if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true;
   if (/^fe[89ab]/.test(normalized)) return true;
   if (normalized.startsWith('::ffff:')) {
@@ -54,9 +56,13 @@ export function isPrivateHostLiteral(host: string): boolean {
   const normalized = host.toLowerCase();
   if (normalized === 'localhost' || normalized === '::1') return true;
   if (normalized.endsWith('.local')) return true;
-  const kind = isIP(normalized);
-  if (kind === 4) return isPrivateIPv4(normalized);
-  if (kind === 6) return isPrivateIPv6(normalized);
+  // F17/S1: WHATWG URL.hostname keeps brackets on IPv6 literals (e.g. `[::1]`), for which isIP()===0,
+  // so the literal check was skipped. Strip a surrounding pair before classifying.
+  const bare = normalized.startsWith('[') && normalized.endsWith(']') ? normalized.slice(1, -1) : normalized;
+  if (bare === '::1' || bare === '::') return true;
+  const kind = isIP(bare);
+  if (kind === 4) return isPrivateIPv4(bare);
+  if (kind === 6) return isPrivateIPv6(bare);
   return false;
 }
 
@@ -102,10 +108,8 @@ export async function validateOutboundUrl(rawUrl: string, policy: OutboundNetwor
         throw new Error('Resolved private network address is not allowed');
       }
     } catch (error) {
-      if (error instanceof Error && /ENOTFOUND|EAI_AGAIN|EAI_FAIL|ENODATA/i.test(error.message)) {
-        return parsed;
-      }
-      throw error;
+      // F3: fail CLOSED. A host whose address cannot be validated is refused, not allowed through.
+      throw new Error(`Could not validate address for host: ${host}`);
     }
   }
 
