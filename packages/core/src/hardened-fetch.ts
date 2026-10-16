@@ -249,7 +249,19 @@ export async function hardenedFetch(
     ...(safeDispatcher ?? {}),
   };
 
-  const resp0 = await fetch(input, composed as RequestInit);
+  // When a DNS-pinning dispatcher is attached (Phase 5) it was created from the `undici` PACKAGE, and
+  // it must be driven by THAT undici's own `fetch`. Node's built-in global `fetch` is a *different*
+  // undici build and rejects a foreign dispatcher with `UND_ERR_INVALID_ARG` ("invalid onRequestStart
+  // method"), which surfaces to callers as an opaque "fetch failed" and silently disables every
+  // outbound request (e.g. all AI-provider calls). Use undici's own fetch whenever a dispatcher is
+  // present; fall back to the global fetch when none was attached (undici unavailable / enforceHttps off).
+  let resp0: Response;
+  if ((composed as { dispatcher?: unknown }).dispatcher !== undefined) {
+    const { fetch: undiciFetch } = (await import('undici')) as unknown as { fetch: typeof fetch };
+    resp0 = await undiciFetch(input, composed as RequestInit);
+  } else {
+    resp0 = await fetch(input, composed as RequestInit);
+  }
   const resp = enforceHttps
     ? await followRedirectsSafely(resp0, init, signal, policy)
     : resp0;
