@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/tools",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "The weaveIntel tool library: a core tool registry + risk/policy/health machinery, plus ready-made integrations (Gmail, Slack, market data, …) behind tree-shakeable subpath imports.",
   "type": "module",
   "sideEffects": false,
