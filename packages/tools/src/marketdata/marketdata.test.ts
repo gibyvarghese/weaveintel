@@ -73,7 +73,10 @@ describe('@weaveintel/tools-marketdata (fixture)', () => {
   });
 
   it('marketdata.ohlcv.get returns bars within date range', async () => {
-    const res = await callTool('marketdata.ohlcv.get', { symbol: 'GOOGL', interval: 'daily', from: '2025-01-01', to: '2026-01-01' });
+    // The fixture generates bars ending today, so ask for the last 180 days rather than fixed dates.
+    const to = new Date();
+    const from = new Date(to.getTime() - 180 * 86_400_000);
+    const res = await callTool('marketdata.ohlcv.get', { symbol: 'GOOGL', interval: 'daily', from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) });
     const data = JSON.parse(res.content[0]!.text) as Array<{ ts: string; adjustedClose: number }>;
     expect(Array.isArray(data)).toBe(true);
     expect(data.length).toBeGreaterThan(0);

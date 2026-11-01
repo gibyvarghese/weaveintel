@@ -8,6 +8,13 @@ import { FacebookProvider } from '../platforms/facebook.js';
 import { InstagramProvider } from '../platforms/instagram.js';
 import type { SocialAccountConfig } from '../types.js';
 
+// The hardened fetch drives undici's own `fetch` when it pins DNS, so a stubbed global `fetch`
+// is never reached. Route undici's fetch through the global one so these fixtures intercept it.
+vi.mock('undici', async (importOriginal) => {
+  const mod = await importOriginal<Record<string, unknown>>();
+  return { ...mod, fetch: (...args: Parameters<typeof fetch>) => globalThis.fetch(...args) };
+});
+
 /* ---------- helpers ---------- */
 
 const ok = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });

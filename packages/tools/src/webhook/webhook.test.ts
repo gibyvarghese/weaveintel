@@ -1,4 +1,12 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+
+// The SSRF guard resolves every host and refuses names that do not resolve. These fixtures use
+// reserved example hostnames, so resolve them to a fixed public address instead of the network.
+vi.mock('node:dns/promises', async (importOriginal) => {
+  const mod = await importOriginal<Record<string, unknown>>();
+  const lookup = async () => [{ address: '93.184.215.14', family: 4 }];
+  return { ...mod, lookup, default: { ...(mod['default'] as object), lookup } };
+});
 import { weaveFakeTransport } from '@weaveintel/testing';
 import { weaveMCPClient } from '@weaveintel/mcp-client';
 import { weaveContext } from '@weaveintel/core';
