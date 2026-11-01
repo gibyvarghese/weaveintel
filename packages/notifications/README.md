@@ -83,7 +83,7 @@ SMS sends the title and link by default, never the body; no channel sends `data`
 
 | Group | Exports |
 | --- | --- |
-| Channels | `createWebhookChannel`, `createWebPushChannel`, `createApnsChannel`, `createFcmChannel`, `createEmailChannel`, `createSmsChannel`, `createTeamsChannel` (+ `createTeamsWebhookTransport`, `createRecording*Transport`) |
+| Channels | `createWebhookChannel`, `createWebPushChannel`, `createApnsChannel`, `createFcmChannel`, `createEmailChannel`, `createSmsChannel`, `createTeamsChannel` (+ `createTeamsWebhookTransport`, `createRecording*Transport`), `createPushChannel` (host `PushTransport`; `render` decides what reaches the lock screen — the HTTP push channels take a `render` too) |
 | Types | `createNotificationTypeRegistry`, `buildNotification`, `typeKeyOf`, `TYPE_KEY_FIELD` |
 | Preferences | `preferenceSuppression`, `resolveEffectivePreference`, `inQuietHours`, `createInMemoryDigestSink`, `buildDigestNotification` |
 | Registry | `createChannelRegistry` |

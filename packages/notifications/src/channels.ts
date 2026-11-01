@@ -16,6 +16,7 @@ import { createHardenedFetch, newUUIDv7, type ExecutionContext, type CapabilityI
 import type { NotificationChannel, NotificationMessage, ChannelTarget, NotificationDelivery } from '@weaveintel/core';
 import { createRetryPolicy, createResilientCallable } from '@weaveintel/resilience';
 import { createHmac } from 'node:crypto';
+import { defaultPushRender, type PushContent } from './channels-push.js';
 
 // ---------------------------------------------------------------------------
 // Shared
@@ -82,6 +83,8 @@ export interface WebPushChannelOptions {
   /** VAPID Authorization header value (caller manages token refresh). */
   vapidAuthorization: string;
   timeoutMs?: number;
+  /** What the push carries (see `PushContent`). Default: title, body and data. */
+  render?: (msg: NotificationMessage) => PushContent;
 }
 
 export function createWebPushChannel(opts: WebPushChannelOptions): NotificationChannel {
@@ -108,8 +111,9 @@ export function createWebPushChannel(opts: WebPushChannelOptions): NotificationC
     id,
     capabilities: new Set<CapabilityId>(),
     async send(_ctx: ExecutionContext, msg: NotificationMessage, target: ChannelTarget): Promise<NotificationDelivery> {
-      const payload = JSON.stringify({ title: msg.title, body: msg.body, data: msg.data });
       try {
+        const c = (opts.render ?? defaultPushRender)(msg);
+        const payload = JSON.stringify({ title: c.title, body: c.body, data: c.data });
         await doSend(payload, target.address, opts.vapidAuthorization);
         return { channelId: id, messageId: newUUIDv7(), status: 'sent' };
       } catch (err) {
@@ -132,6 +136,8 @@ export interface ApnsChannelOptions {
   /** APNs host. Defaults to api.push.apple.com. Use api.sandbox.push.apple.com for dev. */
   host?: string;
   timeoutMs?: number;
+  /** What the push carries (see `PushContent`). Default: title, body and data. */
+  render?: (msg: NotificationMessage) => PushContent;
 }
 
 export function createApnsChannel(opts: ApnsChannelOptions): NotificationChannel {
@@ -161,8 +167,9 @@ export function createApnsChannel(opts: ApnsChannelOptions): NotificationChannel
     id,
     capabilities: new Set<CapabilityId>(),
     async send(_ctx: ExecutionContext, msg: NotificationMessage, target: ChannelTarget): Promise<NotificationDelivery> {
-      const payload = JSON.stringify({ aps: { alert: { title: msg.title, body: msg.body }, sound: 'default' }, data: msg.data ?? {} });
       try {
+        const c = (opts.render ?? defaultPushRender)(msg);
+        const payload = JSON.stringify({ aps: { alert: { title: c.title, body: c.body }, sound: 'default' }, data: c.data ?? {} });
         await doSend(payload, target.address, opts.bearerToken);
         return { channelId: id, messageId: newUUIDv7(), status: 'sent' };
       } catch (err) {
@@ -183,6 +190,8 @@ export interface FcmChannelOptions {
   /** OAuth 2.0 access token — caller manages rotation. */
   accessToken: string;
   timeoutMs?: number;
+  /** What the push carries (see `PushContent`). Default: title, body and data. */
+  render?: (msg: NotificationMessage) => PushContent;
 }
 
 export function createFcmChannel(opts: FcmChannelOptions): NotificationChannel {
@@ -209,14 +218,15 @@ export function createFcmChannel(opts: FcmChannelOptions): NotificationChannel {
     id,
     capabilities: new Set<CapabilityId>(),
     async send(_ctx: ExecutionContext, msg: NotificationMessage, target: ChannelTarget): Promise<NotificationDelivery> {
-      const body = JSON.stringify({
-        message: {
-          token: target.address,
-          notification: { title: msg.title, body: msg.body },
-          data: msg.data ? Object.fromEntries(Object.entries(msg.data).map(([k, v]) => [k, String(v)])) : {},
-        },
-      });
       try {
+        const c = (opts.render ?? defaultPushRender)(msg);
+        const body = JSON.stringify({
+          message: {
+            token: target.address,
+            notification: { title: c.title, body: c.body },
+            data: c.data ? Object.fromEntries(Object.entries(c.data).map(([k, v]) => [k, String(v)])) : {},
+          },
+        });
         await doSend(body, opts.accessToken);
         return { channelId: id, messageId: newUUIDv7(), status: 'sent' };
       } catch (err) {
