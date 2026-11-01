@@ -153,3 +153,14 @@ export {
   spotlightPreamble,
   spotlight,
 } from './spotlighting.js';
+
+// ── Tool-result quarantine (GAPS G-WI-2): fence tool output and check it against `returns` ──
+// Also available as the subpath import `@weaveintel/guardrails/tool-quarantine`.
+export {
+  quarantineToolResult,
+  validateJsonSchema,
+  type QuarantineToolResultOptions,
+  type QuarantinedToolResult,
+  type JsonSchemaError,
+  type JsonSchemaResult,
+} from './tool-quarantine.js';

@@ -65,6 +65,7 @@ import type {
   PricingResolver,
 } from '@weaveintel/cost-governor';
 import { wrapModelWithCostLedger } from '@weaveintel/cost-governor';
+import { makeFence, spotlightPreamble, quarantineToolResult, validateJsonSchema } from '@weaveintel/guardrails';
 import type { ContentPart, ImageContent } from '@weaveintel/core';
 
 async function withObservedSpan<T>(
@@ -399,6 +400,50 @@ export interface ToolCallingAgentOptions {
    * Requires a vision-capable model (`Capabilities.Vision`).
    */
   visionLoop?: boolean;
+  /**
+   * Quarantine tool results before they re-enter the prompt (GAPS G-WI-2). On by default.
+   * Each result is wrapped in a per-run spotlight fence that the system prompt names as
+   * untrusted data, and a result from a tool that declares `schema.returns` must match it
+   * or it is withheld from the model. Callers still see the raw result in `steps`.
+   * Turning this off sends tool output to the model verbatim.
+   */
+  toolResultQuarantine?: boolean;
+}
+
+/**
+ * Builds the per-run quarantine: a fresh fence, the system-prompt preamble that names it, and
+ * a function that turns a tool step into the content the model sees.
+ */
+function createToolQuarantine(enabled: boolean, tools: ToolRegistry) {
+  if (!enabled) {
+    return {
+      prepare: (_messages: Message[]): void => undefined,
+      content: (step: AgentStep | undefined) => step?.toolCall?.result ?? '',
+    };
+  }
+  const fence = makeFence();
+  return {
+    /** Puts the spotlight preamble at the top of the system prompt (or adds one), in place. */
+    prepare(messages: Message[]): void {
+      if (tools.list().length === 0) return;
+      const preamble = spotlightPreamble(fence);
+      const first = messages[0];
+      if (first && first.role === 'system' && typeof first.content === 'string') {
+        messages[0] = { ...first, content: `${preamble}\n\n${first.content}` };
+      } else {
+        messages.unshift({ role: 'system', content: preamble });
+      }
+    },
+    content(step: AgentStep | undefined): string {
+      const name = step?.toolCall?.name ?? 'tool';
+      const returns = tools.get(name)?.schema.returns;
+      return quarantineToolResult(step?.toolCall?.result ?? '', {
+        fence,
+        toolName: name,
+        ...(returns !== undefined ? { returns } : {}),
+      }).content;
+    },
+  };
 }
 
 // ─── Reflection / verify shared helper ───────────────────────
@@ -424,15 +469,10 @@ function validateStructuredOutput(
   } catch {
     return { valid: false };
   }
-  // For json_schema with a `required` array, verify each key is present.
+  // For json_schema, validate the parsed value against the whole schema (types, nesting,
+  // enums, bounds), not only the presence of required keys.
   if (schema.type === 'json_schema' && schema.schema) {
-    const s = schema.schema as { required?: string[] };
-    if (Array.isArray(s.required)) {
-      const obj = parsed as Record<string, unknown>;
-      for (const key of s.required) {
-        if (!(key in obj)) return { valid: false };
-      }
-    }
+    if (!validateJsonSchema(parsed, schema.schema).valid) return { valid: false };
   }
   return { valid: true, parsed };
 }
@@ -736,6 +776,9 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
         messages.push(...history);
       }
       messages.push(...input.messages);
+      // Tool results are quarantined (G-WI-2): one fence per run, named in the system prompt.
+      const quarantine = createToolQuarantine(opts.toolResultQuarantine !== false, toolReg);
+      quarantine.prepare(messages);
 
       // Build tool definitions for the model
       const toolDefs = toolReg.toDefinitions();
@@ -843,7 +886,7 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
               for (let i = 0; i < response.toolCalls.length; i++) {
                 messages.push({
                   role: 'tool',
-                  content: toolResults[i]!.toolCall?.result ?? '',
+                  content: quarantine.content(toolResults[i]),
                   toolCallId: response.toolCalls[i]!.id,
                 });
               }
@@ -856,7 +899,7 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
                 toolCallCount++;
                 messages.push({
                   role: 'tool',
-                  content: toolStep.toolCall?.result ?? '',
+                  content: quarantine.content(toolStep),
                   toolCallId: tc.id,
                 });
               }
@@ -865,13 +908,11 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
             // P6-5: Vision loop — detect screenshot tool outputs and inject ImageContent.
             if (opts.visionLoop) {
               const visionMessages: Message[] = [];
-              for (let mi = messages.length - response.toolCalls.length; mi < messages.length; mi++) {
-                const toolMsg = messages[mi];
-                if (toolMsg && toolMsg.role === 'tool') {
-                  const imgContent = tryExtractScreenshot(typeof toolMsg.content === 'string' ? toolMsg.content : '');
-                  if (imgContent) {
-                    visionMessages.push({ role: 'user', content: [imgContent] as ContentPart[] });
-                  }
+              // Read the raw tool results from the steps: the tool messages are quarantined.
+              for (const toolStep of steps.slice(-response.toolCalls.length)) {
+                const imgContent = tryExtractScreenshot(toolStep.toolCall?.result ?? '');
+                if (imgContent) {
+                  visionMessages.push({ role: 'user', content: [imgContent] as ContentPart[] });
                 }
               }
               for (const vm of visionMessages) messages.push(vm);
@@ -1178,6 +1219,9 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
         messages.push(...history);
       }
       messages.push(...input.messages);
+      // Tool results are quarantined (G-WI-2): one fence per run, named in the system prompt.
+      const quarantine = createToolQuarantine(opts.toolResultQuarantine !== false, toolReg);
+      quarantine.prepare(messages);
 
       const toolDefs = toolReg.toDefinitions();
 
@@ -1267,7 +1311,7 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
               for (let i = 0; i < accToolCalls.length; i++) {
                 steps.push(toolResults[i]!);
                 toolCallCount++;
-                messages.push({ role: 'tool', content: toolResults[i]!.toolCall?.result ?? '', toolCallId: accToolCalls[i]!.id });
+                messages.push({ role: 'tool', content: quarantine.content(toolResults[i]), toolCallId: accToolCalls[i]!.id });
                 yield { type: 'tool_end', step: toolResults[i]! };
               }
             } else {
@@ -1276,7 +1320,7 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
                 const toolStep = await executeToolCall(ctx, tc, toolReg, policy, eventBus, config.name, stepIdx, stepStart, streamToolRetryOpts, streamInterruptOpts, streamPendingHandoffFeedback, opts.complianceTools);
                 steps.push(toolStep);
                 toolCallCount++;
-                messages.push({ role: 'tool', content: toolStep.toolCall?.result ?? '', toolCallId: tc.id });
+                messages.push({ role: 'tool', content: quarantine.content(toolStep), toolCallId: tc.id });
                 yield { type: 'tool_end', step: toolStep };
               }
             }
@@ -1373,7 +1417,7 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
             for (let i = 0; i < response.toolCalls.length; i++) {
               steps.push(toolResults[i]!);
               toolCallCount++;
-              messages.push({ role: 'tool', content: toolResults[i]!.toolCall?.result ?? '', toolCallId: response.toolCalls[i]!.id });
+              messages.push({ role: 'tool', content: quarantine.content(toolResults[i]), toolCallId: response.toolCalls[i]!.id });
               yield { type: 'tool_end', step: toolResults[i]! };
             }
           } else {
@@ -1382,7 +1426,7 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
               const toolStep = await executeToolCall(ctx, tc, toolReg, policy, eventBus, config.name, stepIdx, stepStart, streamToolRetryOpts, streamInterruptOpts, streamPendingHandoffFeedback);
               steps.push(toolStep);
               toolCallCount++;
-              messages.push({ role: 'tool', content: toolStep.toolCall?.result ?? '', toolCallId: tc.id });
+              messages.push({ role: 'tool', content: quarantine.content(toolStep), toolCallId: tc.id });
               yield { type: 'tool_end', step: toolStep };
             }
           }
