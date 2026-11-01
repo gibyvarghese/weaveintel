@@ -172,7 +172,7 @@ export type {
 } from './output-truncation.js';
 
 // Phase 7 — Budget Gate (lever L9)
-export { weaveBudgetGate, weaveCostLedgerFromBreakdown } from './budget-gate.js';
+export { weaveBudgetGate, weaveCostLedgerFromBreakdown, CostLedgerUnavailableError } from './budget-gate.js';
 export type {
   WeaveBudgetGateOptions,
   WeaveCostLedgerFromBreakdownOptions,

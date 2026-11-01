@@ -69,7 +69,7 @@ describe('weaveBudgetGate', () => {
     await expect(g.check(ctx)).resolves.toBeUndefined();
   });
 
-  it('swallows ledger errors and returns (graceful, never load-bearing)', async () => {
+  it("swallows ledger errors only when onLedgerError is 'allow' (see budget-gate-fail-closed.test.ts)", async () => {
     const g = weaveBudgetGate({
       ledger: {
         total: async () => {
@@ -78,6 +78,8 @@ describe('weaveBudgetGate', () => {
       },
       ceilingUsd: 1,
       runIdResolver: (c) => c.runId ?? null,
+      onLedgerError: 'allow',
+      log: () => {},
     });
     await expect(g.check(ctx)).resolves.toBeUndefined();
   });
@@ -139,13 +141,13 @@ describe('weaveCostLedgerFromBreakdown adapter', () => {
     expect(await led.total('r-1')).toBe(1.234);
   });
 
-  it('total() returns 0 when readBreakdown throws', async () => {
+  it('total() rethrows when readBreakdown throws (never reports $0)', async () => {
     const led = weaveCostLedgerFromBreakdown({
       readBreakdown: async () => {
         throw new Error('db down');
       },
     });
-    expect(await led.total('r-1')).toBe(0);
+    await expect(led.total('r-1')).rejects.toThrow('db down');
   });
 
   it('record() is a no-op (writer of record is the sink)', async () => {
