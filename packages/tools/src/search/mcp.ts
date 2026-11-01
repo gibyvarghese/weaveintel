@@ -38,6 +38,7 @@ export function createSearchTools(router: SearchRouter): Tool[] {
   tools.push({
     schema: {
       name: 'search.query',
+      riskLevel: 'read-only',
       description: 'Web search using the best available search provider',
       parameters: SEARCH_PARAMS,
     },
@@ -52,6 +53,7 @@ export function createSearchTools(router: SearchRouter): Tool[] {
   tools.push({
     schema: {
       name: 'search.all',
+      riskLevel: 'read-only',
       description: 'Search all enabled providers and merge results',
       parameters: SEARCH_PARAMS,
     },
@@ -67,6 +69,7 @@ export function createSearchTools(router: SearchRouter): Tool[] {
     tools.push({
       schema: {
         name: `search.${providerName}`,
+        riskLevel: 'read-only',
         description: `Search using ${providerName} provider`,
         parameters: SEARCH_PARAMS,
       },

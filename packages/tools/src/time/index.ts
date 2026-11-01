@@ -213,6 +213,7 @@ export function createTimeTools(options: TimeToolOptions = {}): Tool[] {
   return [
     weaveTool({
       name: 'datetime',
+      riskLevel: 'read-only',
       description: 'Get the current date/time in different formats. Use format="weekday" to get the current day of the week (e.g. Sunday). Use format="date" to get the full date including day of week.',
       parameters: {
         type: 'object',
@@ -231,6 +232,7 @@ export function createTimeTools(options: TimeToolOptions = {}): Tool[] {
 
     weaveTool({
       name: 'timezone_info',
+      riskLevel: 'read-only',
       description: 'Get effective timezone and localized now snapshot.',
       parameters: {
         type: 'object',
@@ -248,6 +250,7 @@ export function createTimeTools(options: TimeToolOptions = {}): Tool[] {
 
     weaveTool({
       name: 'datetime_add',
+      riskLevel: 'read-only',
       description: 'Calculate a future or past date by adding/subtracting days, weeks, months, or years from now. Use positive numbers to go forward in time, negative to go backward. Returns the resulting date in the chosen format.',
       parameters: {
         type: 'object',
@@ -283,6 +286,7 @@ export function createTimeTools(options: TimeToolOptions = {}): Tool[] {
 
     weaveTool({
       name: 'timer_start',
+      riskLevel: 'read-only',
       description: 'Start a timer, optionally with duration in milliseconds.',
       parameters: {
         type: 'object',
@@ -311,6 +315,7 @@ export function createTimeTools(options: TimeToolOptions = {}): Tool[] {
 
     weaveTool({
       name: 'timer_pause',
+      riskLevel: 'read-only',
       description: 'Pause a running timer.',
       parameters: {
         type: 'object',
@@ -335,6 +340,7 @@ export function createTimeTools(options: TimeToolOptions = {}): Tool[] {
 
     weaveTool({
       name: 'timer_resume',
+      riskLevel: 'read-only',
       description: 'Resume a paused timer.',
       parameters: {
         type: 'object',
@@ -358,6 +364,7 @@ export function createTimeTools(options: TimeToolOptions = {}): Tool[] {
 
     weaveTool({
       name: 'timer_stop',
+      riskLevel: 'read-only',
       description: 'Stop a timer and freeze elapsed time.',
       parameters: {
         type: 'object',
@@ -381,6 +388,7 @@ export function createTimeTools(options: TimeToolOptions = {}): Tool[] {
 
     weaveTool({
       name: 'timer_status',
+      riskLevel: 'read-only',
       description: 'Get status for one timer.',
       parameters: {
         type: 'object',
@@ -400,6 +408,7 @@ export function createTimeTools(options: TimeToolOptions = {}): Tool[] {
 
     weaveTool({
       name: 'timer_list',
+      riskLevel: 'read-only',
       description: 'List timers for current execution scope.',
       parameters: { type: 'object', properties: {} },
       execute: async (_args: Record<string, never>, ctx) => {
@@ -412,6 +421,7 @@ export function createTimeTools(options: TimeToolOptions = {}): Tool[] {
 
     weaveTool({
       name: 'stopwatch_start',
+      riskLevel: 'read-only',
       description: 'Start a stopwatch.',
       parameters: {
         type: 'object',
@@ -439,6 +449,7 @@ export function createTimeTools(options: TimeToolOptions = {}): Tool[] {
 
     weaveTool({
       name: 'stopwatch_lap',
+      riskLevel: 'read-only',
       description: 'Record a lap on a running stopwatch.',
       parameters: {
         type: 'object',
@@ -461,6 +472,7 @@ export function createTimeTools(options: TimeToolOptions = {}): Tool[] {
 
     weaveTool({
       name: 'stopwatch_pause',
+      riskLevel: 'read-only',
       description: 'Pause a stopwatch.',
       parameters: {
         type: 'object',
@@ -485,6 +497,7 @@ export function createTimeTools(options: TimeToolOptions = {}): Tool[] {
 
     weaveTool({
       name: 'stopwatch_resume',
+      riskLevel: 'read-only',
       description: 'Resume a paused stopwatch.',
       parameters: {
         type: 'object',
@@ -508,6 +521,7 @@ export function createTimeTools(options: TimeToolOptions = {}): Tool[] {
 
     weaveTool({
       name: 'stopwatch_stop',
+      riskLevel: 'read-only',
       description: 'Stop a stopwatch.',
       parameters: {
         type: 'object',
@@ -531,6 +545,7 @@ export function createTimeTools(options: TimeToolOptions = {}): Tool[] {
 
     weaveTool({
       name: 'stopwatch_status',
+      riskLevel: 'read-only',
       description: 'Get stopwatch status.',
       parameters: {
         type: 'object',
@@ -550,6 +565,7 @@ export function createTimeTools(options: TimeToolOptions = {}): Tool[] {
 
     weaveTool({
       name: 'reminder_create',
+      riskLevel: 'read-only',
       description: 'Create a reminder at an absolute time (ISO timestamp).',
       parameters: {
         type: 'object',
@@ -583,6 +599,7 @@ export function createTimeTools(options: TimeToolOptions = {}): Tool[] {
 
     weaveTool({
       name: 'reminder_list',
+      riskLevel: 'read-only',
       description: 'List reminders for the current execution scope.',
       parameters: {
         type: 'object',
@@ -602,6 +619,7 @@ export function createTimeTools(options: TimeToolOptions = {}): Tool[] {
 
     weaveTool({
       name: 'reminder_cancel',
+      riskLevel: 'read-only',
       description: 'Cancel a scheduled reminder.',
       parameters: {
         type: 'object',

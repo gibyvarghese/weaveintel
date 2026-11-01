@@ -306,6 +306,7 @@ function parseDataflows(raw: unknown): SdmxDataflow[] {
 
 const listDataflowsTool = weaveTool({
   name: 'statsnz_list_dataflows',
+  riskLevel: 'read-only',
   description:
     'List all available Stats NZ datasets (dataflows) from the Aotearoa Data Explorer. ' +
     'Returns a catalogue of tables with their IDs, names, and versions. ' +
@@ -341,6 +342,7 @@ const listDataflowsTool = weaveTool({
 
 const searchDataflowsTool = weaveTool({
   name: 'statsnz_search_dataflows',
+  riskLevel: 'read-only',
   description:
     'Search Stats NZ datasets by keyword. Filters the full catalogue of Aotearoa Data Explorer tables by name or description. ' +
     'Returns matching dataflows with their IDs to use in statsnz_get_data.',
@@ -381,6 +383,7 @@ const searchDataflowsTool = weaveTool({
 
 const getDataflowInfoTool = weaveTool({
   name: 'statsnz_get_dataflow_info',
+  riskLevel: 'read-only',
   description:
     'Get structural metadata for a specific Stats NZ dataset, including dimensions and codelist IDs. ' +
     'Use this before statsnz_get_data to understand what dimension codes are available for filtering.',
@@ -453,6 +456,7 @@ const getDataflowInfoTool = weaveTool({
 
 const getDatastructureTool = weaveTool({
   name: 'statsnz_get_datastructure',
+  riskLevel: 'read-only',
   description:
     'Get the Stats NZ Data Structure Definition (DSD) for a dataflow, including ordered dimensions and related codelists. ' +
     'Use this to construct valid SDMX keys for statsnz_get_data.',
@@ -527,6 +531,7 @@ const getDatastructureTool = weaveTool({
 
 const getStructureTool = weaveTool({
   name: 'statsnz_get_structure',
+  riskLevel: 'read-only',
   description:
     'Get a composite structure bundle for a Stats NZ dataflow (dataflow + datastructure + codelists and related artefacts). ' +
     'Useful as a one-shot schema call before querying observations.',
@@ -601,6 +606,7 @@ const getStructureTool = weaveTool({
 
 const getActualConstraintTool = weaveTool({
   name: 'statsnz_get_actualconstraint',
+  riskLevel: 'read-only',
   description:
     'Get actual constraints for a Stats NZ dataflow (which dimension combinations currently have observations). ' +
     'Use this to avoid querying empty slices.',
@@ -670,6 +676,7 @@ const getActualConstraintTool = weaveTool({
 
 const getCodelistTool = weaveTool({
   name: 'statsnz_get_codelist',
+  riskLevel: 'read-only',
   description:
     'Retrieve the codes and labels for a Stats NZ dimension codelist. ' +
     'Useful for finding valid filter values to use in statsnz_get_data.',
@@ -725,6 +732,7 @@ const getCodelistTool = weaveTool({
 
 const getDataTool = weaveTool({
   name: 'statsnz_get_data',
+  riskLevel: 'read-only',
   description:
     'Fetch observations from a Stats NZ Aotearoa Data Explorer dataset. Returns up to 500 decoded ' +
     'observations with dimension codes and values. Use statsnz_get_datastructure to discover dimensions, ' +

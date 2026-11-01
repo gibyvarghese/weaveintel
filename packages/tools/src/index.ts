@@ -27,6 +27,8 @@ export {
   InMemoryToolPolicyResolver,
   noopAuditEmitter,
   ToolPolicyViolationError,
+  ToolPolicyConfigError,
+  assertToolRiskLevels,
   resolveEffectivePolicy,
   createPolicyEnforcedTool,
   createPolicyEnforcedRegistry,

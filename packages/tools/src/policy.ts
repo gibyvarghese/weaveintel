@@ -163,6 +163,43 @@ export class ToolPolicyViolationError extends Error {
   }
 }
 
+/**
+ * Thrown when a policy-enforced tool or registry is built from a configuration that would
+ * fail open: a tool with no declared `riskLevel`, or a tool that requires approval with no
+ * approval gate wired. Building refuses instead of silently weakening the policy.
+ */
+export class ToolPolicyConfigError extends Error {
+  public override readonly name = 'ToolPolicyConfigError';
+
+  constructor(
+    message: string,
+    /** The names of the tools that caused the refusal. */
+    public readonly toolNames: readonly string[],
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * Asserts that every tool declares a `riskLevel` (GAPS G-WI-8).
+ *
+ * A tool with no label used to be treated as `read-only`, so an unlabelled write tool ran under
+ * the read-only default. Call this at start-up over every registry the host builds; the policy
+ * layer also calls it when it wraps a registry.
+ *
+ * @throws ToolPolicyConfigError naming every unlabelled tool.
+ */
+export function assertToolRiskLevels(tools: ToolRegistry | readonly Tool[]): void {
+  const list: readonly Tool[] = Array.isArray(tools) ? tools : (tools as ToolRegistry).list();
+  const missing = list.filter((t) => !t.schema.riskLevel).map((t) => t.schema.name);
+  if (missing.length > 0) {
+    throw new ToolPolicyConfigError(
+      `Tools without a declared riskLevel are refused (label each tool): ${missing.join(', ')}`,
+      missing,
+    );
+  }
+}
+
 // ─── resolveEffectivePolicy ──────────────────────────────────
 
 /**
@@ -319,15 +356,36 @@ export function createPolicyEnforcedTool(
       throw new ToolPolicyViolationError(tool.schema.name, 'circuit_open', policy);
     }
 
-    // 3. Risk level gate — check the tool's own risk level against allowed levels
-    const toolRiskLevel = (tool.schema as { riskLevel?: ToolRiskLevel }).riskLevel ?? 'read-only';
+    // 3. Risk level gate — check the tool's own risk level against allowed levels.
+    // A tool that declares no risk level is refused: treating it as read-only would let an
+    // unlabelled write tool run under the read-only default (G-WI-8).
+    const toolRiskLevel: ToolRiskLevel | undefined = tool.schema.riskLevel;
+    if (!toolRiskLevel) {
+      await emitter.emit(await buildAuditEvent('denied_policy', 0, { violationReason: 'risk_level_blocked', policyId: policy.policyId }));
+      throw new ToolPolicyViolationError(
+        tool.schema.name,
+        'risk_level_blocked',
+        policy,
+        `Tool '${tool.schema.name}' declares no riskLevel; an unlabelled tool is refused`,
+      );
+    }
     if (!policy.allowedRiskLevels.includes(toolRiskLevel)) {
       await emitter.emit(await buildAuditEvent('denied_policy', 0, { violationReason: 'risk_level_blocked', policyId: policy.policyId }));
       throw new ToolPolicyViolationError(tool.schema.name, 'risk_level_blocked', policy);
     }
 
-    // 4. Approval gate
-    if (policy.requiresApproval && opts.approvalGate) {
+    // 4. Approval gate. Approval is required when either the policy or the tool's own schema
+    // says so. With no gate wired the call is refused, never waved through (G-WI-9).
+    if (policy.requiresApproval || tool.schema.requiresApproval) {
+      if (!opts.approvalGate) {
+        await emitter.emit(await buildAuditEvent('denied_approval', 0, { violationReason: 'approval_required', policyId: policy.policyId }));
+        throw new ToolPolicyViolationError(
+          tool.schema.name,
+          'approval_required',
+          policy,
+          `Tool '${tool.schema.name}' requires approval and no approval gate is wired`,
+        );
+      }
       const chatId = opts.resolutionContext?.chatId ?? '';
       const decision = await opts.approvalGate.check(tool.schema.name, chatId, input);
       if (decision.status !== 'approved') {
@@ -466,13 +524,26 @@ export function createPolicyEnforcedTool(
  * This is the primary integration point for a consuming application.
  *
  * The returned registry is a new registry containing enforced versions of all
- * tools from the original. New tools registered after this call are NOT automatically
+ * tools from the original. Building refuses (`ToolPolicyConfigError`) when a tool declares no
+ * `riskLevel`, or when a tool's schema requires approval and no `approvalGate` is wired. New tools registered after this call are NOT automatically
  * wrapped — call this after all tools have been registered.
  */
 export function createPolicyEnforcedRegistry(
   registry: ToolRegistry,
   opts: PolicyEnforcedToolOptions,
 ): ToolRegistry {
+  // Refuse to build a registry that would fail open (G-WI-8, G-WI-9).
+  assertToolRiskLevels(registry);
+  if (!opts.approvalGate) {
+    const needGate = registry.list().filter((t) => t.schema.requiresApproval).map((t) => t.schema.name);
+    if (needGate.length > 0) {
+      throw new ToolPolicyConfigError(
+        `Tools that require approval need an approval gate wired: ${needGate.join(', ')}`,
+        needGate,
+      );
+    }
+  }
+
   const enforcedRegistry = weaveToolRegistry();
 
   for (const tool of registry.list()) {
