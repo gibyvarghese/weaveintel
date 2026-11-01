@@ -38,3 +38,16 @@ export {
   buildQueryExpansionPrompt,
   parseExpandedQueries,
 } from './rag.js';
+
+// ── pgvector VectorStore whose search needs a verified principal (G-WI-18) ──
+export {
+  weavePgVectorStore,
+  createPrincipalSeal,
+  PrincipalRequiredError,
+  type PgVectorStore,
+  type PgVectorStoreOptions,
+  type PgQueryable,
+  type PgPoolLike,
+  type VerifiedPrincipal,
+  type PrincipalVectorSearchOptions,
+} from './pgvector-store.js';

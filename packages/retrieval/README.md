@@ -22,6 +22,23 @@ const chunks = chunker.chunk(handbookText);
 console.log(chunks.length, 'chunks ready for embedding');
 ```
 
+## Permission-aware pgvector store
+
+`weavePgVectorStore` is a Postgres + pgvector `VectorStore` that will not search without a **verified
+principal**. You give it your `pg` pool and a `verifyPrincipal` function (there is no default); each row
+carries the tenant, an ACL (subjects or groups; `*` = anyone in the tenant) and a classification. The SQL
+keeps only rows in the principal's tenant, whose ACL names it or one of its groups, at or below its
+clearance. The principal's tenant must equal the server-owned `ctx.tenantId`; writes and deletes are
+scoped to it. Set `rlsTenantSetting` (e.g. `app.tenant_id`) to also drive row-level security.
+
+```ts
+const seal = createPrincipalSeal(process.env.PRINCIPAL_SEAL_SECRET!); // or your identity layer
+const store = weavePgVectorStore({ pool, dimensions: 1536, verifyPrincipal: (_ctx, p) => seal.verify(p) });
+await store.ensureSchema();
+await store.upsert(ctx, [{ id, embedding, content, metadata: { acl: ['ops'], classification: 1 } }]);
+const hits = await store.search(ctx, { embedding: q, topK: 8, principal: seal.seal({ tenantId, subject: userId, groups }) });
+```
+
 ## What's in the box
 
 - **Ingest & retrieve** — `weaveChunker`, `weaveEmbeddingPipeline`, `weaveRetriever`.

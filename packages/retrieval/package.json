@@ -29,5 +29,9 @@
   "license": "MIT",
   "publishConfig": {
     "access": "public"
+  },
+  "devDependencies": {
+    "pg": "^8.13.0",
+    "@types/pg": "^8.11.0"
   }
 }
