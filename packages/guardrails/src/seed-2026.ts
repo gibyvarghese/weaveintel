@@ -1,7 +1,7 @@
 /**
  * @weaveintel/guardrails — seed data (mid-2026)
  *
- * 18 new guardrail rows across five compliance and safety categories:
+ * 19 new guardrail rows across five compliance and safety categories:
  *
  *   EU AI Act       × 4  — high-risk classification, prohibited manipulation,
  *                           biometric data block, transparency disclosure
@@ -10,8 +10,8 @@
  *   Agent-Safety    × 5  — memory poisoning, goal hijacking, tool-call injection,
  *                           excessive resource use, unauthorized delegation
  *   IP Protection   × 2  — verbatim reproduction, code license mismatch
- *   Data Residency  × 3  — EU GDPR transfer block, US CLOUD Act flag,
- *                           GDPR consent gate
+ *   Data Residency  × 4  — EU GDPR transfer block, US CLOUD Act flag,
+ *                           GDPR consent gate, NZ PII redaction
  *
  * New columns introduced by migration m71:
  *   judge_model          — model used for this guardrail's LLM judge
@@ -379,5 +379,19 @@ export const GUARDRAILS_2026: GuardrailSeedRow[] = [
     priority: 86, enabled: 0,
     judge_model: 'claude-haiku-4-5-20251001',
     compliance_framework: 'GDPR_ART_6_ART_9',
+  },
+
+  {
+    id: 'e5000004-2026-4000-8000-000000000004',
+    name: 'Compliance: NZ PII Redaction',
+    description:
+      'Redacts New Zealand identifiers before text reaches a model: IRD number (check digit ' +
+      'verified), NZ mobile (020–029, local or +64), NHI (check digit verified for AAANNNC) and ' +
+      'NZ passport number. Disabled by default — enable for tenants that hold NZ personal data ' +
+      '(Privacy Act 2020, Health Information Privacy Code 2020).',
+    type: 'redaction', stage: 'pre',
+    config: JSON.stringify({ patterns: ['nz_ird', 'nz_mobile', 'nz_nhi', 'nz_passport'] }),
+    priority: 85, enabled: 0,
+    compliance_framework: 'NZ_PRIVACY_ACT_2020',
   },
 ];

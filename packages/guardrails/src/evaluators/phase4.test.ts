@@ -73,8 +73,14 @@ function malformedModel() {
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe('GUARDRAILS_2026 seed integrity', () => {
-  it('contains exactly 18 rows', () => {
-    expect(GUARDRAILS_2026).toHaveLength(18);
+  it('contains exactly 19 rows', () => {
+    expect(GUARDRAILS_2026).toHaveLength(19);
+  });
+
+  it('includes the NZ PII redaction row naming every NZ built-in (G-WI-13)', () => {
+    const row = GUARDRAILS_2026.find((g) => g.id === 'e5000004-2026-4000-8000-000000000004');
+    expect(row?.type).toBe('redaction');
+    expect(JSON.parse(row!.config)).toEqual({ patterns: ['nz_ird', 'nz_mobile', 'nz_nhi', 'nz_passport'] });
   });
 
   it('all rows have valid UUIDs', () => {
@@ -127,7 +133,7 @@ describe('GUARDRAILS_2026 seed integrity', () => {
 
   it('data residency rows default to disabled', () => {
     const residency = GUARDRAILS_2026.filter((g) => g.id.startsWith('e5000'));
-    expect(residency).toHaveLength(3);
+    expect(residency).toHaveLength(4);
     for (const g of residency) {
       expect(g.enabled, `${g.name} should default disabled`).toBe(0);
     }
