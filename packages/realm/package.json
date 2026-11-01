@@ -1,7 +1,7 @@
 {
   "name": "@weaveintel/realm",
   "version": "0.4.0",
-  "description": "Realm configuration — resolve the effective config record for a tenant across a global→tenant hierarchy, with provenance and git-style drift.",
+  "description": "Realm configuration \u2014 resolve the effective config record for a tenant across a global\u2192tenant hierarchy, with provenance and git-style drift.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -38,6 +38,7 @@
     "@types/better-sqlite3": "^7.6.11",
     "pg": "^8.13.0",
     "@types/pg": "^8.11.0",
-    "@testcontainers/postgresql": "^11.0.0"
+    "@testcontainers/postgresql": "^11.0.0",
+    "@weaveintel/human-tasks": "^0.1.2"
   }
 }

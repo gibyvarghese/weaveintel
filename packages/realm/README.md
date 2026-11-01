@@ -227,6 +227,30 @@ await promoteFork(store, versionLog, 'prompts', acmesFork);
 The tenant's own copy is left untouched; you decide whether to retire it afterwards so they fall back to
 the (now identical) global.
 
+## Propose, review, then promote (two people, not one)
+
+Promoting or sharing changes what *other* tenants get, so in production you put a person in between.
+`proposeFork` opens an approval task on any `HumanTaskQueue` (for example `@weaveintel/human-tasks`,
+in memory or on Postgres). The task carries the current global default, the fork, the change and its
+blast radius, so the reviewer sees exactly what will happen. Nothing changes until it is decided:
+
+```ts
+import { proposeFork, decideForkProposal, blastRadius } from '@weaveintel/realm';
+
+const taskId = await proposeFork(store, 'prompts', acmesFork, {
+  queue, reviewer: 'platform-curators', proposedBy: 'alice',
+  // or { change: { kind: 'share', shareMode: 'subtree' }, blastRadius: blastRadius(...) }
+});
+
+// Later, from the reviewer's inbox:
+await decideForkProposal({ store, versionLog, queue }, taskId, { decidedBy: 'bob', approved: true });
+// → { outcome: 'promoted', contentHash } — or 'shared', 'rejected', or 'stale'
+```
+
+The proposer cannot approve their own proposal (`self_approval`). If the fork, or for a promotion the
+global default, changed after the proposal, approval applies nothing and closes the task as `stale`:
+the reviewer approved what they saw, not what is there now.
+
 ## License
 
 MIT.

@@ -16,3 +16,4 @@ export * from './reconcile.js';
 export * from './realm-state.js';
 export * from './realm-state-sql.js';
 export * from './realm-share.js';
+export * from './realm-propose.js';
