@@ -4,7 +4,7 @@
  */
 
 import { weaveContext, type ExecutionContext } from '@weaveintel/core';
-import { weaveMCPServer } from '@weaveintel/mcp-server';
+import { callerAssertedMCPContext, weaveMCPServer } from '@weaveintel/mcp-server';
 import { weaveToolDescriptor as describeT } from '../index.js';
 import type { NewsAdapter } from './adapter.js';
 import { fixtureNewsAdapter } from './adapters/fixture.js';
@@ -23,10 +23,7 @@ export function createNewsMCPServer(opts: NewsMCPServerOptions = {}) {
   const server = weaveMCPServer(
     { name: 'news', version: '0.1.0' },
     {
-      contextFactory: (params) => {
-        const executionContext = (params['_meta'] as { executionContext?: Partial<ExecutionContext> } | undefined)?.executionContext;
-        return weaveContext(executionContext ?? {});
-      },
+      contextFactory: callerAssertedMCPContext,
     },
   );
 

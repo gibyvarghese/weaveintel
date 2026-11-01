@@ -25,7 +25,7 @@ const NOOP_MODEL = {
     return { content: '', toolCalls: [], usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 } };
   },
 } as unknown as Model;
-import { weaveMCPServer } from '@weaveintel/mcp-server';
+import { inProcessMCPContext, weaveMCPServer } from '@weaveintel/mcp-server';
 import { weaveFakeTransport } from '@weaveintel/testing';
 import {
   createActionExecutor,
@@ -279,7 +279,7 @@ async function main() {
   });
 
   const { client, server } = weaveFakeTransport();
-  const mcpServer = weaveMCPServer({ name: 'gmail-fixture', version: '1.0.0' });
+  const mcpServer = weaveMCPServer({ name: 'gmail-fixture', version: '1.0.0' }, { contextFactory: inProcessMCPContext });
   mcpServer.addTool(
     {
       name: 'gmail.send',

@@ -20,8 +20,11 @@ import {
   ReadResourceRequestSchema,
   ListPromptsRequestSchema,
   GetPromptRequestSchema,
+  ErrorCode,
+  McpError,
   type JSONRPCMessage,
 } from '@modelcontextprotocol/sdk/types.js';
+import type { AuthInfo } from '@modelcontextprotocol/sdk/server/auth/types.js';
 import type { Transport as SDKTransport } from '@modelcontextprotocol/sdk/shared/transport.js';
 
 class CoreTransportAdapter implements SDKTransport {
@@ -61,26 +64,118 @@ function toSDKTransport(transport: MCPTransport): SDKTransport {
 }
 
 /**
- * Options for creating an MCP server.
- *
- * contextFactory — optional. Called for every tool/resource/prompt invocation
- * to build the ExecutionContext that flows into handler functions. Use this to
- * propagate caller identity (userId, tenantId), cancellation signal, and budget
- * from the transport layer.
- *
- * If omitted, a fresh anonymous context is created per call (legacy behaviour —
- * no identity, no tenant, no budget, no cancellation signal).
+ * What the transport knows about an incoming request. This is the only input a
+ * `contextFactory` gets: facts the transport established, never the caller's own
+ * JSON-RPC params (a caller could put any identity there).
  */
-export interface WeaveMCPServerOptions {
+export interface MCPRequestInfo {
+  /** The JSON-RPC method, e.g. `tools/call`. */
+  readonly method: string;
+  /** The JSON-RPC id of the request. */
+  readonly requestId: string | number;
   /**
-   * Factory that produces an ExecutionContext for each incoming request.
-   * Receives the raw JSON-RPC params so the factory can extract caller
-   * identity from an authentication header forwarded through params, etc.
+   * Auth the transport verified before the message reached the server. On HTTP this is
+   * whatever the host's middleware put on `req.auth` after checking the bearer (for
+   * geniWeave: a verified guardWeave note plus proof). Absent on stdio.
    */
-  contextFactory?: (params: Record<string, unknown>) => ExecutionContext;
+  readonly authInfo?: AuthInfo;
+  /** The transport session id, when the transport has sessions. */
+  readonly sessionId?: string;
+  /** HTTP request headers, when the transport is HTTP. */
+  readonly headers?: Readonly<Record<string, string | string[] | undefined>>;
+  /** Fires when the caller cancels the request. */
+  readonly signal: AbortSignal;
 }
 
-export function weaveMCPServer(config: MCPServerConfig, options: WeaveMCPServerOptions = {}): MCPServer {
+/**
+ * Builds the `ExecutionContext` for one request from what the transport verified.
+ * Throw (or reject) to refuse the caller: the request then fails with a generic
+ * "unauthenticated" error and no handler runs.
+ */
+export type MCPContextFactory = (request: MCPRequestInfo) => ExecutionContext | Promise<ExecutionContext>;
+
+/** Options for creating an MCP server. */
+export interface WeaveMCPServerOptions {
+  /**
+   * Required. Called for every request (listing and calls) to authenticate the caller and
+   * build the `ExecutionContext` that flows into tool handlers. There is no anonymous
+   * default (GAPS G-WI-10). An in-process or stdio server whose transport is itself the
+   * trust boundary can pass `inProcessMCPContext` to say so explicitly.
+   */
+  contextFactory: MCPContextFactory;
+}
+
+/** Thrown when an MCP server is built without a way to identify its callers. */
+export class MCPServerConfigError extends Error {
+  public override readonly name = 'MCPServerConfigError';
+}
+
+/**
+ * A `contextFactory` for servers that only ever talk to their own process (stdio or an
+ * in-memory pair), where whoever can reach the transport already is the operator. It gives
+ * each call a fresh context with the request's cancellation signal and no user or tenant.
+ * Never use it on a network transport.
+ */
+export const inProcessMCPContext: MCPContextFactory = (request) => weaveContext({ signal: request.signal });
+
+const CALLER_ASSERTED = Symbol.for('weaveintel.mcp.callerAssertedContext');
+
+/**
+ * A `contextFactory` that builds the context from the caller's own `_meta.executionContext`
+ * (what `weaveMCPClient` forwards). It believes whatever the caller claims, so it is only
+ * for an in-process client in the same trust domain, such as the built-in connector servers
+ * driven by a local agent. The server refuses to start with it on any transport other than
+ * `stdio`, so it can never answer a network caller.
+ */
+export const callerAssertedMCPContext: MCPContextFactory = Object.assign(
+  () => weaveContext(),
+  { [CALLER_ASSERTED]: true as const },
+);
+
+function isCallerAsserted(factory: MCPContextFactory): boolean {
+  return (factory as unknown as Record<symbol, unknown>)[CALLER_ASSERTED] === true;
+}
+
+const UNAUTHENTICATED = 'Unauthenticated: the MCP caller could not be identified';
+
+export function weaveMCPServer(config: MCPServerConfig, options: WeaveMCPServerOptions): MCPServer {
+  if (!options || typeof options.contextFactory !== 'function') {
+    throw new MCPServerConfigError(
+      `MCP server '${config?.name ?? ''}' needs a contextFactory: an MCP caller has no identity by default`,
+    );
+  }
+  const contextFactory = options.contextFactory;
+  const callerAsserted = isCallerAsserted(contextFactory);
+
+  /**
+   * Authenticates one request through the factory. Any failure becomes the same generic
+   * error, so the caller never learns why it was refused.
+   */
+  async function authenticate(
+    method: string,
+    extra: { signal: AbortSignal; requestId: string | number; authInfo?: AuthInfo; sessionId?: string; requestInfo?: { headers?: unknown }; _meta?: unknown },
+  ): Promise<ExecutionContext> {
+    try {
+      const headers = extra.requestInfo?.headers as MCPRequestInfo['headers'] | undefined;
+      const ctx = await contextFactory({
+        method,
+        requestId: extra.requestId,
+        signal: extra.signal,
+        ...(extra.authInfo ? { authInfo: extra.authInfo } : {}),
+        ...(extra.sessionId ? { sessionId: extra.sessionId } : {}),
+        ...(headers ? { headers } : {}),
+      });
+      if (!ctx) throw new Error('contextFactory returned no context');
+      if (callerAsserted) {
+        const asserted = (extra._meta as { executionContext?: Partial<ExecutionContext> } | undefined)?.executionContext;
+        return weaveContext({ ...(asserted ?? {}), signal: extra.signal });
+      }
+      return ctx;
+    } catch {
+      throw new McpError(ErrorCode.InvalidRequest, UNAUTHENTICATED);
+    }
+  }
+
   const tools = new Map<string, { definition: MCPToolDefinition; handler: MCPToolHandler }>();
   const resources = new Map<string, { resource: MCPResource; handler: MCPResourceHandler }>();
   const prompts = new Map<string, { prompt: MCPPrompt; handler: MCPPromptHandler }>();
@@ -97,15 +192,20 @@ export function weaveMCPServer(config: MCPServerConfig, options: WeaveMCPServerO
     },
   );
 
-  sdkServer.setRequestHandler(ListToolsRequestSchema, async () => ({
+  sdkServer.setRequestHandler(ListToolsRequestSchema, async (_request, extra) => {
+    await authenticate('tools/list', extra);
+    return {
     tools: [...tools.values()].map((entry) => ({
       name: entry.definition.name,
       description: entry.definition.description,
       inputSchema: entry.definition.inputSchema,
     })),
-  }));
+    };
+  });
 
-  sdkServer.setRequestHandler(CallToolRequestSchema, async (request) => {
+  sdkServer.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+    // Authenticate before anything else, so an unknown caller cannot probe tool names.
+    const ctx = await authenticate('tools/call', extra);
     const name = request.params.name;
     const args = request.params.arguments ?? {};
     const tool = tools.get(name);
@@ -115,11 +215,6 @@ export function weaveMCPServer(config: MCPServerConfig, options: WeaveMCPServerO
         isError: true,
       };
     }
-
-    const paramsRecord = request.params as unknown as Record<string, unknown>;
-    const ctx = options.contextFactory
-      ? options.contextFactory(paramsRecord)
-      : weaveContext();
 
     const result = await tool.handler(ctx, args as Record<string, unknown>);
     return {
@@ -139,16 +234,20 @@ export function weaveMCPServer(config: MCPServerConfig, options: WeaveMCPServerO
     };
   });
 
-  sdkServer.setRequestHandler(ListResourcesRequestSchema, async () => ({
+  sdkServer.setRequestHandler(ListResourcesRequestSchema, async (_request, extra) => {
+    await authenticate('resources/list', extra);
+    return {
     resources: [...resources.values()].map((entry) => ({
       uri: entry.resource.uri,
       name: entry.resource.name,
       description: entry.resource.description,
       mimeType: entry.resource.mimeType,
     })),
-  }));
+    };
+  });
 
-  sdkServer.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+  sdkServer.setRequestHandler(ReadResourceRequestSchema, async (request, extra) => {
+    await authenticate('resources/read', extra);
     const uri = request.params.uri;
     const resource = resources.get(uri);
     if (!resource) {
@@ -167,15 +266,19 @@ export function weaveMCPServer(config: MCPServerConfig, options: WeaveMCPServerO
     };
   });
 
-  sdkServer.setRequestHandler(ListPromptsRequestSchema, async () => ({
+  sdkServer.setRequestHandler(ListPromptsRequestSchema, async (_request, extra) => {
+    await authenticate('prompts/list', extra);
+    return {
     prompts: [...prompts.values()].map((entry) => ({
       name: entry.prompt.name,
       description: entry.prompt.description,
       arguments: entry.prompt.arguments,
     })),
-  }));
+    };
+  });
 
-  sdkServer.setRequestHandler(GetPromptRequestSchema, async (request) => {
+  sdkServer.setRequestHandler(GetPromptRequestSchema, async (request, extra) => {
+    await authenticate('prompts/get', extra);
     const name = request.params.name;
     const args = request.params.arguments ?? {};
     const prompt = prompts.get(name);
@@ -236,6 +339,11 @@ export function weaveMCPServer(config: MCPServerConfig, options: WeaveMCPServerO
     },
 
     async start(t: MCPTransport): Promise<void> {
+      if (callerAsserted && t.type !== 'stdio') {
+        throw new MCPServerConfigError(
+          `MCP server '${config.name}' trusts caller-asserted context and may only run on a stdio transport, not '${t.type}'`,
+        );
+      }
       transport = t;
       await sdkServer.connect(toSDKTransport(t));
     },

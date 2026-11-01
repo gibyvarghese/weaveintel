@@ -21,7 +21,7 @@
 
 import { weaveContext } from '@weaveintel/core';
 import type { ExecutionContext } from '@weaveintel/core';
-import { weaveMCPServer } from '@weaveintel/mcp-server';
+import { callerAssertedMCPContext, weaveMCPServer } from '@weaveintel/mcp-server';
 import { weaveToolDescriptor as describeT } from '../index.js';
 import type { BrokerAdapter } from './adapter.js';
 import { paperBrokerAdapter } from './adapters/paper.js';
@@ -47,10 +47,7 @@ export function createBrokerMCPServer(opts: BrokerMCPServerOptions = {}) {
   const server = weaveMCPServer(
     { name: 'broker', version: '0.1.0' },
     {
-      contextFactory: (params) => {
-        const executionContext = (params['_meta'] as { executionContext?: Partial<ExecutionContext> } | undefined)?.executionContext;
-        return weaveContext(executionContext ?? {});
-      },
+      contextFactory: callerAssertedMCPContext,
     },
   );
 

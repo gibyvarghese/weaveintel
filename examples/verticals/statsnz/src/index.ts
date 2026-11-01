@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 import type { MCPServer, MCPTransport } from '@weaveintel/core';
 import { weaveContext } from '@weaveintel/core';
-import { createMCPStdioServerTransport, weaveMCPServer } from '@weaveintel/mcp-server';
+import { createMCPStdioServerTransport, inProcessMCPContext, weaveMCPServer } from '@weaveintel/mcp-server';
 import { statsNzToolMap } from '@weaveintel/tools/http';
 
 export interface StatsNzMCPServerConfig {
@@ -21,7 +21,7 @@ export function createStatsNzMCPServer(config: StatsNzMCPServerConfig = {}): Sta
   const server = weaveMCPServer({
     name: config.name ?? 'statsnz-ade',
     version: config.version ?? '1.0.0',
-  });
+  }, { contextFactory: inProcessMCPContext });
 
   const tools = statsNzToolMap();
   for (const tool of Object.values(tools)) {

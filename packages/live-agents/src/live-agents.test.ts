@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AccessTokenResolver, ExecutionContext, Model, ModelRequest, ModelResponse } from '@weaveintel/core';
 import { weaveContext } from '@weaveintel/core';
-import { weaveMCPServer } from '@weaveintel/mcp-server';
+import { inProcessMCPContext, weaveMCPServer } from '@weaveintel/mcp-server';
 import { weaveInMemoryTracer } from '@weaveintel/observability';
 import { weaveFakeTransport } from '@weaveintel/testing';
 import {
@@ -787,7 +787,7 @@ describe('@weaveintel/live-agents phase 1 scaffold', () => {
     let transportCreateCount = 0;
 
     const { client, server } = weaveFakeTransport();
-    const mcpServer = weaveMCPServer({ name: 'gmail-fixture', version: '1.0.0' });
+    const mcpServer = weaveMCPServer({ name: 'gmail-fixture', version: '1.0.0' }, { contextFactory: inProcessMCPContext });
     mcpServer.addTool(
       {
         name: 'gmail.send',

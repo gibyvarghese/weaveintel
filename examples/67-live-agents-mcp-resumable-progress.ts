@@ -27,7 +27,7 @@
 
 import type { AccessTokenResolver } from '@weaveintel/core';
 import { weaveContext } from '@weaveintel/core';
-import { weaveMCPServer } from '@weaveintel/mcp-server';
+import { inProcessMCPContext, weaveMCPServer } from '@weaveintel/mcp-server';
 import { weaveFakeTransport } from '@weaveintel/testing';
 import { weaveWorkingMemory } from '@weaveintel/memory';
 import { createMockModel } from '@weaveintel/devtools';
@@ -244,7 +244,7 @@ async function buildFixtureCseMcp(): Promise<{
   sessionProvider: ReturnType<typeof createMcpAccountSessionProvider>;
 }> {
   const { client, server } = weaveFakeTransport();
-  const mcp = weaveMCPServer({ name: 'cse-fixture', version: '1.0.0' });
+  const mcp = weaveMCPServer({ name: 'cse-fixture', version: '1.0.0' }, { contextFactory: inProcessMCPContext });
 
   mcp.addTool(
     {

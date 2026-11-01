@@ -19,7 +19,7 @@
  * serve and consume MCP-compliant endpoints.
  */
 import { weaveContext } from '@weaveintel/core';
-import { weaveMCPServer } from '@weaveintel/mcp-server';
+import { inProcessMCPContext, weaveMCPServer } from '@weaveintel/mcp-server';
 import { weaveMCPClient, weaveMCPTools } from '@weaveintel/mcp-client';
 import { weaveFakeTransport } from '@weaveintel/testing';
 
@@ -38,7 +38,7 @@ async function main() {
   const server = weaveMCPServer({
     name: 'demo-server',
     version: '1.0.0',
-  });
+  }, { contextFactory: inProcessMCPContext });
 
   server.addTool(
     {

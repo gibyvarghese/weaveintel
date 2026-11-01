@@ -5,7 +5,7 @@
  */
 
 import { weaveContext, type ExecutionContext } from '@weaveintel/core';
-import { weaveMCPServer } from '@weaveintel/mcp-server';
+import { callerAssertedMCPContext, weaveMCPServer } from '@weaveintel/mcp-server';
 import { weaveToolDescriptor as describeT } from '../index.js';
 import type { AltDataAdapter } from './adapter.js';
 import { fixtureAltDataAdapter } from './adapters/fixture.js';
@@ -24,10 +24,7 @@ export function createAltDataMCPServer(opts: AltDataMCPServerOptions = {}) {
   const server = weaveMCPServer(
     { name: 'altdata', version: '0.1.0' },
     {
-      contextFactory: (params) => {
-        const executionContext = (params['_meta'] as { executionContext?: Partial<ExecutionContext> } | undefined)?.executionContext;
-        return weaveContext(executionContext ?? {});
-      },
+      contextFactory: callerAssertedMCPContext,
     },
   );
 

@@ -5,12 +5,12 @@
 import { weaveContext } from '@weaveintel/core';
 import { weaveFakeTransport } from '@weaveintel/testing';
 import { weaveMCPClient } from '@weaveintel/mcp-client';
-import { weaveMCPServer } from '@weaveintel/mcp-server';
+import { inProcessMCPContext, weaveMCPServer } from '@weaveintel/mcp-server';
 
 async function main(): Promise<void> {
   const { client: clientTransport, server: serverTransport } = weaveFakeTransport();
 
-  const server = weaveMCPServer({ name: 'compose-stream-example', version: '1.0.0' });
+  const server = weaveMCPServer({ name: 'compose-stream-example', version: '1.0.0' }, { contextFactory: inProcessMCPContext });
 
   server.addTool(
     {

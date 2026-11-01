@@ -4,7 +4,7 @@
  */
 
 import { hardenedFetch, weaveContext, type ExecutionContext } from '@weaveintel/core';
-import { weaveMCPServer } from '@weaveintel/mcp-server';
+import { callerAssertedMCPContext, weaveMCPServer } from '@weaveintel/mcp-server';
 import { weaveToolDescriptor as describeT } from '../index.js';
 
 export interface OnedriveCredentials { accessToken: string; userId?: string; refreshAccessToken?: () => Promise<string | undefined>; }
@@ -129,10 +129,7 @@ export function createOnedriveMCPServer(opts: OnedriveMCPServerOptions = {}) {
   const server = weaveMCPServer(
     { name: 'onedrive', version: '0.1.0' },
     {
-      contextFactory: (params) => {
-        const executionContext = (params['_meta'] as { executionContext?: Partial<ExecutionContext> } | undefined)?.executionContext;
-        return weaveContext(executionContext ?? {});
-      },
+      contextFactory: callerAssertedMCPContext,
     },
   );
 

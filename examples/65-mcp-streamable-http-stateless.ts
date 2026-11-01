@@ -11,14 +11,14 @@ import { weaveContext } from '@weaveintel/core';
 import { weaveMCPClient, createMCPStreamableHttpTransport } from '@weaveintel/mcp-client';
 import {
   createMCPStreamableHttpServerTransport,
-  weaveMCPServer,
+  inProcessMCPContext, weaveMCPServer,
 } from '@weaveintel/mcp-server';
 
 function createServerInstance() {
   const mcpServer = weaveMCPServer({
     name: 'stateless-streamable-example',
     version: '1.0.0',
-  });
+  }, { contextFactory: inProcessMCPContext });
 
   mcpServer.addTool(
     {

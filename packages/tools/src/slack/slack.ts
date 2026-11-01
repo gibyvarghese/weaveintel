@@ -4,7 +4,7 @@
  */
 
 import { hardenedFetch, weaveContext, type ExecutionContext } from '@weaveintel/core';
-import { weaveMCPServer } from '@weaveintel/mcp-server';
+import { callerAssertedMCPContext, weaveMCPServer } from '@weaveintel/mcp-server';
 import { weaveToolDescriptor as describeT } from '../index.js';
 
 export interface SlackCredentials { botToken: string; refreshBotToken?: () => Promise<string | undefined>; }
@@ -126,10 +126,7 @@ export function createSlackMCPServer(opts: SlackMCPServerOptions = {}) {
   const server = weaveMCPServer(
     { name: 'slack', version: '0.1.0' },
     {
-      contextFactory: (params) => {
-        const executionContext = (params['_meta'] as { executionContext?: Partial<ExecutionContext> } | undefined)?.executionContext;
-        return weaveContext(executionContext ?? {});
-      },
+      contextFactory: callerAssertedMCPContext,
     },
   );
 

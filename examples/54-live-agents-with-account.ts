@@ -6,7 +6,7 @@
 
 import type { AccessTokenResolver, ExecutionContext, Model, ModelRequest, ModelResponse } from '@weaveintel/core';
 import { weaveContext } from '@weaveintel/core';
-import { weaveMCPServer } from '@weaveintel/mcp-server';
+import { inProcessMCPContext, weaveMCPServer } from '@weaveintel/mcp-server';
 import { weaveFakeTransport } from '@weaveintel/testing';
 import {
   createActionExecutor,
@@ -136,7 +136,7 @@ async function main() {
   });
 
   const { client, server } = weaveFakeTransport();
-  const mcpServer = weaveMCPServer({ name: 'gmail-account-fixture', version: '1.0.0' });
+  const mcpServer = weaveMCPServer({ name: 'gmail-account-fixture', version: '1.0.0' }, { contextFactory: inProcessMCPContext });
   mcpServer.addTool(
     {
       name: 'gmail.list',

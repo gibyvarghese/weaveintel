@@ -1,5 +1,13 @@
 // SPDX-License-Identifier: MIT
-export { weaveMCPServer } from './server.js';
+export {
+	weaveMCPServer,
+	inProcessMCPContext,
+	callerAssertedMCPContext,
+	MCPServerConfigError,
+	type MCPContextFactory,
+	type MCPRequestInfo,
+	type WeaveMCPServerOptions,
+} from './server.js';
 export {
 	createMCPStdioServerTransport,
 	createMCPStreamableHttpServerTransport,

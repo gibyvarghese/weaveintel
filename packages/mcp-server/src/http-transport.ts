@@ -18,14 +18,22 @@ import type {
   MCPToolHandler,
 } from '@weaveintel/core';
 import { createMCPStreamableHttpServerTransport } from './transports.js';
-import { weaveMCPServer } from './server.js';
+import { inProcessMCPContext, MCPServerConfigError, weaveMCPServer, type MCPContextFactory } from './server.js';
 
 export interface RealMCPTransportOptions {
   /** Port to run the HTTP server on. If 0 or undefined, picks a random available port. */
   port?: number;
   /** Hostname to bind to. Defaults to 127.0.0.1 */
   hostname?: string;
+  /**
+   * Identifies each caller (see `WeaveMCPServerOptions.contextFactory`). Optional only while
+   * the fixture is bound to a loopback address, where it defaults to `inProcessMCPContext`;
+   * binding any other address without one is refused.
+   */
+  contextFactory?: MCPContextFactory;
 }
+
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
 
 export interface RealMCPTransportServer {
   /** The MCP server instance for adding tools and resources */
@@ -51,6 +59,12 @@ export async function weaveRealMCPTransport(
 ): Promise<RealMCPTransportServer> {
   const hostname = options.hostname ?? '127.0.0.1';
   const port = options.port ?? 0;
+  if (!options.contextFactory && !LOOPBACK_HOSTS.has(hostname)) {
+    throw new MCPServerConfigError(
+      `An MCP server bound to ${hostname} needs a contextFactory: an MCP caller has no identity by default`,
+    );
+  }
+  const contextFactory = options.contextFactory ?? inProcessMCPContext;
 
   const config: MCPServerConfig = { name: 'real-mcp-server', version: '1.0.0' };
   const tools = new Map<string, ToolEntry>();
@@ -102,7 +116,7 @@ export async function weaveRealMCPTransport(
       }
     }
 
-    const requestServer = weaveMCPServer(config);
+    const requestServer = weaveMCPServer(config, { contextFactory });
     for (const entry of tools.values()) {
       requestServer.addTool(entry.definition, entry.handler);
     }

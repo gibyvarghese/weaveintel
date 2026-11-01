@@ -1,6 +1,5 @@
 import type { ExecutionContext } from '@weaveintel/core';
-import { weaveContext } from '@weaveintel/core';
-import { weaveMCPServer } from '@weaveintel/mcp-server';
+import { callerAssertedMCPContext, weaveMCPServer, type MCPContextFactory } from '@weaveintel/mcp-server';
 import type { ComputeSandboxEngine } from './executor.js';
 import { CSE_TOOL_DEFINITIONS, handleCSETool } from './tools.js';
 
@@ -9,6 +8,11 @@ export interface CSEMCPServerOptions {
   name?: string;
   version?: string;
   description?: string;
+  /**
+   * Identifies each caller. Required to serve the sandbox over a network transport; when
+   * omitted the server trusts the in-process caller's context and runs on stdio only.
+   */
+  contextFactory?: MCPContextFactory;
 }
 
 function resolveChatId(ctx: ExecutionContext): string | undefined {
@@ -28,11 +32,9 @@ export function createCSEMCPServer(opts: CSEMCPServerOptions) {
       description: opts.description ?? 'Compute Sandbox Engine tools exposed over MCP',
     },
     {
-      contextFactory: (params) => {
-        const executionContext = (params['_meta'] as { executionContext?: Partial<ExecutionContext> } | undefined)
-          ?.executionContext;
-        return weaveContext(executionContext ?? {});
-      },
+      // Over a network transport the host must supply a factory that verifies the caller;
+      // the caller-asserted default only runs on stdio.
+      contextFactory: opts.contextFactory ?? callerAssertedMCPContext,
     },
   );
 

@@ -4,7 +4,7 @@
  */
 
 import { hardenedFetch, weaveContext, type ExecutionContext } from '@weaveintel/core';
-import { weaveMCPServer } from '@weaveintel/mcp-server';
+import { callerAssertedMCPContext, weaveMCPServer } from '@weaveintel/mcp-server';
 import { weaveToolDescriptor as describeT } from '../index.js';
 
 export interface OutlookCalCredentials { accessToken: string; userId?: string; refreshAccessToken?: () => Promise<string | undefined>; }
@@ -135,10 +135,7 @@ export function createOutlookCalMCPServer(opts: OutlookCalMCPServerOptions = {})
   const server = weaveMCPServer(
     { name: 'outlook-cal', version: '0.1.0' },
     {
-      contextFactory: (params) => {
-        const executionContext = (params['_meta'] as { executionContext?: Partial<ExecutionContext> } | undefined)?.executionContext;
-        return weaveContext(executionContext ?? {});
-      },
+      contextFactory: callerAssertedMCPContext,
     },
   );
 

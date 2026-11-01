@@ -16,10 +16,13 @@ Reach for it when you want to *publish* capabilities for the outside world to co
 import {
   weaveMCPServer,
   createMCPStdioServerTransport,
+  inProcessMCPContext,
   mcpText,
 } from '@weaveintel/mcp-server';
 
-const server = weaveMCPServer({ name: 'my-tools', version: '1.0.0' });
+// Every server says how it identifies callers. A stdio server talks only to the process
+// that launched it, so `inProcessMCPContext` (no user, no tenant) is the honest answer.
+const server = weaveMCPServer({ name: 'my-tools', version: '1.0.0' }, { contextFactory: inProcessMCPContext });
 
 server.addTool(
   { name: 'greet', description: 'Say hello', inputSchema: { type: 'object' } },
@@ -29,11 +32,35 @@ server.addTool(
 await server.connect(createMCPStdioServerTransport());
 ```
 
+### Who is calling?
+
+There is no anonymous default: `weaveMCPServer` refuses to build without a `contextFactory`.
+The factory runs on every request (listing and calls) and gets only what the transport
+verified — `authInfo` (on HTTP, whatever your auth middleware put on `req.auth`), the
+session id, headers and the cancellation signal. It never sees the caller's JSON-RPC params,
+because a caller can put any identity there. Throw to refuse the caller; the request then
+fails with a generic "unauthenticated" error and no handler runs.
+
+```ts
+const server = weaveMCPServer(config, {
+  contextFactory: async ({ authInfo, signal }) => {
+    if (!authInfo) throw new Error('no verified caller');
+    const who = await verifyNote(authInfo.token); // your identity layer
+    return weaveContext({ userId: who.userId, tenantId: who.tenantId, signal });
+  },
+});
+```
+
+`callerAssertedMCPContext` builds the context from the caller's own `_meta.executionContext`
+(what `weaveMCPClient` forwards). It believes the caller, so the server refuses to start with it
+on anything but a stdio transport; the built-in connector servers use it for in-process agents.
+
 ## What's in the box
 
 | Export | What it does |
 | --- | --- |
-| `weaveMCPServer(config, opts?)` | The server: `addTool`, add resources/prompts, `connect` |
+| `weaveMCPServer(config, { contextFactory })` | The server: `addTool`, add resources/prompts, `connect` |
+| `inProcessMCPContext`, `callerAssertedMCPContext` | Ready-made factories for stdio / in-process servers |
 | `createMCPStdioServerTransport()` | Serve over stdio (e.g. to a desktop client subprocess) |
 | `createMCPStreamableHttpServerTransport()` | Serve over streamable HTTP |
 | `weaveRealMCPTransport(opts)` | Batteries-included real HTTP transport server |

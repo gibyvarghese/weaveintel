@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { weaveContext } from '@weaveintel/core';
 import {
   createMCPStreamableHttpServerTransport,
+  inProcessMCPContext,
   weaveMCPServer,
 } from '@weaveintel/mcp-server';
 import { weaveMCPClient } from './client.js';
@@ -14,7 +15,7 @@ interface RunningFixture {
 }
 
 function createServerInstance() {
-  const server = weaveMCPServer({ name: 'streamable-http-fixture', version: '1.0.0' });
+  const server = weaveMCPServer({ name: 'streamable-http-fixture', version: '1.0.0' }, { contextFactory: inProcessMCPContext });
   server.addTool(
     {
       name: 'ping',
