@@ -43,11 +43,49 @@ await feed.markAllRead('t1', 'alice');
 
 Two things it gets right that matter at scale. **Dedupe:** if your delivery pipeline runs twice (it's at-least-once by design), a stable `dedupeKey` collapses the two into one inbox row — enforced by a partial unique index, so even 50 concurrent redeliveries produce exactly one row. **Isolation:** every read is scoped to `(tenant, principal)`, so one user never sees another's notifications. The same **contract test** the in-memory version passes runs against Postgres, and it's proven on a real fan-out to 5,000 recipients.
 
+## Notification types, preferences and digests
+
+Apps register **types** keyed `<app>.<module>.<event>` with default channels, per-channel templates,
+priority, collapse/dedupe, `digestable`, `breakthrough` and the `permission` needed to see the subject.
+`buildNotification` fills the template and puts the type in `data.type_key` (the closed `category`
+stays as the coarse filter).
+
+`preferenceSuppression({ resolvePrefs, types })` decides per person and channel from preference rows
+— `org` → `role` → `user`, with `policy` rows final — and answers deliver, digest (quiet hours or a
+digest preference, digestable types only) or suppress. Breakthrough types skip quiet hours. Give the
+dispatcher `types`, a `permissionCheck` and a `digest` sink: an unregistered type, a type whose
+permission can't be confirmed, or a preference store that errors all withhold the notification.
+
+```ts
+const types = createNotificationTypeRegistry([{
+  key: 'itsm.change.cab_scheduled', category: 'task', channels: ['email', 'in-app'],
+  templates: { default: { title: 'CAB scheduled for {{change}}' } },
+  priority: 'normal', digestable: true, breakthrough: false,
+}]);
+const dispatcher = createNotificationDispatcher({
+  channels, targets, types, digest: createInMemoryDigestSink(),
+  permissionCheck: async (ctx, c) => canSee(c.principalId, c.permission),
+  suppression: preferenceSuppression({ types, resolvePrefs: loadPreferenceRows }),
+});
+await dispatcher.notify(ctx, userId, tenantId,
+  buildNotification(types, 'itsm.change.cab_scheduled', { id, tenantId, principalId: userId, vars: { change: 'CHG0042' } }));
+```
+
+## Email, SMS and Teams
+
+`createEmailChannel`, `createSmsChannel` and `createTeamsChannel` adapt transport interfaces you supply
+(`EmailTransport`, `SmsTransport`, `TeamsTransport`), so no vendor SDK or credential lives here.
+`createTeamsWebhookTransport` posts an Adaptive Card to Teams / Workflows incoming webhooks through the
+hardened fetch, only to https Microsoft webhook hosts. `createRecording*Transport` are test doubles.
+SMS sends the title and link by default, never the body; no channel sends `data`.
+
 ## What's in the box
 
 | Group | Exports |
 | --- | --- |
-| Channels | `createWebhookChannel`, `createWebPushChannel`, `createApnsChannel`, `createFcmChannel` |
+| Channels | `createWebhookChannel`, `createWebPushChannel`, `createApnsChannel`, `createFcmChannel`, `createEmailChannel`, `createSmsChannel`, `createTeamsChannel` (+ `createTeamsWebhookTransport`, `createRecording*Transport`) |
+| Types | `createNotificationTypeRegistry`, `buildNotification`, `typeKeyOf`, `TYPE_KEY_FIELD` |
+| Preferences | `preferenceSuppression`, `resolveEffectivePreference`, `inQuietHours`, `createInMemoryDigestSink`, `buildDigestNotification` |
 | Registry | `createChannelRegistry` |
 | Targets | `createMemoryTargetStore`, `createKvTargetStore` |
 | Dispatcher | `createNotificationDispatcher` (with `SuppressionPolicy`, `DispatchResult`, `DispatchOptions`) |

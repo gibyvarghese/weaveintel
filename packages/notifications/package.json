@@ -1,7 +1,7 @@
 {
   "name": "@weaveintel/notifications",
   "version": "0.1.2",
-  "description": "Notification channels, dispatcher, and target store for the weaveIntel platform. Supports webhook, web-push, APNs, and FCM.",
+  "description": "Notification channels, dispatcher, type registry, preference suppression and target store for the weaveIntel platform. Supports webhook, web-push, APNs, FCM, email, SMS and Microsoft Teams.",
   "type": "module",
   "exports": {
     ".": {

@@ -25,8 +25,68 @@ export {
   type FcmChannelOptions,
 } from './channels.js';
 
+// Email, SMS and Teams channels (G-WI-17): transport interfaces + test doubles
+export {
+  createEmailChannel,
+  createSmsChannel,
+  createTeamsChannel,
+  createTeamsWebhookTransport,
+  createRecordingEmailTransport,
+  createRecordingSmsTransport,
+  createRecordingTeamsTransport,
+  defaultTeamsCard,
+  isAllowedWebhookUrl,
+  DEFAULT_TEAMS_WEBHOOK_HOSTS,
+  type EmailEnvelope,
+  type EmailTransport,
+  type EmailChannelOptions,
+  type SmsEnvelope,
+  type SmsTransport,
+  type SmsChannelOptions,
+  type TeamsCardPayload,
+  type TeamsTransport,
+  type TeamsChannelOptions,
+  type TeamsWebhookTransportOptions,
+} from './channels-email-sms-teams.js';
+
 // Registry
 export { createChannelRegistry, type ChannelRegistry } from './registry.js';
+
+// Notification types (G-WI-15): `<app>.<module>.<event>` keys, `type_key` in `data`
+export {
+  createNotificationTypeRegistry,
+  buildNotification,
+  renderTemplate,
+  templateFor,
+  typeKeyOf,
+  TYPE_KEY_FIELD,
+  NotificationTypeError,
+  type NotificationTypeRegistry,
+  type NotificationTypeDefinition,
+  type NotificationTemplate,
+  type NotificationDedupe,
+  type BuildNotificationInput,
+} from './type-registry.js';
+
+// Preference-based suppression (G-WI-16): Org → Role → Mine + Policy, quiet hours, digests
+export {
+  preferenceSuppression,
+  resolveEffectivePreference,
+  inQuietHours,
+  type NotificationPreference,
+  type QuietHours,
+  type PreferenceQuery,
+  type PreferenceResolver,
+  type PreferenceSuppressionOptions,
+  type EffectivePreference,
+} from './preferences.js';
+export {
+  createInMemoryDigestSink,
+  buildDigestNotification,
+  type DigestEntry,
+  type DigestSink,
+  type InMemoryDigestSink,
+} from './digest.js';
 
 // Targets
 export {
@@ -44,6 +104,8 @@ export {
   type NotificationDispatcherOptions,
   type SuppressionPolicy,
   type SuppressionContext,
+  type SuppressionDecision,
+  type NotificationPermissionCheck,
   type DispatchResult,
   type DispatchOptions,
 } from './dispatcher.js';
