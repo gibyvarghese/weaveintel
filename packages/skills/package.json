@@ -21,7 +21,7 @@
   "dependencies": {
     "@weaveintel/core": "^0.1.1",
     "@weaveintel/encryption": "^0.1.1",
-    "@weaveintel/retrieval": "^0.1.1"
+    "@weaveintel/retrieval": "^0.1.1 || ^0.2.0"
   },
   "devDependencies": {
     "@weaveintel/sandbox": "^0.1.1",

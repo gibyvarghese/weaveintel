@@ -26,7 +26,7 @@
   "dependencies": {
     "@weaveintel/core": "^0.1.1",
     "@weaveintel/resilience": "^0.1.1",
-    "@weaveintel/tools": "^0.1.1"
+    "@weaveintel/tools": "^0.1.1 || ^0.2.0"
   },
   "license": "MIT",
   "publishConfig": {

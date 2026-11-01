@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/retrieval",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Document ingestion, chunking, embedding, and retrieval pipeline",
   "type": "module",
   "main": "./dist/index.js",
