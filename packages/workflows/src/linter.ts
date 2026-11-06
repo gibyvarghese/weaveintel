@@ -22,7 +22,8 @@ import type { WorkflowDefinition, WorkflowStep, LintResult, WorkflowGraph, Workf
  *  1. Entry step exists in steps list
  *  2. All `next` references resolve to a known step ID
  *  3. Unreachable steps (not reachable via DFS from entryStepId)
- *  4. Circular references (cycle in the step graph)
+ *  4. Cycles: one no path can leave is an error (`circular-reference`); one with a way out is a
+ *     `bounded-cycle` warning — the engine bounds every run with `policy.maxSteps`
  *  5. `condition` / `branch` steps — `next` length matches semantics
  *  6. `parallel` steps with no handlers
  *  7. Non-terminal steps missing `next` (warning)
@@ -162,39 +163,40 @@ export function lintWorkflow(def: WorkflowDefinition): LintResult[] {
     }
   }
 
-  // — 4. Cycle detection (DFS with recursion stack)
-  const visited = new Set<string>();
-  const recStack = new Set<string>();
-  function hasCycle(id: string): boolean {
-    visited.add(id);
-    recStack.add(id);
-    const step = stepMap.get(id);
-    if (!step) { recStack.delete(id); return false; }
-    const nexts = Array.isArray(step.next)
-      ? (step.next as string[])
-      : step.next ? [step.next as string] : [];
-    for (const nxt of nexts) {
-      if (!visited.has(nxt)) {
-        if (hasCycle(nxt)) return true;
-      } else if (recStack.has(nxt)) {
-        return true;
-      }
+  // — 4. Cycles. A cycle is legal — the engine bounds every run with `policy.maxSteps`, and a rework loop
+  //      ("ask again until the answer is usable") is an ordinary workflow shape. What is never legal is a
+  //      cycle NO path can leave: every run that reaches it loops until it is killed by the step budget.
+  //      So each strongly-connected component with a cycle is classified: with an exit (a `next`, a switch
+  //      case or an `onError` leading outside it) it is a `bounded-cycle` warning; with none it is the
+  //      `circular-reference` error it always was.
+  const successorsOf = (step: WorkflowStep): string[] => {
+    const out = Array.isArray(step.next) ? [...(step.next as string[])] : step.next ? [step.next as string] : [];
+    const cases = step.config?.['cases'];
+    if (cases && typeof cases === 'object' && !Array.isArray(cases)) {
+      for (const v of Object.values(cases as Record<string, unknown>)) if (typeof v === 'string') out.push(v);
     }
-    recStack.delete(id);
-    return false;
-  }
-  for (const step of def.steps) {
-    if (!visited.has(step.id)) {
-      if (hasCycle(step.id)) {
-        results.push({
+    if (typeof step.onError === 'string') out.push(step.onError);
+    return out.filter((id) => stepMap.has(id));
+  };
+  for (const component of stronglyConnected(def.steps, successorsOf)) {
+    const first = component[0]!;
+    const isCycle = component.length > 1 || successorsOf(stepMap.get(first)!).includes(first);
+    if (!isCycle) continue;
+    const inside = new Set(component);
+    const hasExit = component.some((id) => successorsOf(stepMap.get(id)!).some((n) => !inside.has(n)));
+    results.push(hasExit
+      ? {
+          severity: 'warning',
+          stepId: first,
+          rule: 'bounded-cycle',
+          message: `Steps ${component.map((id) => `"${id}"`).join(', ')} form a loop with a way out; each run is still bounded by policy.maxSteps`,
+        }
+      : {
           severity: 'error',
-          stepId: step.id,
+          stepId: first,
           rule: 'circular-reference',
-          message: `Step "${step.id}" is part of a cycle in the step graph`,
+          message: `Step "${first}" is part of a cycle in the step graph that no path can leave`,
         });
-        break; // one cycle report is enough; DFS would report duplicates
-      }
-    }
   }
 
   return results;
@@ -272,4 +274,47 @@ export function getWorkflowGraph(def: WorkflowDefinition): WorkflowGraph {
     entryStepId: def.entryStepId,
     unreachableStepIds: def.steps.filter(s => !reachable.has(s.id)).map(s => s.id),
   };
+}
+
+/**
+ * Tarjan's strongly-connected components over the step graph, in a stable order (declaration order of each
+ * component's first-reached step). Iterative, so a very long chain cannot overflow the call stack.
+ */
+function stronglyConnected(steps: readonly WorkflowStep[], successorsOf: (s: WorkflowStep) => string[]): string[][] {
+  const byId = new Map(steps.map((s) => [s.id, s] as const));
+  let index = 0;
+  const indexOf = new Map<string, number>();
+  const low = new Map<string, number>();
+  const onStack = new Set<string>();
+  const stack: string[] = [];
+  const out: string[][] = [];
+  for (const root of steps) {
+    if (indexOf.has(root.id)) continue;
+    const work: Array<{ id: string; next: number; succ: string[] }> = [];
+    const open = (id: string): void => {
+      indexOf.set(id, index); low.set(id, index); index++;
+      stack.push(id); onStack.add(id);
+      work.push({ id, next: 0, succ: successorsOf(byId.get(id)!) });
+    };
+    open(root.id);
+    while (work.length > 0) {
+      const frame = work[work.length - 1]!;
+      if (frame.next < frame.succ.length) {
+        const n = frame.succ[frame.next++]!;
+        if (!indexOf.has(n)) open(n);
+        else if (onStack.has(n)) low.set(frame.id, Math.min(low.get(frame.id)!, indexOf.get(n)!));
+        continue;
+      }
+      work.pop();
+      const parent = work[work.length - 1];
+      if (parent) low.set(parent.id, Math.min(low.get(parent.id)!, low.get(frame.id)!));
+      if (low.get(frame.id) === indexOf.get(frame.id)) {
+        const component: string[] = [];
+        let w: string;
+        do { w = stack.pop()!; onStack.delete(w); component.push(w); } while (w !== frame.id);
+        out.push(component.reverse());
+      }
+    }
+  }
+  return out;
 }
