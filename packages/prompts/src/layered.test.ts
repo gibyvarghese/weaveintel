@@ -72,6 +72,7 @@ describe('mergeFrameworkLayers', () => {
   it('omits sections the caller leaves out and skips empty ones', () => {
     const r = mergeFrameworkLayers(fw, [], { slots: { question: 'q' }, omit: ['tone'] });
     expect(r.text).not.toContain('Plain and brief.');
+    expect(mergeFrameworkLayers(fw, [], { omit: ['task'] }).lint).toEqual([]);
     expect(r.sections.find((s) => s.key === 'house_rules')?.text).toBe('');
   });
 

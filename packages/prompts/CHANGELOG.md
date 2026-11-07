@@ -1,5 +1,12 @@
 # @weaveintel/prompts
 
+## 0.2.1
+
+### Fixed
+
+- `mergeFrameworkLayers`: a section the caller omits is not filled, so its slots are no longer reported as
+  `MISSING_SLOT`.
+
 ## 0.2.0
 
 ### Added

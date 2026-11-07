@@ -236,6 +236,11 @@ export function mergeFrameworkLayers(
   const sections: MergedSection[] = [];
   const parts: string[] = [];
   for (const s of ordered) {
+    if (omit.has(s.key)) {
+      // Left out by the caller: nothing is filled, so its slots are not missing.
+      sections.push({ key: s.key, lock: s.lock, text: '', contributors: [] });
+      continue;
+    }
     const org = forSection(s.key, 'org');
     const team = forSection(s.key, 'team');
     let body = '';
@@ -275,7 +280,7 @@ export function mergeFrameworkLayers(
       body = pieces.join('\n\n');
     }
     const content = trim ? body.trim() : body;
-    if (omit.has(s.key) || content === '') {
+    if (content === '') {
       sections.push({ key: s.key, lock: s.lock, text: '', contributors: [] });
       continue;
     }
