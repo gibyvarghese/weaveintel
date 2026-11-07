@@ -210,6 +210,15 @@ export interface SkillDefinition {
    * playbook into the supervisor system prompt.
    */
   readonly domainSections?: readonly SkillDomainSection[];
+  /**
+   * The model tier this skill runs on, from the host's allowed list (e.g. `fast`, `balanced`, `deep`) —
+   * never a raw model id, so a router can pick the model and a tenant cannot pin an unapproved one.
+   */
+  readonly modelTier?: string;
+  /** The host's context recipe that assembles this skill's context pack. */
+  readonly contextRecipeId?: string;
+  /** The eval suite a change to this skill (or its prompt) must pass before it goes live. */
+  readonly evalSuiteId?: string;
 }
 
 export interface SkillExtensionOverlay {
@@ -291,6 +300,18 @@ export interface SkillActivationOptions {
    * behaviour unchanged. See `retrieval.ts`.
    */
   retriever?: import('./retrieval.js').SkillRetriever;
+  /**
+   * Tenant- and team-scoped overlays (vendor → tenant → team, policy tightens only). Applied after
+   * `overlays`, for the call's `scope`.
+   */
+  scopedOverlays?: readonly import('./scoped-overlays.js').ScopedSkillOverlay[];
+  /** Whose call this is; selects which scoped overlays apply. */
+  scope?: import('./scoped-overlays.js').SkillScope;
+  /**
+   * The latest eval result per skill id, when the host keeps them. A skill whose latest eval failed is
+   * not offered. Skills in `draft` lifecycle are never offered; `retired` ones never were.
+   */
+  evaluationOf?: (skillId: string) => { readonly passed: boolean } | undefined;
 }
 
 export interface SkillActivationResult {

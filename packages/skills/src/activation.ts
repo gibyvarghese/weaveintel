@@ -1,3 +1,4 @@
+import { isSkillActivatable, resolveScopedSkill } from './scoped-overlays.js';
 import type { CapabilityTelemetrySummary } from '@weaveintel/core';
 import type {
   SkillDefinition,
@@ -60,9 +61,12 @@ export async function activateSkills(
   const maxSelected = opts.maxSelected ?? 3;
   const minScore = opts.minScore ?? 0.12;
 
-  const overlaid = applySkillOverlays(skills, opts.overlays);
+  const overlaid = applySkillOverlays(skills, opts.overlays).map((skill) =>
+    opts.scopedOverlays === undefined ? skill : resolveScopedSkill(skill, opts.scopedOverlays, opts.scope ?? {}),
+  );
   const eligible = overlaid
     .filter((skill) => skill.enabled !== false)
+    .filter((skill) => isSkillActivatable(skill, opts.evaluationOf?.(skill.id)))
     .filter((skill) => keepIfCategory(skill, opts.categories));
 
   let considered: SkillMatch[];

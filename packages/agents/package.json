@@ -30,7 +30,7 @@
     "@weaveintel/guardrails": "^0.2.0",
     "@weaveintel/human-tasks": "^0.1.1",
     "@weaveintel/memory": "^0.1.1",
-    "@weaveintel/prompts": "^0.1.1",
+    "@weaveintel/prompts": "^0.1.1 || ^0.2.0",
     "@weaveintel/testing": "^0.1.1"
   },
   "devDependencies": {

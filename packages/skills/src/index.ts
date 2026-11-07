@@ -189,3 +189,15 @@ export {
   mapA2ASkillToRow,
 } from './a2a-skill-catalog.js';
 export type { A2ASkillDef, A2ASkillMode, A2AWorkerDef } from './a2a-skill-catalog.js';
+
+// Tenant- and team-scoped overlays (vendor → tenant → team, strict tightening) and the skill store port (0.2.0).
+export {
+  InMemorySkillStore,
+  SkillStoreError,
+  isSkillActivatable,
+  overlayLayer,
+  resolveScopedSkill,
+  tightenSkillPolicy,
+  withScopedOverlay,
+} from './scoped-overlays.js';
+export type { ScopedSkillOverlay, SkillEvalRecord, SkillScope, SkillStore } from './scoped-overlays.js';

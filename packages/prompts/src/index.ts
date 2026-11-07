@@ -201,3 +201,42 @@ export {
   parseTranslation,
   verifyTranslation,
 } from './translate.js';
+
+// ─── Layered frameworks and the prompt store (0.2.0) ─────────
+// Sections with lock classes (locked / append / replace / runtime), merged vendor → org → team by
+// section key; a storage-neutral store port with drafts, evaluations, activation and history, plus the
+// contract suite every host adapter runs.
+export {
+  PROMPT_LAYER_ORDER,
+  canLayerWrite,
+  layeredFramework,
+  lintLayers,
+  mergeFrameworkLayers,
+  promptHash,
+  slotsOf,
+  type LayeredFramework,
+  type LayeredRenderOptions,
+  type LayeredRenderResult,
+  type LayeredSectionDef,
+  type MergedSection,
+  type PromptLayerName,
+  type PromptLintIssue,
+  type SectionLockClass,
+  type SectionOverlay,
+} from './layered.js';
+export {
+  CONTRACT_FRAMEWORK,
+  InMemoryPromptStore,
+  PromptStoreError,
+  assertWritable,
+  definePromptStoreContract,
+  renderFromStore,
+  type ContractTestApi,
+  type PromptScope,
+  type PromptSectionVersion,
+  type PromptStore,
+  type PromptStoreErrorCode,
+  type PromptVersionEvaluation,
+  type PromptVersionInput,
+  type PromptVersionStatus,
+} from './prompt-store.js';
