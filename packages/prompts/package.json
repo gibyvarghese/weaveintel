@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/prompts",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Prompt management — versioned templates, variable substitution, instruction bundles, A/B experiments, scoped resolution",
   "type": "module",
   "exports": {

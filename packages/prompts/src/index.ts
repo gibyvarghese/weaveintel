@@ -231,6 +231,7 @@ export {
   assertWritable,
   definePromptStoreContract,
   renderFromStore,
+  type ContractIds,
   type ContractTestApi,
   type PromptScope,
   type PromptSectionVersion,

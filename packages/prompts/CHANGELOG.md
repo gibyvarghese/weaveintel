@@ -1,5 +1,12 @@
 # @weaveintel/prompts
 
+## 0.2.2
+
+### Changed
+
+- `definePromptStoreContract` takes its ids as an object or a function read when each test runs, and calls
+  `make()` once per test, so a host can give every test its own fresh workspace (`ContractIds`).
+
 ## 0.2.1
 
 ### Fixed
