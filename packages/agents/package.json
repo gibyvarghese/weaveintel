@@ -1,7 +1,7 @@
 {
   "name": "@weaveintel/agents",
-  "version": "0.2.0",
-  "description": "Agent runtime \u2014 tool-calling loop, planner-executor, hierarchical supervisor-worker",
+  "version": "0.2.1",
+  "description": "Agent runtime \u2014 tool-calling loop, planner-executor, hierarchical supervisor-worker, swarms defined as data",
   "type": "module",
   "exports": {
     ".": {
@@ -13,6 +13,11 @@
       "import": "./dist/recipes/index.js",
       "types": "./dist/recipes/index.d.ts",
       "default": "./dist/recipes/index.js"
+    },
+    "./swarm": {
+      "import": "./dist/swarm/index.js",
+      "types": "./dist/swarm/index.d.ts",
+      "default": "./dist/swarm/index.js"
     }
   },
   "main": "./dist/index.js",

@@ -1,5 +1,28 @@
 # @weaveintel/agents
 
+## 0.2.1
+
+### Added
+
+- Swarms: a group of agents set to work on one task, driven by a definition that is plain data
+  (`weaveSwarm`, also at the `@weaveintel/agents/swarm` subpath). One engine, five patterns chosen by
+  the definition: plan, fan out and join; map over a list and reduce; a pipeline of stages; several
+  independent attempts and a judge; a lead with helpers (the existing supervisor).
+- Limits are enforced in code: agents, agents at once, steps per agent, model calls, tokens, cost and
+  wall-clock time. On a limit the run stops cleanly and returns what it has, with the reason.
+- Failure is reported, never hidden: one worker failing does not sink the run unless the definition
+  says so, retries are bounded, and there is no fallback to a single agent.
+- Safety: a worker's output reaches the next agent as fenced data; every tool call is checked through
+  the host's permission port as the person who started the run; a write tool must be named in the
+  definition and waits at the host's approval port.
+- Watch, stop and resume: events on the core run-event contract, `cancel()`, and a store port
+  (`SwarmRunStore`, in-memory by default) so a host can persist a run, mark it interrupted after a
+  restart and carry it on without redoing finished work.
+- `validateSwarmDefinition` and `estimateSwarm` for a host to check and preview a definition before
+  starting it.
+
+Nothing existing changes: the agent loop, supervisor, ensemble and verifier are untouched.
+
 ## 0.2.0
 
 ### Changed (fail-closed default)

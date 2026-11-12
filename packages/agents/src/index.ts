@@ -114,3 +114,5 @@ export {
   type PlanScopeOptions,
   type PlanStoreOptions,
 } from './plan-cache.js';
+// Swarm: a group of agents on one task (plan, fan out, join, check) under hard limits.
+export * from './swarm/index.js';
