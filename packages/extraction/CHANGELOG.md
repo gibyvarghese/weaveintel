@@ -19,6 +19,13 @@
 - **Spreadsheet column mapping** (`mapColumns`, `applyMapping`, constrained `TRANSFORMS`).
 - **Result-cache keys** (`resultCacheKey`, `contentHash`, `createMemoryResultCache`).
 - **Stand-in engines** for tests.
+- **File sources** (`FileSource` port; identities `user` / `service` / `anonymous`, recorded as `fetchedAs`):
+  plain links, Microsoft Graph (OneDrive, SharePoint: share links, content, permissions, delta, live access check),
+  Google Drive (download, export of Docs/Sheets/Slides, permissions, changes), Dropbox, Box, an MCP read-file
+  tool configured as data, and iCloud public links (no iCloud Drive API exists; stated plainly). A resolver that
+  never fetches a link found inside a document, and an on-behalf-of token provider.
+- **Guarded transport** (`createGuardedTransport`): https only, public addresses only checked at connect time,
+  each redirect hop checked, credentials dropped across origins, size and time limits.
 
 ### Dependencies
 

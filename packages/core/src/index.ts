@@ -1009,3 +1009,6 @@ export {
 } from './surface-catalog.js';
 
 
+
+// Strict address classification for fetching URLs a person supplied (public unicast only)
+export { classifyAddress, classifyIPv4, classifyIPv6, isPublicAddress, type AddressClass } from './net-address.js';

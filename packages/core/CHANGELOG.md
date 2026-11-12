@@ -18,3 +18,6 @@
 - **Optional multimodal embedding shape** (`MultimodalEmbeddingRequest`, `MultimodalEmbeddingModel`): text or
   image inputs; every vector carries its model and size. `asMultimodalEmbeddingModel` puts a text model behind
   it and refuses images. `EmbeddingResponse` gains an optional `dimensions`.
+- **Strict address classification** (`classifyAddress`, `isPublicAddress`) for fetching URLs a person supplied:
+  only public unicast passes (blocks loopback, RFC 1918, link-local and metadata, CGNAT, 0/8, benchmarking,
+  documentation, multicast, reserved, ULA, IPv4-mapped / IPv4-compatible / NAT64 forms, 6to4 and Teredo).

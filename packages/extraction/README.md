@@ -89,3 +89,32 @@ tenant is required and comes first.
 
 **Tests**: `createStandInModel`, `createStandInEmbedder`, `createStandInOcr`, `createStandInVision`,
 `createStandInSpeech` are deterministic and make no network calls.
+
+## File sources: links and cloud drives
+
+A `FileSource` fetches a file as one identity — `user` (the person's own token; ideally an on-behalf-of
+exchange of their sign-in, see `createOnBehalfOfTokenProvider`), `service` (a configured connection) or
+`anonymous` — and returns **bytes**, the name, size, version, source URL, the source's permissions normalised
+(`sourceAcl`), and `fetchedAs`. Put sources in a `createSourceResolver([...])`; it refuses refs whose origin is
+`document`: **a link found inside a file is never fetched automatically**.
+
+All sources go through `createGuardedTransport`: https only, public addresses only (checked inside the
+connection's DNS lookup, so no rebinding window), every redirect hop checked, credentials dropped when a
+redirect leaves the origin, size and time limits.
+
+| Source | Refs | Identity | List | Changes | ACL | Live access check |
+|---|---|---|---|---|---|---|
+| `createUrlSource` | https links | anonymous, or per-domain credentials (data) | no | no | no | no |
+| `createGraphSource` (OneDrive, SharePoint) | any sharing link, `graph:drives/{d}/items/{i}` | user: delegated (OBO); service: app-only **Sites.Selected** | yes | delta | yes | yes |
+| `createGoogleDriveSource` | Drive/Docs/Sheets/Slides links, `gdrive:{id}` | user OAuth; service account that is a member of chosen shared drives | yes | changes.list | yes | yes |
+| `createDropboxSource` | shared links, `dropbox:{id or path}` | user OAuth; team token + selected member | yes | list_folder cursor | members | no |
+| `createBoxSource` | shared links, `box:{id}` | user OAuth; service account collaborated on folders | yes | no (needs enterprise events) | collaborations | yes |
+| `createMcpFileSource` | a configured prefix or host | whatever the MCP server uses | no | no | no | no |
+| `createICloudLinkSource` | icloud.com links | anonymous | no | no | no | no |
+
+**iCloud Drive:** Apple offers **no public server API** to read a person's iCloud Drive (CloudKit Web Services
+reach only an app's own containers). Two paths are supported, and only these: a public iCloud share link that
+serves the file itself (most serve a web page, which is refused with an explanation), or the person downloads the
+file in Files or Finder and uploads it.
+
+The base URLs are configurable (national clouds, tests); the tests run every adapter against localhost stand-ins.
