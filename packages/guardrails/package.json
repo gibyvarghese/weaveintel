@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/guardrails",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Guardrail pipeline \u2014 evaluation chain, risk classification, cost guard, governance",
   "type": "module",
   "exports": {

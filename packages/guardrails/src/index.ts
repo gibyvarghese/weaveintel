@@ -164,3 +164,22 @@ export {
   type JsonSchemaError,
   type JsonSchemaResult,
 } from './tool-quarantine.js';
+
+// File content guards: hidden-text stripper, text-layer vs OCR check, file fence, injection signal port
+export {
+  stripHiddenText,
+  compareTextLayers,
+  fileSpotlight,
+  fileSpotlightPreamble,
+  createHeuristicInjectionSignal,
+  combineInjectionSignals,
+  type HiddenTextKind,
+  type HiddenTextFinding,
+  type StrippedText,
+  type TextLayerComparison,
+  type FileFenceMeta,
+  type FileSpotlight,
+  type InjectionSignal,
+  type InjectionSignalHit,
+  type InjectionAssessment,
+} from './file-content.js';
