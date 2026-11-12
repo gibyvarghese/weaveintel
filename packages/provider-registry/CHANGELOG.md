@@ -1,5 +1,23 @@
 # @weaveintel/provider-registry
 
+## 0.1.1
+
+### Changed
+
+- **OpenAI-compatible endpoints** (Azure OpenAI, Foundry, Databricks, vLLM, ...): PDF (`file` part, neutral
+  name) and audio (`input_audio`) are sent when the model row declares `pdf` / `audio_in`; every other non-text,
+  non-image part is refused with `UnsupportedContentError` naming the capability (it used to throw a plain
+  `INVALID_INPUT`).
+- **Bedrock Converse**: `document` blocks for pdf, csv, doc, docx, xls, xlsx, html, txt and md when the row
+  declares `pdf` or `document:<mime>`, with neutral names (`document 1`, ...) because Bedrock warns the name is
+  open to prompt injection; `audio` blocks when the row declares `audio_in`. A file in a system prompt or a tool
+  result is refused instead of dropped. `toConverseMessages` takes the model row.
+- Model rows accept `pdf`, `audio_in` and `document:<mime>` in `capabilities`.
+
+### Added
+
+- `profileOfModel(row)`: the row's capability profile. `BEDROCK_DOCUMENT_FORMATS`, `BEDROCK_AUDIO_FORMATS`.
+
 ## 0.1.0
 
 ### Added

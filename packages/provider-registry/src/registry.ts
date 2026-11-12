@@ -132,6 +132,8 @@ const CAPABILITY_NAMES: Readonly<Record<string, CapabilityId>> = {
   structured_output: Capabilities.StructuredOutput,
   reasoning: Capabilities.Reasoning,
   streaming: Capabilities.Streaming,
+  pdf: Capabilities.PdfInput,
+  audio_in: Capabilities.AudioInput,
 };
 
 function nameOf(provider: ProviderDescription): string {
@@ -414,7 +416,11 @@ export function createProviderRegistry(opts: ProviderRegistryOptions): ProviderR
 
   function capabilitiesOf(model: ModelDescription, extra: CapabilityId[]): CapabilityId[] {
     const out = new Set<CapabilityId>(extra);
-    for (const name of model.capabilities ?? []) out.add(CAPABILITY_NAMES[name] ?? capabilityId(name));
+    for (const name of model.capabilities ?? []) {
+      // Every `document:<mime>` entry also means "reads some document files".
+      if (name.startsWith('document:')) out.add(Capabilities.DocumentInput);
+      out.add(CAPABILITY_NAMES[name] ?? capabilityId(name));
+    }
     return [...out];
   }
 

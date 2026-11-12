@@ -14,7 +14,7 @@
  * for temporary credentials).
  */
 
-import { WeaveIntelError, type Message, type ModelRequest, type ModelResponse, type StreamChunk, type ToolCall } from '@weaveintel/core';
+import { WeaveIntelError, featureForPart, profileSupports, unsupportedPart, type Message, type ModelRequest, type ModelResponse, type StreamChunk, type ToolCall } from '@weaveintel/core';
 import { malformed, parseJsonBody } from '../../wire.js';
 import type {
   AdapterCall,
@@ -28,6 +28,7 @@ import type {
 } from '../../types.js';
 import { EventStreamFormatError, readEventStream } from './event-stream.js';
 import { signRequest } from './sigv4.js';
+import { profileOfModel } from '../../profile.js';
 
 type Json = Record<string, unknown>;
 
@@ -121,23 +122,93 @@ function toolResultContent(text: string): Json[] {
 
 const IMAGE_FORMATS: Readonly<Record<string, string>> = { 'image/png': 'png', 'image/jpeg': 'jpeg', 'image/jpg': 'jpeg', 'image/gif': 'gif', 'image/webp': 'webp' };
 
-function contentBlocks(call: AdapterCall, msg: Message): Json[] {
+/** Converse `document` formats (Bedrock API reference, DocumentBlock: pdf, csv, doc, docx, xls, xlsx, html, txt, md). */
+export const BEDROCK_DOCUMENT_FORMATS: Readonly<Record<string, string>> = {
+  'application/pdf': 'pdf',
+  'text/csv': 'csv',
+  'application/msword': 'doc',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+  'application/vnd.ms-excel': 'xls',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+  'text/html': 'html',
+  'text/plain': 'txt',
+  'text/markdown': 'md',
+};
+
+/** Converse `audio` formats (Bedrock API reference, AudioBlock). */
+export const BEDROCK_AUDIO_FORMATS: Readonly<Record<string, string>> = {
+  'audio/mpeg': 'mp3', 'audio/mp3': 'mp3', 'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/wave': 'wav',
+  'audio/aac': 'aac', 'audio/flac': 'flac', 'audio/ogg': 'ogg', 'audio/opus': 'opus', 'audio/webm': 'webm',
+  'audio/mp4': 'm4a', 'audio/x-m4a': 'm4a', 'audio/m4a': 'm4a',
+};
+
+const mimeOf = (m: string | undefined, fallback: string): string => (m ?? fallback).split(';')[0]!.trim().toLowerCase();
+
+/**
+ * Translate content parts into Converse blocks. Each part is sent properly or
+ * refused with an `UnsupportedContentError` naming the capability:
+ *
+ * - images: bytes only (Bedrock takes no image links);
+ * - PDF: a `document` block when the model row declares `pdf`;
+ * - csv, doc, docx, xls, xlsx, html, txt, md: a `document` block when the row
+ *   declares `document:<mime type>` (or a wildcard such as `document:text/*`);
+ * - audio: an `audio` block when the row declares `audio_in`.
+ *
+ * Documents get neutral names (`document 1`, ...): Bedrock warns that the name
+ * field is open to prompt injection, so the uploader's file name is never used.
+ */
+function contentBlocks(call: AdapterCall, model: ModelDescription, msg: Message, counter: { n: number }): Json[] {
   if (typeof msg.content === 'string') return msg.content === '' ? [] : [{ text: msg.content }];
+  const profile = profileOfModel(model);
+  const who = { provider: call.provider.id, modelId: model.id };
   return msg.content.map((part) => {
     if (part.type === 'text') return { text: part.text };
-    if (part.type === 'image' && part.base64) {
-      const format = IMAGE_FORMATS[(part.mimeType ?? 'image/png').toLowerCase()];
-      if (!format) throw invalidInput(call, `Images of type "${part.mimeType ?? ''}" cannot be sent to Bedrock.`);
+    const isImage = part.type === 'image' || (part.type === 'file' && mimeOf(part.mimeType, '').startsWith('image/'));
+    if (isImage) {
+      if (!part.base64) throw unsupportedPart(part, { ...who, capability: 'vision', reason: 'Bedrock needs the image itself, not a link to it' });
+      const format = IMAGE_FORMATS[mimeOf(part.mimeType, 'image/png')];
+      if (!format) throw unsupportedPart(part, { ...who, capability: 'vision', reason: `images of type ${mimeOf(part.mimeType, '')} are not accepted` });
       return { image: { format, source: { bytes: part.base64 } } };
     }
-    if (part.type === 'image') throw invalidInput(call, 'Bedrock needs the image itself, not a link to it.');
-    throw invalidInput(call, `Content of type "${part.type}" cannot be sent to Bedrock chat.`);
+    if (part.type === 'file') {
+      const mime = mimeOf(part.mimeType, 'application/octet-stream');
+      const format = BEDROCK_DOCUMENT_FORMATS[mime];
+      const feature = featureForPart(part)!;
+      if (!format || !profileSupports(profile, feature)) throw unsupportedPart(part, who);
+      if (!part.base64) throw unsupportedPart(part, { ...who, reason: 'Bedrock needs the document itself, not a link to it' });
+      counter.n += 1;
+      return { document: { format, name: `document ${counter.n}`, source: { bytes: part.base64 } } };
+    }
+    if (part.type === 'audio') {
+      if (!profile.audioIn) throw unsupportedPart(part, who);
+      const format = BEDROCK_AUDIO_FORMATS[mimeOf(part.mimeType, 'audio/wav')];
+      if (!format) throw unsupportedPart(part, { ...who, reason: `audio of type ${mimeOf(part.mimeType, '')} is not accepted` });
+      if (!part.base64) throw unsupportedPart(part, { ...who, reason: 'Bedrock needs the audio itself, not a link to it' });
+      return { audio: { format, source: { bytes: part.base64 } } };
+    }
+    throw unsupportedPart(part, who);
   });
 }
 
 /** Translate the library's messages into Converse `system` and `messages`. */
-export function toConverseMessages(call: AdapterCall, messages: readonly Message[]): { system: Json[]; messages: Json[] } {
+export function toConverseMessages(
+  call: AdapterCall,
+  messages: readonly Message[],
+  model: ModelDescription = { id: '', kind: 'chat' },
+): { system: Json[]; messages: Json[] } {
   const system: Json[] = [];
+  const counter = { n: 0 };
+  // System prompts and tool results carry text only on Converse. Any other
+  // part there is refused, never dropped.
+  const textOnly = (msg: Message, where: string): string => {
+    if (typeof msg.content === 'string') return msg.content;
+    return msg.content
+      .map((p) => {
+        if (p.type === 'text') return p.text;
+        throw unsupportedPart(p, { provider: call.provider.id, ...(model.id ? { modelId: model.id } : {}), reason: `Converse takes only text in ${where}` });
+      })
+      .join('');
+  };
   const out: Array<{ role: 'user' | 'assistant'; content: Json[] }> = [];
   const push = (role: 'user' | 'assistant', content: Json[]): void => {
     if (content.length === 0) return;
@@ -149,30 +220,30 @@ export function toConverseMessages(call: AdapterCall, messages: readonly Message
   };
   for (const msg of messages) {
     if (msg.role === 'system') {
-      const text = typeof msg.content === 'string' ? msg.content : msg.content.map((p) => (p.type === 'text' ? p.text : '')).join('');
+      const text = textOnly(msg, 'a system prompt');
       if (text !== '') system.push({ text });
       continue;
     }
     if (msg.role === 'tool') {
-      push('user', [{ toolResult: { toolUseId: msg.toolCallId ?? '', content: toolResultContent(typeof msg.content === 'string' ? msg.content : msg.content.map((p) => (p.type === 'text' ? p.text : '')).join('')) } }]);
+      push('user', [{ toolResult: { toolUseId: msg.toolCallId ?? '', content: toolResultContent(textOnly(msg, 'a tool result')) } }]);
       continue;
     }
     if (msg.role === 'assistant') {
-      const blocks = contentBlocks(call, msg);
+      const blocks = contentBlocks(call, model, msg, counter);
       for (const tc of msg.toolCalls ?? []) blocks.push({ toolUse: { toolUseId: tc.id, name: tc.name, input: parseArguments(call, tc.arguments) } });
       push('assistant', blocks);
       continue;
     }
-    push('user', contentBlocks(call, msg));
+    push('user', contentBlocks(call, model, msg, counter));
   }
   return { system, messages: out };
 }
 
-function converseBody(call: AdapterCall, request: ModelRequest): Json {
+function converseBody(call: AdapterCall, model: ModelDescription, request: ModelRequest): Json {
   if (request.responseFormat) {
     throw invalidInput(call, `${label(call)} (Bedrock Converse) does not take a structured-output format through this adapter, and this request needs one.`);
   }
-  const { system, messages } = toConverseMessages(call, request.messages);
+  const { system, messages } = toConverseMessages(call, request.messages, model);
   const body: Json = { messages };
   if (system.length > 0) body['system'] = system;
   const inference: Json = {};
@@ -315,7 +386,7 @@ export function bedrockAdapter(): ProviderAdapter {
     mapError: bedrockErrorOverride,
 
     async generate(call, model, request): Promise<ModelResponse> {
-      const res = await call.transport.send(await post(call, modelPath(model.id, 'converse'), converseBody(call, request)));
+      const res = await call.transport.send(await post(call, modelPath(model.id, 'converse'), converseBody(call, model, request)));
       const body = parseJsonBody<Json>(label(call), res.text);
       const message = (body['output'] as Json | undefined)?.['message'] as Json | undefined;
       const blocks = message?.['content'];
@@ -342,7 +413,7 @@ export function bedrockAdapter(): ProviderAdapter {
     },
 
     async *stream(call, model, request): AsyncIterable<StreamChunk> {
-      const res = await call.transport.open(await post(call, modelPath(model.id, 'converse-stream'), converseBody(call, request), 'application/vnd.amazon.eventstream'));
+      const res = await call.transport.open(await post(call, modelPath(model.id, 'converse-stream'), converseBody(call, model, request), 'application/vnd.amazon.eventstream'));
       if (!res.body) throw malformed(label(call), 'the stream had no body');
       const decoder = new TextDecoder();
       try {

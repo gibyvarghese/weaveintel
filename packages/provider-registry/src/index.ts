@@ -50,3 +50,7 @@ export { httpFailure, parseJsonBody, malformed, providerMessage, retryAfterFrom,
 export { normalizeVector, isUnitLength, truncateVector } from './vectors.js';
 export { signRequest, awsEncode, type AwsCredentials, type SignInput } from './adapters/bedrock/sigv4.js';
 export { readEventStream, encodeEventStreamMessage, crc32, EventStreamFormatError, type EventStreamMessage } from './adapters/bedrock/event-stream.js';
+
+// Capability profile of a model row (what it can read and do)
+export { profileOfModel } from './profile.js';
+export { BEDROCK_DOCUMENT_FORMATS, BEDROCK_AUDIO_FORMATS } from './adapters/bedrock/bedrock.js';

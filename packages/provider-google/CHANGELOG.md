@@ -1,5 +1,14 @@
 # @weaveintel/provider-google
 
+## 0.1.3
+
+### Changed
+
+- Gemini parts are sent properly or refused with `UnsupportedContentError`: a part with no content is no
+  longer sent as an empty inline blob, file types Gemini does not read (Word, Excel, zip) are refused, and a
+  file in a system instruction is refused rather than dropped.
+- Vision models declare `PdfInput`, `AudioInput` and `DocumentInput`.
+
 ## 0.1.2
 
 ### Added

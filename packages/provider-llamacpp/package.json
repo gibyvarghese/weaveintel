@@ -1,7 +1,7 @@
 {
   "name": "@weaveintel/provider-llamacpp",
-  "version": "0.1.1",
-  "description": "llama.cpp HTTP server provider for weaveIntel — local GGUF models via OpenAI-compatible API",
+  "version": "0.1.2",
+  "description": "llama.cpp HTTP server provider for weaveIntel \u2014 local GGUF models via OpenAI-compatible API",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -24,7 +24,7 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@weaveintel/core": "^0.1.1",
+    "@weaveintel/core": "^0.1.3",
     "@weaveintel/tools": "^0.1.1 || ^0.2.0"
   },
   "license": "MIT",

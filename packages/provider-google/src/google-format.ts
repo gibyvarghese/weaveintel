@@ -1,5 +1,5 @@
 import type { ContentPart, ModelRequest, ModelResponse, CapabilityId } from '@weaveintel/core';
-import { Capabilities } from '@weaveintel/core';
+import { Capabilities, unsupportedPart } from '@weaveintel/core';
 import { googleAdapter, translate } from '@weaveintel/tools/schema';
 
 export interface GeminiPart {
@@ -29,39 +29,30 @@ export interface ParsedCandidate {
   finishReason: string | undefined;
 }
 
-export function partToGeminiPart(part: ContentPart): GeminiPart {
-  switch (part.type) {
-    case 'text':
-      return { text: part.text };
-    case 'image':
-      if (part.url && part.url.startsWith('http')) {
-        return { fileData: { mimeType: part.mimeType ?? 'image/png', fileUri: part.url } };
-      }
-      return {
-        inlineData: { mimeType: part.mimeType ?? 'image/png', data: part.base64 ?? '' },
-      };
-    case 'audio':
-      return {
-        inlineData: { mimeType: part.mimeType ?? 'audio/wav', data: part.base64 ?? '' },
-      };
-    case 'file':
-      if (part.url && part.url.startsWith('http')) {
-        return {
-          fileData: {
-            mimeType: part.mimeType ?? 'application/octet-stream',
-            fileUri: part.url,
-          },
-        };
-      }
-      return {
-        inlineData: {
-          mimeType: part.mimeType ?? 'application/octet-stream',
-          data: part.base64 ?? '',
-        },
-      };
-    default:
-      return { text: `[${(part as { type: string }).type} content]` };
+const mimeOf = (m: string | undefined, fallback: string): string => (m ?? fallback).split(';')[0]!.trim().toLowerCase();
+
+/** File types Gemini reads inline: PDF, text, images, audio and video. Office files are not among them. */
+export function geminiReadsMime(mime: string): boolean {
+  return mime === 'application/pdf' || /^(text|image|audio|video)\//.test(mime);
+}
+
+/**
+ * Translate one content part for Gemini. Every part is sent properly or
+ * refused with an `UnsupportedContentError` naming the capability: a part
+ * with no content is never sent as an empty inline blob, and file types
+ * Gemini cannot read (Word, Excel, zip ...) are refused rather than sent blind.
+ */
+export function partToGeminiPart(part: ContentPart, who: { provider?: string; modelId?: string } = { provider: 'google' }): GeminiPart {
+  if (part.type === 'text') return { text: part.text };
+  if (part.type !== 'image' && part.type !== 'audio' && part.type !== 'file') {
+    throw unsupportedPart(part, who);
   }
+  const fallback = part.type === 'image' ? 'image/png' : part.type === 'audio' ? 'audio/wav' : 'application/octet-stream';
+  const mime = mimeOf(part.mimeType, fallback);
+  if (part.type === 'file' && !geminiReadsMime(mime)) throw unsupportedPart(part, who);
+  if (part.base64) return { inlineData: { mimeType: mime, data: part.base64 } };
+  if (part.url && /^(https?|gs):\/\//.test(part.url)) return { fileData: { mimeType: mime, fileUri: part.url } };
+  throw unsupportedPart(part, { ...who, reason: part.url ? 'only http(s) or gs:// links can be sent' : 'the part has no content' });
 }
 
 export function buildGeminiRequest(
@@ -72,9 +63,12 @@ export function buildGeminiRequest(
 
   for (const msg of request.messages) {
     if (msg.role === 'system') {
+      // A system instruction carries text only: any other part is refused, never dropped.
       const text = typeof msg.content === 'string' ? msg.content : msg.content
-        .filter((p): p is Extract<ContentPart, { type: 'text' }> => p.type === 'text')
-        .map((p) => p.text)
+        .map((p) => {
+          if (p.type === 'text') return p.text;
+          throw unsupportedPart(p, { provider: 'google', reason: 'a system instruction takes only text' });
+        })
         .join('\n');
       const existing = systemInstruction?.parts[0]?.text ?? '';
       systemInstruction = {
@@ -166,6 +160,9 @@ export const GEMINI_MODEL_METADATA: GeminiModelMetadata[] = [
       Capabilities.ToolCalling,
       Capabilities.StructuredOutput,
       Capabilities.Vision,
+      Capabilities.PdfInput,
+      Capabilities.AudioInput,
+      Capabilities.DocumentInput,
       Capabilities.Multimodal,
       Capabilities.Reasoning,
     ],
@@ -180,6 +177,9 @@ export const GEMINI_MODEL_METADATA: GeminiModelMetadata[] = [
       Capabilities.ToolCalling,
       Capabilities.StructuredOutput,
       Capabilities.Vision,
+      Capabilities.PdfInput,
+      Capabilities.AudioInput,
+      Capabilities.DocumentInput,
       Capabilities.Multimodal,
     ],
     maxContextTokens: 1_048_576,
@@ -192,6 +192,9 @@ export const GEMINI_MODEL_METADATA: GeminiModelMetadata[] = [
       Capabilities.Streaming,
       Capabilities.ToolCalling,
       Capabilities.Vision,
+      Capabilities.PdfInput,
+      Capabilities.AudioInput,
+      Capabilities.DocumentInput,
       Capabilities.Multimodal,
     ],
     maxContextTokens: 32_768,

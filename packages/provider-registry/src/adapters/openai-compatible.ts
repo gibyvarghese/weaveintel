@@ -11,7 +11,8 @@
  * `WireQuirks`, which is data. There is no `if (provider === 'groq')` anywhere.
  */
 
-import { WeaveIntelError, type Message, type ModelRequest, type ModelResponse, type StreamChunk, type ToolCall } from '@weaveintel/core';
+import { WeaveIntelError, unsupportedPart, type ContentPart, type Message, type ModelRequest, type ModelResponse, type StreamChunk, type ToolCall } from '@weaveintel/core';
+import { profileOfModel } from '../profile.js';
 import { malformed, parseJsonBody, sseData } from '../wire.js';
 import type {
   AdapterCall,
@@ -50,20 +51,63 @@ function label(call: AdapterCall): string {
   return call.provider.displayName ?? call.provider.id;
 }
 
-/** Translate the library's messages into OpenAI chat messages. */
-export function toOpenAIMessages(messages: readonly Message[]): Json[] {
+const AUDIO_FORMATS: Readonly<Record<string, string>> = {
+  'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/wave': 'wav', 'audio/mpeg': 'mp3', 'audio/mp3': 'mp3',
+};
+
+const mimeOf = (m: string | undefined, fallback: string): string => (m ?? fallback).split(';')[0]!.trim().toLowerCase();
+
+/**
+ * Translate one content part for an OpenAI-compatible chat endpoint. What
+ * such servers read differs per deployment, so anything beyond text and
+ * images is sent only when the model row DECLARES it (`pdf`, `audio_in`);
+ * otherwise the part is refused with an `UnsupportedContentError` naming the
+ * capability. Images are sent as before (a link or a data URL).
+ */
+function toOpenAIPart(part: ContentPart, model: ModelDescription | undefined, providerId: string | undefined): Json {
+  const profile = model ? profileOfModel(model) : undefined;
+  const who = { ...(providerId !== undefined ? { provider: providerId } : {}), ...(model ? { modelId: model.id } : {}) };
+  const imageUrl = (p: { url?: string; base64?: string; mimeType?: string }): Json =>
+    ({ type: 'image_url', image_url: { url: p.url ?? `data:${mimeOf(p.mimeType, 'image/png')};base64,${p.base64 ?? ''}` } });
+  switch (part.type) {
+    case 'text':
+      return { type: 'text', text: part.text };
+    case 'image':
+      return imageUrl(part);
+    case 'file': {
+      const mime = mimeOf(part.mimeType, 'application/octet-stream');
+      if (mime.startsWith('image/')) return imageUrl(part);
+      if (mime === 'application/pdf' && profile?.pdf) {
+        if (!part.base64) throw unsupportedPart(part, { ...who, reason: 'it needs the content itself, not a link to it' });
+        // A neutral name: file names can carry instructions.
+        return { type: 'file', file: { filename: 'document.pdf', file_data: `data:application/pdf;base64,${part.base64}` } };
+      }
+      throw unsupportedPart(part, who);
+    }
+    case 'audio': {
+      if (!profile?.audioIn) throw unsupportedPart(part, who);
+      const format = AUDIO_FORMATS[mimeOf(part.mimeType, 'audio/wav')];
+      if (!format) throw unsupportedPart(part, { ...who, reason: 'only wav or mp3 audio is accepted' });
+      if (!part.base64) throw unsupportedPart(part, { ...who, reason: 'it needs the content itself, not a link to it' });
+      return { type: 'input_audio', input_audio: { data: part.base64, format } };
+    }
+    default:
+      throw unsupportedPart(part, who);
+  }
+}
+
+/**
+ * Translate the library's messages into OpenAI chat messages. Pass the model
+ * row so declared PDF and audio input can be sent; without it only text and
+ * images are accepted and every other part is refused.
+ */
+export function toOpenAIMessages(messages: readonly Message[], model?: ModelDescription, providerId?: string): Json[] {
   return messages.map((msg) => {
     const m: Json = { role: msg.role };
     if (typeof msg.content === 'string') {
       m['content'] = msg.content;
     } else {
-      m['content'] = msg.content.map((part) => {
-        if (part.type === 'text') return { type: 'text', text: part.text };
-        if (part.type === 'image') {
-          return { type: 'image_url', image_url: { url: part.url ?? `data:${part.mimeType ?? 'image/png'};base64,${part.base64 ?? ''}` } };
-        }
-        throw new WeaveIntelError({ code: 'INVALID_INPUT', message: `Content of type "${part.type}" cannot be sent to an OpenAI-compatible chat endpoint.`, retryable: false });
-      });
+      m['content'] = msg.content.map((part) => toOpenAIPart(part, model, providerId));
     }
     if (msg.name) m['name'] = msg.name;
     if (msg.role === 'tool' && msg.toolCallId) m['tool_call_id'] = msg.toolCallId;
@@ -152,7 +196,7 @@ export function openAICompatibleAdapter(options: OpenAICompatibleAdapterOptions 
 
   function chatBody(call: AdapterCall, model: ModelDescription, request: ModelRequest, stream: boolean): Json {
     const q = quirksOf(call);
-    const body: Json = { messages: toOpenAIMessages(request.messages) };
+    const body: Json = { messages: toOpenAIMessages(request.messages, model, call.provider.id) };
     if (q.modelInBody !== false) body['model'] = model.id;
     if (request.tools && request.tools.length > 0) {
       if (q.tools === false) {
