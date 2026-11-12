@@ -31,6 +31,14 @@ export const Capabilities = {
   ImageEditing: capabilityId('model.image_editing'),
   Vision: capabilityId('model.vision'),
   Multimodal: capabilityId('model.multimodal'),
+  /** Reads PDF files natively (text and page images). */
+  PdfInput: capabilityId('model.input.pdf'),
+  /** Reads audio natively in a chat request (not a separate transcription endpoint). */
+  AudioInput: capabilityId('model.input.audio'),
+  /** Reads some non-PDF document files natively (which ones: the capability profile's `documentMimeTypes`). */
+  DocumentInput: capabilityId('model.input.document'),
+  /** Embeds images (as well as text) into the same vector space. */
+  ImageEmbedding: capabilityId('model.embedding.image'),
 
   // Connector capabilities
   ConnectorList: capabilityId('connector.list'),

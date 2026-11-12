@@ -25,6 +25,8 @@ export type ErrorCode =
   | 'CIRCUIT_OPEN'
   | 'PROVIDER_ERROR'
   | 'PROTOCOL_ERROR'
+  /** The model or connection cannot read a kind of content in the request (an image, PDF, audio, a file type). */
+  | 'UNSUPPORTED_CONTENT'
   | 'INTERNAL_ERROR';
 
 export class WeaveIntelError extends Error {

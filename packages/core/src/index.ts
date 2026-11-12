@@ -263,6 +263,11 @@ export {
   type EmbeddingRequest,
   type EmbeddingResponse,
   type EmbeddingModel,
+  type EmbeddingInput,
+  type MultimodalEmbeddingRequest,
+  type EmbeddingVector,
+  type MultimodalEmbeddingResponse,
+  type MultimodalEmbeddingModel,
   type RerankRequest,
   type RerankResult,
   type RerankResponse,
@@ -277,6 +282,38 @@ export {
   type TranscriptionResult,
   type AudioModel,
 } from './models.js';
+
+// Model capability profiles (what a model or connection can read and do, as data)
+export {
+  ModelFeatures,
+  documentFeature,
+  textOnlyProfile,
+  featureForPart,
+  requiredFeatures,
+  profileSupports,
+  missingFeatures,
+  profileFeatures,
+  featureLabel,
+  profileFromCapabilities,
+  capabilitiesFromProfile,
+  UnsupportedContentError,
+  isUnsupportedContentError,
+  unsupportedPart,
+  assertProfileSupports,
+  asMultimodalEmbeddingModel,
+  type ModelFeature,
+  type ModelCapabilityProfile,
+  type ProbeEvidence,
+} from './model-profile.js';
+export {
+  probeModelProfile,
+  buildProbePdfBase64,
+  PROBE_RED_PNG_BASE64,
+  PROBE_PDF_CODE,
+  type ProbeOptions,
+  type ProbeResult,
+  type ProbeAudioSample,
+} from './conformance-probe.js';
 
 // Tool contracts
 export {
