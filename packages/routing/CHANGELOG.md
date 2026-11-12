@@ -1,5 +1,19 @@
 # @weaveintel/routing
 
+## 0.1.3
+
+### Added
+
+- **Routing on what a model can read.** `needsForRequest(request)` turns a model request into route needs:
+  one capability per kind of content it carries (`vision`, `pdf`, `audio_in`, `document:<mime>`), plus
+  `structured_output` and `tools`. A model that cannot read the content is skipped before any call.
+- `RouteTarget.profile`: a capability profile (declared, or measured by core's conformance probe). Its
+  features count as well as `capabilities`, and its context size is used when `contextTokens` is not set. A
+  `document:text/*` entry matches every text type.
+- `SmartModelRouter` takes `profiles` (keyed `providerId:modelId`), and never falls back to a model that cannot
+  read the request's content: it throws `UnsupportedContentError` instead.
+- Readable names in explanations: "does not support PDF files", "does not support text/csv files".
+
 ## 0.1.2
 
 ### Added

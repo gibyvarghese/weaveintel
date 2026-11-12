@@ -39,7 +39,8 @@
  *   quietly producing vectors that would corrupt a search index.
  */
 
-import { WeaveIntelError } from '@weaveintel/core';
+import { WeaveIntelError, profileFeatures, profileSupports, requiredFeatures } from '@weaveintel/core';
+import type { ModelCapabilityProfile, ModelRequest } from '@weaveintel/core';
 import { createCircuitBreaker, PROVIDER_RESILIENCE_DEFAULTS } from '@weaveintel/resilience';
 import type { CircuitBreaker, CircuitState } from '@weaveintel/resilience';
 
@@ -60,8 +61,14 @@ export interface RouteTarget {
   readonly enabled: boolean;
   /** Whether the provider as a whole is switched on. Default true. */
   readonly providerEnabled?: boolean;
-  /** What the model can do, e.g. 'tools', 'vision', 'structured_output'. */
+  /** What the model can do, e.g. 'tools', 'vision', 'pdf', 'audio_in', 'structured_output', 'document:text/csv'. */
   readonly capabilities?: readonly string[];
+  /**
+   * The model's capability profile (declared or measured by the conformance
+   * probe). When present, its features count as well as `capabilities`, and
+   * its context size is used when `contextTokens` is not set.
+   */
+  readonly profile?: ModelCapabilityProfile;
   readonly contextTokens?: number;
   readonly region?: string;
   /** USD per million input tokens. */
@@ -369,6 +376,50 @@ interface JudgeContext {
   readonly circuitState: CircuitState;
 }
 
+function capabilityName(capability: string): string {
+  if (capability === 'pdf') return 'PDF files';
+  if (capability === 'audio_in') return 'audio input';
+  if (capability.startsWith('document:')) return `${capability.slice('document:'.length)} files`;
+  return capability;
+}
+
+/**
+ * Whether a target has one capability: listed in `capabilities` (a
+ * `document:text/*` entry matches every text type), or present in its profile.
+ */
+function targetSupports(target: RouteTarget, capability: string): boolean {
+  const listed = target.capabilities ?? [];
+  if (listed.includes(capability)) return true;
+  if (capability.startsWith('document:')) {
+    const mime = capability.slice('document:'.length);
+    if (listed.some((c) => c.startsWith('document:') && c.endsWith('/*') && mime.startsWith(c.slice('document:'.length, -1)))) return true;
+  }
+  return target.profile !== undefined && profileSupports(target.profile, capability);
+}
+
+/**
+ * What a model request needs of a model, as route needs: one capability per
+ * kind of content it carries (`vision`, `pdf`, `audio_in`, `document:<mime>`),
+ * plus `structured_output` and `tools` when asked for. Pass it as
+ * `RouteRequest.needs` so a model that cannot read the content is skipped
+ * BEFORE any call is made.
+ */
+export function needsForRequest(
+  request: Pick<ModelRequest, 'messages'> & Partial<Pick<ModelRequest, 'tools' | 'responseFormat'>>,
+  extra?: RouteNeeds,
+): RouteNeeds {
+  const capabilities = [...new Set([...requiredFeatures(request), ...(extra?.capabilities ?? [])])];
+  return {
+    capabilities,
+    ...(extra?.minContextTokens !== undefined ? { minContextTokens: extra.minContextTokens } : {}),
+  };
+}
+
+/** The flat capability list for a target built from a profile. */
+export function capabilitiesOfProfile(profile: ModelCapabilityProfile): string[] {
+  return profileFeatures(profile);
+}
+
 /** Returns the first reason the target cannot be used, or undefined when it can. */
 function judgeTarget(target: RouteTarget, ctx: JudgeContext): Verdict | undefined {
   if (!target.enabled || target.providerEnabled === false) {
@@ -425,10 +476,11 @@ function judgeTarget(target: RouteTarget, ctx: JudgeContext): Verdict | undefine
     };
   }
 
-  const has = target.capabilities ?? [];
-  const missing = ctx.capabilities.filter((capability) => !has.includes(capability));
+  const missing = ctx.capabilities.filter((capability) => !targetSupports(target, capability));
   if (missing.length > 0) {
-    const phrase = `does not support ${joinList(missing)}`;
+    // The newer input features get readable names ("PDF files", "text/csv files");
+    // the older ones keep their own names, so existing wording is unchanged.
+    const phrase = `does not support ${joinList(missing.map(capabilityName))}`;
     return {
       dropped: 'missing_capability',
       detail: `missing capability: ${missing.join(', ')}`,
@@ -438,13 +490,14 @@ function judgeTarget(target: RouteTarget, ctx: JudgeContext): Verdict | undefine
   }
 
   // A stated minimum is a hard requirement, so a model with no recorded size cannot be assumed to fit.
-  if (ctx.minContextTokens !== undefined && (target.contextTokens ?? 0) < ctx.minContextTokens) {
+  const contextTokens = target.contextTokens ?? target.profile?.contextTokens;
+  if (ctx.minContextTokens !== undefined && (contextTokens ?? 0) < ctx.minContextTokens) {
     return {
       dropped: 'context_too_small',
       detail:
-        target.contextTokens === undefined
+        contextTokens === undefined
           ? `needs room for ${ctx.minContextTokens} tokens and no context size is recorded for this model`
-          : `needs room for ${ctx.minContextTokens} tokens and this model holds ${target.contextTokens}`,
+          : `needs room for ${ctx.minContextTokens} tokens and this model holds ${contextTokens}`,
       aside: 'context window too small',
       clause: 'cannot hold a request this large',
     };

@@ -54,7 +54,7 @@ export {
 } from './seed.js';
 
 // Rule router (data-driven routes: ordered fall-back, stickiness, embedding safety)
-export { createRuleRouter } from './rule-router.js';
+export { createRuleRouter, needsForRequest, capabilitiesOfProfile } from './rule-router.js';
 export type {
   RoutePurpose,
   RouteTarget,
