@@ -12,3 +12,5 @@ export * from './stages/timeline.js';
 export * from './knowledge-graph.js';
 // AI database column auto-fill with citations.
 export * from './autofill.js';
+// File understanding (ports, readers, schema-forced extraction, mapping, cache, service).
+export * from './files/index.js';

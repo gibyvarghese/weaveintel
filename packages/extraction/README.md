@@ -39,3 +39,53 @@ console.log(result.metadata, result.entities);
 ## License
 
 MIT.
+
+## File understanding (0.2.0)
+
+`createFileUnderstanding` takes a file's bytes to a checked result: a normalised document (pages, tables,
+attachments, metadata), an optional classification, and optional extracted values, each with a quote, a page, a
+confidence and provenance. Nothing is written anywhere: the result is a suggestion for a person to confirm.
+
+```ts
+import { createFileUnderstanding, createModelFieldExtractor, createModelClassifier } from '@weaveintel/extraction';
+import { createHeuristicInjectionSignal } from '@weaveintel/guardrails';
+
+const fu = createFileUnderstanding({
+  pipelineVersion: '2026-11-13',
+  extractor: createModelFieldExtractor(claude),   // any core Model; NO tools are ever offered
+  classifier: createModelClassifier(claude),
+  injectionSignal: createHeuristicInjectionSignal(),
+});
+const result = await fu.understand(ctx, { bytes, declaredMimeType }, {
+  tenantId,
+  fields: [{ name: 'total', type: 'number', required: true }],          // data, e.g. from a dictionary
+  labels: { types: [{ id: 'invoice', description: 'A bill to pay' }] },  // data
+});
+```
+
+**Ports** (swap engines by configuration): `DocumentParser`, `Ocr`, `VisionReader`, `SpeechToText`,
+`FieldExtractor`, `DocumentClassifier`, `Embedder`, `ResultCache`.
+
+**In-house readers** (no package): PDF text layer (basic: Flate, object streams, ToUnicode), DOCX and XLSX (ZIP
+via `node:zlib` with zip-bomb limits, XML with DOCTYPE refused), e-mail (MIME, RFC 2047/2231, nested parts,
+depth caps), text, CSV and HTML. **Adapters taking the library by injection** (no dependency): `pdfjs-dist`
+(`createPdfJsParser`), `postal-mime` (`createPostalMimeParser`). **Self-hosted engine over HTTP**:
+docling-serve (`createDoclingServeEngine`, the host passes its guarded `fetch`).
+
+**Hidden content** is kept out of what the model sees and reported: hidden Word runs, white or tiny text,
+comments, deleted tracked changes, hidden sheets/rows/columns, invisible PDF text (render mode 3, white fill,
+sub-1pt), invisible HTML, zero-width and Unicode tag characters, and PDF text-layer text that OCR did not see.
+
+**Validation**: values are normalised to their type, checked against enum, pattern and length, their quote is
+looked up as an exact string in the document (and in OCR text when an OCR engine is configured), instruction-like
+values are flagged, and host validation hooks run last. Each problem lowers the confidence and is listed.
+
+**Spreadsheets**: `mapColumns` maps columns by exact name or alias, then embedding similarity, and asks a model
+only about the ambiguous ones, choosing from a fixed list of fields and transforms; `applyMapping` applies it in
+code to every row with row-level errors.
+
+**Cache keys**: `resultCacheKey` = tenant + SHA-256 of the bytes + pipeline, schema and model versions. The
+tenant is required and comes first.
+
+**Tests**: `createStandInModel`, `createStandInEmbedder`, `createStandInOcr`, `createStandInVision`,
+`createStandInSpeech` are deterministic and make no network calls.
