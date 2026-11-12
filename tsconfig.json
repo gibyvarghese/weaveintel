@@ -101,6 +101,9 @@
       "path": "packages/provider-openai"
     },
     {
+      "path": "packages/provider-registry"
+    },
+    {
       "path": "packages/resilience"
     },
     {

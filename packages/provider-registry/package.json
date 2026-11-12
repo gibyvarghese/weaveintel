@@ -1,0 +1,44 @@
+{
+  "name": "@weaveintel/provider-registry",
+  "version": "0.1.0",
+  "description": "Model providers as data — a registry that builds chat and embedding models from a plain provider description, with keys fetched at call time, a guarded transport, and adapters for OpenAI-compatible servers, Azure and AWS Bedrock",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./contract": {
+      "types": "./dist/contract.d.ts",
+      "import": "./dist/contract.js",
+      "default": "./dist/contract.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@weaveintel/core": "^0.1.1",
+    "@weaveintel/resilience": "^0.1.1"
+  },
+  "devDependencies": {
+    "@weaveintel/testing": "^0.1.2",
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.6"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  }
+}
