@@ -1,7 +1,7 @@
 {
   "name": "@weaveintel/provider-google",
-  "version": "0.1.1",
-  "description": "Google Gemini provider for weaveIntel — chat, tool use, vision, streaming",
+  "version": "0.1.2",
+  "description": "Google Gemini and Vertex AI for weaveIntel \u2014 chat, tool use, vision, streaming, embeddings, and registry adapters",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -19,14 +19,20 @@
   ],
   "scripts": {
     "build": "tsc -b",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
     "@weaveintel/core": "^0.1.1",
+    "@weaveintel/provider-registry": "^0.1.0",
     "@weaveintel/resilience": "^0.1.1",
     "@weaveintel/tools": "^0.1.1 || ^0.2.0"
+  },
+  "devDependencies": {
+    "@weaveintel/testing": "^0.1.2",
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.6"
   },
   "license": "MIT",
   "publishConfig": {

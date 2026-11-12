@@ -12,3 +12,7 @@ export {
   weaveGoogle,
   type GoogleProviderOptions,
 } from './google.js';
+
+// Google as a provider described by data, for `@weaveintel/provider-registry`:
+// the Gemini API (one key) and Vertex AI (a service-account file).
+export { geminiAdapter, vertexAdapter, googleChatBody, googleErrorOverride, signServiceAccountAssertion } from './registry-adapters.js';

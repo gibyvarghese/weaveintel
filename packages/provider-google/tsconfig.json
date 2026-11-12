@@ -16,6 +16,12 @@
     },
     {
       "path": "../tools"
+    },
+    {
+      "path": "../provider-registry"
+    },
+    {
+      "path": "../testing"
     }
   ]
 }
