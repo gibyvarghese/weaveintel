@@ -52,3 +52,25 @@ export {
   DEFAULT_TASK_TYPES,       type TaskTypeSeedRow,
   DEFAULT_PROVIDER_ADAPTERS, type ProviderAdapterSeedRow,
 } from './seed.js';
+
+// Rule router (data-driven routes: ordered fall-back, stickiness, embedding safety)
+export { createRuleRouter } from './rule-router.js';
+export type {
+  RoutePurpose,
+  RouteTarget,
+  RouteStep,
+  RouteNeeds,
+  RouteRule,
+  DataRule,
+  RouteRequest,
+  DropReason,
+  RouteCandidate,
+  RoutePlan,
+  RouteAttempt,
+  RouteAttemptInfo,
+  RouteOutcome,
+  RouteRunOptions,
+  RouteTargetHealth,
+  RuleRouterOptions,
+  RuleRouter,
+} from './rule-router.js';

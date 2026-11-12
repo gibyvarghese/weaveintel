@@ -38,6 +38,8 @@ console.log(decision.selectedModel, decision.reason);
 - **Capability flags** — `getModelCapabilityFlags`, `getModelContextWindowK`, `getModelMaxOutputK`.
 - **Runtime slot & seeds** — `createRuntimeRoutingAdapter`, plus `DEFAULT_ROUTING_POLICIES`, `DEFAULT_MODEL_PRICING`, `DEFAULT_TASK_TYPES`.
 
+- **Rule router** — `createRuleRouter({ targets, rules, dataRule })`: routes held as plain rows. A rule says "for this purpose (chat, agent, judge, summarise, embed) try these models in this order", with needs (capabilities, context size), a cost ceiling and a latency ceiling. A per-tenant data rule lists the providers and regions data may go to. `plan(request)` decides without calling anything and returns every candidate with the reason it was kept or dropped, plus one plain sentence. `run(request, attempt)` calls your function for the chosen model and moves to the next step when it fails, pausing a model that keeps failing (circuit breaker from `@weaveintel/resilience`). A request carrying an `affinityKey` stays with the model that answered first until that model fails. **An embedding route never falls back to a different model**: a step is usable only when it declares the same vector space as the first, and otherwise the request fails with a clear error.
+
 Single entry point: `@weaveintel/routing`.
 
 ## License
