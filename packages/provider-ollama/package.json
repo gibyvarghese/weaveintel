@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/provider-ollama",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Ollama provider for weaveIntel \u2014 local LLMs (Llama, Mistral, Qwen, Phi, Gemma, DeepSeek, etc.)",
   "type": "module",
   "main": "./dist/index.js",

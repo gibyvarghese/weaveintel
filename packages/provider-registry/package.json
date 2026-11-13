@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/provider-registry",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Model providers as data \u2014 a registry that builds chat and embedding models from a plain provider description, with keys fetched at call time, a guarded transport, and adapters for OpenAI-compatible servers, Azure and AWS Bedrock",
   "type": "module",
   "main": "./dist/index.js",
@@ -29,7 +29,7 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@weaveintel/core": "^0.1.3",
+    "@weaveintel/core": "^0.2.0",
     "@weaveintel/resilience": "^0.1.1"
   },
   "devDependencies": {

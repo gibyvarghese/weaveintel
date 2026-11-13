@@ -535,3 +535,21 @@ describe('wrapped provider libraries', () => {
     expect(registry.kinds()).toEqual([{ kind: 'wrapped', label: 'Wrapped library', secretSlots: [{ name: 'apiKey', label: 'API key', required: true }], chat: true, streaming: true, embeddings: false, listsModels: true }]);
   });
 });
+
+describe('the addresses the wave-4 security test reached (S3-SSRF-1/2), with no operator entry', () => {
+  // With no entry, these were ATTEMPTED (the test reported "unreachable"): CGNAT, NAT64 and IPv4-compatible
+  // literals were classed as public, and a name that did not resolve was let through. Each is now refused before
+  // anything is sent — "blocked", and only an operator's exact host-and-port entry opens one.
+  it('refuses CGNAT, NAT64, IPv4-compatible and an unresolvable name as blocked, sending nothing', async () => {
+    const f = await fake();
+    const events: RegistryEvent[] = [];
+    const registry = registryFor(f, { privateEndpoints: [], onEvent: (e) => events.push(e) });
+    for (const baseUrl of ['https://100.64.0.1:9931', 'https://[64:ff9b::7f00:1]:9931', 'https://[::7f00:1]:9931', 'https://pentest-w4-nx.invalid']) {
+      const test = await registry.testConnection(describeProvider(f, { baseUrl }));
+      expect(test, baseUrl).toMatchObject({ ok: false, outcome: 'blocked' });
+      await expect(registry.listModels(describeProvider(f, { baseUrl })), baseUrl).rejects.toMatchObject({ code: 'POLICY_DENIED' });
+    }
+    expect(f.requests).toHaveLength(0);
+    expect(events.filter((e) => e.kind === 'blocked').length).toBeGreaterThanOrEqual(4);
+  });
+});

@@ -1,4 +1,46 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+
+// The network is controlled here. DNS answers from `table` (an unknown name fails, as it would), and the
+// pinned connection is undici's own fetch — mocked to run the guard's connect-time lookup hook and then
+// hand the request to the test's stub. The global fetch is stubbed too, for the enforceHttps:false path.
+const h = vi.hoisted(() => ({
+  table: new Map<string, string[]>([['api.example.com', ['93.184.216.34']], ['example.com', ['93.184.216.34']]]),
+  handler: undefined as undefined | ((url: string, init: RequestInit | undefined) => Response | Promise<Response>),
+  calls: [] as { url: string; init: RequestInit | undefined }[],
+}));
+
+vi.mock('node:dns', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:dns')>();
+  const lookup = (host: string, _o: unknown, cb: (e: NodeJS.ErrnoException | null, a: { address: string; family: number }[]) => void): void => {
+    const list = h.table.get(host);
+    if (list === undefined) {
+      setImmediate(() => cb(Object.assign(new Error(`getaddrinfo ENOTFOUND ${host}`), { code: 'ENOTFOUND' }), []));
+      return;
+    }
+    setImmediate(() => cb(null, list.map((address) => ({ address, family: 4 }))));
+  };
+  return { ...actual, default: { ...actual, lookup }, lookup };
+});
+
+vi.mock('undici', () => {
+  class Agent {
+    constructor(readonly opts: { connect: { lookup: (h: string, o: unknown, cb: (...a: unknown[]) => void) => void } }) {}
+  }
+  const fetch = async (url: string, init: RequestInit & { dispatcher?: Agent }): Promise<Response> => {
+    const host = new URL(url).hostname.replace(/^\[|\]$/g, '');
+    await new Promise<void>((resolve, reject) => {
+      const hook = init.dispatcher?.opts.connect.lookup;
+      if (hook === undefined || /^[\d.]+$|:/.test(host)) return resolve();
+      hook(host, { all: true }, (e: unknown) => (e ? reject(new TypeError('fetch failed', { cause: e })) : resolve()));
+    });
+    h.calls.push({ url, init });
+    const res = await h.handler!(url, init);
+    Object.defineProperty(res, 'url', { value: url });
+    return res;
+  };
+  return { Agent, fetch };
+});
+
 import {
   createHardenedFetch,
   hardenedFetch,
@@ -18,16 +60,18 @@ function installFetchStub(
   handler: (url: string, init: RequestInit | undefined, calls: FetchCall[]) => Response | Promise<Response>,
 ): { restore: () => void; calls: FetchCall[] } {
   const original = globalThis.fetch;
-  const calls: FetchCall[] = [];
+  h.calls.length = 0;
+  h.handler = (url, init) => handler(url, init, h.calls);
   globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
     const u = typeof url === 'string' ? url : url instanceof URL ? url.toString() : url.url;
-    calls.push({ url: u, init });
-    return handler(u, init, calls);
+    h.calls.push({ url: u, init });
+    return handler(u, init, h.calls);
   }) as typeof fetch;
   return {
-    calls,
+    calls: h.calls,
     restore: () => {
       globalThis.fetch = original;
+      h.handler = undefined;
     },
   };
 }
@@ -227,3 +271,46 @@ describe('assertSafeForEgress — standalone', () => {
     ).rejects.toThrow(/standalone/);
   });
 });
+
+describe('hardenedFetch — security test S3 (0.2.0)', () => {
+  let stub: { restore: () => void; calls: FetchCall[] };
+  beforeEach(() => {
+    stub = installFetchStub(() => new Response('ok', { status: 200 }));
+  });
+  afterEach(() => stub.restore());
+
+  it('refuses CGNAT, NAT64 and IPv4-compatible addresses before any connection', async () => {
+    for (const url of ['https://100.64.0.1:9931/', 'https://[64:ff9b::7f00:1]:9931/', 'https://[::7f00:1]:9931/']) {
+      await expect(hardenedFetch(url, {}, DEFAULTS), url).rejects.toThrow(/test-egress/);
+    }
+    expect(stub.calls).toHaveLength(0);
+  });
+
+  it('refuses a name that does not resolve, before any connection', async () => {
+    await expect(hardenedFetch('https://pentest-w4-nx.invalid/', {}, DEFAULTS)).rejects.toThrow(/could not be resolved/);
+    expect(stub.calls).toHaveLength(0);
+  });
+
+  it('refuses loopback unless the caller allows it', async () => {
+    await expect(hardenedFetch('http://127.0.0.1:9931/', {}, DEFAULTS)).rejects.toThrow(/test-egress/);
+    await expect(hardenedFetch('http://127.0.0.1:9931/', {}, { ...DEFAULTS, policy: { allowLoopback: true } })).resolves.toBeInstanceOf(Response);
+  });
+
+  it('connects every redirect hop through the pinned lookup: a hop that resolves to CGNAT at connect time is refused', async () => {
+    let asked = 0;
+    h.table.set('hop.example.com', ['93.184.216.34']);
+    stub.restore();
+    stub = installFetchStub((url) => (url === 'https://api.example.com/start' ? new Response(null, { status: 302, headers: { location: 'https://hop.example.com/x' } }) : new Response('leaked', { status: 200 })));
+    // The check sees a public address; the connection is offered CGNAT.
+    const original = h.table.get('hop.example.com')!;
+    const get = h.table.get.bind(h.table);
+    h.table.get = ((k: string) => (k === 'hop.example.com' ? (asked++ === 0 ? original : ['100.64.0.1']) : get(k))) as typeof h.table.get;
+    try {
+      await expect(hardenedFetch('https://api.example.com/start', {}, DEFAULTS)).rejects.toThrow(/fetch failed/);
+      expect(stub.calls.map((c) => c.url)).toEqual(['https://api.example.com/start']);
+    } finally {
+      h.table.get = get;
+    }
+  });
+});
+

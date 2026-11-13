@@ -1,5 +1,14 @@
 # @weaveintel/provider-registry
 
+## 0.1.2
+
+### Fixed (security test wave 4)
+
+- Depends on `@weaveintel/core` ^0.2.0: with no operator entry, a provider address in CGNAT 100.64/10, NAT64
+  64:ff9b::/96 or IPv4-compatible form, or a name that does not resolve, is now refused as `blocked`
+  (`POLICY_DENIED`) before anything is sent — it was attempted. Redirect hops of a public call are pinned.
+  A test pins all four with `testConnection` and `listModels`.
+
 ## 0.1.1
 
 ### Changed

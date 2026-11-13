@@ -110,9 +110,12 @@ export {
 // redirects manually so each hop is re-validated.
 export {
   type OutboundUrlPolicy,
+  type OutboundLookup,
   assertSafeOutboundUrl,
   followRedirectsSafely,
   validateResolvedAddress,
+  pinnedFetch,
+  pinnedLookup,
 } from './net-guard.js';
 
 // Hardened egress client (Phase 1 — single source of truth for outbound HTTP).

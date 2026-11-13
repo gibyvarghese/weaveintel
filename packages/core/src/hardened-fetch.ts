@@ -21,96 +21,12 @@
  * Depends only on `@weaveintel/core` itself (`net-guard`) + node built-ins.
  */
 
-import dns from 'node:dns';
 import {
   type OutboundUrlPolicy,
   assertSafeOutboundUrl,
   followRedirectsSafely,
-  validateResolvedAddress,
+  pinnedFetch,
 } from './net-guard.js';
-
-/**
- * Phase 5 — TOCTOU DNS-pinning dispatcher.
- *
- * `assertSafeOutboundUrl` resolves DNS once at validation time. Between that
- * resolution and the actual TCP connection, an attacker who controls DNS could
- * rebind the hostname to a private IP — the classic SSRF bypass via DNS
- * rebinding. This factory closes that window.
- *
- * It creates an undici `Agent` with a custom `connect.lookup` hook. Undici
- * calls our hook at connection time (not earlier), so the IP we validate is
- * exactly the IP undici connects to. A rebind between the two resolutions
- * becomes impossible.
- *
- * Graceful degradation: if undici is unavailable (non-Node environments or
- * bundlers that strip it) the function returns `undefined` and callers fall
- * back to the pre-TOCTOU behaviour — still protected by the upfront
- * `assertSafeOutboundUrl` check.
- */
-async function createSafeDispatcher(
-  policy: OutboundUrlPolicy,
-): Promise<{ dispatcher: unknown } | undefined> {
-  let AgentCtor: (new (opts: Record<string, unknown>) => unknown) | undefined;
-  try {
-    const undici = await import('undici') as { Agent: new (opts: Record<string, unknown>) => unknown };
-    AgentCtor = undici.Agent;
-  } catch {
-    return undefined; // undici unavailable — graceful degradation
-  }
-
-  // Undici's connect.lookup may ask for either a single resolved address or
-  // all candidates (`all:true`). Handle both callback shapes and validate each
-  // candidate so we never pass an undefined/unsafe address to the socket layer.
-  const lookup = (
-    hostname: string,
-    options: unknown,
-    callback: (...args: unknown[]) => void,
-  ): void => {
-    const wantsAll =
-      typeof options === 'object' &&
-      options !== null &&
-      'all' in options &&
-      (options as { all?: boolean }).all === true;
-
-    if (wantsAll) {
-      dns.lookup(hostname, { all: true }, (err, addresses) => {
-        if (err) {
-          callback(err);
-          return;
-        }
-        try {
-          for (const entry of addresses) {
-            validateResolvedAddress(entry.address, policy);
-          }
-          callback(null, addresses);
-        } catch (e) {
-          callback(e as NodeJS.ErrnoException);
-        }
-      });
-      return;
-    }
-
-    dns.lookup(hostname, (err, address, family) => {
-      if (err) {
-        callback(err);
-        return;
-      }
-      if (!address || typeof address !== 'string') {
-        callback(new TypeError(`invalid DNS lookup result for host "${hostname}"`) as NodeJS.ErrnoException);
-        return;
-      }
-      try {
-        validateResolvedAddress(address, policy);
-        callback(null, address, family);
-      } catch (e) {
-        callback(e as NodeJS.ErrnoException);
-      }
-    });
-  };
-
-  const agent = new AgentCtor({ connect: { lookup } });
-  return { dispatcher: agent };
-}
 
 export interface HardenedFetchOptions {
   /** Outer wall-clock timeout in ms. Default: 60_000. Use 0 to disable (streaming). */
@@ -234,36 +150,21 @@ export async function hardenedFetch(
 
   if (enforceHttps) await assertSafeOutboundUrl(input, policy);
 
-  // Phase 5 — attach a DNS-pinning dispatcher so the IP validated above is the
-  // same IP undici connects to, closing the TOCTOU DNS-rebinding window.
-  // Gracefully absent when undici is unavailable.
-  const safeDispatcher = enforceHttps ? await createSafeDispatcher(policy) : undefined;
-
   const callerSignal = (init?.signal ?? null) as AbortSignal | null;
   const signal = composeSignal(callerSignal, timeoutMs);
 
-  const composed: RequestInit & { redirect?: RequestRedirect; dispatcher?: unknown } = {
+  const composed: RequestInit & { redirect?: RequestRedirect } = {
     ...(init ?? {}),
     redirect: opts.redirect ?? 'manual',
     ...(signal ? { signal } : {}),
-    ...(safeDispatcher ?? {}),
   };
 
-  // When a DNS-pinning dispatcher is attached (Phase 5) it was created from the `undici` PACKAGE, and
-  // it must be driven by THAT undici's own `fetch`. Node's built-in global `fetch` is a *different*
-  // undici build and rejects a foreign dispatcher with `UND_ERR_INVALID_ARG` ("invalid onRequestStart
-  // method"), which surfaces to callers as an opaque "fetch failed" and silently disables every
-  // outbound request (e.g. all AI-provider calls). Use undici's own fetch whenever a dispatcher is
-  // present; fall back to the global fetch when none was attached (undici unavailable / enforceHttps off).
-  let resp0: Response;
-  if ((composed as { dispatcher?: unknown }).dispatcher !== undefined) {
-    const { fetch: undiciFetch } = (await import('undici')) as unknown as { fetch: typeof fetch };
-    resp0 = await undiciFetch(input, composed as RequestInit);
-  } else {
-    resp0 = await fetch(input, composed as RequestInit);
-  }
+  // The connection is pinned to the address that was checked (net-guard `pinnedFetch`, a connect-time
+  // lookup hook on undici's own fetch), closing the DNS-rebinding window — on the first request and,
+  // inside `followRedirectsSafely`, on every redirect hop.
+  const resp0 = enforceHttps ? await pinnedFetch(input, composed, policy) : await fetch(input, composed as RequestInit);
   const resp = enforceHttps
-    ? await followRedirectsSafely(resp0, init, signal, policy)
+    ? await followRedirectsSafely(resp0, init, signal, policy, input)
     : resp0;
 
   // When no size cap is requested (maxBytes <= 0 — the streaming / escape-hatch
