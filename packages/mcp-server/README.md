@@ -55,6 +55,54 @@ const server = weaveMCPServer(config, {
 (what `weaveMCPClient` forwards). It believes the caller, so the server refuses to start with it
 on anything but a stdio transport; the built-in connector servers use it for in-process agents.
 
+## A remote endpoint for outside assistants (2025-11-25 and 2026-07-28)
+
+`weaveMcpEndpoint` serves one stateless HTTP endpoint that both protocol eras can use: clients that
+open with `initialize` (2025-11-25 and older) and clients that send `server/discover` and name their
+revision on every request (2026-07-28). Your HTTP layer verifies the bearer token and hands over only
+what it verified; the endpoint never reads identity or scopes from the caller's params.
+
+```ts
+import { weaveContext } from '@weaveintel/core';
+import { weaveMcpEndpoint, urlElicitationRequired, mcpText } from '@weaveintel/mcp-server';
+
+const endpoint = weaveMcpEndpoint({
+  serverInfo: { name: 'my-app', version: '1.0.0' },
+  contextFactory: ({ authInfo, signal }) => {
+    if (!authInfo) throw new Error('no verified caller'); // -> 401 with the resource_metadata challenge
+    return weaveContext({ userId: String(authInfo.extra?.userId), signal });
+  },
+  resourceMetadataUrl: 'https://app.example/.well-known/oauth-protected-resource/mcp',
+  tools: [
+    {
+      tool: { name: 'note_read', description: 'Read a note.', inputSchema: { type: 'object' }, annotations: { readOnlyHint: true } },
+      scopes: ['notes.read'], // listed and callable only when the token carries these
+      handler: async ({ args }) => mcpText(await readNote(args)),
+    },
+    {
+      tool: { name: 'note_delete', description: 'Delete a note.', inputSchema: { type: 'object' }, annotations: { destructiveHint: true } },
+      scopes: ['notes.write'], // without it: 403 insufficient_scope, so the client can step up
+      handler: async ({ args }) => mcpText(await deleteNote(args)),
+    },
+  ],
+  // Runs before every call. Bind the person's confirmation to `argsHash`, held on the server.
+  confirm: async ({ name, argsHash, ctx }) =>
+    (await grants.has(ctx.userId, name, argsHash))
+      ? { kind: 'proceed' }
+      : urlElicitationRequired({ elicitationId: id, url: `https://app.example/confirm/${id}`, message: 'Confirm in the app.' }),
+});
+
+// Node: verify the bearer first, then
+await endpoint.serve(req, res, { authInfo });
+```
+
+- **Scopes to tools.** Every tool must name its scopes (`[]` opens it to any authenticated caller).
+- **Manifest hash.** `tools/list` carries `_meta["io.weaveintel/manifest"].hash` for the list this
+  caller saw. A call that sends back a hash the list no longer matches is refused, so a changed tool
+  description cannot ride on an earlier agreement.
+- **Confirmation by URL.** 2025-11-25 clients get error -32042 (URL elicitation required); 2026-07-28
+  clients get `input_required`. A client's "accept" is passed to `confirm` as a hint only.
+
 ## What's in the box
 
 | Export | What it does |
@@ -65,6 +113,11 @@ on anything but a stdio transport; the built-in connector servers use it for in-
 | `createMCPStreamableHttpServerTransport()` | Serve over streamable HTTP |
 | `weaveRealMCPTransport(opts)` | Batteries-included real HTTP transport server |
 | `handleMcpMessage`, `mcpText`, `MCP_PROTOCOL_VERSION` | Transport-free JSON-RPC core + helpers |
+| `weaveMcpEndpoint(opts)` | Stateless remote endpoint: both protocol eras, scope-to-tool, manifest hash, URL elicitation |
+| `negotiateMcpProtocolVersion`, `MCP_SUPPORTED_PROTOCOL_VERSIONS` | Per-request revision negotiation |
+| `manifestHash`, `parameterHash`, `canonicalJson` | Stable fingerprints of a tool list and of one call |
+| `missingScopes`, `bearerChallenge`, `insufficientScopeChallenge` | Scope checks and RFC 6750 challenges |
+| `urlElicitationRequired`, `MCP_ERROR_URL_ELICITATION_REQUIRED` | Ask the person to confirm at a URL |
 
 ## License
 
