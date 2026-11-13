@@ -40,7 +40,7 @@
     "guardrails:eval": "npx tsx src/eval/runner.ts"
   },
   "dependencies": {
-    "@weaveintel/core": "^0.1.1",
+    "@weaveintel/core": "^0.1.1 || ^0.2.0",
     "@weaveintel/persistence": "^0.1.1"
   },
   "devDependencies": {
