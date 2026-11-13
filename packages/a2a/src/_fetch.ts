@@ -3,7 +3,7 @@
  * Phase 1: thin closure over `@weaveintel/core`'s `createHardenedFetch`.
  */
 
-import { createHardenedFetch } from '@weaveintel/core';
+import { createHardenedFetch, assertSafeOutboundUrl, pinnedFetch, type OutboundUrlPolicy } from '@weaveintel/core';
 
 export interface A2AFetchOptions {
   timeoutMs?: number;
@@ -31,3 +31,19 @@ export async function a2aFetch(
 }
 
 export const a2aFetchStream = client.fetchStream;
+
+/**
+ * POST a push notification. The URL has been through `validatePushNotificationConfig`'s checks (the caller
+ * passes the same outbound policy); here it is checked once more, the connection is pinned to the checked
+ * address, and a redirect is returned as-is (never followed): a webhook cannot bounce the push elsewhere.
+ */
+export async function a2aPushFetch(
+  url: string,
+  init: RequestInit,
+  policy: OutboundUrlPolicy,
+  timeoutMs = 10_000,
+): Promise<Response> {
+  const p: OutboundUrlPolicy = { ...policy, errorTag: 'a2a-push' };
+  await assertSafeOutboundUrl(url, p);
+  return pinnedFetch(url, { ...init, redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) }, p);
+}
