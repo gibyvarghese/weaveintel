@@ -31,6 +31,7 @@ export {
   SSE_KEEPALIVE,
   type A2ADispatchRequest,
   type A2ADispatchResult,
+  type A2ADispatcherOptions,
 } from './a2a-server.js';
 
 // ── JSON-RPC 2.0 codec ─────────────────────────────────────────────────────────
@@ -66,6 +67,7 @@ export {
   deliverToWebhook,
   deliverPushNotificationsForTask,
   type PushDeliveryPayload,
+  type PushDeliveryOptions,
 } from './push-notification-delivery.js';
 
 // ── Card Signer (Phase 5) ──────────────────────────────────────────────────────
@@ -88,3 +90,62 @@ export {
 
 // ── Fetch options ──────────────────────────────────────────────────────────────
 export type { A2AFetchOptions } from './_fetch.js';
+
+// ── A2A v0.3 compatibility fields (0.2.0) ──────────────────────────────────────
+export {
+  withV03Compat,
+  checkV03Card,
+  A2A_V03_PROTOCOL_VERSION,
+  type A2AV03Transport,
+  type AgentInterfaceV03,
+  type AgentCardV03Fields,
+  type DualVersionAgentCard,
+  type WithV03CompatOptions,
+} from './card-v03.js';
+
+// ── Card signatures in the A2A wire form, verified against a JWKS (0.2.0) ──────
+export {
+  canonicalizeJson,
+  signAgentCardJws,
+  verifyAgentCardJws,
+  exportCardSigningJwk,
+  buildCardJwks,
+  type AgentCardJwsSignature,
+  type CardSigningJwk,
+  type CardJwks,
+  type CardJwsFailure,
+  type CardJwsVerification,
+  type SignCardJwsOptions,
+  type VerifyCardJwsOptions,
+} from './card-jws.js';
+
+// ── Scoped (tenant-isolated) task store port, in-memory and Postgres (0.2.0) ───
+export {
+  createInMemoryScopedA2ATaskStore,
+  bindA2ATaskScope,
+  newA2ATaskId,
+  A2A_LIST_MAX_PAGE_SIZE,
+  type A2ATaskScope,
+  type A2AScopedTaskStore,
+} from './task-store-scoped.js';
+
+export {
+  createPostgresA2ATaskStore,
+  a2aTaskPostgresDdl,
+  type A2APgQueryable,
+  type A2APostgresTaskStoreOptions,
+} from './task-store-postgres.js';
+
+export {
+  a2aScopedTaskStoreContract,
+  type A2AScopedTaskStoreContractApi,
+} from './scoped-task-store-contract.js';
+
+// ── Push configs through the outbound guard (0.2.0) ────────────────────────────
+export {
+  validatePushNotificationConfig,
+  A2APushConfigError,
+  A2A_PUSH_URL_MAX_LENGTH,
+  type A2APushPolicy,
+  type A2APushConfigErrorCode,
+} from './push-guard.js';

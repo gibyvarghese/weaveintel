@@ -50,6 +50,7 @@ import { isTerminalA2AState } from './task-store.js';
 import type { A2APushNotificationStore } from './push-notification-store.js';
 import type { JwtValidatorFn } from './jwt-validator.js';
 import { deliverPushNotificationsForTask } from './push-notification-delivery.js';
+import { validatePushNotificationConfig, A2APushConfigError, type A2APushPolicy } from './push-guard.js';
 
 // ─── Request / Response shapes ────────────────────────────────────────────────
 
@@ -64,6 +65,15 @@ export type A2ADispatchResult =
   | { readonly kind: 'json'; readonly status: number; readonly data: unknown }
   | { readonly kind: 'stream'; readonly events: AsyncIterable<A2AStreamEvent>; readonly taskId: string; readonly contextId: string };
 
+export interface A2ADispatcherOptions {
+  /**
+   * Where push notifications may go (allow list, outbound guard settings). Every
+   * CreateTaskPushNotificationConfig is checked against it before anything is stored, and every delivery
+   * again. Absent: no allow list, but the outbound guard still applies (private and loopback refused).
+   */
+  readonly pushPolicy?: A2APushPolicy;
+}
+
 // ─── Dispatcher ───────────────────────────────────────────────────────────────
 
 /**
@@ -73,16 +83,28 @@ export type A2ADispatchResult =
  * @param store        - Optional task store; enables GetTask, ListTasks, SubscribeToTask.
  * @param pushStore    - Optional push store; enables push notification CRUD methods.
  * @param jwtValidator - Optional JWT validator; enforces Bearer token auth on all requests.
+ * @param options      - Push policy (see `A2ADispatcherOptions`).
+ *
+ * For tenant isolation pass one scope's view of a scoped store (`bindA2ATaskScope`), built per request from
+ * the verified caller: GetTask, ListTasks and CreateTaskPushNotificationConfig then see only that scope.
  */
 export function createA2ADispatcher(
   impl: A2AServer,
   store?: A2ATaskStore,
   pushStore?: A2APushNotificationStore,
   jwtValidator?: JwtValidatorFn,
+  options: A2ADispatcherOptions = {},
 ): (
   ctx: ExecutionContext,
   req: A2ADispatchRequest,
 ) => Promise<A2ADispatchResult> {
+  const pushDelivery = options.pushPolicy ? { policy: options.pushPolicy } : {};
+  // A push config belongs to a task; with a (scoped) store, only a caller who can see the task reaches it.
+  const requireVisibleTask = async (taskId: string): Promise<void> => {
+    if (store && !(await store.load(taskId))) {
+      throw new A2AJsonRpcError(A2A_ERROR_CODES.TASK_NOT_FOUND, `Task not found: ${taskId}`);
+    }
+  };
   return async (ctx, req) => {
     if (req.method !== 'POST') {
       return {
@@ -135,7 +157,7 @@ export function createA2ADispatcher(
           const task = await impl.handleMessage(ctx, sendParams);
           // Trigger push delivery after task completes
           if (pushStore && isTerminalA2AState(task.status.state)) {
-            void deliverPushNotificationsForTask(pushStore, task).catch(() => {});
+            void deliverPushNotificationsForTask(pushStore, task, pushDelivery).catch(() => {});
           }
           return { kind: 'json', status: 200, data: makeRpcSuccess(id, task) };
         }
@@ -164,14 +186,14 @@ export function createA2ADispatcher(
         }
 
         case A2A_METHODS.GET_TASK: {
-          if (!impl.getTask) {
+          if (!impl.getTask && !store) {
             throw new A2AJsonRpcError(A2A_ERROR_CODES.UNSUPPORTED_OPERATION, 'GetTask is not implemented by this agent');
           }
           const p = (params ?? {}) as Record<string, unknown>;
           const taskId = stringParam(p, 'id', id);
           const historyLength = typeof p['historyLength'] === 'number' ? p['historyLength'] : undefined;
           void historyLength; // forward to store in Phase 3; ignored here
-          const task = await impl.getTask(ctx, taskId);
+          const task = impl.getTask ? await impl.getTask(ctx, taskId) : await store!.load(taskId);
           if (!task) {
             throw new A2AJsonRpcError(A2A_ERROR_CODES.TASK_NOT_FOUND, `Task not found: ${taskId}`);
           }
@@ -179,7 +201,7 @@ export function createA2ADispatcher(
         }
 
         case A2A_METHODS.LIST_TASKS: {
-          if (!impl.listTasks) {
+          if (!impl.listTasks && !store) {
             throw new A2AJsonRpcError(A2A_ERROR_CODES.UNSUPPORTED_OPERATION, 'ListTasks is not implemented by this agent');
           }
           const p = (params ?? {}) as Record<string, unknown>;
@@ -190,7 +212,7 @@ export function createA2ADispatcher(
             pageToken: p['pageToken'] as string | undefined,
             statusTimestampAfter: p['statusTimestampAfter'] as string | undefined,
           };
-          const page = await impl.listTasks(ctx, filter);
+          const page = impl.listTasks ? await impl.listTasks(ctx, filter) : await store!.list(filter);
           return { kind: 'json', status: 200, data: makeRpcSuccess(id, page) };
         }
 
@@ -251,6 +273,17 @@ export function createA2ADispatcher(
           if (!rawConfig || typeof rawConfig.url !== 'string') {
             throw new A2AJsonRpcError(A2A_ERROR_CODES.INVALID_PARAMS, 'CreateTaskPushNotificationConfig: params.config.url is required');
           }
+          // The task must be one this caller can see (with a scoped store, one of its own).
+          await requireVisibleTask(taskId);
+          // The webhook goes through the outbound guard (and the allow list) before anything is stored.
+          try {
+            await validatePushNotificationConfig(rawConfig, options.pushPolicy ?? {});
+          } catch (err) {
+            if (err instanceof A2APushConfigError) {
+              throw new A2AJsonRpcError(A2A_ERROR_CODES.INVALID_PARAMS, `CreateTaskPushNotificationConfig: ${err.message}`);
+            }
+            throw err;
+          }
           const entry = impl.createPushConfig
             ? await impl.createPushConfig(ctx, taskId, rawConfig)
             : await pushStore.create(taskId, rawConfig);
@@ -266,6 +299,7 @@ export function createA2ADispatcher(
           }
           const p = (params ?? {}) as Record<string, unknown>;
           const taskId = stringParam(p, 'taskId', id);
+          await requireVisibleTask(taskId);
           const configId = stringParam(p, 'pushConfigId', id);
           const entry = impl.getPushConfig
             ? await impl.getPushConfig(ctx, taskId, configId)
@@ -285,6 +319,7 @@ export function createA2ADispatcher(
           }
           const p = (params ?? {}) as Record<string, unknown>;
           const taskId = stringParam(p, 'taskId', id);
+          await requireVisibleTask(taskId);
           const configs = impl.listPushConfigs
             ? await impl.listPushConfigs(ctx, taskId)
             : await pushStore.list(taskId);
@@ -300,6 +335,7 @@ export function createA2ADispatcher(
           }
           const p = (params ?? {}) as Record<string, unknown>;
           const taskId = stringParam(p, 'taskId', id);
+          await requireVisibleTask(taskId);
           const configId = stringParam(p, 'pushConfigId', id);
           const deleted = impl.deletePushConfig
             ? await impl.deletePushConfig(ctx, taskId, configId)

@@ -170,6 +170,7 @@ describe('[PUSH-DELIVER] webhook delivery', () => {
     const result = await deliverToWebhook(
       { url: webhookUrl, pushConfigId: 'cfg-1', taskId: task.id, createdAt: new Date().toISOString() },
       { task, timestamp: new Date().toISOString() },
+      { policy: { outbound: { allowLoopback: true } } }, // a local test receiver: loopback is refused unless allowed
     );
 
     expect(result.delivered).toBe(true);
@@ -187,6 +188,7 @@ describe('[PUSH-DELIVER] webhook delivery', () => {
     const result = await deliverToWebhook(
       { url: webhookUrl, token: 'my-secret', pushConfigId: 'cfg-hmac', taskId: task.id, createdAt: new Date().toISOString() },
       { task, timestamp: new Date().toISOString() },
+      { policy: { outbound: { allowLoopback: true } } }, // a local test receiver: loopback is refused unless allowed
     );
 
     expect(result.delivered).toBe(true);
@@ -205,6 +207,7 @@ describe('[PUSH-DELIVER] webhook delivery', () => {
         authentication: { schemes: ['bearer'], credentials: 'my-bearer-token' },
       },
       { task, timestamp: new Date().toISOString() },
+      { policy: { outbound: { allowLoopback: true } } }, // a local test receiver: loopback is refused unless allowed
     );
 
     const received = receivedBodies[0]!;
@@ -235,7 +238,7 @@ describe('[PUSH-DELIVER] webhook delivery', () => {
     await store.create('task-multi', { url: webhookUrl });
 
     const task = makeTask('task-multi');
-    await deliverPushNotificationsForTask(store, task);
+    await deliverPushNotificationsForTask(store, task, { policy: { outbound: { allowLoopback: true } } });
 
     expect(receivedBodies).toHaveLength(2);
   });
@@ -494,7 +497,13 @@ describe('[DISPATCHER] push notification CRUD', () => {
 
   it('full push CRUD lifecycle with push store', async () => {
     const pushStore = createInMemoryPushNotificationStore();
-    const dispatch = createA2ADispatcher(makeMinimalServer(), createInMemoryA2ATaskStore(), pushStore);
+    // 0.2.0: a push config needs a task the store holds, and its webhook passes the outbound guard
+    // (example.com resolved by a fixed test resolver, so no DNS is asked).
+    const taskStore = createInMemoryA2ATaskStore();
+    await taskStore.save(makeTask('task-push'));
+    const dispatch = createA2ADispatcher(makeMinimalServer(), taskStore, pushStore, undefined, {
+      pushPolicy: { outbound: { lookup: (_h, cb) => cb(null, [{ address: '93.184.216.34', family: 4 }]) } },
+    });
 
     // Create
     const createBody = rpcBody(A2A_METHODS.CREATE_PUSH_CONFIG, {
@@ -725,10 +734,12 @@ describe('[SEC] security: push notification delivery', () => {
       await deliverToWebhook(
         { url, token: 'secret', pushConfigId: 'p1', taskId: 'task-1', createdAt: '' },
         { task: makeTask('task-1'), timestamp: '2024-01-01T00:00:00.000Z' },
+        { policy: { outbound: { allowLoopback: true } } }, // a local test receiver: loopback is refused unless allowed
       );
       await deliverToWebhook(
         { url, token: 'secret', pushConfigId: 'p2', taskId: 'task-2', createdAt: '' },
         { task: makeTask('task-2'), timestamp: '2024-01-01T00:00:00.000Z' },
+        { policy: { outbound: { allowLoopback: true } } }, // a local test receiver: loopback is refused unless allowed
       );
 
       expect(sigs).toHaveLength(2);

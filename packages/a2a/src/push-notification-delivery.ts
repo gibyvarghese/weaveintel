@@ -14,9 +14,12 @@
  *   Body: { task: A2ATask, timestamp: ISO-8601 }
  *
  * Safety:
- *   - SSRF guard via `assertHttpsOrLoopback` before any HTTP call
- *   - RFC 1918 / loopback / link-local blocked (configurable)
- *   - Retry: 3 attempts, 1 s / 2 s / 4 s exponential backoff
+ *   - The config goes through `validatePushNotificationConfig` (push-guard.ts) before every delivery: https
+ *     only, the allow list when one is given, and the core outbound guard (every resolved address public;
+ *     private, loopback, link-local and metadata refused). Loopback is refused unless the caller's policy
+ *     allows it (a local test receiver).
+ *   - The connection is pinned to the checked address, and a redirect is never followed.
+ *   - Retry: 3 retries, 1 s / 2 s / 4 s backoff (configurable)
  *   - Non-blocking: delivery errors are logged, never surfaced to task callers
  *
  * Usage:
@@ -28,7 +31,8 @@
 
 import type { A2ATask, A2APushNotificationConfigEntry } from '@weaveintel/core';
 import type { A2APushNotificationStore } from './push-notification-store.js';
-import { assertHttpsOrLoopback } from './_fetch.js';
+import { a2aPushFetch } from './_fetch.js';
+import { validatePushNotificationConfig, type A2APushPolicy } from './push-guard.js';
 
 // ─── Delivery payload ─────────────────────────────────────────────────────────
 
@@ -54,7 +58,8 @@ async function attemptDelivery(
   config: A2APushNotificationConfigEntry,
   body: string,
   signature: string | null,
-): Promise<{ ok: boolean; status?: number; error?: string }> {
+  policy: A2APushPolicy,
+): Promise<{ ok: boolean; status?: number; error?: string; final?: boolean }> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'A2A-Version': '1.0',
@@ -71,12 +76,11 @@ async function attemptDelivery(
   }
 
   try {
-    const resp = await fetch(config.url, {
-      method: 'POST',
-      headers,
-      body,
-      signal: AbortSignal.timeout(10_000),
-    });
+    const resp = await a2aPushFetch(config.url, { method: 'POST', headers, body }, policy.outbound ?? {});
+    try { await resp.body?.cancel(); } catch { /* ignore */ }
+    if (resp.status >= 300 && resp.status < 400) {
+      return { ok: false, status: resp.status, error: `HTTP ${resp.status} redirect refused (pushes never follow a redirect)`, final: true };
+    }
     return { ok: resp.ok, status: resp.status };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -87,13 +91,23 @@ async function attemptDelivery(
 
 const RETRY_DELAYS_MS = [1_000, 2_000, 4_000] as const;
 
+export interface PushDeliveryOptions {
+  /** The push policy (allow list, outbound guard settings). Default: no allow list, loopback refused. */
+  readonly policy?: A2APushPolicy;
+  /** Delays between attempts; its length is the number of retries. Default 1 s, 2 s, 4 s. */
+  readonly retryDelaysMs?: readonly number[];
+}
+
 export async function deliverToWebhook(
   config: A2APushNotificationConfigEntry,
   payload: PushDeliveryPayload,
+  opts: PushDeliveryOptions = {},
 ): Promise<{ delivered: boolean; attempts: number; lastError?: string }> {
-  // SSRF guard — block RFC 1918, loopback, metadata endpoints
+  const policy = opts.policy ?? {};
+  const delays = opts.retryDelaysMs ?? RETRY_DELAYS_MS;
+  // SSRF guard — the same checks as at creation: allow list, https, every resolved address public
   try {
-    await assertHttpsOrLoopback(config.url);
+    await validatePushNotificationConfig(config, policy);
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     return { delivered: false, attempts: 0, lastError: `SSRF guard blocked URL: ${reason}` };
@@ -112,17 +126,20 @@ export async function deliverToWebhook(
   }
 
   let lastError: string | undefined;
-  for (let attempt = 0; attempt < RETRY_DELAYS_MS.length + 1; attempt++) {
-    const result = await attemptDelivery(config, body, signature);
+  let attempts = 0;
+  for (let attempt = 0; attempt < delays.length + 1; attempt++) {
+    attempts = attempt + 1;
+    const result = await attemptDelivery(config, body, signature, policy);
     if (result.ok) {
-      return { delivered: true, attempts: attempt + 1 };
+      return { delivered: true, attempts };
     }
     lastError = result.error ?? `HTTP ${result.status}`;
-    if (attempt < RETRY_DELAYS_MS.length) {
-      await new Promise<void>((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]));
+    if (result.final) break;
+    if (attempt < delays.length) {
+      await new Promise<void>((r) => setTimeout(r, delays[attempt]));
     }
   }
-  return { delivered: false, attempts: RETRY_DELAYS_MS.length + 1, lastError };
+  return { delivered: false, attempts, ...(lastError !== undefined ? { lastError } : {}) };
 }
 
 // ─── High-level: deliver to all registered configs for a task ─────────────────
@@ -137,6 +154,7 @@ export async function deliverToWebhook(
 export async function deliverPushNotificationsForTask(
   pushStore: A2APushNotificationStore,
   task: A2ATask,
+  opts: PushDeliveryOptions = {},
 ): Promise<void> {
   let configs: readonly A2APushNotificationConfigEntry[];
   try {
@@ -155,7 +173,7 @@ export async function deliverPushNotificationsForTask(
   // Fire all deliveries concurrently — errors are caught individually
   await Promise.allSettled(
     configs.map((config) =>
-      deliverToWebhook(config, payload).catch(() => {}),
+      deliverToWebhook(config, payload, opts).catch(() => {}),
     ),
   );
 }
