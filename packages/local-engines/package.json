@@ -1,0 +1,36 @@
+{
+  "name": "@weaveintel/local-engines",
+  "version": "0.1.0",
+  "description": "Browser-safe local model engines: the engine contract, a capability probe, a fallback chain walker that ends at a hosted step, routing-ticket hash checks, a deterministic stub engine and a feature-detected Chrome built-in AI adapter.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.6"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.spec.*",
+    "!dist/test-fixtures.*"
+  ],
+  "license": "MIT"
+}
