@@ -40,6 +40,25 @@ console.log(await clock.execute({}, ctx));
 
 Subpath entry points: `@weaveintel/core/models`, `/contracts`, `/plugins`, `/capability-packs`, `/i18n`.
 
+### Outbound HTTP
+
+`hardenedFetch` validates each redirect and rejects cross-origin redirects by
+default. A trusted host may opt in with `allowCrossOriginRedirects`, but only
+bodyless GET or HEAD requests can cross origins and caller headers are removed.
+Manual and error redirect modes do not follow redirects. Existing callers
+depending on cross-origin redirects or custom headers must adjust their flow.
+
+Non-loopback HTTP and private-network access require separate trusted-policy
+opt-ins (`allowInsecureHttp` and `allowPrivateNetwork`). Both broaden network
+access; insecure HTTP exposes payloads and credentials. Use an `allowedHosts`
+list and HTTPS wherever possible. Known metadata addresses remain blocked even
+when private networking is enabled.
+
+When the optional `undici` package is available, connection-time DNS validation
+also protects against rebinding between the initial check and connection.
+Without it, the client falls back to global fetch and only performs the initial
+DNS check; that fallback does not provide equivalent rebinding protection.
+
 ## License
 
 MIT.

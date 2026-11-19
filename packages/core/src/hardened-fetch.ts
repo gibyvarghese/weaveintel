@@ -121,7 +121,7 @@ export interface HardenedFetchOptions {
   enforceHttps?: boolean;
   /** Outbound URL policy forwarded to the SSRF guard. */
   policy?: OutboundUrlPolicy;
-  /** Override the `redirect` mode. Default: 'manual' so the guard can re-validate. */
+  /** Follow validated redirects (default), return the first redirect, or reject it. */
   redirect?: RequestRedirect;
 }
 
@@ -227,6 +227,7 @@ export async function hardenedFetch(
   const maxBytes = opts.maxBytes ?? DEFAULT_MAX_BYTES;
   const enforceHttps = opts.enforceHttps ?? true;
   const errorTag = opts.errorTag;
+  const redirect = opts.redirect ?? init?.redirect ?? (enforceHttps ? 'follow' : 'manual');
   const policy: OutboundUrlPolicy = {
     ...(opts.policy ?? {}),
     errorTag,
@@ -244,7 +245,7 @@ export async function hardenedFetch(
 
   const composed: RequestInit & { redirect?: RequestRedirect; dispatcher?: unknown } = {
     ...(init ?? {}),
-    redirect: opts.redirect ?? 'manual',
+    redirect: enforceHttps ? 'manual' : redirect,
     ...(signal ? { signal } : {}),
     ...(safeDispatcher ?? {}),
   };
@@ -262,9 +263,15 @@ export async function hardenedFetch(
   } else {
     resp0 = await fetch(input, composed as RequestInit);
   }
-  const resp = enforceHttps
-    ? await followRedirectsSafely(resp0, init, signal, policy)
-    : resp0;
+  let resp = resp0;
+  if (enforceHttps && redirect === 'error'
+    && resp0.status >= 300 && resp0.status < 400 && resp0.status !== 304 && resp0.headers.has('location')) {
+    try { await resp0.body?.cancel(); } catch { /* ignore */ }
+    throw new Error(`${errorTag}: redirect is not allowed`);
+  }
+  if (enforceHttps && redirect === 'follow') {
+    resp = await followRedirectsSafely(resp0, init, signal, policy, input);
+  }
 
   // When no size cap is requested (maxBytes <= 0 — the streaming / escape-hatch
   // path), return the response untouched. Re-wrapping exists only to install the

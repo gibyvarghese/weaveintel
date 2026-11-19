@@ -32,6 +32,10 @@ export {
   type A2ADispatchRequest,
   type A2ADispatchResult,
 } from './a2a-server.js';
+export {
+  createAuthenticatedA2AMessageDispatcher,
+  type AuthenticatedA2AMessageOptions,
+} from './authenticated-message-dispatcher.js';
 
 // ── JSON-RPC 2.0 codec ─────────────────────────────────────────────────────────
 export {

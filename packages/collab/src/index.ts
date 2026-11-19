@@ -26,6 +26,21 @@ export {
   type RgaSnapshot,
 } from './rga.js';
 
+export {
+  createCollaborationReceiver,
+  type CollaborationDocumentScope,
+  type CollaborationDelivery,
+  type CollaborationReceiveResult,
+  type CollaborationReceiverOptions,
+  type CollaborationReceiver,
+} from './document-receiver.js';
+
+export {
+  createRgaSyncJournal,
+  createBlockSyncJournal,
+  type SyncJournal,
+} from './sync-journal.js';
+
 // The co-editing PORT — the seam every collaborator talks to. The RGA above is its
 // zero-dependency reference adapter (`createRgaDoc`); a different engine is a different
 // adapter behind this same interface. See docs/adapters.md.

@@ -25,6 +25,10 @@ import type { ActionExecutionContext, LiveAgent } from '@weaveintel/live-agents'
 import type { ExecutionContext } from '@weaveintel/core';
 import type { HandlerContext } from '../handler-registry.js';
 
+vi.mock('../_fetch.js', () => ({
+  mcpFetch: (url: string, init: RequestInit) => globalThis.fetch(url, init),
+}));
+
 import { agenticCodeInterpreterHandler } from './agentic-code-interpreter.js';
 import { agenticComputerUseHandler } from './agentic-computer-use.js';
 import { agenticBrowserHandler } from './agentic-browser.js';

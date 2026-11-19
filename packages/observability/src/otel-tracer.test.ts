@@ -6,6 +6,11 @@ import {
   weaveOtlpSink,
 } from './otel-tracer.js';
 
+vi.mock('@weaveintel/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@weaveintel/core')>();
+  return { ...actual, hardenedFetch: (url: string, init?: RequestInit) => fetch(url, init) };
+});
+
 // ─── GEN_AI constants ────────────────────────────────────────────────────────
 
 describe('GEN_AI semantic convention constants', () => {
@@ -108,10 +113,13 @@ describe('createOtelTracer', () => {
 
 describe('weaveOtlpSink', () => {
   it('exports a sink that calls flush without throwing when no endpoint is reachable', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockRejectedValue(new Error('unreachable'));
+    const onExportError = vi.fn();
     const sink = weaveOtlpSink({
       endpoint: 'http://localhost:19999', // nothing listening here
       serviceName: 'test',
       exportTimeoutMs: 100,
+      onExportError,
     });
     const span: import('@weaveintel/core').SpanRecord = {
       traceId: 'trace-abc',
@@ -131,6 +139,21 @@ describe('weaveOtlpSink', () => {
     sink.record(span);
     // flush is best-effort — should resolve even when endpoint is unreachable
     await expect(sink.flush?.()).resolves.toBeUndefined();
+    expect(onExportError).toHaveBeenCalledOnce();
+    fetchSpy.mockRestore();
+  });
+
+  it('reports an unsuccessful HTTP export', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(new Response(null, { status: 503 }));
+    const onExportError = vi.fn();
+    const sink = weaveOtlpSink({ endpoint: 'http://localhost:19999', onExportError });
+    sink.record({
+      traceId: 't', spanId: 's', name: 'test',
+      startTime: 1, endTime: 2, status: 'ok', attributes: {}, events: [],
+    });
+    await sink.flush?.();
+    expect(onExportError).toHaveBeenCalledWith(expect.objectContaining({ message: 'OTLP export returned HTTP 503' }));
+    fetchSpy.mockRestore();
   });
 
   it('batches spans and triggers flush when batchSize is reached', async () => {
@@ -256,7 +279,8 @@ describe('createOtelTracer — brand-neutral service.name default', () => {
 // ─── Integration: createOtelTracer + weaveRuntime ────────────────────────────
 
 describe('OTel tracer wired into weaveRuntime', () => {
-  it('runtime.tracer is set to OTel tracer when endpoint provided', () => {
+  it('runtime.tracer is set to OTel tracer when endpoint provided', async () => {
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(new Response(null, { status: 200 }));
     const otelTracer = createOtelTracer({ serviceName: 'test', endpoint: 'http://localhost:4318' });
     const runtime = weaveRuntime({ tracer: otelTracer });
     const ctx = weaveContext({ runtime });
@@ -269,5 +293,7 @@ describe('OTel tracer wired into weaveRuntime', () => {
     expect(span.attributes[GEN_AI.SYSTEM]).toBe('anthropic');
     expect(span.attributes[GEN_AI.REQUEST_MODEL]).toBe('claude-haiku-4-5-20251001');
     span.end();
+    await otelTracer.sink.flush?.();
+    fetchSpy.mockRestore();
   });
 });

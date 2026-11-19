@@ -46,6 +46,7 @@ import type {
 import { loadLatestInboundTask } from '@weaveintel/live-agents';
 import type { ExecutionContext } from '@weaveintel/core';
 import type { HandlerContext, HandlerKindRegistration } from '../handler-registry.js';
+import { mcpFetch } from '../_fetch.js';
 
 export interface ExternalMcpToolConfig {
   mcp_server_url: string;
@@ -102,6 +103,7 @@ async function callMcpTool(
   cfg: ExternalMcpToolConfig,
   toolArguments: Record<string, unknown>,
   log: (msg: string) => void,
+  policy: HandlerContext['mcpOutboundPolicy'],
 ): Promise<string> {
   const rpcId = makeRpcId();
   const body = JSON.stringify({
@@ -116,7 +118,7 @@ async function callMcpTool(
 
   let response: Response;
   try {
-    response = await fetch(cfg.mcp_server_url, {
+    response = await mcpFetch(cfg.mcp_server_url, {
       method:  'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -124,7 +126,7 @@ async function callMcpTool(
       },
       body,
       signal: controller.signal,
-    });
+    }, cfg.timeout_ms ?? DEFAULT_TIMEOUT_MS, policy);
   } finally {
     clearTimeout(timer);
   }
@@ -175,7 +177,7 @@ function buildExternalMcpTool(ctx: HandlerContext): TaskHandler {
     const toolArguments = resolveArguments(inbound.body);
     ctx.log(`external.mcp-tool: calling ${cfg.tool_name} at ${cfg.mcp_server_url}`);
 
-    const result = await callMcpTool(cfg, toolArguments, ctx.log);
+    const result = await callMcpTool(cfg, toolArguments, ctx.log, ctx.mcpOutboundPolicy);
 
     return {
       completed:    true,

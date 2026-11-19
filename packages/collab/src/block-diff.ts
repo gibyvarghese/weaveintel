@@ -52,15 +52,15 @@ function lcsPairs(a: string[], b: string[]): Array<{ i: number; j: number }> {
   return pairs;
 }
 
-/** Length of the common prefix of two strings (by code unit). */
-function commonPrefix(a: string, b: string): number {
+/** Length of the common prefix in CRDT sequence elements. */
+function commonPrefix(a: readonly string[], b: readonly string[]): number {
   const n = Math.min(a.length, b.length);
   let i = 0;
   while (i < n && a[i] === b[i]) i++;
   return i;
 }
 /** Length of the common suffix, not overlapping an already-counted prefix of `prefix`. */
-function commonSuffix(a: string, b: string, prefix: number): number {
+function commonSuffix(a: readonly string[], b: readonly string[], prefix: number): number {
   const max = Math.min(a.length, b.length) - prefix;
   let i = 0;
   while (i < max && a[a.length - 1 - i] === b[b.length - 1 - i]) i++;
@@ -98,11 +98,13 @@ function reconcileBlock(doc: BlockDoc, cur: RenderedBlock, tgt: BlockSpec, ops: 
   const oldText = cur.text;
   const newText = tgt.text ?? '';
   if (oldText !== newText) {
-    const p = commonPrefix(oldText, newText);
-    const s = commonSuffix(oldText, newText, p);
-    const delCount = oldText.length - p - s;
+    const oldChars = [...oldText];
+    const newChars = [...newText];
+    const p = commonPrefix(oldChars, newChars);
+    const s = commonSuffix(oldChars, newChars, p);
+    const delCount = oldChars.length - p - s;
     if (delCount > 0) ops.push(...doc.deleteText(id, p, delCount));
-    const insStr = newText.slice(p, newText.length - s);
+    const insStr = newChars.slice(p, newChars.length - s).join('');
     if (insStr) ops.push(...doc.insertText(id, p, insStr));
   }
 
@@ -167,7 +169,7 @@ export function diffBlocks(doc: BlockDoc, target: BlockSpec[]): BlockOp[] {
       const old = curGap[k]!;
       const id = old.id;
       if (id === null) continue;
-      if (old.text.length > 0) ops.push(...doc.deleteText(id, 0, old.text.length));
+      if (old.text.length > 0) ops.push(...doc.deleteText(id, 0, [...old.text].length));
       ops.push(...doc.mergeBlock(id));
     }
     // Extra NEW blocks → insert.

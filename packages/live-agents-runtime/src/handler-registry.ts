@@ -31,7 +31,7 @@
  *   row per active agent).
  */
 
-import type { Model, ToolRegistry } from '@weaveintel/core';
+import type { Model, OutboundUrlPolicy, ToolRegistry } from '@weaveintel/core';
 import type {
   LiveAgentPolicy,
   ModelResolver,
@@ -94,6 +94,12 @@ export interface HandlerContext {
   modelResolver?: ModelResolver;
   /** Optional resolved tool registry for the agent. */
   tools?: ToolRegistry;
+  /**
+   * Trusted host policy for `external.mcp-tool` egress. Never populate this
+   * from binding config or other untrusted DB data. Cross-origin redirects
+   * remain disabled regardless of this policy.
+   */
+  mcpOutboundPolicy?: Omit<OutboundUrlPolicy, 'errorTag' | 'allowCrossOriginRedirects'>;
   /**
    * Phase 3 (live-agents capability parity) — first-class per-tick policy
    * bundle. When supplied, LLM-driven handler kinds (`agentic.react`) wrap

@@ -46,6 +46,13 @@ old→new map and per-package import-rewrite examples, and [`ROADMAP.md`](ROADMA
 
 ## [Unreleased]
 
+### A2A
+
+- Add an opt-in authenticated independent-message dispatcher for the A2A 1.0
+  JSON-RPC subset, with host-provided authentication and authorization. Task,
+  streaming and push operations remain unsupported by this adapter; callback
+  failures return sanitized 500 responses.
+
 ### Live-Agents — DB-Driven Runtime Phase 3.5: Per-Agent Model Routing
 
 - New `model_capability_json`, `model_routing_policy_key`, and

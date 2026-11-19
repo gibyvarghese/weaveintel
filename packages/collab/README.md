@@ -50,13 +50,110 @@ alice.applyOps(b);
 alice.text() === bob.text();             // ✅ true — both converged, nobody's edit lost
 ```
 
-Only a peer is missing part of the history? Send exactly the missing bit — bandwidth-minimal, and the
-same call whether they were offline for a second or a week:
+Plain-text local insertion uses Unicode code points as sequence elements, not UTF-16 offsets or
+grapheme clusters. Block-document positions and mark ranges also use code points; the ProseMirror
+and Markdown adapters translate their text representation to and from those ranges. Hosts must
+translate editor offsets before using positional APIs directly. This assumes every remote text
+insert also contains one code point: hosts using positional APIs must configure
+`maxCharsPerOp: 1` on their client-operation validator and migrate any older multi-code-point
+operations. The validators retain their more permissive default for existing integrations.
+Persisted block specs produced by older adapters may use UTF-16 mark offsets and need conversion
+against their text before replay.
+Out-of-range deletes do not remove another character or a block marker; `BlockDoc.deleteText`
+requires non-negative safe-integer indices and counts.
+The client-operation validators require positive safe-integer counters in operation IDs and
+references, and a non-empty authenticated site namespace. Hosts with historical operations that
+do not meet these requirements must repair or migrate them before using these validators.
+Local editing refuses to mint counters beyond JavaScript's safe-integer limit. A peer can still
+submit a very high valid counter that exhausts this clock, so hosts need an authenticated counter
+allocation or bounded-jump policy appropriate to their document and recovery protocol.
+
+For causally complete, in-order histories, a peer can request a delta:
 
 ```ts
 const missing = alice.opsSince(bob.stateVector()); // precisely what Bob lacks
 bob.applyOps(missing);                              // caught up
 ```
+
+The built-in vectors record the **largest** counter seen per site, not gaps. If a later independent
+operation arrives before an earlier one, this delta can omit the earlier operation. Do not use the
+vector alone as a reconnect cursor for arbitrary delivery order; replay a complete retained history
+or use a host protocol that proves its checkpoint is gap-free.
+
+### Opt-in full-history reconnect
+
+`createRgaSyncJournal` and `createBlockSyncJournal` retain a complete set of operations rather than
+guessing missing operations from counter maxima. Exchange **all** `entries()` on reconnect and
+`append()` them at each peer; identical operations deduplicate, while an ID with different content
+rejects the entire batch. Each site ID must be globally unique, and the same operation ID must never
+be reused for different content. This protocol is deliberately O(total history) in memory, storage
+and transfer; it is not a compact checkpoint or a scalable production transport.
+
+```ts
+import { createRgaSyncJournal } from '@weaveintel/collab';
+
+// Each journal must contain every local and received op, including buffered ops.
+const aliceHistory = createRgaSyncJournal(aliceOps);
+const bobHistory = createRgaSyncJournal(bobOps);
+const aliceEntries = aliceHistory.entries();
+const bobEntries = bobHistory.entries();
+aliceHistory.append(bobEntries);
+bobHistory.append(aliceEntries);
+// Persist the complete entries, then reconstruct each document with a NEW globally unique site ID.
+const recovered = aliceHistory.rebuild('new-unique-site');
+```
+
+Capture and durably retain **every** accepted operation from document inception, including pending
+operations; `opsSince({})`, ordinary snapshots, and starting a journal after edits are not substitutes.
+The host must authenticate/validate operations before appending, scope and persist histories, coordinate
+local edits and durable writes, and avoid acknowledging or broadcasting before durable storage. On an
+apply or persistence failure, recover from the last complete committed history before proceeding.
+`rebuild()` replays the history including pending dependencies and rejects a site ID already in that
+history; the host must also ensure the new ID has never been used elsewhere. Do not rebuild from an
+untrusted or incomplete history. History alone does not provide authorization or durability.
+
+Journal entries are copied and must be losslessly JSON-compatible (no `undefined`, non-finite
+numbers, negative zero, sparse arrays, accessors, hidden/symbol properties, cycles or non-plain
+objects); this may exclude some otherwise valid `BlockDoc` attribute values. Host payload-size/rate
+limits still apply. The old vector, snapshot and merge APIs are unchanged.
+
+## Document-agnostic receiving boundary
+
+`createCollaborationReceiver` routes an operation batch to one tenant, session, document and
+versioned operation format. It does not define document operations or merge them: use `RgaDoc` /
+`CoeditDoc` for text, `BlockDoc` for rich text, or a separately implemented and tested adapter for
+another document type. No canvas merge semantics are provided by this package.
+
+```ts
+import { createCollaborationReceiver, RgaDoc, validateClientOps } from '@weaveintel/collab';
+
+const doc = new RgaDoc('server-replica');
+const receiver = createCollaborationReceiver({
+  scope: { tenantId: 'tenant', sessionId: 'session', documentId: 'note', documentKind: 'rga/v1' },
+  maxOperations: 500,
+  // This principal comes from the authenticated host, never from the message.
+  authorize: (principal: { site: string; canWrite: boolean }) => principal.canWrite,
+  validate: (ops, principal) => validateClientOps(ops, { expectedSiteId: principal.site }),
+  apply: (ops) => { doc.applyMany(ops); },
+});
+// host: receiver.receive(verifiedPrincipal, untrustedDelivery)
+```
+
+The host must authenticate every caller, bind the scope to the correct replica, check current
+session/document write access on every delivery, validate authorship and payload sizes, and enforce
+limits on message bytes and rates. Authorization and validation callbacks are trusted, synchronous
+host code; exceptions propagate and never constitute acceptance. Read access, secure transport,
+broadcast, persistence, lifecycle, replay and revocation are host responsibilities. `accepted` means
+only that the adapter was invoked, not that changes were persisted, broadcast or fully integrated.
+An adapter that throws may have applied part of a batch; retries require idempotent operations.
+
+For reconnects, the host must retain and replay all missing operations (including local unsent
+edits), or use a verified gap-free checkpoint and tail, with authorization for historical replay.
+The adapter must itself handle duplicates and out-of-order delivery, including dependencies; the
+receiver does not deduplicate, buffer or track checkpoints. Snapshots must preserve whatever
+pending operations and deduplication state the selected adapter needs; do not assume the existing
+text or block snapshots are complete replay checkpoints. This boundary alone does not provide live
+collaboration or authorize use of a network endpoint.
 
 ## The AI as a co-editing peer
 

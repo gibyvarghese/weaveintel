@@ -76,11 +76,11 @@ function inlineMd(s: string): { text: string; marks: NonNullable<BlockSpec['mark
   while (i < s.length) {
     // Link [text](href)
     const link = /^\[([^\]]*)\]\(([^)]*)\)/.exec(s.slice(i));
-    if (link) { const start = text.length; text += link[1]!; marks.push({ from: start, to: text.length, type: 'link', value: link[2]! }); i += link[0].length; continue; }
+    if (link) { const start = [...text].length; text += link[1]!; marks.push({ from: start, to: [...text].length, type: 'link', value: link[2]! }); i += link[0].length; continue; }
     for (const [token, type] of INLINE_TOKENS) {
       if (s.startsWith(token, i)) {
         const end = s.indexOf(token, i + token.length);
-        if (end !== -1) { const start = text.length; text += s.slice(i + token.length, end); marks.push({ from: start, to: text.length, type }); i = end + token.length; }
+        if (end !== -1) { const start = [...text].length; text += s.slice(i + token.length, end); marks.push({ from: start, to: [...text].length, type }); i = end + token.length; }
         else { text += s[i]; i++; }
         // eslint-disable-next-line no-labels
         break;

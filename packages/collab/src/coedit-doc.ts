@@ -65,9 +65,9 @@ export interface CoeditDoc {
   /** Merge remote ops. Idempotent + order-independent; returns how many were NEWLY applied. */
   applyOps(ops: CoeditOp[]): number;
 
-  /** The ops the caller (at `since`) has not yet seen — the sync delta. */
+  /** Operations above `since`'s maxima; not safe for out-of-order gaps. */
   opsSince(since: CoeditStateVector): CoeditOp[];
-  /** This replica's causal state vector. */
+  /** Maximum applied counter per site, not a gap-free cursor. */
   stateVector(): CoeditStateVector;
   /** A serialisable snapshot — persist it, or ship it to a joining peer as their starting state. */
   snapshot(): CoeditSnapshot;

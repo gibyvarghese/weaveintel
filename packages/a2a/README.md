@@ -41,6 +41,49 @@ console.log(task.status.state);   // e.g. "TASK_STATE_COMPLETED"
 | `signAgentCard`, `verifyAgentCard`, `createJwtValidator` | Card signing and JWT auth for trusted agents |
 | `createInMemoryPushNotificationStore`, `deliverToWebhook` | Webhook push notifications for task updates |
 
+### Authenticated, independent messages
+
+`createAuthenticatedA2AMessageDispatcher` is an opt-in adapter for hosts that
+verify credentials and authorize each request. The host supplies an
+`authenticate(headers)` callback returning a verified execution context with
+tenant and user IDs, and an `authorize(context, params)` callback. It accepts
+only independent `SendMessage` calls; task/conversation references, streaming,
+task lookup, subscriptions and push configuration are refused. It does not open
+an HTTP route, authenticate credentials itself, or make an unscoped task store
+safe. This is a restricted subset of the package's A2A 1.0 JSON-RPC
+implementation, not a claim of full A2A 1.0 conformance; the underlying
+dispatcher currently does not reject unsupported version headers.
+Missing or incomplete authentication returns 401, explicit authorization denial
+returns 403, and callback failures return a sanitized 500. Hosts should log
+callback failures at their source without exposing credentials or private data.
+
+#### Reuse and scope
+
+The adapter composes the existing `createA2ADispatcher` and JSON-RPC codec; it
+does not implement a second protocol engine. Its callbacks are integration seams
+for the host's existing verified identity and policy engines, not a new
+credential or delegation implementation. The existing dispatcher's optional
+JWT validator validates a token but does not bind its claims to the supplied
+execution context, and its task-store subscription path has no caller parameter.
+The adapter is needed to bind a host-verified context and require authorization
+for this restricted message path; it is not a replacement for owner-scoped task
+authorization. The MCP server's `contextFactory` is an analogous verified
+identity boundary, but is specific to MCP transports.
+
+No event stream, model router, canvas interaction or storage engine is added.
+Streaming and task storage remain available in the existing A2A package, but
+are deliberately not exposed by this adapter until the host can enforce
+per-caller task isolation and ongoing access.
+
+Use a stateless or properly isolated server and enforce request limits,
+resource/field permissions and auditing in the host. Credential verification
+must establish the intended audience and delegated principal and consent;
+never trust identity, scopes or delegation claimed in message parameters.
+Downstream tools need their own authorization and controlled egress: a caller's
+authorization to invoke an agent is not permission to act as the service
+identity. The original dispatcher remains available for hosts implementing
+their own isolation.
+
 ## License
 
 MIT.

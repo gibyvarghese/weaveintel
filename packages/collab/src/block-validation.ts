@@ -16,7 +16,7 @@
  * the important one — is the AUTHOR id inside the namespace this logged-in
  * connection is allowed to write as? Anything off → reject the whole batch.
  */
-import { siteOwnedBy } from './validation.js';
+import { isRgaId as validRgaId, siteOwnedBy } from './validation.js';
 import type { RgaId } from './rga.js';
 import {
   blockOpId,
@@ -71,9 +71,7 @@ export interface BlockOpValidationResult {
 }
 
 function isRgaId(v: unknown): v is RgaId {
-  return typeof v === 'object' && v !== null
-    && typeof (v as RgaId).counter === 'number' && Number.isFinite((v as RgaId).counter) && (v as RgaId).counter > 0
-    && typeof (v as RgaId).siteId === 'string' && (v as RgaId).siteId.length > 0 && (v as RgaId).siteId.length <= 128;
+  return validRgaId(v, 128);
 }
 
 /** A reasonably-bounded JSON value (no functions, sane serialized size). */

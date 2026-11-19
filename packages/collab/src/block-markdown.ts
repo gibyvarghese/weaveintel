@@ -47,8 +47,12 @@ function inlineMarkdown(text: string, marks: NormalBlock['marks']): string {
     else { const w = MD_WRAP[m.type]; if (w) { edits.push({ at: m.from, insert: w }); edits.push({ at: m.to, insert: w }); } }
   }
   edits.sort((a, b) => b.at - a.at || b.insert.length - a.insert.length);
+  const characters = [...text];
   let out = text;
-  for (const e of edits) out = out.slice(0, e.at) + e.insert + out.slice(e.at);
+  for (const e of edits) {
+    const offset = characters.slice(0, e.at).join('').length;
+    out = out.slice(0, offset) + e.insert + out.slice(offset);
+  }
   return out;
 }
 
@@ -116,11 +120,12 @@ function inlineHtml(text: string, marks: NormalBlock['marks']): string {
     } else { const tag = HTML_TAG[m.type]; if (tag) { edits.push({ at: m.from, insert: `<${tag}>`, open: true }); edits.push({ at: m.to, insert: `</${tag}>`, open: false }); } }
   }
   // Build by walking characters and inserting opens (asc) / closes (asc) at boundaries.
+  const characters = [...text];
   let out = '';
-  for (let i = 0; i <= text.length; i++) {
+  for (let i = 0; i <= characters.length; i++) {
     for (const e of edits.filter((x) => !x.open && x.at === i)) out += e.insert;
     for (const e of edits.filter((x) => x.open && x.at === i)) out += e.insert;
-    if (i < text.length) out += esc(text[i]!);
+    if (i < characters.length) out += esc(characters[i]!);
   }
   return out;
 }

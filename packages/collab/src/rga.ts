@@ -38,6 +38,14 @@ export interface RgaId {
   siteId: string;
 }
 
+/** Ensure a local edit can mint all of its IDs without overflowing the safe integer range. */
+export function assertCounterCapacity(counter: number, count: number): void {
+  if (!Number.isSafeInteger(counter) || counter < 0 || !Number.isSafeInteger(count) || count < 0
+    || counter > Number.MAX_SAFE_INTEGER - count) {
+    throw new Error('Collaboration operation counter exhausted');
+  }
+}
+
 /** `a` sorts BEFORE `b` (to the LEFT) ⇔ `a` has the HIGHER id (descending order). */
 export function idGreater(a: RgaId, b: RgaId): boolean {
   if (a.counter !== b.counter) return a.counter > b.counter;
@@ -75,7 +83,7 @@ interface Node {
   deleted: boolean;
 }
 
-/** A version vector: the max counter this replica has seen from each site. */
+/** The maximum applied counter per site; this does not represent gaps. */
 export type StateVector = Record<string, number>;
 
 export interface RgaSnapshot {
@@ -102,7 +110,7 @@ export class RgaDoc {
   #applied = new Set<string>();
   /** Highest counter seen per site (the state vector) — for offline sync. */
   #seen: StateVector = {};
-  /** Every applied op, in apply order — the durable log used for sync (opsSince). */
+  /** Applied operations in memory; buffered operations are not included. */
   #log: RgaOp[] = [];
 
   constructor(siteId: string) {
@@ -119,7 +127,7 @@ export class RgaDoc {
     return out;
   }
 
-  /** Number of VISIBLE characters. */
+  /** Number of visible sequence elements (local text insertion uses Unicode code points). */
   get length(): number {
     let n = 0;
     for (const node of this.#nodes) if (!node.deleted) n++;
@@ -140,7 +148,7 @@ export class RgaDoc {
     return null;
   }
 
-  /** This replica's state vector (max counter seen per site). */
+  /** This replica's maximum applied counter per site, not a gap-free cursor. */
   stateVector(): StateVector {
     return { ...this.#seen };
   }
@@ -170,9 +178,10 @@ export class RgaDoc {
 
   // ── Local edits ────────────────────────────────────────────────────────────
 
-  /** Insert one character at a VISIBLE index; returns the op to broadcast. */
+  /** Insert one Unicode code point at a VISIBLE index; returns the op to broadcast. */
   localInsert(index: number, value: string): Extract<RgaOp, { type: 'ins' }> {
-    if (value.length !== 1) throw new Error('localInsert takes exactly one character (use localInsertText for strings)');
+    if ([...value].length !== 1) throw new Error('localInsert takes exactly one Unicode code point (use localInsertText for strings)');
+    assertCounterCapacity(this.#counter, 1);
     const originId = this.idAtVisibleIndex(index);
     const id: RgaId = { counter: this.#counter + 1, siteId: this.siteId };
     const op: Extract<RgaOp, { type: 'ins' }> = { type: 'ins', id, originId, value };
@@ -182,9 +191,11 @@ export class RgaDoc {
 
   /** Insert a whole string at a VISIBLE index; returns the ops (one per char, chained). */
   localInsertText(index: number, text: string): RgaOp[] {
+    const characters = [...text];
+    assertCounterCapacity(this.#counter, characters.length);
     const ops: RgaOp[] = [];
     let at = index;
-    for (const ch of [...text]) {
+    for (const ch of characters) {
       ops.push(this.localInsert(at, ch));
       at++;
     }
@@ -193,10 +204,12 @@ export class RgaDoc {
 
   /** Delete the visible character at 0-based `index`; returns the op, or null if out of range. */
   localDelete(index: number): Extract<RgaOp, { type: 'del' }> | null {
+    if (!Number.isInteger(index) || index < 0 || index >= this.length) return null;
     // idAtVisibleIndex is 1-based (the Nth visible char), so the 0-based char at
     // `index` is the (index+1)-th visible element.
     const target = this.idAtVisibleIndex(index + 1);
     if (!target) return null;
+    assertCounterCapacity(this.#counter, 1);
     const opId: RgaId = { counter: this.#counter + 1, siteId: this.siteId };
     const op: Extract<RgaOp, { type: 'del' }> = { type: 'del', opId, target };
     this.apply(op);
@@ -247,7 +260,7 @@ export class RgaDoc {
 
   // ── Sync (offline reconcile) ───────────────────────────────────────────────
 
-  /** The ops this replica has that the peer (described by `since`) is missing. */
+  /** Operations above each supplied maximum; unsafe for a peer with out-of-order gaps. */
   opsSince(since: StateVector): RgaOp[] {
     return this.#log.filter((op) => {
       const opId = opIdOf(op);

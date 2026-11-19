@@ -24,6 +24,14 @@ import type {
   A2APushNotificationConfigEntry,
 } from '@weaveintel/core';
 
+// Hardened fetch uses undici's fetch with its DNS-pinning dispatcher, rather
+// than global fetch. Keep the real Agent while routing transport calls to the
+// per-test mock; no client or egress guard is replaced.
+vi.mock('undici', async (importOriginal) => ({
+  ...await importOriginal<typeof import('undici')>(),
+  fetch: (input: string, init?: RequestInit) => globalThis.fetch(input, init),
+}));
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function makeCtx(): ExecutionContext {
@@ -150,6 +158,7 @@ describe('[CLIENT-DISCOVER] weaveA2AClient.discover', () => {
     await weaveA2AClient().discover('http://127.0.0.1:8080');
     const opts = vi.mocked(fetch).mock.calls[0]![1];
     expect((opts?.headers as Record<string, string>)?.['A2A-Version']).toBe('1.0');
+    expect((opts as RequestInit & { dispatcher?: unknown }).dispatcher).toBeDefined();
   });
 });
 
@@ -624,7 +633,12 @@ describe('[NEG] negative and edge cases', () => {
       weaveA2AClient().sendMessage(makeCtx(), AGENT_URL, {
         message: { role: 'user', parts: [{ text: 'hi' }], messageId: 'm1', contextId: 'c1' },
       }),
-    ).rejects.toThrow();
+    ).rejects.toThrow('network failure');
+  });
+
+  it('refuses metadata addresses before reaching the mocked transport', async () => {
+    await expect(weaveA2AClient().discover('https://169.254.169.254')).rejects.toThrow();
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('discover throws on invalid JSON response', async () => {

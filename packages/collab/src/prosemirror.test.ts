@@ -26,6 +26,21 @@ const RICH_DOC = {
 };
 
 describe('pmToBlocks / blocksToProseMirror — round-trip', () => {
+  it('preserves marks around supplementary Unicode through CRDT, editor and exports', () => {
+    const pm = { type: 'doc', content: [{ type: 'paragraph', content: [
+      { type: 'text', text: '😀' },
+      { type: 'text', text: 'B😀', marks: [{ type: 'bold' }] },
+      { type: 'text', text: '!' },
+    ] }] };
+    const specs = pmToBlocks(pm);
+    expect(specs[0]!.marks).toEqual([{ from: 1, to: 3, type: 'bold' }]);
+    const blocks = BlockDoc.fromBlocks('unicode', specs).blocks();
+    expect(pmToBlocks(blocksToProseMirror(blocks))[0]).toMatchObject(specs[0]!);
+    expect(blocksToMarkdown(blocks)).toBe('😀**B😀**!');
+    expect(blocksToHtml(blocks)).toContain('😀<strong>B😀</strong>!');
+    expect(markdownToBlocks('😀**B😀**!')[0]).toMatchObject(specs[0]!);
+  });
+
   it('flattens a rich ProseMirror doc into blocks with the right types + attrs + marks', () => {
     const blocks = pmToBlocks(RICH_DOC);
     expect(blocks.map((b) => b.type)).toEqual([

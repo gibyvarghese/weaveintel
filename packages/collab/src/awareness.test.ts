@@ -136,11 +136,20 @@ describe('validateClientOps — trusted relay security', () => {
     expect(validateClientOps([{ type: 'del', opId: { counter: 5, siteId: 'mallory' }, target: { counter: 2, siteId: 'x' } }], { expectedSiteId: 'alice' }).ok).toBe(false);
   });
 
+  it('rejects fractional and unsafe counters in author IDs and references', () => {
+    for (const counter of [1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(validateClientOps([base({ id: { counter, siteId: 'alice' } })], { expectedSiteId: 'alice' }).ok).toBe(false);
+      expect(validateClientOps([base({ originId: { counter, siteId: 'bob' } })], { expectedSiteId: 'alice' }).ok).toBe(false);
+      expect(validateClientOps([{ type: 'del', opId: { counter: 1, siteId: 'alice' }, target: { counter, siteId: 'bob' } }], { expectedSiteId: 'alice' }).ok).toBe(false);
+    }
+  });
+
   it('accepts a device site UNDER the user namespace (multi-device), rejects outside it', () => {
     // u:alice owns u:alice:tab1 — accepted.
     expect(validateClientOps([base({ id: { counter: 1, siteId: 'u:alice:tab1' } })], { expectedSiteId: 'u:alice' }).ok).toBe(true);
     // u:alice does NOT own u:bob:tab1 — rejected.
     expect(validateClientOps([base({ id: { counter: 1, siteId: 'u:bob:tab1' } })], { expectedSiteId: 'u:alice' }).ok).toBe(false);
+    expect(validateClientOps([base({ id: { counter: 1, siteId: ':tab1' } })], { expectedSiteId: '' }).ok).toBe(false);
   });
 
   it('rejects unknown op types', () => {

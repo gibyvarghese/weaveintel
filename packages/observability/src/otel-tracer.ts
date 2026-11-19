@@ -20,7 +20,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import type { ExecutionContext, Span, SpanRecord, Tracer, TraceSink } from '@weaveintel/core';
+import { hardenedFetch, type ExecutionContext, type OutboundUrlPolicy, type Span, type SpanRecord, type Tracer, type TraceSink } from '@weaveintel/core';
 
 // ─── GenAI Semantic Convention Attribute Keys (OTel 2026) ────────────────────
 
@@ -147,6 +147,10 @@ export interface OtlpSinkOptions {
   batchSize?: number;
   /** Max age of buffered spans before auto-flush (ms). Default: 2000. */
   flushIntervalMs?: number;
+  /** Trusted host egress policy; private networks and non-loopback HTTP require explicit opt-in. */
+  egressPolicy?: Omit<OutboundUrlPolicy, 'errorTag'>;
+  /** Receives export failures. By default a warning is written to stderr. Failed batches are discarded. */
+  onExportError?: (error: unknown) => void;
 }
 
 /**
@@ -193,14 +197,24 @@ export function weaveOtlpSink(opts: OtlpSinkOptions): TraceSink {
       }],
     });
 
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), exportTimeoutMs);
     try {
-      await fetch(endpoint, { method: 'POST', headers, body, signal: ctrl.signal });
-    } catch {
-      // Best-effort — observability never blocks the critical path
-    } finally {
-      clearTimeout(timer);
+      const response = await hardenedFetch(endpoint, { method: 'POST', headers, body }, {
+        errorTag: 'observability-otlp',
+        timeoutMs: exportTimeoutMs,
+        policy: opts.egressPolicy,
+      });
+      await response.body?.cancel();
+      if (!response.ok) throw new Error(`OTLP export returned HTTP ${response.status}`);
+    } catch (error) {
+      if (opts.onExportError) {
+        try {
+          opts.onExportError(error);
+        } catch {
+          console.error('[weaveintel/observability] OTLP export error handler failed; batch discarded');
+        }
+      } else {
+        console.error('[weaveintel/observability] OTLP export failed; batch discarded');
+      }
     }
   }
 
@@ -257,6 +271,10 @@ export interface OtelTracerOptions {
   resourceAttributes?: Record<string, string>;
   /** Optional bearer token for OTLP endpoint auth. */
   apiKey?: string;
+  /** Trusted host egress policy for the OTLP collector. */
+  egressPolicy?: Omit<OutboundUrlPolicy, 'errorTag'>;
+  /** Receives best-effort OTLP export failures. */
+  onExportError?: (error: unknown) => void;
 }
 
 function createSpanImpl(
@@ -340,6 +358,8 @@ export function createOtelTracer(opts: OtelTracerOptions): Tracer & { sink: Trac
         serviceVersion: opts.serviceVersion,
         resourceAttributes: opts.resourceAttributes,
         apiKey: opts.apiKey,
+        egressPolicy: opts.egressPolicy,
+        onExportError: opts.onExportError,
       })
     : {
         record(): void { /* no-op when no endpoint */ },

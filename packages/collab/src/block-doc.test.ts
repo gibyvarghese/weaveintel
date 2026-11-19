@@ -8,6 +8,34 @@ function summary(doc: BlockDoc): string {
 function applyAll(doc: BlockDoc, ops: BlockOp[]): void { for (const op of ops) doc.apply(op); }
 
 describe('BlockDoc — basic block editing', () => {
+  it('refuses overflowing batch edits without partially changing the document', () => {
+    const doc = new BlockDoc('alice');
+    const first = { counter: 1, siteId: 'bob' };
+    doc.apply({ t: 'ins', id: first, originId: null, kind: 'char', char: 'x' });
+    doc.apply({ t: 'ins', id: { counter: Number.MAX_SAFE_INTEGER - 1, siteId: 'bob' }, originId: first, kind: 'char', char: 'y' });
+    expect(() => doc.insertText(null, 1, 'ab')).toThrow(/counter exhausted/);
+    expect(() => doc.insertBlock(null, 'paragraph', { level: 1 })).toThrow(/counter exhausted/);
+    expect(() => doc.deleteText(null, 0, 2)).toThrow(/counter exhausted/);
+    expect(doc.blocks()[0]!.text).toBe('xy');
+    expect(doc.insertText(null, 2, 'a')[0]).toMatchObject({ id: { counter: Number.MAX_SAFE_INTEGER } });
+    expect(() => doc.deleteText(null, 0, 1)).toThrow(/counter exhausted/);
+    expect(doc.blocks()[0]!.text).toBe('xya');
+  });
+
+  it('deletes only characters in range without deleting a block marker', () => {
+    const doc = BlockDoc.fromBlocks('a', [{ type: 'paragraph', text: 'abc' }]);
+    const blockId = doc.blocks()[0]!.id;
+    expect(doc.deleteText(blockId, 20, 1)).toEqual([]);
+    expect(doc.blocks()[0]!.text).toBe('abc');
+    expect(doc.deleteText(blockId, 1, 99)).toHaveLength(2);
+    expect(doc.blocks().map((b) => b.text)).toEqual(['a']);
+    expect(doc.deleteText(blockId, 0, 99)).toHaveLength(1);
+    expect(doc.blocks().map((b) => b.text)).toEqual(['']);
+    expect(doc.deleteText(blockId, 0, 99)).toEqual([]);
+    expect(() => doc.deleteText(blockId, -1, 1)).toThrow(RangeError);
+    expect(() => doc.deleteText(blockId, 0, 1.5)).toThrow(RangeError);
+  });
+
   it('builds a document from block specs and reads it back', () => {
     const specs: BlockSpec[] = [
       { type: 'heading', attrs: { level: 2 }, text: 'Title' },

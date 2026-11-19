@@ -34,6 +34,34 @@ const handle = await weaveLiveMeshFromDb(db, {
 await handle.stop();
 ```
 
+### External MCP outbound policy
+
+`external.mcp-tool` uses hardened egress: HTTPS and public addresses are
+required by default, except for HTTP loopback. Metadata hosts are always
+blocked and cross-origin redirects are rejected. Tool failures propagate to
+the caller. Existing private or non-loopback HTTP endpoints must be explicitly
+authorized by the host; binding `config_json` cannot set this policy.
+
+For example, inject the policy from trusted application code with
+`weaveLiveMeshFromDb`'s `extraContextFor` (or `weaveLiveAgentFromDb`'s
+`extraContext`):
+
+```ts
+extraContextFor: () => ({
+  mcpOutboundPolicy: {
+    allowedHosts: ['mcp.example.internal'],
+    allowPrivateNetwork: true,
+    allowInsecureHttp: true,
+  },
+})
+```
+
+Allow private networking or insecure HTTP only when necessary, restrict
+`allowedHosts` to trusted destinations, and prefer HTTPS. Host allow-list
+entries also match subdomains. Insecure HTTP exposes credentials and task data
+on the network; use it only on a trusted transport. The host must not copy
+policy settings from DB binding data.
+
 ## What's in the box
 
 | Export | What it does |

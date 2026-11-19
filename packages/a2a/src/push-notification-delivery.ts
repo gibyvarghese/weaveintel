@@ -14,10 +14,10 @@
  *   Body: { task: A2ATask, timestamp: ISO-8601 }
  *
  * Safety:
- *   - SSRF guard via `assertHttpsOrLoopback` before any HTTP call
- *   - RFC 1918 / loopback / link-local blocked (configurable)
+ *   - Hardened fetch validates each destination and redirect; loopback is
+ *     allowed, while other private and metadata destinations are blocked
  *   - Retry: 3 attempts, 1 s / 2 s / 4 s exponential backoff
- *   - Non-blocking: delivery errors are logged, never surfaced to task callers
+ *   - Direct delivery returns failures; task-transition delivery is best-effort
  *
  * Usage:
  *   // After saving a terminal task:
@@ -28,7 +28,7 @@
 
 import type { A2ATask, A2APushNotificationConfigEntry } from '@weaveintel/core';
 import type { A2APushNotificationStore } from './push-notification-store.js';
-import { assertHttpsOrLoopback } from './_fetch.js';
+import { a2aFetch, assertHttpsOrLoopback } from './_fetch.js';
 
 // ─── Delivery payload ─────────────────────────────────────────────────────────
 
@@ -71,12 +71,12 @@ async function attemptDelivery(
   }
 
   try {
-    const resp = await fetch(config.url, {
+    const resp = await a2aFetch(config.url, {
       method: 'POST',
       headers,
       body,
       signal: AbortSignal.timeout(10_000),
-    });
+    }, { timeoutMs: 10_000 });
     return { ok: resp.ok, status: resp.status };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -91,7 +91,7 @@ export async function deliverToWebhook(
   config: A2APushNotificationConfigEntry,
   payload: PushDeliveryPayload,
 ): Promise<{ delivered: boolean; attempts: number; lastError?: string }> {
-  // SSRF guard — block RFC 1918, loopback, metadata endpoints
+  // Validate up front so invalid webhook URLs fail without retries.
   try {
     await assertHttpsOrLoopback(config.url);
   } catch (err) {

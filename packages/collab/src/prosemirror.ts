@@ -36,13 +36,13 @@ function inlineOf(node: PMNode): { text: string; marks: NonNullable<BlockSpec['m
   const marks: NonNullable<BlockSpec['marks']> = [];
   for (const child of node.content ?? []) {
     if (child.type !== 'text' || typeof child.text !== 'string') continue;
-    const start = text.length;
+    const start = [...text].length;
     text += child.text;
     for (const mk of child.marks ?? []) {
       const type = PM_MARK_NAMES[mk.type];
       if (!type) continue;
       const value = markValueOf(type, mk.attrs);
-      marks.push({ from: start, to: text.length, type, ...(value !== undefined ? { value } : {}) });
+      marks.push({ from: start, to: [...text].length, type, ...(value !== undefined ? { value } : {}) });
     }
   }
   return { text, marks };
@@ -66,7 +66,7 @@ function wrapperInline(node: PMNode): { text: string; marks: NonNullable<BlockSp
   for (const child of node.content ?? []) {
     if (text.length > 0) text += '\n';
     const part = inlineOf(child);
-    const offset = text.length;
+    const offset = [...text].length;
     text += part.text;
     for (const m of part.marks) marks.push({ ...m, from: m.from + offset, to: m.to + offset });
   }
@@ -191,17 +191,18 @@ function mergeMarks(marks: NormalBlock['marks']): NormalBlock['marks'] {
 /** Build a ProseMirror text-node array (text split at mark boundaries) for one block. */
 function inlineNodes(text: string, marks: NormalBlock['marks']): PMNode[] {
   if (text.length === 0) return [];
+  const characters = [...text];
   const merged = mergeMarks(marks);
   // Boundaries where the active mark-set changes.
-  const boundaries = new Set<number>([0, text.length]);
-  for (const m of merged) { boundaries.add(Math.max(0, m.from)); boundaries.add(Math.min(text.length, m.to)); }
+  const boundaries = new Set<number>([0, characters.length]);
+  for (const m of merged) { boundaries.add(Math.max(0, m.from)); boundaries.add(Math.min(characters.length, m.to)); }
   const points = [...boundaries].sort((a, b) => a - b);
   const nodes: PMNode[] = [];
   for (let i = 0; i < points.length - 1; i++) {
     const from = points[i]!; const to = points[i + 1]!;
     if (to <= from) continue;
     const active = merged.filter((m) => m.from <= from && m.to >= to);
-    const node: PMNode = { type: 'text', text: text.slice(from, to) };
+    const node: PMNode = { type: 'text', text: characters.slice(from, to).join('') };
     if (active.length) node.marks = active.map((m) => {
       if (m.type === 'link') return { type: 'link', attrs: { href: m.value ?? '' } };
       if (m.type === 'highlight') return { type: 'highlight', ...(m.value ? { attrs: { color: m.value } } : {}) };

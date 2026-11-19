@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { assertSafeOutboundUrl, followRedirectsSafely } from './net-guard.js';
+import { assertSafeOutboundUrl, followRedirectsSafely, validateResolvedAddress } from './net-guard.js';
 
 describe('assertSafeOutboundUrl', () => {
   it('accepts ordinary https hosts', async () => {
@@ -44,6 +44,7 @@ describe('assertSafeOutboundUrl', () => {
 
   it('rejects IPv4-mapped IPv6 to private ranges', async () => {
     await expect(assertSafeOutboundUrl('https://[::ffff:10.0.0.1]/')).rejects.toThrow(/private/);
+    expect(() => validateResolvedAddress('0:0:0:0:0:ffff:0a00:0001')).toThrow(/private/);
   });
 
   it('rejects .local / .internal hostnames', async () => {
@@ -76,6 +77,24 @@ describe('assertSafeOutboundUrl', () => {
       assertSafeOutboundUrl('https://10.0.0.5/', { allowPrivateNetwork: true }),
     ).resolves.toBeInstanceOf(URL);
   });
+
+  it('requires explicit independent opt-ins for private HTTP', async () => {
+    const url = 'http://10.0.0.5/';
+    await expect(assertSafeOutboundUrl(url, { allowPrivateNetwork: true })).rejects.toThrow(/non-HTTPS/);
+    await expect(assertSafeOutboundUrl(url, { allowInsecureHttp: true })).rejects.toThrow(/private/);
+    await expect(assertSafeOutboundUrl(url, { allowInsecureHttp: true, allowPrivateNetwork: true }))
+      .resolves.toBeInstanceOf(URL);
+  });
+
+  it.each(['169.254.169.254', '::ffff:169.254.169.254', 'fd00:ec2::254'])(
+    'blocks metadata address %s even with private networks enabled',
+    async (address) => {
+      const host = address.includes(':') ? `[${address}]` : address;
+      const policy = { allowPrivateNetwork: true };
+      await expect(assertSafeOutboundUrl(`https://${host}/`, policy)).rejects.toThrow(/blocked/);
+      expect(() => validateResolvedAddress(address, policy)).toThrow(/blocked/);
+    },
+  );
 });
 
 describe('followRedirectsSafely', () => {
@@ -108,5 +127,10 @@ describe('followRedirectsSafely', () => {
   it('rejects invalid Location', async () => {
     const initial = new Response(null, { status: 302, headers: { location: 'http://[::not a url' } });
     await expect(followRedirectsSafely(initial, undefined, undefined)).rejects.toThrow();
+  });
+
+  it('rejects an otherwise valid redirect when the source origin is unknown', async () => {
+    const initial = new Response(null, { status: 302, headers: { location: 'http://127.0.0.1:1234/' } });
+    await expect(followRedirectsSafely(initial, undefined, undefined)).rejects.toThrow(/source URL is unavailable/);
   });
 });

@@ -33,6 +33,31 @@ describe('RgaDoc — basic editing', () => {
     expect(d.text()).toBe('hello!');
   });
 
+  it('inserts, shares and deletes supplementary Unicode code points as one element', () => {
+    const source = new RgaDoc('alice');
+    const replica = new RgaDoc('bob');
+    const operations = source.localInsertText(0, 'A😀B');
+    replica.applyMany(operations);
+    expect(source.text()).toBe('A😀B');
+    expect(source.length).toBe(3);
+    expect(replica.text()).toBe(source.text());
+    const deletion = source.localDelete(1)!;
+    replica.apply(deletion);
+    expect(source.text()).toBe('AB');
+    expect(replica.text()).toBe('AB');
+    expect(() => source.localInsert(0, 'ab')).toThrow(/one Unicode code point/);
+  });
+
+  it('refuses overflowing edits before partially applying a multi-character insert', () => {
+    const doc = new RgaDoc('alice');
+    doc.apply({ type: 'ins', id: { counter: Number.MAX_SAFE_INTEGER - 1, siteId: 'bob' }, originId: null, value: 'x' });
+    expect(() => doc.localInsertText(1, 'ab')).toThrow(/counter exhausted/);
+    expect(doc.text()).toBe('x');
+    expect(doc.localInsert(1, 'a').id.counter).toBe(Number.MAX_SAFE_INTEGER);
+    expect(() => doc.localDelete(0)).toThrow(/counter exhausted/);
+    expect(doc.text()).toBe('xa');
+  });
+
   it('delete tombstones (text shrinks, anchors survive)', () => {
     const d = new RgaDoc('a');
     d.localInsertText(0, 'abc');
@@ -41,6 +66,13 @@ describe('RgaDoc — basic editing', () => {
     // Inserting after the (now deleted) anchor still works.
     d.localInsert(1, 'X'); // a|c → aXc
     expect(d.text()).toBe('aXc');
+  });
+
+  it('does not delete another character for an out-of-range index', () => {
+    const doc = new RgaDoc('a');
+    doc.localInsertText(0, 'abc');
+    for (const index of [-1, 3, 100, 1.5, NaN]) expect(doc.localDelete(index)).toBeNull();
+    expect(doc.text()).toBe('abc');
   });
 });
 

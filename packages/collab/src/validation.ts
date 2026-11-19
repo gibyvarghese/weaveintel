@@ -34,7 +34,8 @@ export interface OpValidationOptions {
 
 /** True if `site` is owned by the `namespace` (exact, or a `namespace:device` child). */
 export function siteOwnedBy(site: string, namespace: string): boolean {
-  return site === namespace || site.startsWith(`${namespace}:`);
+  return typeof site === 'string' && typeof namespace === 'string' && namespace.length > 0
+    && (site === namespace || site.startsWith(`${namespace}:`));
 }
 
 export interface OpValidationResult {
@@ -44,10 +45,11 @@ export interface OpValidationResult {
   ops?: RgaOp[];
 }
 
-function isRgaId(v: unknown): v is RgaId {
+/** Shared structural validation for operation IDs and references. */
+export function isRgaId(v: unknown, maxSiteIdLength = 64): v is RgaId {
   return typeof v === 'object' && v !== null
-    && typeof (v as RgaId).counter === 'number' && Number.isFinite((v as RgaId).counter) && (v as RgaId).counter > 0
-    && typeof (v as RgaId).siteId === 'string' && (v as RgaId).siteId.length > 0 && (v as RgaId).siteId.length <= 64;
+    && Number.isSafeInteger((v as RgaId).counter) && (v as RgaId).counter > 0
+    && typeof (v as RgaId).siteId === 'string' && (v as RgaId).siteId.length > 0 && (v as RgaId).siteId.length <= maxSiteIdLength;
 }
 
 /**

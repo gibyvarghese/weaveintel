@@ -30,7 +30,7 @@
  * commutative + idempotent (dedup by a unique per-op id) + causally buffered.
  * Zero-dependency + pure (browser- and server-safe).
  */
-import { idGreater, idKey, type RgaId } from './rga.js';
+import { assertCounterCapacity, idGreater, idKey, type RgaId } from './rga.js';
 
 export type { RgaId };
 
@@ -121,7 +121,7 @@ export interface BlockSpec {
   type: BlockType;
   attrs?: BlockAttrs;
   text?: string;
-  /** Inline marks as offset ranges within `text`. */
+  /** Inline marks as half-open Unicode code-point ranges within `text`. */
   marks?: Array<{ from: number; to: number; type: MarkType; value?: string }>;
 }
 
@@ -149,10 +149,14 @@ export class BlockDoc {
 
   // ── Local edits (return ops to broadcast) ──────────────────────────────────
 
-  #mintId(): RgaId { return { counter: this.#counter + 1, siteId: this.siteId }; }
+  #mintId(): RgaId {
+    assertCounterCapacity(this.#counter, 1);
+    return { counter: this.#counter + 1, siteId: this.siteId };
+  }
 
   /** Insert a new block marker after `afterBlockId` (null = the very start). */
   insertBlock(afterBlockId: RgaId | null, type: BlockType, attrs: BlockAttrs = {}): { ops: BlockOp[]; blockId: RgaId } {
+    assertCounterCapacity(this.#counter, 1 + Object.keys(attrs).length);
     // Anchor: the LAST element of the "after" block (so the new marker starts a new block right after it).
     const originId = afterBlockId === null ? this.#startAnchor() : this.#lastElementOfBlock(afterBlockId);
     const id = this.#mintId();
@@ -164,9 +168,11 @@ export class BlockDoc {
 
   /** Insert text at a visible char index WITHIN a block. */
   insertText(blockId: RgaId | null, index: number, text: string): BlockOp[] {
+    const characters = [...text];
+    assertCounterCapacity(this.#counter, characters.length);
     const ops: BlockOp[] = [];
     let anchor = index <= 0 ? this.#blockMarkerOrStart(blockId) : this.#charIdAtBlockIndex(blockId, index);
-    for (const ch of [...text]) {
+    for (const ch of characters) {
       const id = this.#mintId();
       const op: BlockOp = { t: 'ins', id, originId: anchor, kind: 'char', char: ch };
       this.apply(op); ops.push(op);
@@ -177,10 +183,18 @@ export class BlockDoc {
 
   /** Delete `count` visible chars starting at `index` within a block. */
   deleteText(blockId: RgaId | null, index: number, count: number): BlockOp[] {
+    if (!Number.isSafeInteger(index) || index < 0 || !Number.isSafeInteger(count) || count < 0) {
+      throw new RangeError('Delete index and count must be non-negative safe integers');
+    }
+    const targets: RgaId[] = [];
+    for (let offset = 0; offset < count; offset++) {
+      const target = this.#charIdAtBlockIndex(blockId, index + offset + 1, false);
+      if (!target) break;
+      targets.push(target);
+    }
+    assertCounterCapacity(this.#counter, targets.length);
     const ops: BlockOp[] = [];
-    for (let i = 0; i < count; i++) {
-      const charId = this.#charIdAtBlockIndex(blockId, index + 1); // 1-based → the (index+1)-th char
-      if (!charId) break;
+    for (const charId of targets) {
       const op: BlockOp = { t: 'del', opId: this.#mintId(), target: charId };
       this.apply(op); ops.push(op);
     }
@@ -280,7 +294,9 @@ export class BlockDoc {
 
   // ── Sync ───────────────────────────────────────────────────────────────────
 
+  /** Maximum applied counter per site, not a gap-free cursor. */
   stateVector(): StateVector { return { ...this.#seen }; }
+  /** Operations above each supplied maximum; unsafe for a peer with out-of-order gaps. */
   opsSince(since: StateVector): BlockOp[] {
     return this.#log.filter((op) => { const id = blockOpId(op); return id.counter > (since[id.siteId] ?? 0); });
   }
@@ -409,8 +425,8 @@ export class BlockDoc {
   #blockMarkerOrStart(blockId: RgaId | null): RgaId | null { return blockId; }
 
   /** The id of the `index`-th (1-based) VISIBLE char within `blockId`, or null. */
-  #charIdAtBlockIndex(blockId: RgaId | null, index: number): RgaId | null {
-    if (index <= 0) return blockId;
+  #charIdAtBlockIndex(blockId: RgaId | null, index: number, clamp = true): RgaId | null {
+    if (index <= 0) return clamp ? blockId : null;
     let inBlock = blockId === null; // leading block starts at element 0
     let seen = 0;
     for (const el of this.#elems) {
@@ -419,6 +435,7 @@ export class BlockDoc {
       seen++;
       if (seen === index) return el.id;
     }
+    if (!clamp) return null;
     // Past the end → the last visible char of the block (append).
     let last: RgaId | null = blockId;
     inBlock = blockId === null;

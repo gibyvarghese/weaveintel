@@ -33,6 +33,20 @@ describe('diffBlocks — converges the replica onto the target', () => {
     expect(doc.blocks()[0]!.text).toBe('The quick red fox');
   });
 
+  it('diffs supplementary characters without splitting them or misplacing edits', () => {
+    for (const [before, after] of [
+      ['A😀B', 'A😃XB'], ['😀a😃', '😀x😃'], ['A😀B', 'AB'], ['😀', '😃'],
+      ['😀e\u0301', '😀e\u0301!'], ['A😃', 'A😀B😃'],
+    ]) {
+      const doc = docFrom([{ type: 'paragraph', text: before }]);
+      const replica = BlockDoc.fromSnapshot('replica', doc.snapshot());
+      const ops = diffBlocks(doc, [{ type: 'paragraph', text: after }]);
+      replica.applyMany(ops);
+      expect(doc.blocks()[0]!.text).toBe(after);
+      expect(replica.blocks()[0]!.text).toBe(after);
+    }
+  });
+
   it('appends a new block', () => {
     const doc = docFrom([{ type: 'heading', text: 'Title', attrs: { level: 1 } }]);
     const target: BlockSpec[] = [{ type: 'heading', text: 'Title', attrs: { level: 1 } }, { type: 'paragraph', text: 'Body' }];

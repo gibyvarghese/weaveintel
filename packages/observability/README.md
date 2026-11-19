@@ -31,6 +31,14 @@ Main entry (`@weaveintel/observability`):
 - OpenTelemetry: `createOtelTracer`, `weaveOtlpSink`, plus `GEN_AI` semantic-convention attribute keys and span/event annotators.
 - Budget & timeline: `weaveBudgetTracker` (alerts on spend), `weaveTraceGraph` / `formatTraceGraph`, `weaveRunTimeline`, `weaveJsonSink`.
 
+OTLP exports use hardened outbound HTTP: public HTTPS and loopback HTTP are
+allowed by default, while cross-origin redirects are rejected. For a trusted
+private collector, pass an `egressPolicy` from host code with an `allowedHosts`
+list and `allowPrivateNetwork: true`; non-loopback HTTP also requires
+`allowInsecureHttp: true` and sends trace data and credentials in plaintext.
+Exports remain best-effort: failed batches are discarded and reported through
+`onExportError`, or a stderr warning when no callback is supplied.
+
 Subpath export:
 
 - `@weaveintel/observability/replay` — replay a recorded trace to step back through a run.

@@ -34,6 +34,15 @@ describe('validateClientBlockOps — positive', () => {
 });
 
 describe('validateClientBlockOps — negative / security', () => {
+  it('rejects fractional and unsafe counters in IDs and references', () => {
+    for (const counter of [1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      const id = { counter, siteId: SITE };
+      expect(validateClientBlockOps([{ t: 'ins', id, originId: null, kind: 'char', char: 'x' }], { expectedSiteId: NS }).ok).toBe(false);
+      expect(validateClientBlockOps([{ t: 'del', opId: { counter: 1, siteId: SITE }, target: id }], { expectedSiteId: NS }).ok).toBe(false);
+    }
+    expect(validateClientBlockOps([{ t: 'ins', id: { counter: 1, siteId: ':tab1' }, originId: null, kind: 'char', char: 'x' }], { expectedSiteId: '' }).ok).toBe(false);
+  });
+
   it('rejects identity forgery (author site outside the namespace)', () => {
     const res = validateClientBlockOps(realOps('u:mallory:tab1'), { expectedSiteId: NS });
     expect(res.ok).toBe(false);
