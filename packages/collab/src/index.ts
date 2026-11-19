@@ -183,16 +183,21 @@ export {
   createHandoffManager,
 } from './handoff.js';
 
-// Phase 1 — Presence ("who else is here"): the PORT + in-memory reference
-// adapter (a consuming application provides the SQL adapter over `run_presence`). Both pass
-// `presenceManagerContract`.
+// Phase 1 — Presence ("who else is here"): the port and its memory and PostgreSQL adapters.
 export {
   type PresenceScope,
   type PresenceHeartbeat,
   type PresenceManager,
   type PresenceManagerOptions,
+  PresenceCapacityError,
   createInMemoryPresenceManager,
 } from './presence.js';
+export {
+  type PostgresPresenceOptions,
+  type PresenceSqlClient,
+  createPostgresPresenceManager,
+  ensurePostgresPresenceTable,
+} from './presence-postgres.js';
 export {
   type ContractTestApi as PresenceContractTestApi,
   type PresenceHarness,

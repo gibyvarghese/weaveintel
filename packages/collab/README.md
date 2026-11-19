@@ -214,7 +214,7 @@ coeditDocContract(createYjsDoc, { describe, it, expect });
 
 | Primitive | What it does |
 |---|---|
-| `createInMemoryPresenceManager` | **Presence** — a heartbeat-driven, TTL-expiring "who's here" set (agents are first-class peers). Port + in-memory adapter; your app supplies a SQL adapter. Snapshot-not-delta, ephemeral, server-derived identity. |
+| `createInMemoryPresenceManager`, `createPostgresPresenceManager` | **Presence** — a heartbeat-driven, TTL-expiring "who's here" set (agents are first-class peers). The PostgreSQL adapter shares snapshots across servers using the application's database connection. Authorization and identity are supplied by the host. |
 | `createInMemorySessionManager` | **Shared sessions** — turn a single-owner run multi-user with roles (owner / collaborator / viewer); invite links layer on top. |
 | `createInMemorySubscriptionManager` | **Durable subscriptions** — "notify me when this finishes, even if I close the tab." |
 | `createInMemoryCommentManager` / `AnnotationManager` | **Run comments** (threaded, anchored to a stable part) and **annotation scores** (the bridge to eval datasets). |
