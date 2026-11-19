@@ -5,7 +5,7 @@
  * security / robustness / stress cases.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import { createInMemoryPresenceManager, presenceManagerContract, type PresenceHarness } from './index.js';
+import { createInMemoryPresenceManager, PresenceCapacityError, presenceManagerContract, type PresenceHarness } from './index.js';
 
 // A clock-controllable harness for the contract (deterministic TTL tests).
 function makeHarness(): PresenceHarness {
@@ -33,6 +33,34 @@ describe('presence — security & robustness', () => {
     await m.heartbeat({ runId: 'r1', tenantId: 'tA' }, { userId: 'u1', displayName: 'Secret', presence: 'online', cursor: { x: 1 } });
     const other = await m.list({ runId: 'r1', tenantId: 'tB' });
     expect(other).toEqual([]); // tenant B sees nothing of tenant A's participant
+  });
+
+  it('keeps scopes with separator characters distinct for snapshots, leave and expiry', async () => {
+    let clock = 0;
+    const m = createInMemoryPresenceManager({ ttlMs: 100, now: () => clock });
+    const left = { tenantId: 'org', runId: 'region:board' };
+    const right = { tenantId: 'org:region', runId: 'board' };
+    await m.heartbeat(left, { userId: 'u1', displayName: 'Left', presence: 'online' });
+    await m.heartbeat(right, { userId: 'u1', displayName: 'Right', presence: 'online' });
+    expect(await m.list(left)).toMatchObject([{ displayName: 'Left' }]);
+    await m.leave(left, 'u1');
+    expect(await m.list(right)).toMatchObject([{ displayName: 'Right' }]);
+    clock = 100;
+    expect(await m.sweep()).toEqual([right]);
+  });
+
+  it('bounds occupancy without dropping a live participant and frees capacity on sweep', async () => {
+    let clock = 0;
+    const m = createInMemoryPresenceManager({ maxParticipants: 1, ttlMs: 100, now: () => clock });
+    const alice = { userId: 'alice', displayName: 'Alice', presence: 'online' as const };
+    const otherScope = { tenantId: 'tB', runId: 'r1' };
+    await m.heartbeat(scope, alice);
+    clock = 50;
+    await m.heartbeat(scope, alice);
+    await expect(m.heartbeat(otherScope, alice)).rejects.toBeInstanceOf(PresenceCapacityError);
+    clock = 150;
+    expect(await m.sweep()).toEqual([scope]);
+    expect(await m.heartbeat(otherScope, alice)).toMatchObject([{ displayName: 'Alice' }]);
   });
 
   it('leave on an absent participant is a harmless no-op', async () => {

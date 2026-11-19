@@ -27,8 +27,7 @@
  *
  * Ports & adapters (same pattern as the Phase 0 run substrate): the
  * {@link PresenceManager} PORT lives here with an in-memory reference adapter
- * ({@link createInMemoryPresenceManager}); a consuming application provides a SQL adapter over
- * the `run_presence` table. Both pass {@link presenceManagerContract}.
+ * ({@link createInMemoryPresenceManager}). The PostgreSQL adapter uses the host's connection.
  */
 import type { RunPresenceParticipant } from '@weaveintel/core';
 import type { PresenceStatus, PeerKind } from './presence-model.js';
@@ -56,6 +55,15 @@ export interface PresenceManagerOptions {
   ttlMs?: number;
   /** Clock injection (tests). Default `Date.now`. */
   now?: () => number;
+  /** Maximum stored entries across scopes. Call sweep periodically to free expired slots. */
+  maxParticipants?: number;
+}
+
+export class PresenceCapacityError extends Error {
+  constructor() {
+    super('Presence capacity exhausted');
+    this.name = 'PresenceCapacityError';
+  }
 }
 
 export interface PresenceManager {
@@ -78,8 +86,6 @@ export interface PresenceManager {
 }
 
 interface StoredParticipant extends RunPresenceParticipant {
-  tenantId: string;
-  runId: string;
   expiresAt: number;
 }
 
@@ -96,25 +102,44 @@ function toPublic(p: StoredParticipant): RunPresenceParticipant {
 }
 
 /**
- * In-memory reference {@link PresenceManager}. Single-process; the host application's SQL
- * adapter is the durable, cross-process implementation. Both pass the same
- * conformance suite.
+ * In-memory reference {@link PresenceManager} for a single process.
  */
 export function createInMemoryPresenceManager(opts: PresenceManagerOptions = {}): PresenceManager {
   const ttlMs = opts.ttlMs ?? 30_000;
   const now = opts.now ?? (() => Date.now());
-  // key = `${tenantId}:${runId}:${userId}` — tenant in the key == hard isolation.
-  const store = new Map<string, StoredParticipant>();
-  const key = (s: PresenceScope, userId: string) => `${s.tenantId}:${s.runId}:${userId}`;
-  const prefix = (s: PresenceScope) => `${s.tenantId}:${s.runId}:`;
+  const maxParticipants = opts.maxParticipants ?? Number.MAX_SAFE_INTEGER;
+  if (!Number.isSafeInteger(ttlMs) || ttlMs < 1) throw new RangeError('ttlMs must be a positive safe integer');
+  if (!Number.isSafeInteger(maxParticipants) || maxParticipants < 1) throw new RangeError('maxParticipants must be a positive safe integer');
+  const store = new Map<string, { scope: PresenceScope; participants: Map<string, StoredParticipant> }>();
+  const key = (s: PresenceScope) => JSON.stringify([s.tenantId, s.runId]);
+  let count = 0;
 
-  function snapshot(scope: PresenceScope): RunPresenceParticipant[] {
-    const t = now();
+  function prune(id: string, t: number): boolean {
+    const participants = store.get(id)?.participants;
+    if (!participants) return false;
+    const before = participants.size;
+    for (const [userId, peer] of participants) {
+      if (peer.expiresAt <= t) {
+        participants.delete(userId);
+        count--;
+      }
+    }
+    if (participants.size === 0) store.delete(id);
+    return participants.size !== before;
+  }
+
+  function sweep(t: number): PresenceScope[] {
+    const affected: PresenceScope[] = [];
+    for (const [id, entry] of store) {
+      if (prune(id, t)) affected.push({ ...entry.scope });
+    }
+    return affected;
+  }
+
+  function snapshot(id: string, t: number): RunPresenceParticipant[] {
     const out: RunPresenceParticipant[] = [];
-    for (const [k, v] of store) {
-      if (!k.startsWith(prefix(scope))) continue;
-      if (v.expiresAt <= t) continue; // expired — treated as gone
-      out.push(toPublic(v));
+    for (const peer of store.get(id)?.participants.values() ?? []) {
+      if (peer.expiresAt > t) out.push(toPublic(peer));
     }
     // Deterministic order: humans before agents, then by userId.
     out.sort((a, b) => (a.peerType === b.peerType ? (a.userId < b.userId ? -1 : 1) : a.peerType === 'human' ? -1 : 1));
@@ -124,9 +149,17 @@ export function createInMemoryPresenceManager(opts: PresenceManagerOptions = {})
   return {
     async heartbeat(scope, beat) {
       const t = now();
-      store.set(key(scope, beat.userId), {
-        runId: scope.runId,
-        tenantId: scope.tenantId,
+      const id = key(scope);
+      if (!store.get(id)?.participants.has(beat.userId)) {
+        if (count >= maxParticipants) throw new PresenceCapacityError();
+        count++;
+      }
+      let entry = store.get(id);
+      if (!entry) {
+        entry = { scope: { ...scope }, participants: new Map() };
+        store.set(id, entry);
+      }
+      entry.participants.set(beat.userId, {
         userId: beat.userId,
         displayName: beat.displayName,
         presence: beat.presence,
@@ -136,28 +169,23 @@ export function createInMemoryPresenceManager(opts: PresenceManagerOptions = {})
         lastHeartbeatAt: t,
         expiresAt: t + ttlMs,
       });
-      return snapshot(scope);
+      return snapshot(id, t);
     },
 
     async leave(scope, userId) {
-      store.delete(key(scope, userId));
-      return snapshot(scope);
+      const id = key(scope);
+      const peers = store.get(id)?.participants;
+      if (peers?.delete(userId)) count--;
+      if (peers?.size === 0) store.delete(id);
+      return snapshot(id, now());
     },
 
     async list(scope) {
-      return snapshot(scope);
+      return snapshot(key(scope), now());
     },
 
     async sweep() {
-      const t = now();
-      const affected = new Map<string, PresenceScope>();
-      for (const [k, v] of store) {
-        if (v.expiresAt <= t) {
-          store.delete(k);
-          affected.set(`${v.tenantId}:${v.runId}`, { runId: v.runId, tenantId: v.tenantId });
-        }
-      }
-      return [...affected.values()];
+      return sweep(now());
     },
   };
 }
