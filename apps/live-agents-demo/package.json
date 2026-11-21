@@ -1,6 +1,7 @@
 {
   "name": "@weaveintel/live-agents-demo",
   "version": "0.1.0",
+  "private": true,
   "description": "Reference application for @weaveintel/live-agents",
   "type": "module",
   "main": "./dist/index.js",
