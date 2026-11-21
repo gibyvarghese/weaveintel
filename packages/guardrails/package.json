@@ -2,6 +2,11 @@
   "name": "@weaveintel/guardrails",
   "version": "0.2.1",
   "description": "Guardrail pipeline — evaluation chain, risk classification, cost guard, governance",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gibyvarghese/weaveintel.git",
+    "directory": "packages/guardrails"
+  },
   "type": "module",
   "exports": {
     ".": {

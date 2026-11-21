@@ -2,6 +2,11 @@
   "name": "@weaveintel/encryption",
   "version": "0.1.2",
   "description": "Per-tenant envelope encryption: KMS providers, key manager, AEAD envelope, blind indexes",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gibyvarghese/weaveintel.git",
+    "directory": "packages/encryption"
+  },
   "type": "module",
   "exports": {
     ".": {

@@ -2,6 +2,11 @@
   "name": "@weaveintel/ui-primitives",
   "version": "0.1.2",
   "description": "UI event builders — approval, citations, artifacts, widgets, streaming envelopes",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gibyvarghese/weaveintel.git",
+    "directory": "packages/ui-primitives"
+  },
   "type": "module",
   "exports": {
     ".": {

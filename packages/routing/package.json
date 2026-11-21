@@ -2,6 +2,11 @@
   "name": "@weaveintel/routing",
   "version": "0.1.2",
   "description": "Model routing — policy-based routing, health tracking, weighted scoring, explainable decisions",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gibyvarghese/weaveintel.git",
+    "directory": "packages/routing"
+  },
   "type": "module",
   "exports": {
     ".": {

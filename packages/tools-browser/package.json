@@ -30,5 +30,10 @@
     "dist",
     "!dist/**/*.test.*",
     "!dist/**/*.spec.*"
-  ]
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gibyvarghese/weaveintel.git",
+    "directory": "packages/tools-browser"
+  }
 }

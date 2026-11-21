@@ -92,5 +92,10 @@
     "!dist/**/*.test.*",
     "!dist/**/*.spec.*"
   ],
-  "description": "LLM spend budgets and limits — cap and govern model cost."
+  "description": "LLM spend budgets and limits — cap and govern model cost.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gibyvarghese/weaveintel.git",
+    "directory": "packages/cost-governor"
+  }
 }

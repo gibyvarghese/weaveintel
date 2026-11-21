@@ -2,6 +2,11 @@
   "name": "@weaveintel/cache",
   "version": "0.1.2",
   "description": "Semantic & operational caching — exact match, embedding similarity, tool result caching, TTL, invalidation",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gibyvarghese/weaveintel.git",
+    "directory": "packages/cache"
+  },
   "type": "module",
   "exports": {
     ".": {

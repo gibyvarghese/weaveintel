@@ -23,6 +23,11 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gibyvarghese/weaveintel.git",
+    "directory": "packages/weaveintel"
+  },
   "dependencies": {
     "@weaveintel/agents": "^0.2.1",
     "@weaveintel/core": "^0.2.0",

@@ -2,6 +2,11 @@
   "name": "@weaveintel/collab",
   "version": "0.2.0",
   "description": "Real-time collaboration + CRDT co-editing — one presence model, a CoeditDoc port with an RGA reference adapter, and the AI-as-editing-peer.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gibyvarghese/weaveintel.git",
+    "directory": "packages/collab"
+  },
   "type": "module",
   "exports": {
     ".": {

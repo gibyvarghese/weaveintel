@@ -36,5 +36,10 @@
     "!dist/**/*.test.*",
     "!dist/**/*.spec.*"
   ],
-  "description": "Structured notes as a capability — a NoteRepository port, contract test, and doc model."
+  "description": "Structured notes as a capability — a NoteRepository port, contract test, and doc model.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gibyvarghese/weaveintel.git",
+    "directory": "packages/notes"
+  }
 }

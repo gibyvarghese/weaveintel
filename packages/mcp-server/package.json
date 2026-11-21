@@ -2,6 +2,11 @@
   "name": "@weaveintel/mcp-server",
   "version": "0.2.1",
   "description": "MCP server — expose tools/resources/prompts via MCP protocol",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gibyvarghese/weaveintel.git",
+    "directory": "packages/mcp-server"
+  },
   "type": "module",
   "exports": {
     ".": {

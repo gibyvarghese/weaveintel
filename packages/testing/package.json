@@ -2,6 +2,11 @@
   "name": "@weaveintel/testing",
   "version": "0.1.2",
   "description": "Testing harnesses — fake models, fake vector stores, fake MCP servers",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gibyvarghese/weaveintel.git",
+    "directory": "packages/testing"
+  },
   "type": "module",
   "exports": {
     ".": {

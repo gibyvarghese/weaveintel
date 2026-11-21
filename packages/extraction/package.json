@@ -32,5 +32,10 @@
     "!dist/**/*.test.*",
     "!dist/**/*.spec.*"
   ],
-  "description": "Structured data extraction from text and documents."
+  "description": "Structured data extraction from text and documents.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gibyvarghese/weaveintel.git",
+    "directory": "packages/extraction"
+  }
 }
