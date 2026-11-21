@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/tools-enterprise",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "exports": {
     ".": {
@@ -16,8 +16,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@weaveintel/core": "^0.1.1",
-    "@weaveintel/tools": "^0.1.1 || ^0.2.0"
+    "@weaveintel/core": "^0.2.0",
+    "@weaveintel/tools": "^0.2.1"
   },
   "devDependencies": {
     "vitest": "^3.2.6"

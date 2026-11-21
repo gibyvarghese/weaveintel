@@ -1,5 +1,15 @@
 # @weaveintel/tools
 
+## 0.2.1
+
+### Patch Changes
+
+- Updated dependencies [766246e]
+  - @weaveintel/core@0.2.0
+  - @weaveintel/mcp-client@0.1.2
+  - @weaveintel/mcp-server@0.2.1
+  - @weaveintel/resilience@0.1.2
+
 ## 0.2.0
 
 ### Breaking (fail-closed defaults)

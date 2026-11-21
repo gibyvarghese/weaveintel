@@ -1,5 +1,20 @@
 # @weaveintel/agents
 
+## 0.2.1
+
+### Patch Changes
+
+- Updated dependencies [766246e]
+- Updated dependencies [766246e]
+  - @weaveintel/a2a@0.2.0
+  - @weaveintel/core@0.2.0
+  - @weaveintel/cost-governor@0.2.1
+  - @weaveintel/guardrails@0.2.1
+  - @weaveintel/human-tasks@0.1.3
+  - @weaveintel/memory@0.1.3
+  - @weaveintel/prompts@0.2.3
+  - @weaveintel/testing@0.1.2
+
 ## 0.2.0
 
 ### Changed (fail-closed default)

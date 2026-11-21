@@ -1,5 +1,14 @@
 # @weaveintel/workflows
 
+## 0.1.5
+
+### Patch Changes
+
+- Updated dependencies [766246e]
+  - @weaveintel/core@0.2.0
+  - @weaveintel/observability@0.2.0
+  - @weaveintel/human-tasks@0.1.3
+
 ## 0.1.4
 
 ### Patch Changes

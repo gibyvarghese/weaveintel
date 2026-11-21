@@ -1,7 +1,7 @@
 {
   "name": "@weaveintel/guardrails",
-  "version": "0.2.0",
-  "description": "Guardrail pipeline \u2014 evaluation chain, risk classification, cost guard, governance",
+  "version": "0.2.1",
+  "description": "Guardrail pipeline — evaluation chain, risk classification, cost guard, governance",
   "type": "module",
   "exports": {
     ".": {
@@ -40,11 +40,11 @@
     "guardrails:eval": "npx tsx src/eval/runner.ts"
   },
   "dependencies": {
-    "@weaveintel/core": "^0.1.1",
-    "@weaveintel/persistence": "^0.1.1"
+    "@weaveintel/core": "^0.2.0",
+    "@weaveintel/persistence": "^0.1.3"
   },
   "devDependencies": {
-    "@weaveintel/testing": "^0.1.1",
+    "@weaveintel/testing": "^0.1.2",
     "typescript": "^5.7.0",
     "vitest": "^3.2.6"
   },
