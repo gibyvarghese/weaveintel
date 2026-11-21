@@ -2,6 +2,11 @@
   "name": "@weaveintel/workflows",
   "version": "0.1.5",
   "description": "Workflow engine — definition builder, step execution, scheduling, compensation, checkpointing",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gibyvarghese/weaveintel.git",
+    "directory": "packages/workflows"
+  },
   "type": "module",
   "exports": {
     ".": {

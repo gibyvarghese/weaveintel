@@ -27,6 +27,11 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gibyvarghese/weaveintel.git",
+    "directory": "packages/upgrade"
+  },
   "dependencies": {
     "@weaveintel/encryption": "^0.1.1",
     "semver": "^7.7.4",

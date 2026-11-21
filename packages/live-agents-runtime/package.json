@@ -31,6 +31,11 @@
     "@weaveintel/tools": "^0.2.1"
   },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gibyvarghese/weaveintel.git",
+    "directory": "packages/live-agents-runtime"
+  },
   "publishConfig": {
     "access": "public"
   },

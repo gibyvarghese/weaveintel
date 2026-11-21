@@ -2,6 +2,11 @@
   "name": "@weaveintel/devtools",
   "version": "0.1.2",
   "description": "Developer tools — scaffold, inspector, validator, mock runtime, migration",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gibyvarghese/weaveintel.git",
+    "directory": "packages/devtools"
+  },
   "type": "module",
   "exports": {
     ".": {

@@ -3,6 +3,11 @@
   "version": "0.1.1",
   "type": "module",
   "description": "Framework-agnostic accessibility utilities for weaveIntel UIs — pure, dependency-free helpers (focus restoration across full re-renders, etc.).",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gibyvarghese/weaveintel.git",
+    "directory": "packages/a11y"
+  },
   "exports": {
     ".": {
       "import": "./dist/index.js",

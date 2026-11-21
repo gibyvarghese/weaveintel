@@ -2,6 +2,11 @@
   "name": "@weaveintel/identity",
   "version": "0.1.3",
   "description": "Identity, delegation, and access-control runtime",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gibyvarghese/weaveintel.git",
+    "directory": "packages/identity"
+  },
   "type": "module",
   "exports": {
     ".": {

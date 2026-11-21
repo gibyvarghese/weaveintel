@@ -2,6 +2,11 @@
   "name": "@weaveintel/voice",
   "version": "0.1.2",
   "description": "Production-grade voice agent pipeline for WeaveIntel — STT, TTS, WebSocket session management and full parity with text agents",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gibyvarghese/weaveintel.git",
+    "directory": "packages/voice"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "exports": {

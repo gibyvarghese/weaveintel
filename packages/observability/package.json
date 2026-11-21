@@ -2,6 +2,11 @@
   "name": "@weaveintel/observability",
   "version": "0.2.0",
   "description": "Tracing, cost tracking, and run logging implementations",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gibyvarghese/weaveintel.git",
+    "directory": "packages/observability"
+  },
   "type": "module",
   "exports": {
     ".": {

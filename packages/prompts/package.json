@@ -2,6 +2,11 @@
   "name": "@weaveintel/prompts",
   "version": "0.2.3",
   "description": "Prompt management — versioned templates, variable substitution, instruction bundles, A/B experiments, scoped resolution",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gibyvarghese/weaveintel.git",
+    "directory": "packages/prompts"
+  },
   "type": "module",
   "exports": {
     ".": {

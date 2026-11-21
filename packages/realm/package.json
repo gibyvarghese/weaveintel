@@ -27,6 +27,11 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gibyvarghese/weaveintel.git",
+    "directory": "packages/realm"
+  },
   "dependencies": {
     "@weaveintel/core": "^0.2.0",
     "@weaveintel/identity": "^0.1.3"

@@ -28,6 +28,11 @@
     "vitest": "^3.2.6"
   },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gibyvarghese/weaveintel.git",
+    "directory": "clients/tokens"
+  },
   "publishConfig": {
     "access": "public"
   }

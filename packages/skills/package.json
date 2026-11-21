@@ -2,6 +2,11 @@
   "name": "@weaveintel/skills",
   "version": "0.2.1",
   "description": "Agent Skills capability — reusable named capability bundles that agents discover and apply automatically",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gibyvarghese/weaveintel.git",
+    "directory": "packages/skills"
+  },
   "type": "module",
   "exports": {
     ".": {

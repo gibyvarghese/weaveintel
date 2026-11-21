@@ -2,6 +2,11 @@
   "name": "@weaveintel/mcp-client",
   "version": "0.1.2",
   "description": "MCP client — connect to MCP servers and expose their tools",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gibyvarghese/weaveintel.git",
+    "directory": "packages/mcp-client"
+  },
   "type": "module",
   "exports": {
     ".": {

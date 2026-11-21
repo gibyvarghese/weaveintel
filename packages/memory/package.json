@@ -2,6 +2,11 @@
   "name": "@weaveintel/memory",
   "version": "0.1.3",
   "description": "Memory implementations — conversation, semantic, entity",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gibyvarghese/weaveintel.git",
+    "directory": "packages/memory"
+  },
   "type": "module",
   "exports": {
     ".": {

@@ -2,6 +2,11 @@
   "name": "@weaveintel/agents",
   "version": "0.2.1",
   "description": "Agent runtime — tool-calling loop, planner-executor, hierarchical supervisor-worker",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gibyvarghese/weaveintel.git",
+    "directory": "packages/agents"
+  },
   "type": "module",
   "exports": {
     ".": {
