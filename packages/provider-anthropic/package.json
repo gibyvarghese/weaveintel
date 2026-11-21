@@ -2,6 +2,11 @@
   "name": "@weaveintel/provider-anthropic",
   "version": "0.1.2",
   "description": "Anthropic provider for weaveIntel — chat, tool use, vision, PDF, extended thinking, citations, batches, computer use",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gibyvarghese/weaveintel.git",
+    "directory": "packages/provider-anthropic"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -29,11 +34,6 @@
     "@weaveintel/tools": "^0.2.1"
   },
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/gibyvarghese/weaveintel.git",
-    "directory": "packages/provider-anthropic"
-  },
   "publishConfig": {
     "access": "public"
   }

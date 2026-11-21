@@ -59,3 +59,7 @@ export {
   type TokenCountRequest,
   type TokenCountResponse,
 } from './anthropic-token-count.js';
+
+// Content translation: every part is sent properly or refused with a typed error
+export { partToAnthropicBlock, buildAnthropicMessages, anthropicCapabilityProfile } from './anthropic-format.js';
+export type { AnthropicPartContext } from './anthropic-format.js';

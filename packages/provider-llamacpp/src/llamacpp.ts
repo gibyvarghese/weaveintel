@@ -33,6 +33,7 @@ import {
   WeaveIntelError,
   normalizeError,
   deadlineSignal,
+  unsupportedPart,
 } from '@weaveintel/core';
 import { weaveRegisterModel, weaveRegisterEmbedding } from '@weaveintel/core/models';
 import { openaiAdapter, translate } from '@weaveintel/tools/schema';
@@ -143,7 +144,8 @@ function buildChatMessages(messages: ModelRequest['messages']): unknown[] {
             },
           };
         default:
-          return { type: 'text', text: `[${part.type} content]` };
+          // Never a placeholder: the part is refused, naming what is missing.
+          throw unsupportedPart(part, { provider: 'llamacpp' });
       }
     });
     return { role: msg.role, content: parts };

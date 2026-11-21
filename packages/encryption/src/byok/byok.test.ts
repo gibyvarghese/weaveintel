@@ -2,6 +2,19 @@
  * @weaveintel/encryption — BYOK / HYOK / break-glass / attestation tests.
  */
 
+import { vi } from 'vitest';
+
+// The HYOK proxy's address is checked before every call, and since @weaveintel/core 0.2.0 a name that does not
+// resolve is refused. These tests stub the call itself and use names nobody owns, so they also answer DNS: every
+// name resolves to one public address. (A refused address is still tested: the checks below use http:// and IP
+// literals, which never reach DNS.)
+vi.mock('node:dns', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:dns')>();
+  const lookup = (_host: string, _o: unknown, cb: (e: NodeJS.ErrnoException | null, a: { address: string; family: number }[]) => void): void => {
+    setImmediate(() => cb(null, [{ address: '93.184.216.34', family: 4 }]));
+  };
+  return { ...actual, default: { ...actual, lookup }, lookup };
+});
 import { describe, expect, it } from 'vitest';
 import { generateKeyPairSync } from 'node:crypto';
 import {

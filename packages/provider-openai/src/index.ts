@@ -5,6 +5,7 @@ export {
   weaveOpenAIConfig,
   weaveOpenAI,
   weaveOpenAIEmbedding,
+  toOpenAIChatPart,
   type OpenAIProviderOptions,
 } from './openai.js';
 

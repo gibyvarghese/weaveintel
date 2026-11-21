@@ -19,6 +19,7 @@ import type {
   EmbeddingRequest,
   EmbeddingResponse,
   CapabilityId,
+  ContentPart,
 } from '@weaveintel/core';
 import {
   Capabilities,
@@ -27,6 +28,7 @@ import {
   normalizeError,
   deadlineSignal,
   parseRetryAfterMs,
+  unsupportedPart,
 } from '@weaveintel/core';
 import { weaveRegisterModel, weaveRegisterEmbedding } from '@weaveintel/core/models';
 import { openaiAdapter, translate } from '@weaveintel/tools/schema';
@@ -271,7 +273,74 @@ async function* openaiStreamRequest(
 
 // ─── Chat model ──────────────────────────────────────────────
 
-function buildOpenAIMessages(messages: ModelRequest['messages']): unknown[] {
+const OPENAI_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+const OPENAI_AUDIO_FORMATS: Readonly<Record<string, string>> = {
+  'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/wave': 'wav', 'audio/mpeg': 'mp3', 'audio/mp3': 'mp3',
+};
+
+const mimeOf = (m: string | undefined, fallback: string): string => (m ?? fallback).split(';')[0]!.trim().toLowerCase();
+
+/**
+ * Translate one content part for OpenAI Chat Completions. Every part is sent
+ * properly or refused with an `UnsupportedContentError` naming the capability:
+ *
+ * - images (and image files): `image_url`, a link or a data URL (png, jpeg, gif, webp);
+ * - PDF files, as content, on models that read PDFs: a `file` part with `file_data`
+ *   (a neutral file name is sent, never the uploader's, because names can carry instructions);
+ * - wav or mp3 audio, as content, on audio-input models: `input_audio`;
+ * - everything else: refused. Chat Completions reads no other file type.
+ */
+export function toOpenAIChatPart(
+  part: ContentPart,
+  model: { readonly modelId: string; readonly capabilities: ReadonlySet<CapabilityId> | readonly string[] },
+): Record<string, unknown> {
+  const has = (id: CapabilityId): boolean =>
+    Array.isArray(model.capabilities) ? model.capabilities.includes(id) : (model.capabilities as ReadonlySet<CapabilityId>).has(id);
+  const who = { provider: 'openai', modelId: model.modelId };
+  const image = (p: { url?: string; base64?: string; mimeType?: string }): Record<string, unknown> => {
+    if (p.base64) {
+      const mime = mimeOf(p.mimeType, 'image/png');
+      if (!OPENAI_IMAGE_TYPES.has(mime)) throw unsupportedPart(part, { ...who, reason: `images of type ${mime} are not accepted` });
+      return { type: 'image_url', image_url: { url: `data:${mime};base64,${p.base64}` } };
+    }
+    if (p.url) return { type: 'image_url', image_url: { url: p.url } };
+    throw new WeaveIntelError({ code: 'INVALID_INPUT', message: 'An image part has neither content nor a link.', provider: 'openai' });
+  };
+  switch (part.type) {
+    case 'text':
+      return { type: 'text', text: part.text };
+    case 'image':
+      if (!has(Capabilities.Vision)) throw unsupportedPart(part, who);
+      return image(part);
+    case 'file': {
+      const mime = mimeOf(part.mimeType, 'application/octet-stream');
+      if (mime.startsWith('image/')) {
+        if (!has(Capabilities.Vision)) throw unsupportedPart(part, who);
+        return image(part);
+      }
+      if (mime === 'application/pdf') {
+        if (!has(Capabilities.PdfInput)) throw unsupportedPart(part, who);
+        if (!part.base64) throw unsupportedPart(part, { ...who, reason: 'it needs the content itself, not a link to it' });
+        return { type: 'file', file: { filename: 'document.pdf', file_data: `data:application/pdf;base64,${part.base64}` } };
+      }
+      throw unsupportedPart(part, who);
+    }
+    case 'audio': {
+      if (!has(Capabilities.AudioInput)) throw unsupportedPart(part, who);
+      const format = OPENAI_AUDIO_FORMATS[mimeOf(part.mimeType, 'audio/wav')];
+      if (!format) throw unsupportedPart(part, { ...who, reason: `audio of type ${mimeOf(part.mimeType, '')} is not accepted (wav or mp3 only)` });
+      if (!part.base64) throw unsupportedPart(part, { ...who, reason: 'it needs the content itself, not a link to it' });
+      return { type: 'input_audio', input_audio: { data: part.base64, format } };
+    }
+    default:
+      throw unsupportedPart(part, who);
+  }
+}
+
+function buildOpenAIMessages(
+  messages: ModelRequest['messages'],
+  model: { readonly modelId: string; readonly capabilities: ReadonlySet<CapabilityId> },
+): unknown[] {
   return messages.map((msg) => {
     if (typeof msg.content === 'string') {
       const m: Record<string, unknown> = { role: msg.role, content: msg.content };
@@ -286,20 +355,8 @@ function buildOpenAIMessages(messages: ModelRequest['messages']): unknown[] {
       }
       return m;
     }
-    // Multimodal content parts
-    const parts = msg.content.map((part) => {
-      switch (part.type) {
-        case 'text':
-          return { type: 'text', text: part.text };
-        case 'image':
-          return {
-            type: 'image_url',
-            image_url: { url: part.url ?? `data:${part.mimeType ?? 'image/png'};base64,${part.base64}` },
-          };
-        default:
-          return { type: 'text', text: `[${part.type} content]` };
-      }
-    });
+    // Multimodal content parts: each one is sent properly or refused.
+    const parts = msg.content.map((part) => toOpenAIChatPart(part, model));
     return { role: msg.role, content: parts };
   });
 }
@@ -320,6 +377,17 @@ interface OpenAIModelMetadata {
 
 const OPENAI_MODEL_METADATA: OpenAIModelMetadata[] = [
   {
+    // Audio-input chat models read audio, not images.
+    pattern: /^gpt-4o(?:-mini)?-audio/i,
+    capabilities: [
+      Capabilities.Chat,
+      Capabilities.Streaming,
+      Capabilities.ToolCalling,
+      Capabilities.AudioInput,
+    ],
+    maxContextTokens: 128_000,
+  },
+  {
     pattern: /^gpt-4o/i,
     capabilities: [
       Capabilities.Chat,
@@ -328,8 +396,22 @@ const OPENAI_MODEL_METADATA: OpenAIModelMetadata[] = [
       Capabilities.StructuredOutput,
       Capabilities.Vision,
       Capabilities.Multimodal,
+      Capabilities.PdfInput,
     ],
     maxContextTokens: 128_000,
+  },
+  {
+    pattern: /^gpt-(?:4\.1|5)/i,
+    capabilities: [
+      Capabilities.Chat,
+      Capabilities.Streaming,
+      Capabilities.ToolCalling,
+      Capabilities.StructuredOutput,
+      Capabilities.Vision,
+      Capabilities.Multimodal,
+      Capabilities.PdfInput,
+    ],
+    maxContextTokens: 400_000,
   },
   {
     pattern: /^gpt-4(?:$|-)/i,
@@ -401,7 +483,7 @@ export function weaveOpenAIModel(
     async generate(ctx: ExecutionContext, request: ModelRequest): Promise<ModelResponse> {
       const body: Record<string, unknown> = {
         model: modelId,
-        messages: buildOpenAIMessages(request.messages),
+        messages: buildOpenAIMessages(request.messages, { modelId, capabilities: caps.capabilities }),
       };
       if (request.tools) body['tools'] = buildOpenAITools(request.tools);
       if (request.toolChoice) {
@@ -484,7 +566,7 @@ export function weaveOpenAIModel(
     stream(ctx: ExecutionContext, request: ModelRequest): ModelStream {
       const body: Record<string, unknown> = {
         model: modelId,
-        messages: buildOpenAIMessages(request.messages),
+        messages: buildOpenAIMessages(request.messages, { modelId, capabilities: caps.capabilities }),
         stream: true,
         stream_options: { include_usage: true },
       };
@@ -584,10 +666,12 @@ export function weaveOpenAIEmbeddingModel(
         const data = raw['data'] as Array<Record<string, unknown>>;
         const usage = raw['usage'] as Record<string, number> | undefined;
 
+        const embeddings = data.map((d) => d['embedding'] as number[]);
         return {
-          embeddings: data.map((d) => d['embedding'] as number[]),
+          embeddings,
           model: String(raw['model']),
           usage: { totalTokens: usage?.['total_tokens'] ?? 0 },
+          ...(embeddings[0] ? { dimensions: embeddings[0].length } : {}),
         };
       } catch (err) {
         throw normalizeError(err, 'openai');
