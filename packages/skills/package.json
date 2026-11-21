@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/skills",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Agent Skills capability — reusable named capability bundles that agents discover and apply automatically",
   "type": "module",
   "exports": {
@@ -19,12 +19,12 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@weaveintel/core": "^0.1.1",
-    "@weaveintel/encryption": "^0.1.1",
-    "@weaveintel/retrieval": "^0.1.1 || ^0.2.0"
+    "@weaveintel/core": "^0.2.0",
+    "@weaveintel/encryption": "^0.1.2",
+    "@weaveintel/retrieval": "^0.2.1"
   },
   "devDependencies": {
-    "@weaveintel/sandbox": "^0.1.1",
+    "@weaveintel/sandbox": "^0.1.4",
     "typescript": "^5.7.0",
     "vitest": "^3.2.6"
   },
