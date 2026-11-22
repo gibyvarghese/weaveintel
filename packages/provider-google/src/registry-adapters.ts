@@ -45,6 +45,16 @@ import {
 
 type Json = Record<string, unknown>;
 
+/**
+ * A base URL without its trailing slashes. A character scan, not `/\/+$/`,
+ * which backtracks quadratically on a long run of slashes not at the end.
+ */
+export function trimTrailingSlashes(url: string): string {
+  let end = url.length;
+  while (end > 0 && url.charCodeAt(end - 1) === 47 /* '/' */) end--;
+  return end === url.length ? url : url.slice(0, end);
+}
+
 const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 const DEFAULT_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const CLOUD_PLATFORM_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
@@ -203,7 +213,7 @@ export function googleErrorOverride(status: number, _headers: Headers, bodyText:
 
 /** The Gemini API (Google AI Studio): one API key, sent in the `x-goog-api-key` header. */
 export function geminiAdapter(): ProviderAdapter {
-  const base = (call: AdapterCall): string => (call.provider.baseUrl ?? GEMINI_BASE_URL).replace(/\/+$/, '');
+  const base = (call: AdapterCall): string => trimTrailingSlashes(call.provider.baseUrl ?? GEMINI_BASE_URL);
 
   async function headers(call: AdapterCall): Promise<Record<string, string>> {
     return { 'content-type': 'application/json', ...(call.provider.headers ?? {}), 'x-goog-api-key': await call.secret('apiKey') };
@@ -334,7 +344,7 @@ export function signServiceAccountAssertion(account: { clientEmail: string; priv
  */
 export function vertexAdapter(): ProviderAdapter {
   function base(call: AdapterCall): string {
-    if (call.provider.baseUrl) return call.provider.baseUrl.replace(/\/+$/, '');
+    if (call.provider.baseUrl) return trimTrailingSlashes(call.provider.baseUrl);
     const location = call.provider.region ?? '';
     if (location === '') throw invalid(call, `${label(call)} has no location set (for example "us-central1").`);
     if (!/^[a-z0-9-]+$/.test(location)) throw invalid(call, `${label(call)} has a location that is not a Google Cloud location name.`);

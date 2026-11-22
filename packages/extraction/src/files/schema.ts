@@ -13,6 +13,7 @@ import type { JsonSchema } from '@weaveintel/core';
 import { WeaveIntelError } from '@weaveintel/core';
 import type { RawFieldValue } from './ports.js';
 import type { DocumentPage, ExtractedValue, FieldDefinition, NormalisedDocument, Provenance, Region, ValueIssue, ValueValidator } from './types.js';
+import { trimTrailingChar } from '../strings.js';
 
 const NAME = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
 
@@ -198,7 +199,7 @@ export async function validateValues(
         if (f.type === 'string' && !normaliseForMatch(raw.quote).toLowerCase().includes(normaliseForMatch(String(value)).toLowerCase())) {
           add('value_not_in_quote', 'the value is not in its quote', 0.7);
         }
-        if ((f.type === 'number' || f.type === 'integer') && !raw.quote.replace(/\D/g, '').includes(String(value).replace(/\D/g, '').replace(/0+$/, ''))) {
+        if ((f.type === 'number' || f.type === 'integer') && !raw.quote.replace(/\D/g, '').includes(trimTrailingChar(String(value).replace(/\D/g, ''), '0'))) {
           add('value_not_in_quote', 'the number is not in its quote', 0.7);
         }
         if (opts.ocrPages && opts.ocrPages.length > 0) {

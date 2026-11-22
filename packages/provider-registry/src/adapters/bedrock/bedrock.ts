@@ -15,7 +15,7 @@
  */
 
 import { WeaveIntelError, featureForPart, profileSupports, unsupportedPart, type Message, type ModelRequest, type ModelResponse, type StreamChunk, type ToolCall } from '@weaveintel/core';
-import { malformed, parseJsonBody } from '../../wire.js';
+import { malformed, parseJsonBody, trimTrailingSlashes } from '../../wire.js';
 import type {
   AdapterCall,
   AdapterEmbedInput,
@@ -51,17 +51,19 @@ function region(call: AdapterCall): string {
   return r;
 }
 
+const optionalBase = (url: string | undefined): string | undefined => (url === undefined ? undefined : trimTrailingSlashes(url));
+
 /** Where model calls go. A provider's own base URL (a private endpoint, a test server) wins. */
 function runtimeBase(call: AdapterCall): string {
-  const own = call.provider.baseUrl?.replace(/\/+$/, '');
+  const own = optionalBase(call.provider.baseUrl);
   return own && own !== '' ? own : `https://bedrock-runtime.${region(call)}.amazonaws.com`;
 }
 
 /** Where "what models are there" goes. */
 function controlBase(call: AdapterCall): string {
-  const control = call.provider.settings?.['controlBaseUrl']?.replace(/\/+$/, '');
+  const control = optionalBase(call.provider.settings?.['controlBaseUrl']);
   if (control && control !== '') return control;
-  const own = call.provider.baseUrl?.replace(/\/+$/, '');
+  const own = optionalBase(call.provider.baseUrl);
   return own && own !== '' ? own : `https://bedrock.${region(call)}.amazonaws.com`;
 }
 

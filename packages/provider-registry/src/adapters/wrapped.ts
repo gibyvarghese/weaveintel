@@ -11,7 +11,7 @@
  */
 
 import { WeaveIntelError, type EmbeddingModel, type Model, type StreamChunk } from '@weaveintel/core';
-import { malformed } from '../wire.js';
+import { malformed, trimTrailingSlashes } from '../wire.js';
 import type { AdapterCall, DiscoveredModel, ProviderAdapter, SecretSlot } from '../types.js';
 
 export interface WrappedFactoryCredentials {
@@ -91,7 +91,7 @@ export function wrappedFactoryAdapter(options: WrappedFactoryAdapterOptions): Pr
   if (list) {
     adapter.listModels = async (call): Promise<readonly DiscoveredModel[]> => {
       const key = await call.secret('apiKey');
-      const base = call.provider.baseUrl?.replace(/\/+$/, '');
+      const base = call.provider.baseUrl === undefined ? undefined : trimTrailingSlashes(call.provider.baseUrl);
       const res = await call.transport.send({
         method: 'GET',
         url: base ? `${base}${list.pathFromBase}` : list.defaultUrl,

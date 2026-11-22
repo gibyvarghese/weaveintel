@@ -19,6 +19,7 @@
 import { WeaveIntelError } from '@weaveintel/core';
 import type { DocumentParser, FileBytes, Ocr } from './ports.js';
 import type { DocumentPage, DocumentTable, ParsedDocument, Provenance, TextSpan } from './types.js';
+import { trimTrailingSlashes } from '../strings.js';
 
 export type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body: string; signal?: AbortSignal }) => Promise<{
   ok: boolean;
@@ -98,7 +99,7 @@ export function doclingJsonToPages(json: DoclingJson, source: DocumentPage['sour
 }
 
 async function convert(opts: DoclingServeOptions, file: FileBytes, ocr: boolean, forceOcr = false): Promise<{ json?: DoclingJson; md?: string }> {
-  const url = `${opts.baseUrl.replace(/\/+$/, '')}/v1/convert/source`;
+  const url = `${trimTrailingSlashes(opts.baseUrl)}/v1/convert/source`;
   const body = JSON.stringify({
     options: { to_formats: ['md', 'json'], do_ocr: ocr, force_ocr: forceOcr, image_export_mode: 'placeholder', abort_on_error: false },
     sources: [{ kind: 'file', base64_string: Buffer.from(file.bytes).toString('base64'), filename: `document.${EXT[file.mimeType] ?? 'bin'}` }],

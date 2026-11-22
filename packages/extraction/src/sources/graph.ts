@@ -22,6 +22,7 @@ import type { ExecutionContext } from '@weaveintel/core';
 import type { SourceTransport } from './transport.js';
 import { json, statusError } from './transport.js';
 import { SourceError, fetchedAs, type AclPrincipal, type FetchedFile, type FileSource, type SourceAcl, type SourceIdentity } from './types.js';
+import { trimTrailingSlashes } from '../strings.js';
 
 export const GRAPH_AUDIENCE = 'https://graph.microsoft.com';
 export const GRAPH_USER_SCOPES = ['Files.Read.All', 'Sites.Read.All'] as const;
@@ -30,7 +31,7 @@ export const GRAPH_SERVICE_SCOPES = ['https://graph.microsoft.com/.default'] as 
 
 /** Graph's share id for a sharing URL: "u!" + unpadded base64url of the URL. */
 export function graphShareId(url: string): string {
-  return `u!${Buffer.from(url, 'utf8').toString('base64').replace(/=+$/, '').replace(/\//g, '_').replace(/\+/g, '-')}`;
+  return `u!${Buffer.from(url, 'utf8').toString('base64url')}`;
 }
 
 const SHARE_HOSTS = /(^|\.)(sharepoint\.com|sharepoint\.us|sharepoint-df\.com|1drv\.ms|onedrive\.live\.com|onedrive\.com)$/i;
@@ -79,7 +80,7 @@ export function normaliseGraphPermissions(value: readonly Record<string, unknown
 }
 
 export function createGraphSource(opts: GraphSourceOptions): FileSource {
-  const base = (opts.baseUrl ?? 'https://graph.microsoft.com/v1.0').replace(/\/+$/, '');
+  const base = trimTrailingSlashes(opts.baseUrl ?? 'https://graph.microsoft.com/v1.0');
 
   async function token(ctx: ExecutionContext, identity: SourceIdentity): Promise<string> {
     if (identity.kind === 'anonymous') throw new SourceError('identity_required', 'Microsoft Graph needs a person or a service connection to fetch files.', 'AUTH_FAILED');

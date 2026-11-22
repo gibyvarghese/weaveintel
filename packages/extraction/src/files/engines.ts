@@ -26,7 +26,9 @@ function provenanceOf(model: Model | AudioModel | EmbeddingModel, step: Provenan
 
 /** Parse a model's JSON answer, tolerating a code fence around it. */
 export function parseJsonAnswer(content: string): unknown {
-  const s = content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+  let s = content.trim().replace(/^```(?:json)?\s*/i, '');
+  // A closing fence and the whitespace before it (not a regex: `\s*```$` is quadratic on long whitespace).
+  if (s.endsWith('```')) s = s.slice(0, -3).trimEnd();
   try {
     return JSON.parse(s);
   } catch {

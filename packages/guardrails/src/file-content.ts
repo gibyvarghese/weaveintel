@@ -183,7 +183,8 @@ function randomToken(): string {
 }
 
 /** Anything that looks like one of our fences, so file text cannot forge or close one. */
-const FENCE_LOOKALIKE = /<<\s*\/?\s*(?:FILE|UNTRUSTED)[^>\n]{0,80}>>/gi;
+// `\s*(?:\/\s*)?`, not `\s*\/?\s*`: two adjacent `\s*` split a whitespace run every possible way (quadratic).
+const FENCE_LOOKALIKE = /<<\s*(?:\/\s*)?(?:FILE|UNTRUSTED)[^>\n]{0,80}>>/gi;
 
 export interface FileFenceMeta {
   /** A NEUTRAL label (e.g. "document 1", "page 3"). Never the uploader's file name: names can carry instructions. */
@@ -223,7 +224,12 @@ export function fileSpotlight(system: string, opts?: { seed?: string }): FileSpo
     system: `${fileSpotlightPreamble(fence)}\n\n${system}`,
     fence,
     wrap(text: string, meta?: FileFenceMeta): string {
-      const safe = String(text ?? '').split(fence).join('').replace(FENCE_LOOKALIKE, '');
+      // Until stable: cutting one forged marker must not join its neighbours into another.
+      let safe = String(text ?? '');
+      for (let prev = ''; prev !== safe; ) {
+        prev = safe;
+        safe = safe.split(fence).join('').replace(FENCE_LOOKALIKE, '');
+      }
       const label = meta?.label ? ` ${meta.label.replace(/[^\w .()[\]-]/g, '').slice(0, 40)}` : '';
       return `<<FILE:${fence}${label}>>\n${safe}\n<</FILE:${fence}>>`;
     },

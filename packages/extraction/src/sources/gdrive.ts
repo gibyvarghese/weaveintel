@@ -21,6 +21,7 @@ import type { ExecutionContext } from '@weaveintel/core';
 import type { SourceTransport } from './transport.js';
 import { json, statusError } from './transport.js';
 import { SourceError, fetchedAs, type AclPrincipal, type FetchedFile, type FileSource, type SourceAcl, type SourceIdentity } from './types.js';
+import { trimTrailingSlashes } from '../strings.js';
 
 export const DRIVE_AUDIENCE = 'https://www.googleapis.com';
 export const DRIVE_SCOPES = ['https://www.googleapis.com/auth/drive.readonly'] as const;
@@ -82,8 +83,16 @@ export interface GoogleDriveSourceOptions {
   readonly maxBytes?: number;
 }
 
+/**
+ * A value quoted for a Drive `q` query: backslashes and single quotes are both
+ * escaped with a backslash, so a folder id cannot end the string early.
+ */
+export function driveQueryString(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
 export function createGoogleDriveSource(opts: GoogleDriveSourceOptions): FileSource {
-  const base = (opts.baseUrl ?? 'https://www.googleapis.com/drive/v3').replace(/\/+$/, '');
+  const base = trimTrailingSlashes(opts.baseUrl ?? 'https://www.googleapis.com/drive/v3');
   const exportsMap = { ...DEFAULT_GOOGLE_EXPORTS, ...(opts.exports ?? {}) };
 
   async function token(ctx: ExecutionContext, identity: SourceIdentity): Promise<string> {
@@ -141,7 +150,7 @@ export function createGoogleDriveSource(opts: GoogleDriveSourceOptions): FileSou
     async list(ctx, folderRef, identity, cursor) {
       const tok = await token(ctx, identity);
       const folder = decodeURIComponent(idOf(folderRef));
-      const q = encodeURIComponent(`'${folder.replace(/'/g, "\\'")}' in parents and trashed = false`);
+      const q = encodeURIComponent(`'${driveQueryString(folder)}' in parents and trashed = false`);
       const body = (await get(`/files?q=${q}&fields=nextPageToken,files(id,name,mimeType,size,version,webViewLink)&supportsAllDrives=true&includeItemsFromAllDrives=true&pageSize=200${cursor ? `&pageToken=${encodeURIComponent(cursor)}` : ''}`, tok, 'that folder')).body as { files?: Record<string, string>[]; nextPageToken?: string };
       return {
         items: (body.files ?? []).map((f) => ({

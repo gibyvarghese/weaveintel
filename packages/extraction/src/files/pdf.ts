@@ -25,6 +25,7 @@ import type { DocumentParser, FileBytes } from './ports.js';
 import type { DocumentPage, ParsedDocument, TextSpan } from './types.js';
 import { FileLimitError } from './errors.js';
 import { MIME } from './sniff.js';
+import { blocksBetween } from '../strings.js';
 
 const latin1 = (b: Uint8Array): string => {
   let s = '';
@@ -70,7 +71,8 @@ function inflate(data: Uint8Array, max: number): Uint8Array {
 function collectObjects(bytes: Uint8Array, maxStream: number): Map<number, PdfObject> {
   const raw = latin1(bytes);
   const objects = new Map<number, PdfObject>();
-  const re = /(\d+)\s+(\d+)\s+obj\b/g;
+  // Bounded digit runs and no match inside a longer number: `(\d+)\s+` backtracks quadratically on long digit runs.
+  const re = /(?<!\d)(\d{1,10})\s+(\d{1,5})\s+obj\b/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(raw)) !== null) {
     const num = Number(m[1]);
@@ -147,14 +149,15 @@ export function parseToUnicode(cmap: string): { map: Map<number, string>; twoByt
     return out;
   };
   let twoByte = false;
-  for (const block of cmap.matchAll(/beginbfchar([\s\S]*?)endbfchar/g)) {
-    for (const p of block[1]!.matchAll(/<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]*)>/g)) {
+  for (const block of blocksBetween(cmap, 'beginbfchar', 'endbfchar')) {
+    for (const p of block.matchAll(/<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]*)>/g)) {
       if (p[1]!.length >= 4) twoByte = true;
       map.set(parseInt(p[1]!, 16), hexToStr(p[2]!));
     }
   }
-  for (const block of cmap.matchAll(/beginbfrange([\s\S]*?)endbfrange/g)) {
-    for (const p of block[1]!.matchAll(/<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*(<([0-9A-Fa-f]*)>|\[([^\]]*)\])/g)) {
+  for (const block of blocksBetween(cmap, 'beginbfrange', 'endbfrange')) {
+    // `[^\][]` (not `[^\]]`): an array with no `]` stops at the next `[` instead of rescanning to the end.
+    for (const p of block.matchAll(/<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*(<([0-9A-Fa-f]*)>|\[([^\][]*)\])/g)) {
       const lo = parseInt(p[1]!, 16);
       const hi = parseInt(p[2]!, 16);
       if (p[1]!.length >= 4) twoByte = true;
@@ -390,8 +393,28 @@ export function parsePdfBasic(bytes: Uint8Array, opts: BasicPdfOptions = {}): Pa
     hidden.push({ kind: 'hidden_formatting', count: list.length, decoded: list.join(' ').slice(0, 500), location: `page ${page} (invisible, white or sub-1pt text)` });
   }
   if (pages.every((p) => p.text === '')) warnings.push('No text layer was found (a scan, or filters the basic reader does not read): OCR is needed.');
-  const title = /\/Title\s*\(([^)]*)\)/.exec(raw)?.[1];
+  const title = pdfTitle(raw);
   return { kind: 'pdf', mimeType: MIME.pdf, pages, hidden, activeContent, warnings, metadata: title ? { title } : {} };
+}
+
+/**
+ * The text of the first `/Title (…)` up to its first `)`, as `/\/Title\s*\(([^)]*)\)/`
+ * would find it, in linear time (the regex rescans to the end after each `/Title(`
+ * that has no `)`).
+ */
+export function pdfTitle(raw: string): string | undefined {
+  let from = 0;
+  for (;;) {
+    const at = raw.indexOf('/Title', from);
+    if (at < 0) return undefined;
+    let i = at + 6;
+    while (i < raw.length && /\s/.test(raw[i]!)) i++;
+    if (raw[i] === '(') {
+      const close = raw.indexOf(')', i + 1);
+      return close < 0 ? undefined : raw.slice(i + 1, close);
+    }
+    from = at + 6;
+  }
 }
 
 export function createBasicPdfParser(opts: BasicPdfOptions = {}): DocumentParser {

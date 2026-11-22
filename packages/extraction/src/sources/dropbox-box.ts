@@ -19,6 +19,7 @@ import type { ExecutionContext } from '@weaveintel/core';
 import type { SourceTransport } from './transport.js';
 import { json, statusError } from './transport.js';
 import { SourceError, fetchedAs, type AclPrincipal, type FetchedFile, type FileSource, type SourceAcl, type SourceIdentity } from './types.js';
+import { trimTrailingSlashes } from '../strings.js';
 
 const needIdentity = (who: string, identity: SourceIdentity): Exclude<SourceIdentity, { kind: 'anonymous' }> => {
   if (identity.kind === 'anonymous') throw new SourceError('identity_required', `${who} needs a person or a service connection to fetch files.`, 'AUTH_FAILED');
@@ -40,8 +41,8 @@ export interface DropboxSourceOptions {
 const dropboxArg = (o: unknown): string => JSON.stringify(o).replace(/[\u007f-￿]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
 
 export function createDropboxSource(opts: DropboxSourceOptions): FileSource {
-  const api = (opts.apiBase ?? 'https://api.dropboxapi.com/2').replace(/\/+$/, '');
-  const content = (opts.contentBase ?? 'https://content.dropboxapi.com/2').replace(/\/+$/, '');
+  const api = trimTrailingSlashes(opts.apiBase ?? 'https://api.dropboxapi.com/2');
+  const content = trimTrailingSlashes(opts.contentBase ?? 'https://content.dropboxapi.com/2');
   async function headers(ctx: ExecutionContext, identity: SourceIdentity): Promise<Record<string, string>> {
     const id = needIdentity('Dropbox', identity);
     const tok = await id.tokenProvider.getToken(ctx, { audience: 'https://api.dropboxapi.com', scopes: ['files.content.read', 'sharing.read'] });
@@ -170,7 +171,7 @@ export function normaliseBoxCollaborations(entries: readonly Record<string, unkn
 }
 
 export function createBoxSource(opts: BoxSourceOptions): FileSource {
-  const api = (opts.apiBase ?? 'https://api.box.com/2.0').replace(/\/+$/, '');
+  const api = trimTrailingSlashes(opts.apiBase ?? 'https://api.box.com/2.0');
   const isShared = (ref: string): boolean => /^https:\/\/([\w-]+\.)?(app\.)?box\.com\/(s|shared\/static)\//i.test(ref);
   async function auth(ctx: ExecutionContext, identity: SourceIdentity): Promise<Record<string, string>> {
     const id = needIdentity('Box', identity);

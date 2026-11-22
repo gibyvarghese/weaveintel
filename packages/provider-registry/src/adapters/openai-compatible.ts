@@ -13,7 +13,7 @@
 
 import { WeaveIntelError, unsupportedPart, type ContentPart, type Message, type ModelRequest, type ModelResponse, type StreamChunk, type ToolCall } from '@weaveintel/core';
 import { profileOfModel } from '../profile.js';
-import { malformed, parseJsonBody, sseData } from '../wire.js';
+import { malformed, parseJsonBody, sseData, trimTrailingSlashes } from '../wire.js';
 import type {
   AdapterCall,
   AdapterEmbedInput,
@@ -163,7 +163,7 @@ export function openAICompatibleAdapter(options: OpenAICompatibleAdapterOptions 
   }
 
   function url(call: AdapterCall, template: string, modelId?: string): string {
-    const base = call.provider.baseUrl?.replace(/\/+$/, '');
+    const base = call.provider.baseUrl === undefined ? undefined : trimTrailingSlashes(call.provider.baseUrl);
     if (!base) throw invalid(call, `${label(call)} has no address (base URL) set.`);
     const path = template.replace('{model}', encodeURIComponent(modelId ?? ''));
     const apiVersion = setting(call, 'apiVersion');

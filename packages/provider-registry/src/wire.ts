@@ -14,6 +14,16 @@ import type { WireErrorOverride } from './types.js';
 const MAX_RETRY_AFTER_MS = 120_000;
 
 /** How long the provider asked us to wait, in milliseconds, if it said. */
+/**
+ * A base URL without its trailing slashes. A character scan, not `/\/+$/`,
+ * which backtracks quadratically on a long run of slashes not at the end.
+ */
+export function trimTrailingSlashes(url: string): string {
+  let end = url.length;
+  while (end > 0 && url.charCodeAt(end - 1) === 47 /* '/' */) end--;
+  return end === url.length ? url : url.slice(0, end);
+}
+
 export function retryAfterFrom(headers: Headers): number | undefined {
   const ms = headers.get('retry-after-ms');
   if (ms !== null && ms !== '' && Number.isFinite(Number(ms))) {

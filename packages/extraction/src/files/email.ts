@@ -33,6 +33,94 @@ export function decodeText(bytes: Uint8Array, charset = 'utf-8'): string {
 
 const HIDDEN_STYLE = /(display\s*:\s*none|visibility\s*:\s*hidden|font-size\s*:\s*0(?:\.\d+)?(px|pt|em)?\s*(;|$)|opacity\s*:\s*0(\.0+)?\s*(;|$)|color\s*:\s*(#fff(fff)?|white)\b)/i;
 
+/** Sticky: tried only at the `<` being looked at, never searched forward. */
+const RAW_TEXT_OPEN = /<(script|style|noscript|template|head)\b/iy;
+
+/**
+ * One pass: comments and the raw-text elements (script, style, noscript,
+ * template, head) removed, scanning with `indexOf` rather than lazy `[\s\S]*?`
+ * regexes (which rescan to the end after every unclosed opener). As in a
+ * browser, an unclosed comment or raw-text element runs to the end of the input.
+ */
+function dropCommentsAndRawTextOnce(s: string): string {
+  let out = '';
+  let i = 0;
+  while (i < s.length) {
+    const lt = s.indexOf('<', i);
+    if (lt < 0) { out += s.slice(i); break; }
+    out += s.slice(i, lt);
+    if (s.startsWith('<!--', lt)) {
+      const end = s.indexOf('-->', lt + 4);
+      if (end < 0) return out;
+      i = end + 3;
+      continue;
+    }
+    RAW_TEXT_OPEN.lastIndex = lt;
+    const open = RAW_TEXT_OPEN.exec(s);
+    if (open !== null && open.index === lt) {
+      const close = new RegExp(`</${open[1]!}\\s*>`, 'gi');
+      close.lastIndex = lt + open[0].length;
+      const c = close.exec(s);
+      if (c === null) return out;
+      i = c.index + c[0].length;
+      continue;
+    }
+    out += '<';
+    i = lt + 1;
+  }
+  return out;
+}
+
+/**
+ * Comments and raw-text elements removed until none is left, so pieces that
+ * meet once something between them is cut (`<scr<!-- -->ipt>`) are removed too.
+ */
+export function dropCommentsAndRawText(html: string): string {
+  let s = html;
+  for (let pass = 0; pass < 64; pass++) {
+    const next = dropCommentsAndRawTextOnce(s);
+    if (next === s) return s;
+    s = next;
+  }
+  // Still changing after 64 passes: deliberately nested input. Keep only the text before the first remaining opener.
+  const raw = s.search(/<(script|style|noscript|template|head)\b/i);
+  const comment = s.indexOf('<!--');
+  const cut = [raw, comment].filter((n) => n >= 0);
+  return cut.length > 0 ? s.slice(0, Math.min(...cut)) : s;
+}
+
+/** `s` up to and including its last `>`: no tag (`<…>`) can end after that. */
+const upToLastGt = (s: string): string => s.slice(0, s.lastIndexOf('>') + 1);
+
+/**
+ * `s.replace(re, by)` for a tag pattern ending in `>`, run only on the text up
+ * to the last `>`. Same result, but a `[^>]*>` pattern no longer rescans to the
+ * end from every `<` in a tail that has no `>`.
+ */
+function replaceUpToLastGt(s: string, re: RegExp, by: string): string {
+  const head = upToLastGt(s);
+  return head.replace(re, by) + s.slice(head.length);
+}
+
+/**
+ * Every tag (`<` to the next `>`, at least one character between) replaced by
+ * `replacement`, like `.replace(/<[^>]+>/g, replacement)` but in linear time.
+ * A `<` with no `>` after it is kept as text, as the regex keeps it.
+ */
+export function stripTags(s: string, replacement: string): string {
+  let out = '';
+  let i = 0;
+  for (;;) {
+    const lt = s.indexOf('<', i);
+    if (lt < 0) return out + s.slice(i);
+    const gt = s.indexOf('>', lt + 1);
+    if (gt < 0) return out + s.slice(i);
+    if (gt === lt + 1) { out += s.slice(i, lt + 1); i = lt + 1; continue; }
+    out += s.slice(i, lt) + replacement;
+    i = gt + 1;
+  }
+}
+
 /**
  * HTML to plain text. Scripts, styles and comments are dropped; elements styled
  * to be invisible (display:none, visibility:hidden, zero size or opacity, white
@@ -40,7 +128,7 @@ const HIDDEN_STYLE = /(display\s*:\s*none|visibility\s*:\s*hidden|font-size\s*:\
  */
 export function htmlToText(html: string): { text: string; hidden: HiddenTextFinding[] } {
   const hiddenParts: string[] = [];
-  let s = html.replace(/<!--[\s\S]*?-->/g, '').replace(/<(script|style|noscript|template|head)\b[\s\S]*?<\/\1\s*>/gi, '');
+  let s = dropCommentsAndRawText(html);
   // Remove invisible elements: find each opening tag styled to be invisible and
   // cut to its matching close tag (counting nested tags of the same name).
   const OPEN = /<([a-z][\w-]*)\b([^>]*)>/gi;
@@ -48,7 +136,10 @@ export function htmlToText(html: string): { text: string; hidden: HiddenTextFind
     OPEN.lastIndex = 0;
     let m: RegExpExecArray | null;
     let cut: { from: number; to: number } | undefined;
-    while ((m = OPEN.exec(s)) !== null) {
+    // Only the text up to the last `>`: a tag cannot end later, and `[^>]*>` would
+    // rescan to the end from every `<` with no `>` after it (quadratic).
+    const tagged = upToLastGt(s);
+    while ((m = OPEN.exec(tagged)) !== null) {
       const attrs = m[2] ?? '';
       if (attrs.trimEnd().endsWith('/')) continue;
       const style = /style\s*=\s*("([^"]*)"|'([^']*)')/i.exec(attrs);
@@ -60,7 +151,7 @@ export function htmlToText(html: string): { text: string; hidden: HiddenTextFind
       let depth = 1;
       let t: RegExpExecArray | null;
       let to = s.length;
-      while ((t = re.exec(s)) !== null) {
+      while ((t = re.exec(tagged)) !== null) {
         depth += t[1] ? -1 : 1;
         if (depth === 0) { to = t.index + t[0].length; break; }
       }
@@ -68,16 +159,19 @@ export function htmlToText(html: string): { text: string; hidden: HiddenTextFind
       break;
     }
     if (!cut) break;
-    const inner = decodeEntities(s.slice(cut.from, cut.to).replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+    const inner = decodeEntities(stripTags(s.slice(cut.from, cut.to), ' ')).replace(/\s+/g, ' ').trim();
     if (inner) hiddenParts.push(inner);
     s = `${s.slice(0, cut.from)} ${s.slice(cut.to)}`;
   }
   const text = decodeEntities(
-    s
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<\/(p|div|li|tr|h[1-6]|table|section|article|blockquote)\s*>/gi, '\n')
-      .replace(/<(td|th)\b[^>]*>/gi, '\t')
-      .replace(/<[^>]+>/g, ''),
+    stripTags(
+      replaceUpToLastGt(
+        s.replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|li|tr|h[1-6]|table|section|article|blockquote)\s*>/gi, '\n'),
+        /<(td|th)\b[^>]*>/gi,
+        '\t',
+      ),
+      '',
+    ),
   )
     .replace(/[ \t]{2,}/g, ' ')
     .replace(/[ \t]*\n[ \t]*/g, '\n')

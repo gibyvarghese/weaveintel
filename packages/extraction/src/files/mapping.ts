@@ -23,6 +23,17 @@ import { fileSpotlight } from '@weaveintel/guardrails';
 import type { Embedder } from './ports.js';
 import type { FieldDefinition, Provenance } from './types.js';
 import { parseJsonAnswer, schemaRequest } from './engines.js';
+import { trimWhile } from '../strings.js';
+
+const isDigit = (c: string): boolean => c >= '0' && c <= '9';
+/**
+ * A number's text without the junk around it: leading characters other than a
+ * digit or `+ , - .`, and trailing characters other than a digit or `.`
+ * (a currency sign, a unit). Linear, unlike `/^[^\d+-.]+|[^\d.]+$/`.
+ */
+export function trimNumberEnds(v: string): string {
+  return trimWhile(v, (c) => !isDigit(c) && !'+,-.'.includes(c), (c) => !isDigit(c) && c !== '.');
+}
 
 /** The only transforms a mapping may use. A model can choose among them; it can never write one. */
 export const TRANSFORMS = [
@@ -126,12 +137,12 @@ export function applyTransform(raw: string, transform: Transform, field?: FieldD
     case 'upper': return { value: v.toUpperCase() };
     case 'lower': return { value: v.toLowerCase() };
     case 'number': {
-      const cleaned = v.replace(/[\s,]/g, '').replace(/^[^\d+-.]+|[^\d.]+$/g, '');
+      const cleaned = trimNumberEnds(v.replace(/[\s,]/g, ''));
       const n = Number(cleaned);
       return /\d/.test(cleaned) && Number.isFinite(n) ? { value: n } : { value: null, error: `"${v}" is not a number` };
     }
     case 'number_comma_decimal': {
-      const cleaned = v.replace(/[\s.]/g, '').replace(',', '.').replace(/^[^\d+-.]+|[^\d.]+$/g, '');
+      const cleaned = trimNumberEnds(v.replace(/[\s.]/g, '').replace(',', '.'));
       const n = Number(cleaned);
       return /\d/.test(cleaned) && Number.isFinite(n) ? { value: n } : { value: null, error: `"${v}" is not a number` };
     }
