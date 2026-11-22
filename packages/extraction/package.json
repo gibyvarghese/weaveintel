@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/extraction",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "exports": {
     ".": {
@@ -18,8 +18,8 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@weaveintel/core": "^0.2.0",
-    "@weaveintel/guardrails": "^0.2.1"
+    "@weaveintel/core": "^0.3.0",
+    "@weaveintel/guardrails": "^0.2.2"
   },
   "devDependencies": {
     "pdfjs-dist": "5.7.284",

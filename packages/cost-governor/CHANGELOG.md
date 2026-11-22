@@ -1,5 +1,13 @@
 # @weaveintel/cost-governor
 
+## 0.2.2
+
+### Patch Changes
+
+- Updated dependencies
+  - @weaveintel/core@0.3.0
+  - @weaveintel/tools@0.2.2
+
 ## 0.2.1
 
 ### Patch Changes

@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/sandbox",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "type": "module",
   "exports": {
     ".": {
@@ -18,8 +18,8 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@weaveintel/core": "^0.2.0",
-    "@weaveintel/mcp-server": "^0.2.1",
+    "@weaveintel/core": "^0.3.0",
+    "@weaveintel/mcp-server": "^0.2.2",
     "undici": "^6.27.0"
   },
   "devDependencies": {

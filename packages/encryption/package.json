@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/encryption",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Per-tenant envelope encryption: KMS providers, key manager, AEAD envelope, blind indexes",
   "repository": {
     "type": "git",
@@ -49,7 +49,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@weaveintel/core": "^0.2.0"
+    "@weaveintel/core": "^0.3.0"
   },
   "peerDependencies": {
     "@aws-sdk/client-dynamodb": "^3.810.0",

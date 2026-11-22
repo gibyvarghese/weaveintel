@@ -1,5 +1,13 @@
 # @weaveintel/realm
 
+## 0.5.2
+
+### Patch Changes
+
+- Updated dependencies
+  - @weaveintel/core@0.3.0
+  - @weaveintel/identity@0.1.4
+
 ## 0.5.1
 
 ### Patch Changes

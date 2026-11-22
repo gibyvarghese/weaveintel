@@ -1,5 +1,12 @@
 # @weaveintel/prompts
 
+## 0.2.4
+
+### Patch Changes
+
+- Updated dependencies
+  - @weaveintel/core@0.3.0
+
 ## 0.2.3
 
 ### Patch Changes
