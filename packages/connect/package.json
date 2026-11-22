@@ -1,0 +1,31 @@
+{
+  "name": "@weaveintel/connect",
+  "version": "0.1.0",
+  "description": "Connector framework building blocks: credential appliers and token cache, the generic operation runner, inbound signature verifiers, and a record-and-replay kit. Pure logic: the network is always the caller's.",
+  "type": "module",
+  "exports": {
+    ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+    "./credentials": { "import": "./dist/credentials/index.js", "types": "./dist/credentials/index.d.ts", "default": "./dist/credentials/index.js" },
+    "./runner": { "import": "./dist/runner/index.js", "types": "./dist/runner/index.d.ts", "default": "./dist/runner/index.js" },
+    "./inbound": { "import": "./dist/inbound/index.js", "types": "./dist/inbound/index.d.ts", "default": "./dist/inbound/index.js" },
+    "./replay": { "import": "./dist/replay/index.js", "types": "./dist/replay/index.d.ts", "default": "./dist/replay/index.js" }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.6"
+  },
+  "publishConfig": { "access": "public" },
+  "files": ["dist", "!dist/**/*.test.*", "!dist/**/*.spec.*"],
+  "repository": { "type": "git", "url": "git+https://github.com/gibyvarghese/weaveintel.git", "directory": "packages/connect" },
+  "license": "MIT"
+}
