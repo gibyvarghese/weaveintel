@@ -79,7 +79,9 @@ export function buildRequest(spec: OperationSpec, rows: readonly RequestMapping[
     return encodeURIComponent(v)
   })
   if (missing !== '') return refusal('BAD_INPUT', `The ${words(missing)} is needed.`)
-  const url = new URL(`${base.origin}${base.pathname.replace(/\/+$/, '')}${path.startsWith('/') ? path : `/${path}`}`)
+  // No path of its own: the connection's address is the whole address (a webhook destination), so it is kept as given.
+  const joined = path === '' ? base.pathname : `${base.pathname.replace(/\/+$/, '')}${path.startsWith('/') ? path : `/${path}`}`
+  const url = new URL(`${base.origin}${joined}`)
   for (const [k, v] of base.searchParams) url.searchParams.append(k, v)
   for (const [k, v] of query) url.searchParams.append(k, v)
   if (url.host !== base.host) return refusal('OUTSIDE_REACH', 'That request would leave the connection’s address, so it was not built.')

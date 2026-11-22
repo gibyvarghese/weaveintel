@@ -16,6 +16,12 @@ const base = (over: Partial<RunInput> = {}): RunInput => ({
 })
 
 describe('building the request', () => {
+  it('uses the connection’s address exactly when the operation adds no path (a webhook destination)', () => {
+    const spec: OperationSpec = { key: 'deliver', method: 'POST', baseUrl: 'https://hooks.example.test/in/orders?k=1', pathTemplate: '', bodyFormat: 'json', idempotency: 'none' }
+    const r = buildRequest(spec, [], {}, {})
+    expect(r.ok && r.request.url).toBe('https://hooks.example.test/in/orders?k=1')
+  })
+
   it('fills the path from inputs (encoded), the query from settings, and keeps the host fixed', () => {
     const r = buildRequest(getIssue, getIssueIn, { issue_key: '../../admin?x=1' }, { expand: 'names' })
     expect(r.ok && r.request.url).toBe('https://acme.example.test/rest/api/3/issue/..%2F..%2Fadmin%3Fx%3D1?expand=names')
