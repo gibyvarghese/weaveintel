@@ -28,6 +28,7 @@ console.log(res.content); // "Hello from the stand-in."
 ## What's in the box
 
 - **Fakes** — `weaveFakeModel`, `weaveFakeEmbedding`, `weaveFakeVectorStore`, `weaveFakeTransport` (fake MCP server transport), `weaveFakeContainerRuntime`.
+- **Fake provider servers** — `startFakeOpenAICompatibleServer`, `startFakeBedrockServer`, `startFakeGoogleServer`: in-process HTTP servers that speak each provider's wire format (chat, streaming, tool calls, embeddings, model lists) and can be switched into failure modes (`rate_limit`, `server_error`, `malformed`, `hang`). They record every request so a test can check what was sent. Loopback only, test keys only.
 - **Fake runtime** — `FakeRuntime`, with `FakeModelOptions` / `FakeRuntimeOptions` to script behavior.
 - **Container types** — `ContainerRuntime`, `ContainerRunResult`.
 

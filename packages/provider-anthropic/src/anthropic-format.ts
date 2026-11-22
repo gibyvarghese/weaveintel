@@ -1,4 +1,6 @@
-import type { ContentPart, ModelRequest, ModelResponse, StreamChunk } from '@weaveintel/core';
+import type { ContentPart, ModelCapabilityProfile, ModelRequest, ModelResponse, StreamChunk } from '@weaveintel/core';
+import { WeaveIntelError, profileFromCapabilities, unsupportedPart } from '@weaveintel/core';
+import { resolveAnthropicModelMetadata } from './anthropic-models.js';
 import { anthropicAdapter, translate } from '@weaveintel/tools/schema';
 import type { AnthropicContentBlock } from './anthropic-types.js';
 import type { AnthropicSSEEvent } from './shared.js';
@@ -8,52 +10,87 @@ interface AnthropicMessage {
   content: string | AnthropicContentBlock[];
 }
 
-export function partToAnthropicBlock(part: ContentPart): AnthropicContentBlock {
+const ANTHROPIC_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+
+function mimeOf(mimeType: string | undefined, fallback: string): string {
+  return (mimeType ?? fallback).split(';')[0]!.trim().toLowerCase();
+}
+
+/** Who a refusal is about, for its message. */
+export interface AnthropicPartContext {
+  readonly modelId?: string;
+}
+
+function imageBlock(part: { url?: string; base64?: string; mimeType?: string; type: string }, who: AnthropicPartContext): AnthropicContentBlock {
+  if (part.base64) {
+    const mediaType = mimeOf(part.mimeType, 'image/png');
+    if (!ANTHROPIC_IMAGE_TYPES.has(mediaType)) {
+      throw unsupportedPart(part as ContentPart, { provider: 'anthropic', ...who, reason: `images of type ${mediaType} are not accepted` });
+    }
+    return { type: 'image', source: { type: 'base64', media_type: mediaType, data: part.base64 } };
+  }
+  if (part.url) return { type: 'image', source: { type: 'url', url: part.url } };
+  throw new WeaveIntelError({ code: 'INVALID_INPUT', message: 'An image part has neither content nor a link.', provider: 'anthropic', retryable: false });
+}
+
+/**
+ * Translate one content part into an Anthropic block. Every part is either
+ * sent properly or refused with an `UnsupportedContentError` naming the
+ * capability: nothing is replaced with placeholder text.
+ *
+ * - images: base64 (png, jpeg, gif, webp) or a URL;
+ * - PDF files: a `document` block, base64 or URL;
+ * - text files (`text/*`): a `document` block with a plain-text source;
+ * - image files: an `image` block;
+ * - audio and every other file type: refused (Anthropic reads neither).
+ */
+export function partToAnthropicBlock(part: ContentPart, who: AnthropicPartContext = {}): AnthropicContentBlock {
   switch (part.type) {
     case 'text':
       return { type: 'text', text: part.text };
     case 'image':
-      if (part.url) {
-        return {
-          type: 'image',
-          source: { type: 'url', url: part.url },
-        };
+      return imageBlock(part, who);
+    case 'file': {
+      const mime = mimeOf(part.mimeType, 'application/octet-stream');
+      if (mime === 'application/pdf') {
+        if (part.base64) {
+          return { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: part.base64 } };
+        }
+        if (part.url) return { type: 'document', source: { type: 'url', url: part.url } };
+        throw new WeaveIntelError({ code: 'INVALID_INPUT', message: 'A PDF part has neither content nor a link.', provider: 'anthropic', retryable: false });
       }
-      return {
-        type: 'image',
-        source: {
-          type: 'base64',
-          media_type: part.mimeType ?? 'image/png',
-          data: part.base64 ?? '',
-        },
-      };
-    case 'file':
-      if (part.mimeType === 'application/pdf') {
-        if (part.url) {
-          return {
-            type: 'document',
-            source: { type: 'url', url: part.url },
-          };
+      if (mime.startsWith('image/')) return imageBlock(part, who);
+      if (mime.startsWith('text/')) {
+        if (!part.base64) {
+          throw unsupportedPart(part, { provider: 'anthropic', ...who, reason: 'a text file must be sent as content, not a link' });
         }
         return {
           type: 'document',
-          source: {
-            type: 'base64',
-            media_type: 'application/pdf',
-            data: part.base64 ?? '',
-          },
+          source: { type: 'text', media_type: 'text/plain', data: Buffer.from(part.base64, 'base64').toString('utf8') },
         };
       }
-      return { type: 'text', text: `[file: ${part.filename ?? 'unknown'}]` };
+      throw unsupportedPart(part, { provider: 'anthropic', ...who });
+    }
     case 'audio':
-      return { type: 'text', text: '[audio content not supported by Anthropic]' };
+      throw unsupportedPart(part, { provider: 'anthropic', ...who });
     default:
-      return { type: 'text', text: `[${(part as { type: string }).type} content]` };
+      throw unsupportedPart(part, { provider: 'anthropic', ...who });
   }
+}
+
+/** What Anthropic chat models read, as a capability profile (Claude models with vision). */
+export function anthropicCapabilityProfile(modelId: string): ModelCapabilityProfile {
+  const meta = resolveAnthropicModelMetadata(modelId);
+  return profileFromCapabilities(
+    meta.capabilities,
+    { maxContextTokens: meta.contextWindow, maxOutputTokens: meta.maxOutputTokens },
+    { documentMimeTypes: ['text/*'], imageMimeTypes: [...ANTHROPIC_IMAGE_TYPES], acceptsUrls: true },
+  );
 }
 
 export function buildAnthropicMessages(
   messages: ModelRequest['messages'],
+  who: AnthropicPartContext = {},
 ): { system: string | AnthropicContentBlock[] | undefined; messages: AnthropicMessage[] } {
   let system: string | AnthropicContentBlock[] | undefined;
   const anthropicMessages: AnthropicMessage[] = [];
@@ -65,7 +102,7 @@ export function buildAnthropicMessages(
           ? (typeof system === 'string' ? system + '\n' + msg.content : msg.content)
           : msg.content;
       } else {
-        const blocks: AnthropicContentBlock[] = msg.content.map(partToAnthropicBlock);
+        const blocks: AnthropicContentBlock[] = msg.content.map((part) => partToAnthropicBlock(part, who));
         system = blocks;
       }
       continue;
@@ -102,7 +139,7 @@ export function buildAnthropicMessages(
         anthropicMessages.push({ role, content: msg.content });
       }
     } else {
-      const blocks: AnthropicContentBlock[] = msg.content.map(partToAnthropicBlock);
+      const blocks: AnthropicContentBlock[] = msg.content.map((part) => partToAnthropicBlock(part, who));
       if (role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
         for (const tc of msg.toolCalls) {
           blocks.push({

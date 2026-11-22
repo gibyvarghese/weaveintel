@@ -2,6 +2,11 @@
   "name": "@weaveintel/provider-openai",
   "version": "0.1.2",
   "description": "OpenAI provider for weaveIntel — chat, embeddings, image generation, audio",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gibyvarghese/weaveintel.git",
+    "directory": "packages/provider-openai"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -29,11 +34,6 @@
     "@weaveintel/tools": "^0.2.1"
   },
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/gibyvarghese/weaveintel.git",
-    "directory": "packages/provider-openai"
-  },
   "publishConfig": {
     "access": "public"
   }

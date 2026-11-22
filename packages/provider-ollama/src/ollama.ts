@@ -31,6 +31,7 @@ import {
   WeaveIntelError,
   normalizeError,
   deadlineSignal,
+  unsupportedPart,
 } from '@weaveintel/core';
 import { weaveRegisterModel, weaveRegisterEmbedding } from '@weaveintel/core/models';
 import { openaiAdapter, translate } from '@weaveintel/tools/schema';
@@ -128,9 +129,9 @@ function partToOllama(part: ContentPart): { text?: string; image?: string } {
     case 'image':
       // Ollama expects raw base64 (no data: prefix). URLs are not natively supported.
       if (part.base64) return { image: part.base64 };
-      return { text: `[image url: ${part.url ?? 'unknown'}]` };
+      throw unsupportedPart(part, { provider: 'ollama', reason: 'Ollama needs the image itself, not a link to it' });
     default:
-      return { text: `[${part.type} content]` };
+      throw unsupportedPart(part, { provider: 'ollama' });
   }
 }
 

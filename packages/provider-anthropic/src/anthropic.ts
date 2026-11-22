@@ -107,7 +107,7 @@ export function weaveAnthropicModel(
       const cuaTools = meta.computerUseTools ?? [];
       const extraBeta = cuaTools.length > 0 ? [COMPUTER_USE_BETA] : [];
       const headers = makeHeaders(opts, apiKey, [...(meta.betaFeatures ?? []), ...extraBeta]);
-      const { system, messages } = buildAnthropicMessages(request.messages);
+      const { system, messages } = buildAnthropicMessages(request.messages, { modelId });
 
       const body: Record<string, unknown> = {
         model: modelId,
@@ -176,7 +176,7 @@ export function weaveAnthropicModel(
       const cuaToolsStream = meta.computerUseTools ?? [];
       const extraBetaStream = cuaToolsStream.length > 0 ? [COMPUTER_USE_BETA] : [];
       const headers = makeHeaders(opts, apiKey, [...(meta.betaFeatures ?? []), ...extraBetaStream]);
-      const { system, messages } = buildAnthropicMessages(request.messages);
+      const { system, messages } = buildAnthropicMessages(request.messages, { modelId });
 
       const body: Record<string, unknown> = {
         model: modelId,

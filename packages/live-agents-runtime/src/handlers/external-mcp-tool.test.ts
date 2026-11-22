@@ -67,7 +67,7 @@ describe('external MCP outbound policy', () => {
     const trusted = { allowLoopback: false, allowPrivateNetwork: true, allowInsecureHttp: true, allowedHosts: ['127.0.0.1'] };
     try {
       await expect(run(url, { mcpOutboundPolicy: { ...trusted, allowInsecureHttp: false } })).rejects.toThrow(/non-HTTPS/i);
-      await expect(run(url, { mcpOutboundPolicy: { ...trusted, allowPrivateNetwork: false } })).rejects.toThrow(/private network/i);
+      await expect(run(url, { mcpOutboundPolicy: { ...trusted, allowPrivateNetwork: false } })).rejects.toThrow(/private network|loopback host is not allowed/i); // core 0.3 names loopback separately
       expect(calls).toBe(0);
       await expect(run(url, { mcpOutboundPolicy: trusted })).resolves.toMatchObject({ completed: true });
       expect(calls).toBe(1);
@@ -113,7 +113,8 @@ describe('external MCP outbound policy', () => {
     });
     const port = await listen(server);
     try {
-      await expect(run(`http://127.0.0.1:${port}/redirect`)).resolves.toMatchObject({ completed: true });
+      // A loopback MCP server is reached only when the host allows it (core 0.3: loopback is no longer a default).
+      await expect(run(`http://127.0.0.1:${port}/redirect`, { mcpOutboundPolicy: { allowLoopback: true } })).resolves.toMatchObject({ completed: true });
       expect(received).toMatchObject({ method: 'POST', authorization: 'Bearer test-token' });
       expect(JSON.parse(received!.body)).toMatchObject({
         method: 'tools/call', params: { name: 'test', arguments: { query: 'test' } },

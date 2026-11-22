@@ -204,6 +204,46 @@ export interface EmbeddingResponse {
   readonly embeddings: readonly number[][];
   readonly model: string;
   readonly usage: { readonly totalTokens: number };
+  /** The length of every vector in `embeddings`, when the provider or wrapper states it. */
+  readonly dimensions?: number;
+}
+
+// ─── Multimodal embedding (optional) ─────────────────────────
+
+/** One thing to embed: a text, or an image part. */
+export type EmbeddingInput = TextContent | ImageContent;
+
+/**
+ * An OPTIONAL embedding request that may mix texts and images. Only a model
+ * that embeds images and text into one vector space accepts image inputs;
+ * every other model refuses them with an `UnsupportedContentError`.
+ */
+export interface MultimodalEmbeddingRequest {
+  readonly inputs: readonly EmbeddingInput[];
+  readonly dimensions?: number;
+  /** Whether the inputs are being stored (`document`) or are a search question (`query`). */
+  readonly mode?: 'document' | 'query';
+}
+
+/** One vector, carrying the model and size that produced it, so vectors from different spaces never mix silently. */
+export interface EmbeddingVector {
+  readonly vector: readonly number[];
+  readonly inputType: 'text' | 'image';
+  readonly model: string;
+  readonly dimensions: number;
+}
+
+export interface MultimodalEmbeddingResponse {
+  /** One entry per input, in order. */
+  readonly results: readonly EmbeddingVector[];
+  readonly model: string;
+  readonly dimensions: number;
+  readonly usage: { readonly totalTokens: number };
+}
+
+export interface MultimodalEmbeddingModel extends HasCapabilities {
+  readonly info: ModelInfo;
+  embedMultimodal(ctx: ExecutionContext, request: MultimodalEmbeddingRequest): Promise<MultimodalEmbeddingResponse>;
 }
 
 export interface EmbeddingModel extends HasCapabilities {

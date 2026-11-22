@@ -201,7 +201,9 @@ export function weaveOtlpSink(opts: OtlpSinkOptions): TraceSink {
       const response = await hardenedFetch(endpoint, { method: 'POST', headers, body }, {
         errorTag: 'observability-otlp',
         timeoutMs: exportTimeoutMs,
-        policy: opts.egressPolicy,
+        // A collector on this machine (the usual http://localhost:4318) keeps working now that core refuses
+        // loopback unless asked; private networks and non-loopback HTTP still need the caller's explicit policy.
+        policy: { allowLoopback: true, ...(opts.egressPolicy ?? {}) },
       });
       await response.body?.cancel();
       if (!response.ok) throw new Error(`OTLP export returned HTTP ${response.status}`);

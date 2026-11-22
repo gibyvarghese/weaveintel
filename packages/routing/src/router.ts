@@ -16,7 +16,9 @@ import type {
   TaskTypeInferenceHints,
   TaskTypeInferenceSource,
   OutputModality,
+  ModelCapabilityProfile,
 } from '@weaveintel/core';
+import { UnsupportedContentError, profileFeatures, profileSupports } from '@weaveintel/core';
 import { ModelHealthTracker } from './health.js';
 import { ModelScorer } from './scorer.js';
 import type { ModelCostInfo, ModelQualityInfo, ModelCapabilityInfo } from './scorer.js';
@@ -48,7 +50,16 @@ export interface SmartModelRouterOptions {
   taskInferenceHints?: TaskInferenceHintsMap;
   /** Phase 2: per-(provider, model) declared output modality for modality filter. */
   modalityMap?: Map<string, OutputModality>;
+  /**
+   * Per-(provider, model) capability profiles, keyed `providerId:modelId`.
+   * Their features (`vision`, `pdf`, `audio_in`, `document:<mime>` ...) count
+   * as the candidate's capabilities, so `requiredCapabilities` from
+   * `needsForRequest` filter on what a model can READ.
+   */
+  profiles?: ReadonlyMap<string, ModelCapabilityProfile>;
 }
+
+const INPUT_FEATURE = /^(vision|pdf|audio_in|document:.+)$/;
 
 // ─── Decision metadata extension ─────────────────────────────
 
@@ -72,6 +83,7 @@ export class SmartModelRouter implements IModelRouter {
   private readonly capabilityRows: ModelCapabilityRow[];
   private readonly taskInferenceHints: TaskInferenceHintsMap;
   private readonly modalityMap: Map<string, OutputModality>;
+  private readonly profiles: ReadonlyMap<string, ModelCapabilityProfile>;
 
   constructor(opts: SmartModelRouterOptions) {
     this.healthTracker = new ModelHealthTracker({ windowSize: opts.healthWindowSize });
@@ -82,6 +94,7 @@ export class SmartModelRouter implements IModelRouter {
     this.capabilityRows = opts.capabilityRows ?? [];
     this.taskInferenceHints = opts.taskInferenceHints ?? new Map();
     this.modalityMap = opts.modalityMap ?? new Map();
+    this.profiles = opts.profiles ?? new Map();
     for (const h of opts.initialHealth ?? []) {
       this.healthTracker.applySnapshot(h);
     }
@@ -109,8 +122,10 @@ export class SmartModelRouter implements IModelRouter {
         }
       : (requiredFromContext.length > 0 ? { requiredCapabilities: requiredFromContext } : undefined);
 
-    // 1. Filter by constraints
-    let eligible = filterByConstraints(this.candidates, mergedConstraints, healthMap);
+    // 1. Filter by constraints. A candidate's profile adds to its capabilities.
+    const required = mergedConstraints?.requiredCapabilities ?? [];
+    const withProfiles = this.candidates.map((c) => this.withProfile(c, required));
+    let eligible = filterByConstraints(withProfiles, mergedConstraints, healthMap);
 
     // 2. Remove unhealthy — respects both per-model health and provider-level blocks.
     eligible = eligible.filter(c => this.healthTracker.isAvailable(c.modelId, c.providerId));
@@ -194,6 +209,21 @@ export class SmartModelRouter implements IModelRouter {
       // Use fallback
       const fb = fallbackCandidate(policy);
       if (!fb) throw new Error(`No eligible models and no fallback for policy "${policy.id}"`);
+      // Never fall back to a model that cannot read the request's content:
+      // that would only move the refusal (or a silent drop) one step later.
+      const needInputs = required.filter((r) => INPUT_FEATURE.test(r));
+      if (needInputs.length > 0) {
+        const fbCaps = this.withProfile(fb, required).capabilities ?? [];
+        const lacking = needInputs.filter((r) => !fbCaps.includes(r));
+        if (lacking.length > 0) {
+          throw new UnsupportedContentError({
+            capability: lacking[0]!,
+            provider: fb.providerId,
+            modelId: fb.modelId,
+            reason: `no candidate for policy "${policy.id}" can, and neither can its fallback`,
+          });
+        }
+      }
       selected = fb;
       reason = 'All candidates filtered out; using fallback';
     } else if (policy.strategy === 'round-robin') {
@@ -232,6 +262,14 @@ export class SmartModelRouter implements IModelRouter {
     if (this.decisionStore) await this.decisionStore.record(decision);
 
     return decision;
+  }
+
+  /** The candidate with its profile's features added (including any required document type the profile matches by wildcard). */
+  private withProfile(c: ModelCandidate, required: readonly string[]): ModelCandidate {
+    const profile = this.profiles.get(`${c.providerId}:${c.modelId}`);
+    if (!profile) return c;
+    const matched = required.filter((r) => profileSupports(profile, r));
+    return { ...c, capabilities: [...new Set([...(c.capabilities ?? []), ...profileFeatures(profile), ...matched])] };
   }
 
   async getHealth(modelId: string, providerId: string): Promise<ModelHealth | null> {
