@@ -8,7 +8,8 @@
     "./credentials": { "import": "./dist/credentials/index.js", "types": "./dist/credentials/index.d.ts", "default": "./dist/credentials/index.js" },
     "./runner": { "import": "./dist/runner/index.js", "types": "./dist/runner/index.d.ts", "default": "./dist/runner/index.js" },
     "./inbound": { "import": "./dist/inbound/index.js", "types": "./dist/inbound/index.d.ts", "default": "./dist/inbound/index.js" },
-    "./replay": { "import": "./dist/replay/index.js", "types": "./dist/replay/index.d.ts", "default": "./dist/replay/index.js" }
+    "./replay": { "import": "./dist/replay/index.js", "types": "./dist/replay/index.d.ts", "default": "./dist/replay/index.js" },
+    "./sources": { "import": "./dist/sources/index.js", "types": "./dist/sources/index.d.ts", "default": "./dist/sources/index.js" }
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

@@ -1,11 +1,18 @@
 /**
- * Plain paths into JSON: `fields.priority.name`, `items[2].id`, `items.2.id`. No wildcards, no filters, no
- * expressions — a path names one place. An empty path is the value itself.
+ * Plain paths into JSON: `fields.priority.name`, `items[2].id`, `items.2.id`, and a key that has dots in it quoted in
+ * brackets: `["@odata.nextLink"]`, `a["b.c"]`. No wildcards, no filters, no expressions — a path names one place. An
+ * empty path is the value itself.
  */
 
 /** The steps of a path. */
 function steps(path: string): string[] {
-  return path.replace(/\[(\d+)\]/g, '.$1').split('.').filter((s) => s !== '')
+  const out: string[] = []
+  // A quoted key is one step whatever it holds; everything between quoted keys is split as before.
+  for (const piece of path.split(/(\["[^"]*"\]|\['[^']*'\])/)) {
+    if (/^\[(["']).*\1\]$/.test(piece)) { out.push(piece.slice(2, -2)); continue }
+    out.push(...piece.replace(/\[(\d+)\]/g, '.$1').split('.').filter((s) => s !== ''))
+  }
+  return out
 }
 
 /** Read the value at a path, or undefined. */

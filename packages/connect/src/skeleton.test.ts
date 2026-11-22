@@ -12,7 +12,7 @@ describe('@weaveintel/connect skeleton', () => {
   it('has a source entry for every subpath it exports', () => {
     const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { exports: Record<string, { import: string }> }
     const subpaths = Object.keys(pkg.exports)
-    expect(subpaths).toEqual(['.', './credentials', './runner', './inbound', './replay'])
+    expect(subpaths).toEqual(['.', './credentials', './runner', './inbound', './replay', './sources'])
     for (const s of subpaths) {
       const src = pkg.exports[s]!.import.replace('./dist/', './src/').replace(/\.js$/, '.ts')
       expect(existsSync(join(root, src)), `${s} -> ${src}`).toBe(true)
