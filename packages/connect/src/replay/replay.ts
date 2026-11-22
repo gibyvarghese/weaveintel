@@ -63,6 +63,8 @@ export interface ReplaySend {
   used(): readonly string[]
   /** Every request it was sent, in order. */
   requests(): readonly WireRequest[]
+  /** The names of the exchanges nothing asked for, in recording order: a recording that drifted from the pack. */
+  unused(): readonly string[]
 }
 
 /**
@@ -84,7 +86,7 @@ export function createReplaySend(recording: Recording): ReplaySend {
     const headers = Object.fromEntries(Object.entries(x.response.headers ?? {}).map(([k, v]) => [k.toLowerCase(), v]))
     return { ok: true, status: x.response.status, headers: { 'content-type': 'application/json', ...headers }, body: x.response.body } satisfies SendResult
   }
-  return { send, used: () => [...used], requests: () => [...seen] }
+  return { send, used: () => [...used], requests: () => [...seen], unused: () => recording.exchanges.filter((_, n) => !spent.has(n)).map((x) => x.name) }
 }
 
 const PATTERNS: readonly { readonly name: string; readonly re: RegExp; readonly put: string }[] = [
