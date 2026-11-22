@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/weaveintel",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Meta-package: the curated entry point most adopters need. Re-exports the eight packages that make up the weaveIntel ambient runtime.",
   "type": "module",
   "main": "./dist/index.js",
@@ -29,7 +29,7 @@
     "directory": "packages/weaveintel"
   },
   "dependencies": {
-    "@weaveintel/agents": "^0.2.2",
+    "@weaveintel/agents": "^0.3.0",
     "@weaveintel/core": "^0.3.0",
     "@weaveintel/observability": "^0.2.1",
     "@weaveintel/persistence": "^0.1.4",

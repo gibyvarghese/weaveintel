@@ -1,5 +1,13 @@
 # @weaveintel/live-agents-runtime
 
+## 0.2.2
+
+### Patch Changes
+
+- Updated dependencies
+  - @weaveintel/agents@0.3.0
+  - @weaveintel/live-agents@0.1.5
+
 ## 0.2.1
 
 ### Patch Changes
