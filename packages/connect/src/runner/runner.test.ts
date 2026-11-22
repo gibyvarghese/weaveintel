@@ -82,6 +82,14 @@ describe('running one call', () => {
     expect((await runOperation(base({ spec, send: async () => ok(400, { error: { code: 'OTHER' } }) }))).outcome).toBe('invalid')
     expect((await runOperation(base({ spec, send: async () => ok(403, {}) }))).outcome).toBe('not_found')
   })
+  it('applies the declared outcome to a failure answer whose body is not the JSON it claims to be', async () => {
+    const spec: OperationSpec = { ...getIssue, outcomes: [{ status: 410, outcome: 'not_found' }] }
+    const r = await runOperation(base({ spec, send: async () => ({ ok: true, status: 410, headers: { 'content-type': 'application/json' }, body: 'Gone: deleted' }) }))
+    expect(r.outcome).toBe('not_found')
+    expect(r.detail).toContain('Gone')
+    const good = await runOperation(base({ spec, send: async () => ({ ok: true, status: 200, headers: { 'content-type': 'application/json' }, body: '{oops' }) }))
+    expect(good).toMatchObject({ outcome: 'invalid', code: 'NOT_JSON' })
+  })
   it('a write that timed out after it may have arrived is `unknown` and not safe to repeat', async () => {
     const spec: OperationSpec = { key: 'create', method: 'POST', baseUrl: 'https://a.example.test', pathTemplate: '/x', bodyFormat: 'json', idempotency: 'none' }
     const r = await runOperation(base({ spec, request: [], response: [], send: async () => ({ ok: false, kind: 'timeout', code: 'TIMEOUT', sentence: 'a.example.test did not answer in time.' }) }))

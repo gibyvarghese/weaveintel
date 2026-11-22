@@ -148,10 +148,11 @@ export async function runOperation(run: RunInput): Promise<RunResult> {
     pages++
     lastStatus = r.status
     const parsed = parse(r)
-    if (!parsed.ok) return end('invalid', 'NOT_JSON', r.status, sentenceFor('invalid', label), 'the answer was not JSON', { pages })
-    const outcome = outcomeOf(spec, r.status, parsed.value)
+    // A failure answer is judged by its status even when its body is not the JSON it claims to be (a gateway's page).
+    const outcome = outcomeOf(spec, r.status, parsed.ok ? parsed.value : undefined)
+    if (!parsed.ok && outcome === 'ok') return end('invalid', 'NOT_JSON', r.status, sentenceFor('invalid', label), 'the answer was not JSON', { pages })
     if (outcome !== 'ok') return end(outcome, `HTTP_${String(r.status)}`, r.status, sentenceFor(outcome, label), r.body.slice(0, 300), { pages })
-    const body = parsed.value
+    const body = parsed.ok ? parsed.value : undefined
     // Top-level outputs come from the first page; list outputs gather from every page.
     if (pages === 1) for (const row of run.response.filter((x) => x.itemOf === undefined || x.itemOf === '')) {
       if (!declared.has(row.target)) continue
