@@ -27,7 +27,7 @@
   },
   "dependencies": {
     "@weaveintel/core": "^0.3.0",
-    "@weaveintel/live-agents": "^0.1.4",
+    "@weaveintel/live-agents": "^0.1.5",
     "@weaveintel/persistence": "^0.1.4",
     "pg": "^8.14.1"
   },

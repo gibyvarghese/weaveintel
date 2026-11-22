@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/live-agents-runtime",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Generic, DB-driven runtime atop @weaveintel/live-agents — handler registry + built-in plugins (agentic.react, deterministic.forward).",
   "type": "module",
   "main": "./dist/index.js",
@@ -25,9 +25,9 @@
   },
   "dependencies": {
     "@weaveintel/a2a": "^0.2.1",
-    "@weaveintel/agents": "^0.2.2",
+    "@weaveintel/agents": "^0.3.0",
     "@weaveintel/core": "^0.3.0",
-    "@weaveintel/live-agents": "^0.1.4",
+    "@weaveintel/live-agents": "^0.1.5",
     "@weaveintel/tools": "^0.2.2"
   },
   "license": "MIT",
