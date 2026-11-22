@@ -94,6 +94,13 @@ export async function applyCredential(request: WireRequest, material: Credential
       const profile = s('canonical_profile')
       if (!(HMAC_PROFILES as readonly string[]).includes(profile)) return badSetting('canonical_profile', 'is not one of the signing recipes the platform knows.')
       const timestamp = String(Math.floor(now().getTime() / 1000))
+      if (profile === 'standard_webhooks_v1') {
+        // The message id is part of what is signed, and the same id travels on every retry (Standard Webhooks).
+        const id = request.headers['webhook-id'] ?? ''
+        if (id === '') return badSetting('canonical_profile', 'needs a message id on the request (webhook-id) before it can sign.')
+        const sig = signHmac('standard_webhooks_v1', material.secrets['secret'] ?? '', { body: request.body ?? '', timestamp, id })
+        return { ok: true, request: withHeader(withHeader(request, 'webhook-timestamp', timestamp), 'webhook-signature', `v1,${sig}`) }
+      }
       const sig = signHmac(profile as HmacProfile, material.secrets['secret'] ?? '', { body: request.body ?? '', timestamp })
       let out = withHeader(request, s('signature_header'), `${s('prefix')}${sig}`)
       if (profile === 'timestamp_body_sha256_hex') out = withHeader(out, s('timestamp_header'), timestamp)

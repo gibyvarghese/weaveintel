@@ -4,4 +4,4 @@
 export { CREDENTIAL_KINDS, HMAC_PROFILES, isCredentialKind, settingOf, type CredentialKindDefinition, type CredentialKindKey, type HmacProfile, type SettingPart } from './catalogue.js'
 export { applyCredential, redactRequest, type ApplyContext, type ApplyResult, type CredentialMaterial } from './apply.js'
 export { createTokenCache, type FetchedToken, type TokenCache } from './token-cache.js'
-export { signHmac } from './hmac.js'
+export { signHmac, standardWebhooksKey } from './hmac.js'

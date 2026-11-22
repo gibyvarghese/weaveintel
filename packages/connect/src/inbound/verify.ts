@@ -7,9 +7,10 @@
  */
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import type { ReplayCache } from './replay-cache.js'
+import { standardWebhooksKey } from '../credentials/hmac.js'
 
 /** The presets. */
-export const VERIFIER_PRESETS = ['hmac_sha256_header', 'hmac_sha256_timestamped', 'basic_shared'] as const
+export const VERIFIER_PRESETS = ['hmac_sha256_header', 'hmac_sha256_timestamped', 'basic_shared', 'standard_webhooks_v1'] as const
 /** One preset. */
 export type VerifierPreset = (typeof VERIFIER_PRESETS)[number]
 
@@ -53,6 +54,7 @@ export async function verifyDelivery(input: VerifyInput): Promise<VerifyResult> 
   const header = (name: string): string => input.headers[name.toLowerCase()] ?? ''
   const tolerance = Math.max(1, Number(set('tolerance_seconds', '300')) || 300)
   let replayKey = ''
+  let eventFromPreset = ''
 
   switch (input.preset) {
     case 'hmac_sha256_header': {
@@ -92,6 +94,22 @@ export async function verifyDelivery(input: VerifyInput): Promise<VerifyResult> 
       replayKey = `sig:${match}`
       break
     }
+    case 'standard_webhooks_v1': {
+      // `webhook-signature` holds one or more `v1,<base64>` separated by spaces (several while a secret is replaced).
+      const id = header('webhook-id')
+      const ts = header('webhook-timestamp')
+      const candidates = header('webhook-signature').split(' ').filter((x) => x.startsWith('v1,')).map((x) => x.slice(3))
+      if (id === '' || ts === '' || candidates.length === 0) return no('NO_SIGNATURE')
+      const at = Number(ts)
+      if (!Number.isFinite(at)) return no('BAD_SIGNATURE')
+      if (Math.abs(input.now().getTime() / 1000 - at) > tolerance) return no('STALE')
+      const signed = `${id}.${ts}.${input.body}`
+      const match = candidates.find((c) => secrets.some((s) => same(createHmac('sha256', standardWebhooksKey(s)).update(signed, 'utf8').digest('base64'), c)))
+      if (match === undefined) return no('BAD_SIGNATURE')
+      replayKey = `event:${id.slice(0, 200)}`
+      eventFromPreset = id.slice(0, 200)
+      break
+    }
     case 'basic_shared': {
       const auth = header('authorization')
       if (!auth.toLowerCase().startsWith('basic ')) return no('NO_SIGNATURE')
@@ -105,7 +123,7 @@ export async function verifyDelivery(input: VerifyInput): Promise<VerifyResult> 
   }
 
   const eventHeader = set('event_id_header')
-  const eventId = eventHeader === '' ? '' : header(eventHeader).slice(0, 200)
+  const eventId = eventHeader === '' ? eventFromPreset : header(eventHeader).slice(0, 200)
   const key = eventId !== '' ? `event:${eventId}` : replayKey
   if (key !== '' && (await input.replay.seenBefore(key, tolerance * 1000 * 2))) return no('REPLAYED')
   return eventId === '' ? { ok: true } : { ok: true, eventId }

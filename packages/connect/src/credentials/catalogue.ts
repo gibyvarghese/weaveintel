@@ -29,7 +29,7 @@ export interface CredentialKindDefinition {
 }
 
 /** The HMAC recipes outbound signing may use (closed; the inbound verifiers mirror them). */
-export const HMAC_PROFILES = ['body_sha256_hex', 'body_sha256_base64', 'timestamp_body_sha256_hex'] as const
+export const HMAC_PROFILES = ['body_sha256_hex', 'body_sha256_base64', 'timestamp_body_sha256_hex', 'standard_webhooks_v1'] as const
 /** One HMAC recipe. */
 export type HmacProfile = (typeof HMAC_PROFILES)[number]
 

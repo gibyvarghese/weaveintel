@@ -12,7 +12,7 @@ const v = (over: Partial<VerifyInput>): VerifyInput => ({ preset: 'hmac_sha256_h
 
 describe('the presets', () => {
   it('are a closed list', () => {
-    expect(VERIFIER_PRESETS).toEqual(['hmac_sha256_header', 'hmac_sha256_timestamped', 'basic_shared'])
+    expect(VERIFIER_PRESETS).toEqual(['hmac_sha256_header', 'hmac_sha256_timestamped', 'basic_shared', 'standard_webhooks_v1'])
   })
   it('refuses a preset that is not on the list', async () => {
     expect(await verifyDelivery(v({ preset: 'jwt_magic' as never }))).toEqual({ ok: false, code: 'UNKNOWN_VERIFIER' })
