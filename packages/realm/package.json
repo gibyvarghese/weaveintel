@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/realm",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Realm configuration — resolve the effective config record for a tenant across a global→tenant hierarchy, with provenance and git-style drift.",
   "type": "module",
   "main": "./dist/index.js",
@@ -33,8 +33,8 @@
     "directory": "packages/realm"
   },
   "dependencies": {
-    "@weaveintel/core": "^0.2.0",
-    "@weaveintel/identity": "^0.1.3"
+    "@weaveintel/core": "^0.3.0",
+    "@weaveintel/identity": "^0.1.4"
   },
   "devDependencies": {
     "typescript": "^5.7.0",
@@ -44,6 +44,6 @@
     "pg": "^8.13.0",
     "@types/pg": "^8.11.0",
     "@testcontainers/postgresql": "^11.0.0",
-    "@weaveintel/human-tasks": "^0.1.3"
+    "@weaveintel/human-tasks": "^0.1.4"
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/provider-ollama",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Ollama provider for weaveIntel — local LLMs (Llama, Mistral, Qwen, Phi, Gemma, DeepSeek, etc.)",
   "repository": {
     "type": "git",
@@ -29,8 +29,8 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@weaveintel/core": "^0.2.0",
-    "@weaveintel/tools": "^0.2.1"
+    "@weaveintel/core": "^0.3.0",
+    "@weaveintel/tools": "^0.2.2"
   },
   "license": "MIT",
   "publishConfig": {

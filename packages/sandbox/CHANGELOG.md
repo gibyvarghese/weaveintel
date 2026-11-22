@@ -1,5 +1,13 @@
 # @weaveintel/sandbox
 
+## 0.1.5
+
+### Patch Changes
+
+- Updated dependencies
+  - @weaveintel/core@0.3.0
+  - @weaveintel/mcp-server@0.2.2
+
 ## 0.1.4
 
 ### Patch Changes

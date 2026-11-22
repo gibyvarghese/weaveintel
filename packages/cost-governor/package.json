@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/cost-governor",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "type": "module",
   "exports": {
     ".": {
@@ -43,8 +43,8 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@weaveintel/core": "^0.2.0",
-    "@weaveintel/tools": "^0.2.1"
+    "@weaveintel/core": "^0.3.0",
+    "@weaveintel/tools": "^0.2.2"
   },
   "peerDependencies": {
     "better-sqlite3": "^11.10.0",

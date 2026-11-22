@@ -1,5 +1,14 @@
 # @weaveintel/skills
 
+## 0.2.2
+
+### Patch Changes
+
+- Updated dependencies
+  - @weaveintel/core@0.3.0
+  - @weaveintel/encryption@0.1.3
+  - @weaveintel/retrieval@0.2.2
+
 ## 0.2.1
 
 ### Patch Changes

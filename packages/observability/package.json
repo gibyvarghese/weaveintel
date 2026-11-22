@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/observability",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Tracing, cost tracking, and run logging implementations",
   "repository": {
     "type": "git",
@@ -29,7 +29,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@weaveintel/core": "^0.2.0"
+    "@weaveintel/core": "^0.3.0"
   },
   "devDependencies": {
     "typescript": "^5.7.0",

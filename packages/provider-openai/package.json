@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/provider-openai",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "OpenAI provider for weaveIntel — chat, embeddings, image generation, audio",
   "repository": {
     "type": "git",
@@ -29,9 +29,9 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@weaveintel/core": "^0.2.0",
-    "@weaveintel/resilience": "^0.1.2",
-    "@weaveintel/tools": "^0.2.1"
+    "@weaveintel/core": "^0.3.0",
+    "@weaveintel/resilience": "^0.1.3",
+    "@weaveintel/tools": "^0.2.2"
   },
   "license": "MIT",
   "publishConfig": {

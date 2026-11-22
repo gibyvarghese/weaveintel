@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/retrieval",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Document ingestion, chunking, embedding, and retrieval pipeline",
   "type": "module",
   "main": "./dist/index.js",
@@ -24,7 +24,7 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@weaveintel/core": "^0.2.0"
+    "@weaveintel/core": "^0.3.0"
   },
   "license": "MIT",
   "repository": {
