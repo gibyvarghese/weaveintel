@@ -1,0 +1,20 @@
+{
+  "source": { "kind": "documentation", "ref": "OData v4 protocol, part 1, 11.2.6 (system query options) and 11.2.6.7 (server-driven paging); example service shape (hand-made)", "scrubbed": true },
+  "exchanges": [
+    {
+      "name": "people, first page",
+      "request": { "method": "GET", "url": "https://odata.example.test/svc/People?%24select=UserName%2CFirstName%2CCity&%24filter=City+eq+%27O%27%27Neill%27+and+Age+ge+30&%24top=3", "headers": { "prefer": "odata.maxpagesize=2" } },
+      "response": { "status": 200, "headers": { "content-type": "application/json;odata.metadata=minimal" }, "body": "{\"@odata.context\":\"https://odata.example.test/svc/$metadata#People(UserName,FirstName,City)\",\"value\":[{\"UserName\":\"russellwhyte\",\"FirstName\":\"Russell\",\"City\":\"O'Neill\"},{\"UserName\":\"scottketchum\",\"FirstName\":\"Scott\",\"City\":\"O'Neill\"}],\"@odata.nextLink\":\"https://odata.example.test/svc/People?%24select=UserName%2CFirstName%2CCity&%24filter=City+eq+%27O%27%27Neill%27+and+Age+ge+30&%24top=3&%24skiptoken=2\"}" }
+    },
+    {
+      "name": "people, second page",
+      "request": { "method": "GET", "url": "https://odata.example.test/svc/People?%24select=UserName%2CFirstName%2CCity&%24filter=City+eq+%27O%27%27Neill%27+and+Age+ge+30&%24top=3&%24skiptoken=2", "headers": { "prefer": "odata.maxpagesize=2" } },
+      "response": { "status": 200, "headers": { "content-type": "application/json;odata.metadata=minimal" }, "body": "{\"value\":[{\"UserName\":\"ronaldmundy\",\"FirstName\":\"Ronald\",\"City\":\"O'Neill\"}]}" }
+    },
+    {
+      "name": "people, a link to another host",
+      "request": { "method": "GET", "url": "https://odata.example.test/svc/People?%24select=UserName%2CFirstName%2CCity&%24top=3", "headers": { "prefer": "odata.maxpagesize=2" } },
+      "response": { "status": 200, "headers": { "content-type": "application/json" }, "body": "{\"value\":[{\"UserName\":\"a\"}],\"@odata.nextLink\":\"https://elsewhere.example.test/svc/People?%24skiptoken=1\"}" }
+    }
+  ]
+}

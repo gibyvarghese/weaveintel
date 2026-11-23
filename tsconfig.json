@@ -32,6 +32,9 @@
       "path": "packages/collab"
     },
     {
+      "path": "packages/connect"
+    },
+    {
       "path": "packages/core"
     },
     {
