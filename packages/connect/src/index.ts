@@ -8,5 +8,6 @@
  *   `@weaveintel/connect/inbound`      verifier presets for inbound deliveries, the replay cache
  *   `@weaveintel/connect/replay`       record-and-replay exchanges with secret and personal-data scrubbing (tests)
  *   `@weaveintel/connect/sources`      source adapters on the runner (OData; REST is the runner itself)
+ *   `@weaveintel/connect/remote`       one pinned MCP tool or A2A agent skill, called through the caller's door
  */
 export * from './types.js'

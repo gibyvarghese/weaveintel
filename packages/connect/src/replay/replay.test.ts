@@ -64,3 +64,18 @@ describe('scrubbing', () => {
     expect(checkRecording({ ...recording, source: { kind: 'documentation', ref: '', scrubbed: true } })).toContain('A recording must say where it came from (source.ref).')
   })
 })
+
+describe('files in recordings', () => {
+  it('matches multipart parts and a binary body, and answers a stored file by reference', async () => {
+    const { createReplaySend } = await import('./replay.js')
+    const r = createReplaySend({ source: { kind: 'documentation', ref: 'test', scrubbed: true }, exchanges: [
+      { name: 'upload', request: { method: 'POST', url: 'https://x.example.test/att', parts: [{ name: 'file', fileRef: 'f1' }] }, response: { status: 200, body: '[{"id":"9"}]' } },
+      { name: 'download', request: { method: 'GET', url: 'https://x.example.test/att/9' }, response: { status: 200, body: '', file: { ref: 'stored-9', contentType: 'text/plain' } } },
+    ] })
+    const up = await r.send({ method: 'POST', url: 'https://x.example.test/att', headers: {}, parts: [{ name: 'file', file: { ref: 'f1' } }] })
+    expect(up.ok && up.status).toBe(200)
+    const down = await r.send({ method: 'GET', url: 'https://x.example.test/att/9', headers: {}, expect: 'file' })
+    expect(down.ok && down.file).toEqual({ ref: 'stored-9', contentType: 'text/plain' })
+    await expect(r.send({ method: 'POST', url: 'https://x.example.test/att', headers: {}, parts: [{ name: 'file', file: { ref: 'other' } }] })).rejects.toThrow()
+  })
+})
