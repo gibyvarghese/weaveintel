@@ -16,6 +16,7 @@
  * Not sign-in for the platform itself: `@weaveintel/identity` (oauth) signs people INTO the platform and is a
  * different job.
  */
+import { createPrivateKey, randomUUID, sign as signWith } from 'node:crypto'
 import type { ConnectRefusal, Send } from '../types.js'
 import { refusal } from '../types.js'
 import { settingOf, type CredentialKindKey } from './catalogue.js'
@@ -24,6 +25,8 @@ import type { CredentialMaterial } from './apply.js'
 /** Which grant to ask for. */
 export type TokenGrant =
   | { readonly type: 'client_credentials' }
+  /** RFC 7523: a JWT signed with the credential's private key is the grant. */
+  | { readonly type: 'jwt_bearer' }
   | { readonly type: 'refresh_token' }
   | {
       readonly type: 'authorization_code'
@@ -53,13 +56,36 @@ export interface TokenRequestContext {
    * absent, the token is not used.
    */
   readonly onRotate?: ((parts: Readonly<Record<string, string>>) => Promise<void>) | undefined
+  /** The clock (JWT assertions carry their issue time). */
+  readonly now?: (() => Date) | undefined
 }
 
 /** The token, or why not. `status` is the sign-in service's answer code when it answered. */
 export type TokenResult = { readonly ok: true; readonly token: IssuedToken } | (ConnectRefusal & { readonly status?: number | undefined })
 
 const KIND_FOR_GRANT: Readonly<Record<TokenGrant['type'], CredentialKindKey>> = {
-  client_credentials: 'oauth_client', refresh_token: 'oauth_refresh', authorization_code: 'oauth_refresh',
+  client_credentials: 'oauth_client', refresh_token: 'oauth_refresh', authorization_code: 'oauth_refresh', jwt_bearer: 'jwt_bearer',
+}
+
+const b64url = (b: Buffer): string => b.toString('base64url')
+
+/**
+ * A short-lived JWT assertion (RFC 7523 section 3): issuer and subject, the audience, a five-minute life, a unique id.
+ * @returns the assertion, or undefined when the key cannot be read for the algorithm.
+ */
+export function signJwtAssertion(privateKeyPem: string, claims: { readonly iss: string; readonly sub: string; readonly aud: string }, options: { readonly algorithm: 'RS256' | 'ES256'; readonly keyId?: string | undefined; readonly now: Date }): string | undefined {
+  let key
+  try { key = createPrivateKey(privateKeyPem) } catch { return undefined }
+  const iat = Math.floor(options.now.getTime() / 1000)
+  const header = { alg: options.algorithm, typ: 'JWT', ...(options.keyId === undefined || options.keyId === '' ? {} : { kid: options.keyId }) }
+  const payload = { ...claims, iat, exp: iat + 300, jti: randomUUID() }
+  const input = `${b64url(Buffer.from(JSON.stringify(header)))}.${b64url(Buffer.from(JSON.stringify(payload)))}`
+  try {
+    const sig = options.algorithm === 'RS256'
+      ? signWith('sha256', Buffer.from(input), key)
+      : signWith('sha256', Buffer.from(input), { key, dsaEncoding: 'ieee-p1363' })
+    return `${input}.${b64url(sig)}`
+  } catch { return undefined }
 }
 
 const bad = (part: string, why: string): ConnectRefusal => refusal('BAD_CREDENTIAL_SETTING', `The credential’s ${part.replace(/_/g, ' ')} ${why}`)
@@ -82,8 +108,15 @@ export async function requestToken(material: CredentialMaterial, grant: TokenGra
   if (material.kind === 'oauth_client' && secret === '') return refusal('NO_KEY', 'The client secret has not been stored yet.')
 
   const form = new URLSearchParams()
-  form.set('grant_type', grant.type)
-  if (grant.type === 'client_credentials') {
+  form.set('grant_type', grant.type === 'jwt_bearer' ? 'urn:ietf:params:oauth:grant-type:jwt-bearer' : grant.type)
+  if (s('resource') !== '' && material.kind === 'oauth_refresh') form.set('resource', s('resource'))
+  if (grant.type === 'jwt_bearer') {
+    const now = context.now ?? (() => new Date())
+    const alg = s('algorithm') === 'ES256' ? 'ES256' : 'RS256'
+    const assertion = signJwtAssertion(material.secrets['private_key'] ?? '', { iss: s('issuer') || s('client_id'), sub: s('subject') || s('client_id'), aud: s('audience') || u.toString() }, { algorithm: alg, keyId: s('key_id'), now: now() })
+    if (assertion === undefined) return bad('private_key', `can’t sign with ${alg}.`)
+    form.set('assertion', assertion)
+  } else if (grant.type === 'client_credentials') {
     if (s('audience') !== '') form.set('audience', s('audience'))
   } else if (grant.type === 'refresh_token') {
     const refresh = material.secrets['refresh_token'] ?? ''

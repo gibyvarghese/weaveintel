@@ -13,17 +13,42 @@
 /** A JSON value. */
 export type Json = string | number | boolean | null | readonly Json[] | { readonly [key: string]: Json }
 
+/** A platform file, by reference. The host's door turns it into bytes when sending and stores bytes as one when
+ *  receiving; this package never holds file contents. */
+export interface FileRef {
+  readonly ref: string
+  readonly filename?: string | undefined
+  readonly contentType?: string | undefined
+}
+
+/** One multipart part: a text value or a file. */
+export interface WirePart {
+  readonly name: string
+  readonly value?: string | undefined
+  readonly file?: FileRef | undefined
+}
+
 /** One request as it will leave. Header names are lower case. */
 export interface WireRequest {
   readonly method: string
   readonly url: string
   readonly headers: Readonly<Record<string, string>>
   readonly body?: string | undefined
+  /** `multipart` bodies: the door writes the boundary and the content type. */
+  readonly parts?: readonly WirePart[] | undefined
+  /** `binary` bodies: the file to send as the whole body. */
+  readonly file?: FileRef | undefined
+  /** `file`: the door stores the answer as a platform file and answers with its reference in `file`. */
+  readonly expect?: 'file' | undefined
+  /** Client certificate for an `mtls` credential; the door uses it for this connection's TLS. Never logged. */
+  readonly tls?: { readonly cert: string; readonly key: string; readonly ca?: string | undefined } | undefined
 }
 
 /** How a request ended, as the caller's door reports it. Never throws: a refusal is an answer. */
 export type SendResult =
-  | { readonly ok: true; readonly status: number; readonly headers: Readonly<Record<string, string>>; readonly body: string; readonly callRef?: string | undefined }
+  | { readonly ok: true; readonly status: number; readonly headers: Readonly<Record<string, string>>; readonly body: string; readonly callRef?: string | undefined
+      /** When the request said `expect: 'file'` and the answer succeeded: the stored file. */
+      readonly file?: FileRef | undefined }
   | {
       readonly ok: false
       /** `refused`: nothing left. `timeout` / `unreachable`: it may have reached the other side. `too_large`: it did. */

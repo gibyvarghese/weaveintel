@@ -40,6 +40,7 @@ export type ApplyResult = { readonly ok: true; readonly request: WireRequest } |
 const KIND_WORDS: Readonly<Record<CredentialKindKey, string>> = {
   none: 'no credential', api_key: 'the API key', bearer_token: 'the token', basic: 'the user name and password',
   oauth_client: 'the OAuth client', oauth_refresh: 'the OAuth sign-in', hmac_signing: 'the signing secret',
+  jwt_bearer: 'the signed assertion', mtls: 'the client certificate',
 }
 
 const withHeader = (r: WireRequest, name: string, value: string): WireRequest => ({ ...r, headers: { ...r.headers, [name.toLowerCase()]: value } })
@@ -48,7 +49,8 @@ const badSetting = (part: string, why: string): ConnectRefusal => refusal('BAD_C
 
 function needSecrets(m: CredentialMaterial): ConnectRefusal | undefined {
   for (const part of CREDENTIAL_KINDS[m.kind].secretParts as readonly string[]) {
-    if (part === 'client_secret' && m.kind === 'oauth_refresh') continue // public clients (PKCE) have none
+    // Public clients (PKCE) have no secret; a JWT-bearer client sends one only when its sign-in service asks for it.
+    if (part === 'client_secret' && (m.kind === 'oauth_refresh' || m.kind === 'jwt_bearer')) continue
     if ((m.secrets[part] ?? '') === '') return missing(part)
   }
   for (const part of CREDENTIAL_KINDS[m.kind].settingParts as readonly { name: string; required?: boolean }[]) {
@@ -108,6 +110,10 @@ export async function applyCredential(request: WireRequest, material: Credential
       if (s('key_id') !== '' && s('key_id_header') !== '') out = withHeader(out, s('key_id_header'), s('key_id'))
       return { ok: true, request: out }
     }
+    case 'mtls':
+      // The certificate is public; the key is the secret. The door opens this connection's TLS with both.
+      return { ok: true, request: { ...request, tls: { cert: s('client_cert'), key: material.secrets['client_key'] ?? '', ...(s('ca') === '' ? {} : { ca: s('ca') }) } } }
+    case 'jwt_bearer':
     case 'oauth_client':
     case 'oauth_refresh': {
       const tokenUrl = s('token_url')
@@ -116,7 +122,7 @@ export async function applyCredential(request: WireRequest, material: Credential
       if (u.protocol !== 'https:') return badSetting('token_url', 'must be a secure (https) address.')
       let failure: ConnectRefusal | undefined
       const token = await context.cache.get(context.cacheKey, async () => {
-        const r = await requestToken(material, { type: material.kind === 'oauth_client' ? 'client_credentials' : 'refresh_token' }, context)
+        const r = await requestToken(material, { type: material.kind === 'oauth_client' ? 'client_credentials' : material.kind === 'jwt_bearer' ? 'jwt_bearer' : 'refresh_token' }, { ...context, now })
         if (!r.ok) { failure = { ok: false, code: r.code, sentence: r.sentence }; throw new Error(r.code) }
         return { token: r.token.accessToken, expiresInSeconds: r.token.expiresInSeconds }
       }, () => now().getTime()).catch(() => undefined)

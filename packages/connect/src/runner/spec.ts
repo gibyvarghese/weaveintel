@@ -15,10 +15,52 @@ export const IDEMPOTENCY_STYLES = ['none', 'vendor_header', 'natural_key', 'clie
 /** One idempotency style. */
 export type IdempotencyStyle = (typeof IDEMPOTENCY_STYLES)[number]
 
-/** How the body is sent. */
-export const BODY_FORMATS = ['json', 'form', 'none'] as const
+/**
+ * How the body is sent (a closed list). `multipart`: `part:` rows become form-data parts (a file part carries a
+ * platform file reference the host's door resolves). `binary`: the body is one file (`body:$` = a file reference).
+ * `text`: the body is one string (`body:$`), sent as written.
+ */
+export const BODY_FORMATS = ['json', 'form', 'none', 'multipart', 'binary', 'text'] as const
 /** One body format. */
 export type BodyFormat = (typeof BODY_FORMATS)[number]
+
+/** How the answer is read (a closed list). `file`: the host's door stores the answer as a platform file and the runner
+ *  maps its reference (`$file`) into an output; the bytes never pass through the runner. */
+export const RESPONSE_FORMATS = ['json', 'text', 'file'] as const
+/** One response format. */
+export type ResponseFormat = (typeof RESPONSE_FORMATS)[number]
+
+/**
+ * Wire encodings (a closed list, connect only). A transform changes what a value MEANS and is shared with schemaWeave
+ * inbound (contract v1); an encoding changes only how a value is WRITTEN on the wire for one service, both ways:
+ *  - `adf_document`: plain text ⇄ an Atlassian Document Format document (paragraphs from blank-line-separated text).
+ *  - `comma_list`: a list ⇄ `a,b,c`.
+ *  - `json_text`: any value ⇄ its JSON text (a service that wants JSON inside a string field).
+ */
+export const ENCODINGS = ['none', 'adf_document', 'comma_list', 'json_text'] as const
+/** One encoding. */
+export type Encoding = (typeof ENCODINGS)[number]
+
+/**
+ * Query dialects for clause rows (a closed list). Each clause row says field, operator and where the value comes from;
+ * the runner writes the clause with the dialect's own escaping, so an input can never change the query's shape.
+ */
+export const QUERY_DIALECTS = ['servicenow_encoded', 'jql', 'odata_filter'] as const
+/** One dialect. */
+export type QueryDialect = (typeof QUERY_DIALECTS)[number]
+/** The operators each dialect allows (closed). `order_by` and `order_by_desc` take the FIELD from the row and no value. */
+export const QUERY_OPERATORS: Readonly<Record<QueryDialect, readonly string[]>> = {
+  servicenow_encoded: ['=', '!=', '>', '>=', '<', '<=', 'IN', 'NOT IN', 'STARTSWITH', 'ENDSWITH', 'LIKE', 'NOT LIKE', 'ISEMPTY', 'ISNOTEMPTY', 'order_by', 'order_by_desc'],
+  jql: ['=', '!=', '>', '>=', '<', '<=', 'in', 'not in', '~', '!~', 'is empty', 'is not empty', 'order_by', 'order_by_desc'],
+  odata_filter: ['eq', 'ne', 'gt', 'ge', 'lt', 'le', 'startswith', 'contains', 'order_by', 'order_by_desc'],
+}
+
+/** One clause row's shape: which dialect, which field (a fixed name, never an input), which operator. */
+export interface QueryClause {
+  readonly dialect: QueryDialect
+  readonly field: string
+  readonly operator: string
+}
 
 /** The methods an operation may use. */
 export const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const
@@ -39,6 +81,8 @@ export interface PagingSpec {
   readonly pageParam?: string | undefined
   /** `page_number`: an answer field that is true on the last page. */
   readonly lastPath?: string | undefined
+  /** `offset_limit`: the first item's offset. 0 (default) or 1 (SCIM's `startIndex`). */
+  readonly offsetBase?: 0 | 1 | undefined
   /** Default 50. */
   readonly maxPages?: number | undefined
 }
@@ -60,6 +104,10 @@ export interface OperationSpec {
   /** Path with `{name}` placeholders filled by `path:` mapping rows. */
   readonly pathTemplate: string
   readonly bodyFormat: BodyFormat
+  /** Default `json`. */
+  readonly responseFormat?: ResponseFormat | undefined
+  /** Refuse before sending a request whose body is longer than this (some services fail larger requests outright). */
+  readonly maxRequestBytes?: number | undefined
   /** Default: 200 to 299. */
   readonly successStatuses?: readonly number[] | undefined
   readonly idempotency: IdempotencyStyle
@@ -76,7 +124,14 @@ export interface OperationSpec {
 /** Where a request value comes from: a tool input, a connection setting, or a fixed value. */
 export type MappingFrom = 'input' | 'setting' | 'fixed'
 
-/** One `out` row: a value into a request part (`path:x`, `query:x`, `header:X-Foo`, `body:a.b`). */
+/**
+ * One `out` row: a value into a request part. Targets:
+ *  - `path:x`, `query:x`, `header:X-Foo`, `body:a.b` (as before), `part:x` (a multipart part);
+ *  - `body:$`: the value IS the body (a bare string, number, list, or for `binary` a file reference);
+ *  - `body:*` or `body:a.b.*`: merge the keys of an input object into the body (or into `a.b`), only the keys
+ *    `allowKeys` names (`customfield_*` allows a prefix). Nothing else of the object is sent;
+ *  - with `clause`: a query clause, joined with the other clause rows of the same target in the clause's dialect.
+ */
 export interface RequestMapping {
   readonly from: MappingFrom
   /** The input name (or nested input path), the setting key, or the fixed value. */
@@ -84,8 +139,13 @@ export interface RequestMapping {
   readonly target: string
   readonly transform?: Transform | undefined
   readonly transformArg?: string | undefined
+  readonly encoding?: Encoding | undefined
   readonly defaultValue?: string | undefined
   readonly required?: boolean | undefined
+  /** For `body:*` targets: the keys that may be merged (exact, or `prefix*`). Required for those targets. */
+  readonly allowKeys?: readonly string[] | undefined
+  /** For query-clause rows. */
+  readonly clause?: QueryClause | undefined
 }
 
 /** One `in` row: a value from the answer into an output (or into a field of each item of a list output). */
@@ -98,6 +158,7 @@ export interface ResponseMapping {
   readonly itemOf?: string | undefined
   readonly transform?: Transform | undefined
   readonly transformArg?: string | undefined
+  readonly encoding?: Encoding | undefined
   readonly defaultValue?: string | undefined
 }
 

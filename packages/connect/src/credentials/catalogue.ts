@@ -63,6 +63,32 @@ export const CREDENTIAL_KINDS = {
       { name: 'token_url', label: 'Token address', required: true },
       { name: 'scope', label: 'Scopes', default: '' },
       { name: 'client_auth', label: 'Client sends its secret', default: 'client_secret_basic', choices: ['client_secret_basic', 'client_secret_post'] },
+      // Sign-in (authorization code) settings: where a person is sent to sign in, PKCE, and the resource the token is
+      // for (RFC 8707; MCP servers require it). Read by `@weaveintel/connect/credentials` sign-in helpers.
+      { name: 'authorize_url', label: 'Sign-in address', default: '' },
+      { name: 'pkce', label: 'Proof key (PKCE)', default: 'S256', choices: ['S256', 'none'] },
+      { name: 'resource', label: 'Resource the token is for', default: '' },
+    ],
+  },
+  jwt_bearer: {
+    label: 'OAuth with a signed assertion (JWT bearer)', secretParts: ['private_key', 'client_secret'], fetchesTokens: true,
+    settingParts: [
+      { name: 'client_id', label: 'Client id', required: true },
+      { name: 'token_url', label: 'Token address', required: true },
+      { name: 'subject', label: 'Acts as (subject)', default: '' },
+      { name: 'issuer', label: 'Issuer (defaults to the client id)', default: '' },
+      { name: 'audience', label: 'Audience (defaults to the token address)', default: '' },
+      { name: 'scope', label: 'Scopes', default: '' },
+      { name: 'algorithm', label: 'Signing algorithm', default: 'RS256', choices: ['RS256', 'ES256'] },
+      { name: 'key_id', label: 'Key id', default: '' },
+      { name: 'client_auth', label: 'Client sends its secret', default: 'client_secret_post', choices: ['client_secret_basic', 'client_secret_post'] },
+    ],
+  },
+  mtls: {
+    label: 'Client certificate (mutual TLS)', secretParts: ['client_key'], fetchesTokens: false,
+    settingParts: [
+      { name: 'client_cert', label: 'Client certificate (PEM)', required: true },
+      { name: 'ca', label: 'Trusted issuer certificate (PEM), when the service uses its own', default: '' },
     ],
   },
   hmac_signing: {
