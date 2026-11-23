@@ -1,5 +1,12 @@
 # @weaveintel/weaveintel
 
+## 0.1.4
+
+### Patch Changes
+
+- Updated dependencies
+  - @weaveintel/agents@0.3.0
+
 ## 0.1.3
 
 ### Patch Changes

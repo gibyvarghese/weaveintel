@@ -56,6 +56,7 @@ import { createGovernedAssistant } from '@weaveintel/agents/recipes';
 | `createHumanTaskInterruptHandler` | Pause for human approval (human-in-the-loop). |
 | `buildHandoffTools`, `weaveA2AWorker`, `weaveA2ASupervisor` | Agent-to-agent handoff and delegation. |
 | `createAgentPlanCache` | Reuse structured plan templates across similar runs. |
+| `weaveSwarm`, `validateSwarmDefinition`, `estimateSwarm`, `createInMemorySwarmRunStore`, `markSwarmInterrupted` | A group of agents on one task, from a definition that is plain data: plan, fan out, join, check, with hard limits, stop and resume. Also at `@weaveintel/agents/swarm`. |
 | `@weaveintel/agents/recipes` | Pre-wired assistants — governed, approval-driven, ACL-aware RAG, multi-tenant, eval-routed, and more. |
 
 ## License
