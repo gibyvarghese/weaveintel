@@ -18,6 +18,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@weaveintel/connect": "^0.2.0",
     "@weaveintel/core": "^0.3.0",
     "@weaveintel/guardrails": "^0.2.2"
   },

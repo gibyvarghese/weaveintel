@@ -192,13 +192,13 @@ describe('the small pieces', () => {
     expect(t('number', '12.5')).toBe(12.5)
     expect(t('boolean', 'yes')).toBe(true)
     expect(t('boolean', 'false')).toBe(false)
-    expect(t('date', '2026-11-22T10:00:00+13:00')).toBe('2026-11-21T21:00:00.000Z')
+    expect(t('date', '2026-11-22T10:00:00+13:00')).toBe('2026-11-22T10:00:00+13:00')
     expect(t('epoch_to_datetime', 1_700_000_000)).toBe('2023-11-14T22:13:20.000Z')
     expect(t('default_if_empty', '', 'x')).toBe('x')
     expect(t('join_lines', ['a', 'b'])).toBe('a\nb')
     expect(t('minor_units_to_decimal', 1234, '2')).toBe(12.34)
     expect(t('choice_map', 'A', 'm')).toBe('alpha')
-    expect(t('choice_map', 'Z', 'm')).toBeUndefined()
+    expect(t('choice_map', 'Z', 'm')).toBe('Z') // a miss passes through, so the field's own check refuses it
     expect(() => applyTransform('eval' as never, 1, '', {})).toThrow()
   })
   it('derives a stable vendor-side key from the dispatch and the tool', () => {

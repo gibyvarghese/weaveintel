@@ -40,6 +40,8 @@ export {
   mapColumns,
   applyMapping,
   applyTransform,
+  toMappingRule,
+  type MappingRule,
   inferTransform,
   cosine,
   TRANSFORMS,

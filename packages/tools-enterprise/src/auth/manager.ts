@@ -1,12 +1,38 @@
 /**
  * Universal Authentication Manager
  *
- * Handles token acquisition, refresh, and header injection for all
- * supported auth methods. Designed to be shared across all connectors
- * (enterprise + social) via a single profile store.
+ * Holds named auth profiles (enterprise + social connectors) and turns one into request headers, acquiring and
+ * refreshing OAuth tokens as needed.
+ *
+ * BUILT ON `@weaveintel/connect`. Every header is made by connect's credential appliers (`applyCredential`) and every
+ * token request (client credentials, refresh, authorization-code exchange) is connect's one `requestToken`, sent
+ * through this package's hardened fetch. This class adds only the profile store and the in-memory token state.
+ *
+ * @deprecated for new code. Use `@weaveintel/connect/credentials` directly: `applyCredential` with a
+ * `createTokenCache()` for calls, and `requestToken` for code exchange. Those keep tokens out of profile objects,
+ * refresh one at a time per key, and hand a rotated refresh token to the caller to seal before it is used.
+ * AuthManager stays as a compatibility wrapper over them.
  */
-import type { AuthProfile, TokenState, TokenResponse, AuthEvents } from './types.js';
+import { applyCredential, createTokenCache, requestToken, type CredentialMaterial, type IssuedToken, type TokenGrant } from '@weaveintel/connect/credentials';
+import type { Send, WireRequest } from '@weaveintel/connect';
+import type { AuthProfile, TokenState, AuthEvents } from './types.js';
 import { enterpriseFetch } from '../_fetch.js';
+
+/** The one way out for token requests: this package's hardened fetch, answering as connect's door contract. */
+const hardenedSend: Send = async (r: WireRequest) => {
+  try {
+    const resp = await enterpriseFetch(r.url, { method: r.method, headers: { ...r.headers }, ...(r.body === undefined ? {} : { body: r.body }) });
+    const headers: Record<string, string> = {};
+    resp.headers.forEach((v, k) => { headers[k.toLowerCase()] = v; });
+    return { ok: true, status: resp.status, headers, body: await resp.text() };
+  } catch (e) {
+    return { ok: false, kind: 'unreachable', code: e instanceof Error ? e.name : 'error', sentence: 'The sign-in service could not be reached.' };
+  }
+};
+
+/** Static appliers never fetch, so they get a cache that is never used. */
+const NO_FETCH = { send: hardenedSend, cache: createTokenCache(), cacheKey: 'static' };
+const PLACEHOLDER: WireRequest = { method: 'GET', url: 'https://auth.invalid/', headers: {} };
 
 /* ---------- URL template helpers ---------- */
 
@@ -28,9 +54,15 @@ function isExpired(state?: TokenState): boolean {
 export class AuthManager {
   private profiles = new Map<string, AuthProfile>();
   private events: AuthEvents;
+  private send: Send;
 
-  constructor(profiles?: AuthProfile[], events?: AuthEvents) {
+  /**
+   * @param options.send The way out for token requests (connect's door contract). Default: this package's hardened
+   *   fetch. A host passes its own door so sign-in calls get its address rules and outbound log.
+   */
+  constructor(profiles?: AuthProfile[], events?: AuthEvents, options?: { readonly send?: Send }) {
     this.events = events ?? {};
+    this.send = options?.send ?? hardenedSend;
     for (const p of profiles ?? []) this.register(p);
   }
 
@@ -67,28 +99,25 @@ export class AuthManager {
     const headers: Record<string, string> = { ...(profile.extraHeaders ?? {}) };
 
     switch (profile.method) {
-      case 'basic': {
-        const user = profile.username ?? '';
-        const pass = profile.password ?? '';
-        headers['Authorization'] = `Basic ${Buffer.from(`${user}:${pass}`).toString('base64')}`;
+      case 'basic':
+        headers['Authorization'] = (await this.applyStatic(profile, { kind: 'basic', secrets: { password: profile.password ?? '' }, settings: { username: profile.username ?? '' } })).headers['authorization']!;
         break;
-      }
 
       case 'api_key': {
-        const key = profile.apiKey ?? '';
+        const name = profile.apiKeyHeaderName ?? (profile.apiKeyPlacement === 'query' ? 'api_key' : 'X-API-Key');
+        const applied = await this.applyStatic(profile, { kind: 'api_key', secrets: { api_key: profile.apiKey ?? '' }, settings: { placement: profile.apiKeyPlacement ?? 'header', name } });
         if (profile.apiKeyPlacement === 'query') {
-          // caller must append to URL; we store in a custom pseudo-header
-          headers['X-Auth-Query-Param'] = `${profile.apiKeyHeaderName ?? 'api_key'}=${key}`;
+          // AuthManager returns headers only, so a query key travels as a pseudo-header the caller moves onto the URL.
+          headers['X-Auth-Query-Param'] = new URL(applied.url).search.slice(1);
         } else {
-          headers[profile.apiKeyHeaderName ?? 'X-API-Key'] = key;
+          headers[name] = applied.headers[name.toLowerCase()]!;
         }
         break;
       }
 
-      case 'bearer': {
-        headers['Authorization'] = `Bearer ${profile.apiKey ?? profile.tokenState?.accessToken ?? ''}`;
+      case 'bearer':
+        headers['Authorization'] = (await this.applyStatic(profile, { kind: 'bearer_token', secrets: { token: profile.apiKey ?? profile.tokenState?.accessToken ?? '' }, settings: {} })).headers['authorization']!;
         break;
-      }
 
       case 'service_account': {
         // For service accounts the token is typically exchanged via JWT assertion
@@ -142,20 +171,12 @@ export class AuthManager {
 
   /**
    * Exchange an authorization code for tokens (authorization-code flow).
+   * @param codeVerifier The PKCE verifier, when the authorization request carried a challenge.
    */
-  async exchangeCode(profileId: string, code: string): Promise<TokenState> {
+  async exchangeCode(profileId: string, code: string, codeVerifier?: string): Promise<TokenState> {
     const profile = this.profiles.get(profileId);
     if (!profile) throw new Error(`Auth profile "${profileId}" not found`);
-    const tokenUrl = resolveUrl(profile.tokenUrl, profile.domain);
-    const body = new URLSearchParams({
-      grant_type: 'authorization_code',
-      code,
-      redirect_uri: profile.redirectUri ?? '',
-      client_id: profile.clientId ?? '',
-      client_secret: profile.clientSecret ?? '',
-    });
-    const tokenResp = await this.fetchToken(tokenUrl, body);
-    const state = this.toTokenState(tokenResp);
+    const state = this.toTokenState(await this.token(profile, { type: 'authorization_code', code, redirectUri: profile.redirectUri ?? '', ...(codeVerifier === undefined ? {} : { codeVerifier }) }));
     profile.tokenState = state;
     return state;
   }
@@ -166,15 +187,7 @@ export class AuthManager {
   async acquireClientCredentials(profileId: string): Promise<TokenState> {
     const profile = this.profiles.get(profileId);
     if (!profile) throw new Error(`Auth profile "${profileId}" not found`);
-    const tokenUrl = resolveUrl(profile.tokenUrl, profile.domain);
-    const body = new URLSearchParams({
-      grant_type: 'client_credentials',
-      client_id: profile.clientId ?? '',
-      client_secret: profile.clientSecret ?? '',
-      scope: (profile.scopes ?? []).join(' '),
-    });
-    const tokenResp = await this.fetchToken(tokenUrl, body);
-    const state = this.toTokenState(tokenResp);
+    const state = this.toTokenState(await this.token(profile, { type: 'client_credentials' }));
     profile.tokenState = state;
     return state;
   }
@@ -188,15 +201,7 @@ export class AuthManager {
     if (!profile.tokenState?.refreshToken) {
       throw new Error(`No refresh token available for "${profileId}"`);
     }
-    const tokenUrl = resolveUrl(profile.tokenUrl, profile.domain);
-    const body = new URLSearchParams({
-      grant_type: 'refresh_token',
-      refresh_token: profile.tokenState.refreshToken,
-      client_id: profile.clientId ?? '',
-      client_secret: profile.clientSecret ?? '',
-    });
-    const tokenResp = await this.fetchToken(tokenUrl, body);
-    const state = this.toTokenState(tokenResp);
+    const state = this.toTokenState(await this.token(profile, { type: 'refresh_token' }));
     // Preserve existing refresh token if the server didn't issue a new one
     if (!state.refreshToken && profile.tokenState.refreshToken) {
       state.refreshToken = profile.tokenState.refreshToken;
@@ -247,27 +252,33 @@ export class AuthManager {
     }
   }
 
-  private async fetchToken(url: string, body: URLSearchParams): Promise<TokenResponse> {
-    const resp = await enterpriseFetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: body.toString(),
-    });
-    if (!resp.ok) {
-      const text = await resp.text();
-      throw new Error(`Token request failed (${resp.status}): ${text}`);
-    }
-    return resp.json() as Promise<TokenResponse>;
+  /** Put a static credential on a placeholder request with connect's applier; a refusal fails closed. */
+  private async applyStatic(profile: AuthProfile, material: CredentialMaterial): Promise<WireRequest> {
+    const r = await applyCredential(PLACEHOLDER, material, NO_FETCH);
+    if (!r.ok) throw new Error(`Auth profile "${profile.id}": ${r.sentence}`);
+    return r.request;
   }
 
-  private toTokenState(resp: TokenResponse): TokenState {
+  /** One token request through connect, for this profile. The sign-in service's own error text is never included. */
+  private async token(profile: AuthProfile, grant: TokenGrant): Promise<IssuedToken> {
+    const settings = { client_id: profile.clientId ?? '', token_url: resolveUrl(profile.tokenUrl, profile.domain), client_auth: 'client_secret_post' };
+    const material: CredentialMaterial = grant.type === 'client_credentials'
+      ? { kind: 'oauth_client', secrets: { client_secret: profile.clientSecret ?? '' }, settings: { ...settings, scope: (profile.scopes ?? []).join(' ') } }
+      : { kind: 'oauth_refresh', secrets: { client_secret: profile.clientSecret ?? '', refresh_token: profile.tokenState?.refreshToken ?? '' }, settings };
+    // A rotated refresh token is kept on the profile's token state (below), which is this class's store.
+    const r = await requestToken(material, grant, { send: this.send, onRotate: async () => {} });
+    if (!r.ok) throw new Error(`Token request failed (${r.status ?? r.code}): ${r.sentence}`);
+    return r.token;
+  }
+
+  private toTokenState(t: IssuedToken): TokenState {
     return {
-      accessToken: resp.access_token,
-      refreshToken: resp.refresh_token,
-      tokenType: resp.token_type,
-      idToken: resp.id_token,
-      scope: resp.scope,
-      expiresAt: resp.expires_in ? Date.now() + resp.expires_in * 1000 : undefined,
+      accessToken: t.accessToken,
+      refreshToken: t.refreshToken,
+      tokenType: t.tokenType,
+      idToken: t.idToken,
+      scope: t.scope,
+      expiresAt: t.expiresInSeconds !== undefined ? Date.now() + t.expiresInSeconds * 1000 : undefined,
     };
   }
 }

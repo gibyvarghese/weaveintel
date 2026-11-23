@@ -10,6 +10,7 @@ import { refusal } from '../types.js'
 import { CREDENTIAL_KINDS, HMAC_PROFILES, isCredentialKind, settingOf, type CredentialKindKey, type HmacProfile } from './catalogue.js'
 import { signHmac } from './hmac.js'
 import type { TokenCache } from './token-cache.js'
+import { requestToken } from './token.js'
 
 /** A credential opened for one call: its kind, its secret parts and its setting parts. Held in memory only. */
 export interface CredentialMaterial {
@@ -115,51 +116,14 @@ export async function applyCredential(request: WireRequest, material: Credential
       if (u.protocol !== 'https:') return badSetting('token_url', 'must be a secure (https) address.')
       let failure: ConnectRefusal | undefined
       const token = await context.cache.get(context.cacheKey, async () => {
-        const r = await fetchToken(material, s, context)
-        if (!r.ok) { failure = r; throw new Error(r.code) }
-        return r.token
+        const r = await requestToken(material, { type: material.kind === 'oauth_client' ? 'client_credentials' : 'refresh_token' }, context)
+        if (!r.ok) { failure = { ok: false, code: r.code, sentence: r.sentence }; throw new Error(r.code) }
+        return { token: r.token.accessToken, expiresInSeconds: r.token.expiresInSeconds }
       }, () => now().getTime()).catch(() => undefined)
       if (token === undefined) return failure ?? refusal('KEY_REJECTED', `${KIND_WORDS[material.kind]} was not accepted.`)
       return { ok: true, request: withHeader(request, 'authorization', `Bearer ${token}`) }
     }
   }
-}
-
-async function fetchToken(m: CredentialMaterial, s: (name: string) => string, context: ApplyContext): Promise<{ readonly ok: true; readonly token: { token: string; expiresInSeconds?: number } } | ConnectRefusal> {
-  const form = new URLSearchParams()
-  const headers: Record<string, string> = { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' }
-  if (m.kind === 'oauth_client') {
-    form.set('grant_type', 'client_credentials')
-    if (s('audience') !== '') form.set('audience', s('audience'))
-  } else {
-    form.set('grant_type', 'refresh_token')
-    form.set('refresh_token', m.secrets['refresh_token'] ?? '')
-  }
-  if (s('scope') !== '') form.set('scope', s('scope'))
-  const secret = m.secrets['client_secret'] ?? ''
-  if (s('client_auth') === 'client_secret_post' || secret === '') {
-    form.set('client_id', s('client_id'))
-    if (secret !== '') form.set('client_secret', secret)
-  } else {
-    headers['authorization'] = `Basic ${Buffer.from(`${encodeURIComponent(s('client_id'))}:${encodeURIComponent(secret)}`, 'utf8').toString('base64')}`
-  }
-  const r = await context.send({ method: 'POST', url: s('token_url'), headers, body: form.toString() })
-  if (!r.ok) return refusal('KEY_SOURCE_UNAVAILABLE', 'The sign-in service could not be reached, so nothing was sent.')
-  let body: Record<string, unknown> = {}
-  try { body = JSON.parse(r.body) as Record<string, unknown> } catch { body = {} }
-  if (r.status < 200 || r.status >= 300) {
-    if (m.kind === 'oauth_refresh' && body['error'] === 'invalid_grant') return refusal('NEEDS_RECONNECT', 'The sign-in has ended. An administrator needs to sign in again.')
-    return refusal('KEY_REJECTED', `${KIND_WORDS[m.kind]} was not accepted by the sign-in service.`)
-  }
-  const token = typeof body['access_token'] === 'string' ? body['access_token'] : ''
-  if (token === '') return refusal('KEY_REJECTED', 'The sign-in service answered without a token.')
-  const rotated = typeof body['refresh_token'] === 'string' ? body['refresh_token'] : ''
-  if (m.kind === 'oauth_refresh' && rotated !== '' && rotated !== m.secrets['refresh_token']) {
-    if (context.onRotate === undefined) return refusal('KEY_NOT_STORED', 'The sign-in service issued a new refresh token and there is nowhere to keep it, so it was not used.')
-    try { await context.onRotate({ refresh_token: rotated }) } catch { return refusal('KEY_NOT_STORED', 'The new sign-in could not be stored, so it was not used.') }
-  }
-  const expires = typeof body['expires_in'] === 'number' ? body['expires_in'] : Number(body['expires_in'])
-  return { ok: true, token: { token, ...(Number.isFinite(expires) ? { expiresInSeconds: expires } : {}) } }
 }
 
 const HIDDEN = '•••'
