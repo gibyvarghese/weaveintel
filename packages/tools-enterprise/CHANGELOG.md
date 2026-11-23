@@ -10,6 +10,8 @@ codeVerifier?)` sends a PKCE verifier, and the constructor takes `{ send }` so a
   its own door. Failures say `Token request failed (<status>): <plain sentence>` and no longer include the sign-in
   service's response text. A basic or API-key profile with a missing secret now fails closed instead of sending an
   empty value. `AuthManager` is deprecated for new code: use `@weaveintel/connect/credentials` directly.
+- The package is frozen (security fixes only): its connectors are moving to connector packs on `@weaveintel/connect`,
+  and each provider is deprecated as its pack does everything the provider does (owner ruling, 2026-11-24).
 
 ### Patch Changes
 
