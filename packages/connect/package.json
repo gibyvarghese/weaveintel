@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/connect",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Connector framework building blocks: credential appliers and token cache, the generic operation runner, inbound signature verifiers, and a record-and-replay kit. Pure logic: the network is always the caller's.",
   "type": "module",
   "exports": {
