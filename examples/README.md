@@ -2,6 +2,16 @@
 
 This directory contains runnable TypeScript examples organized into three tiers.
 
+## The rule: every library change ships an example
+
+Each change to a published `@weaveintel/*` package adds or updates an example here. The example:
+- uses public entry points only;
+- asserts its own results;
+- says in a header comment what it shows and when to use it;
+- gets a row in the tables below.
+
+CI checks this with `npm run check:examples-updated`. The full rule is in [`../CLAUDE.md`](../CLAUDE.md).
+
 ## Folder structure
 
 ```

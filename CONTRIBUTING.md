@@ -35,6 +35,7 @@ scripts/              Developer scripts, pentest, stress tests
 
 1. **Fork** the repo and create a branch: `git checkout -b feat/my-feature`
 2. **Write tests** — new behaviour requires unit tests; bug fixes require a regression test
+   - **Write or update an example** for every library change (Examples rule in [`CLAUDE.md`](CLAUDE.md))
 3. **Run the test suite**: `npm test`
 4. **Lint**: `npm run lint` (we use ESLint + TypeScript strict mode)
 5. **Type-check**: `npm run typecheck`
@@ -62,6 +63,9 @@ Scopes match the app or package name (`geneweave`, `compliance`, `workflows`, et
 - [ ] Breaking API changes are documented in the PR body
 - [ ] New environment variables are documented in `deploy/server.ts` header JSDoc
 - [ ] **A changeset is included** for any change to a published `@weaveintel/*` package (`npx changeset`)
+- [ ] **An example shows the change** (`examples/packages/`, `examples/use-cases/` or `examples/with-llm/`), uses only
+      public entry points, asserts its results, and has a row in `examples/README.md`. CI's
+      `check:examples-updated` enforces this; see the Examples rule in [`CLAUDE.md`](CLAUDE.md).
 
 ## Releasing
 

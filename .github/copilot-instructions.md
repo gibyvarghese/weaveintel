@@ -48,7 +48,10 @@ A new capability is not done until **all** of these hold. This is the single ans
 9. **The test quartet.** Ship: package unit tests, a GeneWeave DB-level test, a canonical
    `examples/NN-*.ts` (in-process, no DB / no LLM / no external services), and a
    `scripts/e2e-*.mjs` verified against a running server.
-10. **Examples and docs updated** so end-to-end usage stays discoverable.
+10. **Examples and docs updated** so end-to-end usage stays discoverable. **Every change to a published
+    `@weaveintel/*` package ships a runnable, self-asserting example** that uses public entry points only, with a
+    row in `examples/README.md`. CI enforces it (`npm run check:examples-updated`). The full rule is in
+    [`CLAUDE.md`](../CLAUDE.md) (Examples rule).
 
 ---
 
