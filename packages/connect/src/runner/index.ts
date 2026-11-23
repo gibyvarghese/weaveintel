@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @weaveintel/connect/runner — the generic operation runner (FRAMEWORK 5.3).
  */

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @weaveintel/connect/credentials — credential kinds, their appliers, and the single-flight token cache.
  */

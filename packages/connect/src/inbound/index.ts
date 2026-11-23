@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @weaveintel/connect/inbound — verifier presets for inbound deliveries and the replay cache (FRAMEWORK 4.5).
  */

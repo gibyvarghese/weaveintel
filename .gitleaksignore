@@ -4,3 +4,11 @@
 # field, default 5000). gitleaks' generic-api-key entropy heuristic misfires on
 # the field/label text — there is no secret on this line.
 60039285b915705417259629e70c89750fd9d49c:apps/geneweave/src/admin/schema/platform-capability-tabs.ts:generic-api-key:459
+
+# @weaveintel/connect replay kit test: a deliberately planted fake bearer token, key and JWT that the
+# scrubbing test must remove. Nothing on this line is a real credential.
+34fecc84a9e2996af3144ee4b7c946120e73f2f4:packages/connect/src/replay/replay.test.ts:jwt:49
+
+# @weaveintel/connect Standard Webhooks test: the signing secret is the published example from the Standard
+# Webhooks v1 specification's test vector, used to prove signatures match the spec byte for byte.
+1089de6a243d355fd677e6a853bc2b9f2308e76f:packages/connect/src/standard-webhooks.test.ts:generic-api-key:7

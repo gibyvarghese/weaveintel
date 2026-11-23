@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @weaveintel/connect/sources — source adapters on the generic operation runner (F-L2d). REST is the runner itself;
  * OData is a description turned into the runner's operation and mapping rows.

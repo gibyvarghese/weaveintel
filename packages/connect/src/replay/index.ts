@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @weaveintel/connect/replay — record-and-replay exchanges for connector tests, with scrubbing.
  * Recording (`createRecordingSend`) runs only with CONNECT_RECORD=1.
