@@ -64,6 +64,12 @@ describe('query clauses', () => {
     expect(checkClause({ dialect: 'jql', field: 'status', operator: 'was' })).toBeDefined()
     expect(checkClause({ dialect: 'jql', field: 'cf[10010]', operator: '=' })).toBeUndefined()
   })
+  it('accepts ServiceNow full-text search as a clause and escapes its words', () => {
+    expect(checkClause({ dialect: 'servicenow_encoded', field: '123TEXTQUERY321', operator: '=' })).toBeUndefined()
+    expect(checkClause({ dialect: 'servicenow_encoded', field: '123other', operator: '=' })).toBeDefined()
+    const rows: RequestMapping[] = [{ from: 'input', source: 'text', target: 'query:sysparm_query', clause: sn('123TEXTQUERY321', '=') }, { from: 'fixed', source: 'published', target: 'query:sysparm_query', clause: sn('workflow_state', '=') }]
+    expect(query(built(op(), rows, { text: 'email^ORactive=false' }), 'sysparm_query')).toBe('123TEXTQUERY321=email^^ORactive=false^workflow_state=published')
+  })
 })
 
 describe('bodies', () => {

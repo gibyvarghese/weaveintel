@@ -6,7 +6,8 @@ The partner vocabulary: connectors described entirely as rows.
 
 - Runner: body formats `multipart`, `binary`, `text`; answer formats `text` and `file` (file references, never bytes);
   value encodings (`adf_document`, `comma_list`, `json_text`); query clauses for ServiceNow encoded queries, JQL and
-  OData filters (field and operator fixed by the row, value escaped); allow-listed body merges (`body:x.*`); whole-body
+  OData filters (field and operator fixed by the row, value escaped; ServiceNow full-text search through its documented
+  `123TEXTQUERY321` pseudo-field); allow-listed body merges (`body:x.*`); whole-body
   `body:$`; `maxRequestBytes`; 1-based offset paging (`offsetBase`); rate-limit headers on every result.
 - Credentials: new kinds `jwt_bearer` (RFC 7523, RS256/ES256) and `mtls`; `oauth_refresh` gains `authorize_url`,
   `pkce` and `resource`. Sign-in helpers: `createPkcePair`, `createSignInState`, `buildAuthorizationUrl`,

@@ -14,7 +14,8 @@ import { refusal } from '../types.js'
 import { QUERY_OPERATORS, type QueryClause, type QueryDialect } from './spec.js'
 
 const FIELD: Readonly<Record<QueryDialect, RegExp>> = {
-  servicenow_encoded: /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$/,
+  // 123TEXTQUERY321 is ServiceNow's documented full-text pseudo-field (`123TEXTQUERY321=words`).
+  servicenow_encoded: /^(123TEXTQUERY321|[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*)$/,
   jql: /^([A-Za-z_][A-Za-z0-9_]*|cf\[\d+\]|"[^"\\]+")$/,
   odata_filter: /^[A-Za-z_][A-Za-z0-9_]*(\/[A-Za-z_][A-Za-z0-9_]*)*$/,
 }
