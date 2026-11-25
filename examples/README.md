@@ -30,6 +30,7 @@ understand what a single package does and how to configure it.
 | `plugins.ts` | `@weaveintel/plugins` | Manifest validation, registry, lifecycle hooks, installer |
 | `tools-time.ts` | `@weaveintel/tools-time` | Time snapshot, formatting, timer/stopwatch state machines, tool schemas |
 | `sqlite-e2e.ts` | `@weaveintel/skills` + `@weaveintel/memory` | SQLite-backed skills + memory (custom adapter pattern) |
+| `connect-forms.ts` | `@weaveintel/connect` (`./forms`) | One form model for every application (ServiceNow, Jira, SharePoint mappings as data), rules, MCP elicitation, lookup resolution, time-zone conversion, confirm-then-submit |
 | `encryption.ts` | `@weaveintel/encryption` | LocalKmsProvider, key hierarchy, AEAD envelope, field-level encryption, blind index |
 
 Run any file with:
