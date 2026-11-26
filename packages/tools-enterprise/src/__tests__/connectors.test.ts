@@ -4,6 +4,14 @@
  * Tests JiraFullProvider, ServiceNowProvider, CanvaProvider by mocking fetch.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+// The hardened transport in `@weaveintel/core` resolves the host and connects
+// through undici's own `fetch` (DNS-pinned dispatcher), so the stubbed
+// `globalThis.fetch` never sees the request. These tests cover the connector and
+// auth logic, so route the package's transport seam through the stubbed global.
+vi.mock('../_fetch.js', () => ({
+  enterpriseFetch: (input: string, init?: RequestInit) => globalThis.fetch(input, init),
+}));
 import { JiraFullProvider } from '../connectors/jira-full.js';
 import { ServiceNowProvider } from '../connectors/servicenow.js';
 import { CanvaProvider } from '../connectors/canva.js';
