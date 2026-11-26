@@ -1,5 +1,12 @@
 # @weaveintel/tools
 
+## 0.2.3
+
+### Patch Changes
+
+- Updated dependencies [0d4427a]
+  - @weaveintel/mcp-server@0.3.0
+
 ## 0.2.2
 
 ### Patch Changes

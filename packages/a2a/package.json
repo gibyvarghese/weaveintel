@@ -1,7 +1,7 @@
 {
   "name": "@weaveintel/a2a",
-  "version": "0.3.0",
-  "description": "A2A protocol \u2014 agent-to-agent communication client and server",
+  "version": "0.4.0",
+  "description": "A2A protocol — agent-to-agent communication client and server",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/gibyvarghese/weaveintel.git",
