@@ -26,10 +26,31 @@ export interface McpTool {
   title?: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  /** JSON Schema of `structuredContent`, when the tool returns structured output. */
+  outputSchema?: Record<string, unknown>;
+  /** Behaviour hints a client may show or act on (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`). */
+  annotations?: McpToolAnnotations;
+  /** Free-form metadata; not part of the manifest hash. */
+  _meta?: Record<string, unknown>;
+}
+
+/** Tool annotations (hints, never guarantees: a client must not trust them for safety). */
+export interface McpToolAnnotations {
+  title?: string;
+  readOnlyHint?: boolean;
+  destructiveHint?: boolean;
+  idempotentHint?: boolean;
+  openWorldHint?: boolean;
 }
 
 /** A `tools/call` result — an array of content blocks + an error flag (tool errors are NOT protocol errors). */
-export interface McpToolResult { content: Array<{ type: 'text'; text: string }>; isError?: boolean }
+export interface McpToolResult {
+  content: Array<{ type: 'text'; text: string }>;
+  isError?: boolean;
+  /** Structured output matching the tool's `outputSchema`. */
+  structuredContent?: Record<string, unknown>;
+  _meta?: Record<string, unknown>;
+}
 
 /** A JSON-RPC 2.0 request/notification as received on the wire. */
 export interface JsonRpcMessage { jsonrpc?: string; id?: string | number | null; method?: string; params?: Record<string, unknown> }
