@@ -19,6 +19,11 @@
       "types": "./dist/runner/index.d.ts",
       "default": "./dist/runner/index.js"
     },
+    "./forms": {
+      "import": "./dist/forms/index.js",
+      "types": "./dist/forms/index.d.ts",
+      "default": "./dist/forms/index.js"
+    },
     "./inbound": {
       "import": "./dist/inbound/index.js",
       "types": "./dist/inbound/index.d.ts",
