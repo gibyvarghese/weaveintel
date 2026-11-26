@@ -16,8 +16,13 @@ async function close(server: Server): Promise<void> {
 const task = { id: 'test', contextId: 'test', status: { state: 'TASK_STATE_COMPLETED' } } as A2ATask;
 const payload = { task, timestamp: '2026-01-01T00:00:00Z' };
 
+// Pushes never follow a redirect, same-origin or not: the connection is pinned to the address the guard checked,
+// so a webhook cannot bounce the push (with its signature and credentials) anywhere else. A 3xx is a failed
+// delivery and is not retried. The receivers here are on loopback, which a push must opt into.
+const localReceiver = { policy: { outbound: { allowLoopback: true } }, retryDelaysMs: [] } as const;
+
 describe('webhook hardened egress', () => {
-  it('retains the signed POST on a same-origin redirect', async () => {
+  it('does not follow a same-origin redirect: nothing is forwarded, the 3xx is a failed delivery', async () => {
     let received: { method?: string; authorization?: string; signature?: string; body: string } | undefined;
     const server = createServer((req, res) => {
       if (req.url === '/redirect') {
@@ -37,16 +42,16 @@ describe('webhook hardened egress', () => {
       const result = await deliverToWebhook({
         url: `http://127.0.0.1:${port}/redirect`, taskId: task.id, pushConfigId: '1', createdAt: '',
         token: 'test-signing-token', authentication: { schemes: ['bearer'], credentials: 'test-token' },
-      }, payload);
-      expect(result.delivered).toBe(true);
-      expect(received).toMatchObject({ method: 'POST', authorization: 'Bearer test-token', body: JSON.stringify(payload) });
-      expect(received?.signature).toMatch(/^sha256=[0-9a-f]{64}$/);
+      }, payload, localReceiver);
+      expect(result).toMatchObject({ delivered: false, attempts: 1 });
+      expect(result.lastError).toMatch(/redirect refused/i);
+      expect(received).toBeUndefined();
     } finally {
       await close(server);
     }
   });
 
-  it('reports cross-origin redirect failures without forwarding payload or credentials', async () => {
+  it('does not follow a cross-origin redirect and forwards neither payload nor credentials', async () => {
     let forwarded = 0;
     const target = createServer((_req, res) => { forwarded++; res.writeHead(200).end(); });
     const targetPort = await listen(target);
@@ -58,9 +63,9 @@ describe('webhook hardened egress', () => {
       const result = await deliverToWebhook({
         url: `http://127.0.0.1:${sourcePort}/hook`, taskId: task.id, pushConfigId: '2', createdAt: '',
         authentication: { schemes: ['bearer'], credentials: 'test-token' },
-      }, payload);
-      expect(result).toMatchObject({ delivered: false, attempts: 4 });
-      expect(result.lastError).toMatch(/cross-origin redirect/i);
+      }, payload, localReceiver);
+      expect(result).toMatchObject({ delivered: false, attempts: 1 });
+      expect(result.lastError).toMatch(/redirect refused/i);
       expect(forwarded).toBe(0);
     } finally {
       await close(source);

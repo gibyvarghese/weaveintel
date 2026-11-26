@@ -24,7 +24,8 @@ Breaking (hence minor on 0.x):
 
 - Push delivery refuses loopback by default and re-checks the config on every delivery; a local test receiver passes
   `{ policy: { outbound: { allowLoopback: true } } }`. Delivery is pinned to the checked address and never follows a
-  redirect (a 3xx is a failed delivery, not retried).
+  redirect, same-origin included (a 3xx is a failed delivery, not retried); 0.3.0 followed a same-origin redirect
+  and retried a refused cross-origin one.
 - `CreateTaskPushNotificationConfig` refuses a webhook the guard refuses (`INVALID_PARAMS`) and, with a task store, a
   task the store does not hold (`TASK_NOT_FOUND`); Get/List/Delete answer `TASK_NOT_FOUND` for such a task, so one
   tenant cannot read another's webhook tokens.
