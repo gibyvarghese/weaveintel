@@ -238,3 +238,21 @@ describe('docling-serve adapter (against a local stand-in server)', () => {
     }
   });
 });
+
+describe('mapping proposals speak the shared transform vocabulary', () => {
+  it('every proposal transform converts to one shared rule, and reads values as the shared engine does', async () => {
+    const { TRANSFORMS: SHARED } = await import('@weaveintel/connect/runner');
+    const { TRANSFORMS: PROPOSED, toMappingRule } = await import('../mapping.js');
+    for (const t of PROPOSED) expect(SHARED as readonly string[]).toContain(toMappingRule(t).transform);
+    expect(toMappingRule('date_dmy')).toEqual({ transform: 'date', arg: 'day_first' });
+    expect(toMappingRule('number_comma_decimal')).toEqual({ transform: 'number', arg: 'comma_decimal' });
+    expect(toMappingRule('enum_match', { name: 'p', type: 'enum', enum: ['High', 'Low'] }, [' high ', 'LOW', 'nope']))
+      .toEqual({ transform: 'choice_map', arg: '', choiceMap: { high: 'High', LOW: 'Low' } });
+    // Readings now match schemaWeave inbound: an unrecognised word is not "no", a two-digit year uses the 1969/2068 window.
+    expect(applyTransform('maybe', 'boolean').error).toMatch(/yes or no/);
+    expect(applyTransform('checked', 'boolean')).toEqual({ value: true });
+    expect(applyTransform('25/12/70', 'date_dmy')).toEqual({ value: '1970-12-25' });
+    expect(applyTransform('2026-03-04T10:00', 'date_iso')).toEqual({ value: '2026-03-04' });
+    expect(applyTransform('$1,234.50', 'number')).toEqual({ value: 1234.5 });
+  });
+});

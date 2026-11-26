@@ -2,6 +2,12 @@
 
 **A ready-made toolbelt of enterprise connectors — Jira, Confluence, Salesforce, Notion, ServiceNow, Canva — for your agent.**
 
+> **Status: frozen (security fixes only).** Connectors are moving to connector packs (operation and mapping rows)
+> run by the generic runner in [`@weaveintel/connect`](../connect), ServiceNow and Jira first. Each provider here is
+> marked deprecated when its pack does everything the provider does, and the package is deprecated once all six have
+> moved. For new code, use `@weaveintel/connect` (`runOperation` for calls, `applyCredential` / `requestToken` for
+> sign-in) instead of these classes and `AuthManager`.
+
 ## Why it exists
 
 A company doesn't keep its work in one place: tickets live in Jira, docs in Confluence, customers in Salesforce, records in ServiceNow. Wiring an agent to each one means learning six different APIs and six different login schemes. This package is the pre-cut set of house keys: each connector already knows how to query, read, and create records in its system, and a shared auth manager handles the various locks (OAuth 2.0, OIDC, basic, API key, client credentials) so you don't hand-roll each one. It sits on top of `@weaveintel/tools`, adding a business-systems toolbelt to the standard one.

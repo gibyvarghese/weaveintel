@@ -88,7 +88,37 @@ async function withSpan<T>(
 
 // ─── JSON-RPC POST helper ─────────────────────────────────────────────────────
 
+/**
+ * How the client reaches agents. By default the package's hardened fetch (SSRF guard, timeouts, size cap). A host
+ * that has its own outbound door (address rules, an outbound log, per-connection credentials) passes `fetch`, and
+ * `getHeaders` to add a credential per call (a bearer token from a connection, refreshed by the host).
+ */
+export interface A2AClientOptions {
+  /** Replaces the hardened fetch for every call (discovery, messages, streams). The caller owns its safety. */
+  readonly fetch?: ((input: string, init: RequestInit) => Promise<Response>) | undefined;
+  /** Headers added to every call to `url` (for example `authorization`). Called per request, so tokens can rotate. */
+  readonly getHeaders?: ((url: string) => Promise<Record<string, string>>) | undefined;
+}
+
+interface ClientIo {
+  readonly fetch: (input: string, init: RequestInit) => Promise<Response>;
+  readonly stream: (input: string, init: RequestInit) => Promise<Response>;
+}
+
+function clientIo(options: A2AClientOptions): ClientIo {
+  const withHeaders = async (url: string, init: RequestInit): Promise<RequestInit> => {
+    if (options.getHeaders === undefined) return init;
+    const extra = await options.getHeaders(url);
+    return { ...init, headers: { ...(init.headers as Record<string, string> | undefined), ...extra } };
+  };
+  return {
+    fetch: async (url, init) => (options.fetch ?? ((u, i) => a2aFetch(u, i)))(url, await withHeaders(url, init)),
+    stream: async (url, init) => (options.fetch ?? ((u, i) => a2aFetchStream(u, i)))(url, await withHeaders(url, init)),
+  };
+}
+
 async function rpcPost<T>(
+  io: ClientIo,
   ctx: ExecutionContext,
   agentUrl: string,
   method: string,
@@ -98,7 +128,7 @@ async function rpcPost<T>(
   const body = JSON.stringify(makeRpcRequest(method, params));
 
   const execute = async (span?: Span): Promise<T> => {
-    const response = await a2aFetch(agentUrl, {
+    const response = await io.fetch(agentUrl, {
       method: 'POST',
       headers: rpcHeaders(ctx),
       body,
@@ -131,7 +161,8 @@ async function rpcPost<T>(
 
 // ─── HTTP-based A2A client (JSON-RPC 2.0) ────────────────────────────────────
 
-export function weaveA2AClient(): A2AClient {
+export function weaveA2AClient(options: A2AClientOptions = {}): A2AClient {
+  const io = clientIo(options);
   return {
     // ── Discovery ───────────────────────────────────────────────────────────────
 
@@ -140,9 +171,9 @@ export function weaveA2AClient(): A2AClient {
       const v1Path = `${base}/.well-known/agent-card.json`;
       const legacyPath = `${base}/.well-known/agent.json`;
 
-      let response = await a2aFetch(v1Path, { headers: { [A2A_VERSION_HEADER]: A2A_VERSION } });
+      let response = await io.fetch(v1Path, { headers: { [A2A_VERSION_HEADER]: A2A_VERSION } });
       if (!response.ok && response.status === 404) {
-        response = await a2aFetch(legacyPath, { headers: { [A2A_VERSION_HEADER]: A2A_VERSION } });
+        response = await io.fetch(legacyPath, { headers: { [A2A_VERSION_HEADER]: A2A_VERSION } });
       }
       if (!response.ok) {
         throw new WeaveIntelError({
@@ -192,7 +223,7 @@ export function weaveA2AClient(): A2AClient {
     // ── v1.0 methods (JSON-RPC 2.0) ─────────────────────────────────────────────
 
     async sendMessage(ctx: ExecutionContext, agentUrl: string, params: A2ATaskSendParams): Promise<A2ATask> {
-      return rpcPost<A2ATask>(ctx, agentUrl, A2A_METHODS.SEND_MESSAGE, params, (span, task) => {
+      return rpcPost<A2ATask>(io, ctx, agentUrl, A2A_METHODS.SEND_MESSAGE, params, (span, task) => {
         span.setAttribute('a2a.taskId', task.id);
         span.setAttribute('a2a.contextId', task.contextId);
         span.setAttribute('a2a.taskState', task.status.state);
@@ -204,7 +235,7 @@ export function weaveA2AClient(): A2AClient {
       const body = JSON.stringify(rpcReq);
 
       const response = await withSpan(ctx, 'a2a.client.SendStreamingMessage', { 'a2a.method': 'SendStreamingMessage', 'a2a.agentUrl': agentUrl }, () =>
-        a2aFetchStream(agentUrl, {
+        io.stream(agentUrl, {
           method: 'POST',
           headers: rpcHeaders(ctx, { Accept: 'text/event-stream' }),
           body,
@@ -225,7 +256,7 @@ export function weaveA2AClient(): A2AClient {
     async getTask(ctx: ExecutionContext, agentUrl: string, taskId: string, historyLength?: number): Promise<A2ATask> {
       const params: Record<string, unknown> = { id: taskId };
       if (historyLength !== undefined) params['historyLength'] = historyLength;
-      return rpcPost<A2ATask>(ctx, agentUrl, A2A_METHODS.GET_TASK, params, (span, task) => {
+      return rpcPost<A2ATask>(io, ctx, agentUrl, A2A_METHODS.GET_TASK, params, (span, task) => {
         span.setAttribute('a2a.taskId', task.id);
         span.setAttribute('a2a.contextId', task.contextId);
         span.setAttribute('a2a.taskState', task.status.state);
@@ -239,17 +270,17 @@ export function weaveA2AClient(): A2AClient {
       if (filter?.pageSize) params['pageSize'] = filter.pageSize;
       if (filter?.pageToken) params['pageToken'] = filter.pageToken;
       if (filter?.statusTimestampAfter) params['statusTimestampAfter'] = filter.statusTimestampAfter;
-      return rpcPost<A2ATaskPage>(ctx, agentUrl, A2A_METHODS.LIST_TASKS, params);
+      return rpcPost<A2ATaskPage>(io, ctx, agentUrl, A2A_METHODS.LIST_TASKS, params);
     },
 
     async cancelTask(ctx: ExecutionContext, agentUrl: string, taskId: string): Promise<void> {
-      await rpcPost<unknown>(ctx, agentUrl, A2A_METHODS.CANCEL_TASK, { id: taskId });
+      await rpcPost<unknown>(io, ctx, agentUrl, A2A_METHODS.CANCEL_TASK, { id: taskId });
     },
 
     async *subscribeToTask(ctx: ExecutionContext, agentUrl: string, taskId: string): AsyncIterable<A2AStreamEvent> {
       const rpcReq = makeRpcRequest(A2A_METHODS.SUBSCRIBE_TO_TASK, { id: taskId });
       const response = await withSpan(ctx, 'a2a.client.SubscribeToTask', { 'a2a.method': 'SubscribeToTask', 'a2a.agentUrl': agentUrl, 'a2a.taskId': taskId }, () =>
-        a2aFetchStream(agentUrl, {
+        io.stream(agentUrl, {
           method: 'POST',
           headers: rpcHeaders(ctx, { Accept: 'text/event-stream' }),
           body: JSON.stringify(rpcReq),
@@ -276,6 +307,7 @@ export function weaveA2AClient(): A2AClient {
       config: A2APushNotificationConfig,
     ): Promise<A2APushNotificationConfigEntry> {
       return rpcPost<A2APushNotificationConfigEntry>(
+        io,
         ctx, agentUrl, A2A_METHODS.CREATE_PUSH_CONFIG, { taskId, config },
       );
     },
@@ -287,6 +319,7 @@ export function weaveA2AClient(): A2AClient {
       configId: string,
     ): Promise<A2APushNotificationConfigEntry> {
       return rpcPost<A2APushNotificationConfigEntry>(
+        io,
         ctx, agentUrl, A2A_METHODS.GET_PUSH_CONFIG, { taskId, pushConfigId: configId },
       );
     },
@@ -297,6 +330,7 @@ export function weaveA2AClient(): A2AClient {
       taskId: string,
     ): Promise<readonly A2APushNotificationConfigEntry[]> {
       const res = await rpcPost<{ configs: A2APushNotificationConfigEntry[] }>(
+        io,
         ctx, agentUrl, A2A_METHODS.LIST_PUSH_CONFIGS, { taskId },
       );
       return res.configs ?? [];
@@ -309,6 +343,7 @@ export function weaveA2AClient(): A2AClient {
       configId: string,
     ): Promise<boolean> {
       await rpcPost<unknown>(
+        io,
         ctx, agentUrl, A2A_METHODS.DELETE_PUSH_CONFIG, { taskId, pushConfigId: configId },
       );
       return true;

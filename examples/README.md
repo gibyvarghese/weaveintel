@@ -32,6 +32,10 @@ understand what a single package does and how to configure it.
 | `sqlite-e2e.ts` | `@weaveintel/skills` + `@weaveintel/memory` | SQLite-backed skills + memory (custom adapter pattern) |
 | `connect-forms.ts` | `@weaveintel/connect` (`./forms`) | One form model for every application (ServiceNow, Jira, SharePoint mappings as data), rules, MCP elicitation, lookup resolution, time-zone conversion, confirm-then-submit |
 | `encryption.ts` | `@weaveintel/encryption` | LocalKmsProvider, key hierarchy, AEAD envelope, field-level encryption, blind index |
+| `connect-operations.ts` | `@weaveintel/connect` | A connector as rows: query clauses (ServiceNow/JQL/OData), ADF encoding, allow-listed body merge, multipart + file answers, 1-based paging, rate-limit headers, replayed |
+| `connect-signin.ts` | `@weaveintel/connect` | Sign-in: discovery (RFC 9728/8414), dynamic registration, PKCE, code exchange with `resource`; `jwt_bearer` and `mtls` credential kinds |
+| `connect-remote.ts` | `@weaveintel/connect` | Remote MCP tools and A2A agent skills (0.3 + 1.0) as pinned, replayable connector calls; drift refusal |
+| `a2a-client-door.ts` | `@weaveintel/a2a` | `weaveA2AClient({ fetch, getHeaders })`: every call through your own door with a rotating credential |
 
 Run any file with:
 

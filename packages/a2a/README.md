@@ -33,7 +33,7 @@ console.log(task.status.state);   // e.g. "TASK_STATE_COMPLETED"
 
 | Export | What it does |
 | --- | --- |
-| `weaveA2AClient()` | Client: `discover`, `sendMessage`, `streamMessage`, `getTask` |
+| `weaveA2AClient(options?)` | Client: `discover`, `sendMessage`, `streamMessage`, `getTask`. `options.fetch` routes every call through your own door; `options.getHeaders` adds a fresh credential per call (see `examples/packages/a2a-client-door.ts`) |
 | `weaveAgentAsA2AServer(opts)` | Turn one of your agents into an A2A-serving endpoint |
 | `weaveA2ABus()` | In-process client↔server bus (no HTTP) for tests/embedding |
 | `createA2ADispatcher`, `weaveA2AServer`, `streamToSse` | JSON-RPC 2.0 server dispatch + SSE streaming |

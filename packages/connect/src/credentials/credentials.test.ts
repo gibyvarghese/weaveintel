@@ -14,7 +14,7 @@ const m = (kind: CredentialMaterial['kind'], secrets: Record<string, string>, se
 
 describe('the catalogue', () => {
   it('is closed and names each kind’s secret and setting parts', () => {
-    expect(Object.keys(CREDENTIAL_KINDS).sort()).toEqual(['api_key', 'basic', 'bearer_token', 'hmac_signing', 'none', 'oauth_client', 'oauth_refresh'])
+    expect(Object.keys(CREDENTIAL_KINDS).sort()).toEqual(['api_key', 'basic', 'bearer_token', 'hmac_signing', 'jwt_bearer', 'mtls', 'none', 'oauth_client', 'oauth_refresh'])
     expect(CREDENTIAL_KINDS.oauth_client.secretParts).toEqual(['client_secret'])
     expect(CREDENTIAL_KINDS.oauth_client.settingParts.map((p) => p.name)).toEqual(['client_id', 'token_url', 'scope', 'audience', 'client_auth'])
     expect(CREDENTIAL_KINDS.basic.settingParts.map((p) => p.name)).toEqual(['username'])

@@ -6,3 +6,5 @@ export { CREDENTIAL_KINDS, HMAC_PROFILES, isCredentialKind, settingOf, type Cred
 export { applyCredential, redactRequest, type ApplyContext, type ApplyResult, type CredentialMaterial } from './apply.js'
 export { createTokenCache, type FetchedToken, type TokenCache } from './token-cache.js'
 export { signHmac, standardWebhooksKey } from './hmac.js'
+export { requestToken, signJwtAssertion, type IssuedToken, type TokenGrant, type TokenRequestContext, type TokenResult } from './token.js'
+export { buildAuthorizationUrl, createPkcePair, createSignInState, discoverAuthorizationServer, registerClient, type AuthorizationServer, type PkcePair } from './signin.js'

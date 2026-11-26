@@ -24,6 +24,7 @@ import type { Embedder } from './ports.js';
 import type { FieldDefinition, Provenance } from './types.js';
 import { parseJsonAnswer, schemaRequest } from './engines.js';
 import { trimWhile } from '../strings.js';
+import { applyMappingTransform, type Transform as SharedTransform } from '@weaveintel/connect/runner';
 
 const isDigit = (c: string): boolean => c >= '0' && c <= '9';
 /**
@@ -35,7 +36,10 @@ export function trimNumberEnds(v: string): string {
   return trimWhile(v, (c) => !isDigit(c) && !'+,-.'.includes(c), (c) => !isDigit(c) && c !== '.');
 }
 
-/** The only transforms a mapping may use. A model can choose among them; it can never write one. */
+/**
+ * The transforms a mapping PROPOSAL may use. A model can choose among them; it can never write one. Each stands for
+ * one rule of the shared vocabulary (`toMappingRule`), which is what a saved mapping stores.
+ */
 export const TRANSFORMS = [
   'none',
   'trim',
@@ -121,54 +125,85 @@ export function inferTransform(field: FieldDefinition, samples: readonly string[
   }
 }
 
-/** Apply one constrained transform. Returns an error instead of guessing. */
+/**
+ * The shared mapping vocabulary rule a proposal transform stands for (FRAMEWORK 4.6). This package only PROPOSES
+ * mappings; the stored and applied mapping uses the one closed list shared by `@weaveintel/connect` (runner) and
+ * `@schemaweave/inbound` (the engine for inbound data). Convert a proposal with this before saving it.
+ *
+ * `enum_match` becomes a `choice_map` whose map sends every normalised spelling of a sample to the field's own value.
+ */
+export interface MappingRule {
+  readonly transform: SharedTransform;
+  readonly arg: string;
+  readonly choiceMap?: Readonly<Record<string, string>>;
+}
+
+const RULES: Readonly<Record<Exclude<Transform, 'enum_match'>, Omit<MappingRule, 'choiceMap'>>> = {
+  none: { transform: 'none', arg: '' },
+  trim: { transform: 'trim', arg: '' },
+  upper: { transform: 'uppercase', arg: '' },
+  lower: { transform: 'lowercase', arg: '' },
+  number: { transform: 'number', arg: 'dot_decimal' },
+  number_comma_decimal: { transform: 'number', arg: 'comma_decimal' },
+  integer: { transform: 'number', arg: 'dot_decimal' },
+  boolean: { transform: 'boolean', arg: '' },
+  date_iso: { transform: 'date', arg: 'iso' },
+  date_dmy: { transform: 'date', arg: 'day_first' },
+  date_mdy: { transform: 'date', arg: 'month_first' },
+};
+
+/**
+ * The shared-vocabulary rule for a proposed transform.
+ * @param transform The proposal's transform.
+ * @param field The target field (needed for `enum_match`).
+ * @param samples The column's values (an `enum_match` map is built from them).
+ */
+export function toMappingRule(transform: Transform, field?: FieldDefinition, samples: readonly string[] = []): MappingRule {
+  if (transform !== 'enum_match') return RULES[transform];
+  const map: Record<string, string> = {};
+  for (const raw of samples) {
+    const v = raw.trim();
+    const hit = (field?.enum ?? []).find((e) => norm(e) === norm(v));
+    if (v !== '' && hit !== undefined) map[v] = hit;
+  }
+  return { transform: 'choice_map', arg: '', choiceMap: map };
+}
+
+/**
+ * Apply one constrained transform. Returns an error instead of guessing.
+ *
+ * Reading is done by `@weaveintel/connect`'s shared transforms (the same behaviour as schemaWeave inbound), so a
+ * proposal previewed here reads each value exactly as the stored mapping will.
+ */
 export function applyTransform(raw: string, transform: Transform, field?: FieldDefinition): { value: string | number | boolean | null; error?: string } {
   const v = raw.trim();
   if (v === '') return { value: null };
-  const dateOut = (y: number, m: number, d: number): { value: string | null; error?: string } => {
-    const yy = y < 100 ? 2000 + y : y;
-    const iso = `${String(yy).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-    const dt = new Date(`${iso}T00:00:00Z`);
-    return dt.getUTCMonth() + 1 === m && dt.getUTCDate() === d ? { value: iso } : { value: null, error: `"${v}" is not a real date` };
-  };
+  if (transform === 'none') return { value: raw };
+  const rule = toMappingRule(transform, field, [v]);
+  if (transform === 'enum_match') {
+    const hit = rule.choiceMap?.[v];
+    return hit !== undefined ? { value: hit } : { value: null, error: `"${v}" is not one of the allowed values` };
+  }
+  const out = applyMappingTransform(rule.transform, v, rule.arg);
   switch (transform) {
-    case 'none': return { value: raw };
-    case 'trim': return { value: v };
-    case 'upper': return { value: v.toUpperCase() };
-    case 'lower': return { value: v.toLowerCase() };
-    case 'number': {
-      const cleaned = trimNumberEnds(v.replace(/[\s,]/g, ''));
-      const n = Number(cleaned);
-      return /\d/.test(cleaned) && Number.isFinite(n) ? { value: n } : { value: null, error: `"${v}" is not a number` };
-    }
-    case 'number_comma_decimal': {
-      const cleaned = trimNumberEnds(v.replace(/[\s.]/g, '').replace(',', '.'));
-      const n = Number(cleaned);
-      return /\d/.test(cleaned) && Number.isFinite(n) ? { value: n } : { value: null, error: `"${v}" is not a number` };
-    }
-    case 'integer': {
-      const n = Number(v.replace(/[\s,]/g, ''));
-      return Number.isInteger(n) ? { value: n } : { value: null, error: `"${v}" is not a whole number` };
-    }
+    case 'number':
+    case 'number_comma_decimal':
+      return typeof out === 'number' ? { value: out } : { value: null, error: `"${v}" is not a number` };
+    case 'integer':
+      return typeof out === 'number' && Number.isInteger(out) ? { value: out } : { value: null, error: `"${v}" is not a whole number` };
     case 'boolean':
-      if (/^(true|yes|y|1|x)$/i.test(v)) return { value: true };
-      if (/^(false|no|n|0)$/i.test(v)) return { value: false };
-      return { value: null, error: `"${v}" is not yes or no` };
-    case 'date_iso': {
-      const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(v);
-      return m ? dateOut(Number(m[1]), Number(m[2]), Number(m[3])) : { value: null, error: `"${v}" is not YYYY-MM-DD` };
-    }
+      return typeof out === 'boolean' ? { value: out } : { value: null, error: `"${v}" is not yes or no` };
+    case 'date_iso':
     case 'date_dmy':
     case 'date_mdy': {
-      const m = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/.exec(v);
-      if (!m) return { value: null, error: `"${v}" is not a day/month/year date` };
-      const [a, b, y] = [Number(m[1]), Number(m[2]), Number(m[3])];
-      return transform === 'date_dmy' ? dateOut(y, b, a) : dateOut(y, a, b);
+      // A date field holds the day: a time of day, if one was written, is not kept.
+      if (typeof out === 'string') return { value: out.slice(0, 10) };
+      const shaped = transform === 'date_iso' ? /^\d{4}-\d{2}-\d{2}/.test(v) : /^\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}$/.test(v);
+      if (shaped) return { value: null, error: `"${v}" is not a real date` };
+      return { value: null, error: transform === 'date_iso' ? `"${v}" is not YYYY-MM-DD` : `"${v}" is not a day/month/year date` };
     }
-    case 'enum_match': {
-      const hit = (field?.enum ?? []).find((e) => norm(e) === norm(v));
-      return hit !== undefined ? { value: hit } : { value: null, error: `"${v}" is not one of the allowed values` };
-    }
+    default:
+      return { value: typeof out === 'string' ? out : v };
   }
 }
 

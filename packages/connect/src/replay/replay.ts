@@ -17,11 +17,17 @@ export interface RecordedRequest {
   readonly json?: unknown
   /** The body must contain this text. */
   readonly bodyIncludes?: string | undefined
+  /** Multipart: these parts must be present (a file part by its reference, a value part by its text). */
+  readonly parts?: readonly { readonly name: string; readonly value?: string | undefined; readonly fileRef?: string | undefined }[] | undefined
+  /** Binary: the file sent as the body. */
+  readonly fileRef?: string | undefined
 }
 
 /** One exchange: the answer, or a failure as the door reports it. */
 export type Exchange =
-  | { readonly name: string; readonly request: RecordedRequest; readonly response: { readonly status: number; readonly headers?: Readonly<Record<string, string>> | undefined; readonly body: string }; readonly repeat?: boolean | undefined }
+  | { readonly name: string; readonly request: RecordedRequest; readonly response: { readonly status: number; readonly headers?: Readonly<Record<string, string>> | undefined; readonly body: string
+      /** For a request that expects a file: the reference the door would answer with (the bytes are never recorded). */
+      readonly file?: { readonly ref: string; readonly filename?: string | undefined; readonly contentType?: string | undefined } | undefined }; readonly repeat?: boolean | undefined }
   | { readonly name: string; readonly request: RecordedRequest; readonly failure: { readonly kind: 'timeout' | 'unreachable' | 'refused' | 'too_large'; readonly code: string; readonly sentence?: string | undefined }; readonly repeat?: boolean | undefined }
 
 /** A recording file. */
@@ -53,6 +59,11 @@ function matches(rec: RecordedRequest, r: WireRequest): boolean {
     try { if (!deepEqual(JSON.parse(r.body ?? ''), rec.json)) return false } catch { return false }
   }
   if (rec.bodyIncludes !== undefined && !(r.body ?? '').includes(rec.bodyIncludes)) return false
+  for (const p of rec.parts ?? []) {
+    const hit = (r.parts ?? []).some((x) => x.name === p.name && (p.fileRef === undefined || x.file?.ref === p.fileRef) && (p.value === undefined || x.value === p.value))
+    if (!hit) return false
+  }
+  if (rec.fileRef !== undefined && r.file?.ref !== rec.fileRef) return false
   return true
 }
 
@@ -84,7 +95,8 @@ export function createReplaySend(recording: Recording): ReplaySend {
     used.push(x.name)
     if ('failure' in x) return { ok: false, kind: x.failure.kind, code: x.failure.code, sentence: x.failure.sentence ?? x.failure.code } satisfies SendResult
     const headers = Object.fromEntries(Object.entries(x.response.headers ?? {}).map(([k, v]) => [k.toLowerCase(), v]))
-    return { ok: true, status: x.response.status, headers: { 'content-type': 'application/json', ...headers }, body: x.response.body } satisfies SendResult
+    const file = r.expect === 'file' && x.response.file !== undefined ? { file: x.response.file } : {}
+    return { ok: true, status: x.response.status, headers: { 'content-type': 'application/json', ...headers }, body: x.response.body, ...file } satisfies SendResult
   }
   return { send, used: () => [...used], requests: () => [...seen], unused: () => recording.exchanges.filter((_, n) => !spent.has(n)).map((x) => x.name) }
 }

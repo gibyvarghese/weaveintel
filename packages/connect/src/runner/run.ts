@@ -6,6 +6,7 @@ import type { ApplyResult } from '../credentials/apply.js'
 import type { Json, Outcome, Send, SendResult, WireRequest } from '../types.js'
 import { outcomeForStatus } from '../types.js'
 import { buildRequest, safeToRepeat } from './build.js'
+import { decodeValue } from './encodings.js'
 import { getAt, setAt } from './paths.js'
 import type { DeclaredOutput, OperationSpec, RequestMapping, ResponseMapping } from './spec.js'
 import { applyTransform, type ChoiceMaps } from './transforms.js'
@@ -48,6 +49,10 @@ export interface RunResult {
   /** Whether running it again cannot do the thing twice. */
   readonly safeToRepeat: boolean
   readonly callRefs: readonly string[]
+  /** When the application asked us to wait (`Retry-After`, in seconds), for the host's call rules. */
+  readonly retryAfterSeconds?: number | undefined
+  /** The application's own rate-limit headers (`x-ratelimit-*`, `ratelimit-*`), for the host's call rules and log. */
+  readonly rateLimit?: Readonly<Record<string, string>> | undefined
 }
 
 const SENTENCES: Readonly<Record<Exclude<Outcome, 'refused'>, (label: string) => string>> = {
@@ -66,7 +71,9 @@ export function sentenceFor(outcome: Exclude<Outcome, 'refused'>, label: string)
   return SENTENCES[outcome](label)
 }
 
-function parse(r: Extract<SendResult, { ok: true }>): { readonly ok: true; readonly value: unknown } | { readonly ok: false } {
+function parse(r: Extract<SendResult, { ok: true }>, format: OperationSpec['responseFormat']): { readonly ok: true; readonly value: unknown } | { readonly ok: false } {
+  if (format === 'file') return { ok: true, value: r.file === undefined ? {} : { $file: r.file } }
+  if (format === 'text') return { ok: true, value: r.body }
   const type = (r.headers['content-type'] ?? '').toLowerCase()
   const looksJson = type.includes('json') || /^\s*[[{]/.test(r.body)
   if (r.body.trim() === '') return { ok: true, value: {} }
@@ -90,7 +97,8 @@ function outcomeOf(spec: OperationSpec, status: number, body: unknown): Exclude<
 
 function mapRow(row: ResponseMapping, from: unknown, maps: ChoiceMaps): unknown {
   const raw = getAt(from, row.source)
-  let v = row.transform === undefined || row.transform === 'none' ? raw : applyTransform(row.transform, raw, row.transformArg ?? '', maps)
+  const decoded = decodeValue(row.encoding, raw)
+  let v = row.transform === undefined || row.transform === 'none' ? decoded : applyTransform(row.transform, decoded, row.transformArg ?? '', maps)
   if ((v === undefined || v === null || v === '') && row.defaultValue !== undefined && row.defaultValue !== '') v = row.defaultValue
   return v
 }
@@ -104,6 +112,19 @@ function parseLinkNext(header: string | undefined): string | undefined {
     if (m !== null && /rel="?next"?/i.test(m[2] ?? '')) return m[1]
   }
   return undefined
+}
+
+/** The wait and rate-limit headers an answer carried, for the host's call rules (never shown to a model). */
+export function rateHeaders(headers: Readonly<Record<string, string>>): { readonly retryAfterSeconds?: number; readonly rateLimit?: Readonly<Record<string, string>> } {
+  const out: { retryAfterSeconds?: number; rateLimit?: Record<string, string> } = {}
+  const ra = headers['retry-after']
+  if (ra !== undefined && ra.trim() !== '') {
+    const secs = /^\d+$/.test(ra.trim()) ? Number(ra.trim()) : Math.ceil((Date.parse(ra) - Date.now()) / 1000)
+    if (Number.isFinite(secs) && secs >= 0) out.retryAfterSeconds = Math.min(secs, 86_400)
+  }
+  const limits = Object.entries(headers).filter(([k]) => k.startsWith('x-ratelimit-') || k.startsWith('ratelimit') || k === 'x-rate-limit-remaining')
+  if (limits.length > 0) out.rateLimit = Object.fromEntries(limits)
+  return out
 }
 
 /** Run one operation. Never throws for anything the outside did. */
@@ -126,13 +147,15 @@ export async function runOperation(run: RunInput): Promise<RunResult> {
   const top: Record<string, Json> = {}
   let pageRequest: WireRequest = built.request
   if (paging.pageSizeParam !== undefined && paging.pageSize !== undefined) pageRequest = withQuery(pageRequest, paging.pageSizeParam, String(paging.pageSize))
-  if (paging.style === 'offset_limit' && paging.offsetParam !== undefined) pageRequest = withQuery(pageRequest, paging.offsetParam, '0')
+  const offsetBase = paging.offsetBase ?? 0
+  if (paging.style === 'offset_limit' && paging.offsetParam !== undefined) pageRequest = withQuery(pageRequest, paging.offsetParam, String(offsetBase))
   if (paging.style === 'page_number' && paging.pageParam !== undefined) pageRequest = withQuery(pageRequest, paging.pageParam, '1')
   let offset = 0
   let pageNo = 1
   let pages = 0
   let truncated = false
   let lastStatus = 0
+  let lastHeaders: Readonly<Record<string, string>> | undefined
   for (;;) {
     const signed = await run.credential(pageRequest)
     if (!signed.ok) return end('refused', signed.code, 0, signed.sentence, '', { pages })
@@ -147,11 +170,13 @@ export async function runOperation(run: RunInput): Promise<RunResult> {
     sent = true
     pages++
     lastStatus = r.status
-    const parsed = parse(r)
+    lastHeaders = r.headers
+    const parsed = parse(r, spec.responseFormat)
     // A failure answer is judged by its status even when its body is not the JSON it claims to be (a gateway's page).
     const outcome = outcomeOf(spec, r.status, parsed.ok ? parsed.value : undefined)
     if (!parsed.ok && outcome === 'ok') return end('invalid', 'NOT_JSON', r.status, sentenceFor('invalid', label), 'the answer was not JSON', { pages })
-    if (outcome !== 'ok') return end(outcome, `HTTP_${String(r.status)}`, r.status, sentenceFor(outcome, label), r.body.slice(0, 300), { pages })
+    if (outcome !== 'ok') return end(outcome, `HTTP_${String(r.status)}`, r.status, sentenceFor(outcome, label), r.body.slice(0, 300), { pages, ...rateHeaders(r.headers) })
+    if (spec.responseFormat === 'file' && r.file === undefined) return end('unavailable', 'NO_FILE', r.status, `${label} answered, but the file could not be kept.`, '', { pages })
     const body = parsed.ok ? parsed.value : undefined
     // Top-level outputs come from the first page; list outputs gather from every page.
     if (pages === 1) for (const row of run.response.filter((x) => x.itemOf === undefined || x.itemOf === '')) {
@@ -191,7 +216,7 @@ export async function runOperation(run: RunInput): Promise<RunResult> {
         offset += list.length
         const total = Number(atPath(paging.totalPath))
         const more = list.length > 0 && (Number.isFinite(total) && paging.totalPath !== undefined ? offset < total : list.length === (paging.pageSize ?? -1))
-        if (more) next = withQuery(pageRequest, paging.offsetParam ?? 'offset', String(offset))
+        if (more) next = withQuery(pageRequest, paging.offsetParam ?? 'offset', String(offset + offsetBase))
         break
       }
       case 'page_number': {
@@ -217,7 +242,7 @@ export async function runOperation(run: RunInput): Promise<RunResult> {
   }
   const output: Record<string, Json> = { ...top }
   for (const [name, list] of items) output[name] = list
-  return { outcome: 'ok', code: 'OK', status: lastStatus, output, sentence: sentenceFor('ok', label), detail: '', pages, truncated, sent, safeToRepeat: repeatable, callRefs }
+  return { outcome: 'ok', code: 'OK', status: lastStatus, output, sentence: sentenceFor('ok', label), detail: '', pages, truncated, sent, safeToRepeat: repeatable, callRefs, ...(lastHeaders === undefined ? {} : rateHeaders(lastHeaders)) }
 }
 
 function withQuery(r: WireRequest, name: string, value: string): WireRequest {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 // ── Client + bus ───────────────────────────────────────────────────────────────
-export { weaveA2AClient, weaveA2ABus } from './a2a.js';
+export { weaveA2AClient, weaveA2ABus, type A2AClientOptions } from './a2a.js';
 
 // ── Task store (Phase 3) ───────────────────────────────────────────────────────
 export {
