@@ -1,5 +1,14 @@
 # @weaveintel/live-agents-runtime
 
+## 0.2.4
+
+### Patch Changes
+
+- Updated dependencies [7ea3691]
+  - @weaveintel/a2a@0.4.0
+  - @weaveintel/agents@0.3.2
+  - @weaveintel/tools@0.2.3
+
 ## 0.2.3
 
 ### Patch Changes
