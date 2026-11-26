@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/extraction",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "exports": {
     ".": {
@@ -18,8 +18,8 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@weaveintel/connect": "^0.3.0",
-    "@weaveintel/core": "^0.3.0",
+    "@weaveintel/connect": "^0.4.0",
+    "@weaveintel/core": "^0.3.1",
     "@weaveintel/guardrails": "^0.2.2"
   },
   "devDependencies": {

@@ -1,5 +1,17 @@
 # @weaveintel/a2a
 
+## 0.3.0
+
+### Minor Changes
+
+- b29c076: `weaveA2AClient(options)` takes `fetch` and `getHeaders`, so discovery, messages and streams go through the caller's
+  own network door with a fresh credential on every call. With no options it behaves as before.
+
+### Patch Changes
+
+- Updated dependencies [b57835c]
+  - @weaveintel/core@0.3.1
+
 ## 0.2.1
 
 ### Patch Changes
