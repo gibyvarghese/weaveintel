@@ -1,4 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+// `@weaveintel/core`'s hardened transport resolves the host and connects through
+// undici's own `fetch` (DNS-pinned dispatcher), so the stubbed `globalThis.fetch`
+// below never sees the request the A2A client makes. This suite covers the
+// handler's request shape and result mapping, so keep every real core export and
+// only route the hardened transport through the stubbed global.
+vi.mock('@weaveintel/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@weaveintel/core')>();
+  const viaGlobal = (input: string, init?: RequestInit) => globalThis.fetch(input, init);
+  return {
+    ...actual,
+    createHardenedFetch: () => ({ fetch: viaGlobal, fetchStream: viaGlobal, assertSafe: async () => undefined }),
+  };
+});
 import { a2aOutboundHandler } from './a2a-outbound.js';
 import type { HandlerContext } from '../handler-registry.js';
 import type { ActionExecutionContext } from '@weaveintel/live-agents';
