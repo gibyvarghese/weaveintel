@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/agents",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Agent runtime — tool-calling loop, planner-executor, hierarchical supervisor-worker, swarms defined as data",
   "repository": {
     "type": "git",
@@ -34,8 +34,8 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@weaveintel/a2a": "^0.2.1",
-    "@weaveintel/core": "^0.3.0",
+    "@weaveintel/a2a": "^0.3.0",
+    "@weaveintel/core": "^0.3.1",
     "@weaveintel/cost-governor": "^0.2.2",
     "@weaveintel/guardrails": "^0.2.2",
     "@weaveintel/human-tasks": "^0.1.4",

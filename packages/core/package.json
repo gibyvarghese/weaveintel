@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/core",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Core contracts, types, and runtime for weaveIntel AI framework",
   "type": "module",
   "main": "./dist/index.js",

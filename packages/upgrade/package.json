@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/upgrade",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Self-upgrade engine primitives — signed release manifest discovery + Ed25519 verification, priority banding for a reconcile review queue, pre-upgrade database snapshots, and a structured id-keyed three-way merge.",
   "type": "module",
   "main": "./dist/index.js",

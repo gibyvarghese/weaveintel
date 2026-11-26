@@ -1,5 +1,15 @@
 # @weaveintel/tools-enterprise
 
+## 0.2.1
+
+### Patch Changes
+
+- Updated dependencies [b57835c]
+- Updated dependencies [ee6ef7e]
+- Updated dependencies [b29c076]
+  - @weaveintel/core@0.3.1
+  - @weaveintel/connect@0.4.0
+
 ## 0.2.0
 
 ### Minor Changes

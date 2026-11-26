@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/mcp-server",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "MCP server — expose tools/resources/prompts via MCP protocol",
   "repository": {
     "type": "git",
@@ -25,7 +25,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
-    "@weaveintel/core": "^0.3.0"
+    "@weaveintel/core": "^0.3.1"
   },
   "devDependencies": {
     "typescript": "^5.7.0",
