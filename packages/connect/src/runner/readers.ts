@@ -113,7 +113,18 @@ export function dateText(read: ReadDate): string {
   return read.time === undefined ? read.date : `${read.date}T${read.time}${read.zone ?? 'Z'}`
 }
 
-const CURRENCY = /^[\s]*(?:[$£€¥₹₽¢]|USD|EUR|GBP|NZD|AUD|CAD|JPY|INR)?[\s]*|[\s]*(?:[$£€¥₹₽¢]|USD|EUR|GBP|NZD|AUD|CAD|JPY|INR)?[\s]*$/g
+/** Currency marks a number may carry before or after it. Stripped by prefix and suffix, never by a pattern, so a long run of spaces costs one pass. */
+const CURRENCY_MARKS: readonly string[] = ['$', '£', '€', '¥', '₹', '₽', '¢', 'USD', 'EUR', 'GBP', 'NZD', 'AUD', 'CAD', 'JPY', 'INR']
+
+/** The text without one leading and one trailing currency mark, and the spaces beside them. */
+function withoutCurrency(text: string): string {
+  let out = text.trim()
+  const lead = CURRENCY_MARKS.find((m) => out.startsWith(m))
+  if (lead !== undefined) out = out.slice(lead.length).trimStart()
+  const tail = CURRENCY_MARKS.find((m) => out.endsWith(m))
+  if (tail !== undefined) out = out.slice(0, out.length - tail.length).trimEnd()
+  return out
+}
 const BARE = /^[+-]?[\d.,\s']*\d(?:[eE][+-]?\d+)?$/
 
 function undress(raw: string): { body: string; negative: boolean } | undefined {
@@ -122,7 +133,7 @@ function undress(raw: string): { body: string; negative: boolean } | undefined {
   let negative = false
   if (text.startsWith('(') && text.endsWith(')')) { negative = true; text = text.slice(1, -1).trim() }
   if (text.endsWith('%')) text = text.slice(0, -1).trim()
-  text = text.replace(CURRENCY, '').trim()
+  text = withoutCurrency(text)
   if (text.startsWith('-')) { negative = !negative; text = text.slice(1).trim() } else if (text.startsWith('+')) text = text.slice(1).trim()
   if (text === '' || !BARE.test(text)) return undefined
   return { body: text, negative }
