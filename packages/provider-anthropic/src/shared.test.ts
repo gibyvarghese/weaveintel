@@ -1,6 +1,17 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { anthropicRequest, anthropicStreamRequest, parseRetryAfterMs } from './shared.js';
 
+// The hardened transport in `@weaveintel/core` connects through undici's own
+// `fetch` (DNS-pinned dispatcher), so a `globalThis.fetch` spy never sees the
+// request. These are unit tests of `shared.ts` (error classification + signal
+// composition), so route the package's transport seam through the global fetch
+// that each test stubs. The hardened path itself is covered in `@weaveintel/core`.
+vi.mock('./_fetch.js', () => ({
+  anthropicFetch: (input: string, init?: RequestInit) => globalThis.fetch(input, init),
+  anthropicFetchStream: (input: string, init?: RequestInit) => globalThis.fetch(input, init),
+  assertHttpsOrLoopback: async () => undefined,
+}));
+
 describe('anthropic shared retry-after parsing', () => {
   it('parses delta-seconds retry-after', () => {
     expect(parseRetryAfterMs('9')).toBe(9000);
