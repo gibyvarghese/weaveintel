@@ -11,6 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # check:examples-updated compares the branch with main
 
       - uses: actions/setup-node@v7
         with:
@@ -31,6 +33,11 @@ jobs:
       # so the reference app in apps/ is present — cached from the Build step above.)
       - name: Typecheck examples
         run: npm run test:examples
+
+      # Every library change ships an example (CLAUDE.md, Examples rule).
+      - name: Examples updated with library changes
+        if: github.event_name == 'pull_request'
+        run: npm run check:examples-updated -- --base origin/${{ github.base_ref }}
 
       - name: Public API Boundary Check
         run: npm run check:api-boundaries
