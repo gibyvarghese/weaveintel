@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/local-engines",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Browser-safe local model engines: the engine contract, a capability probe, a fallback chain walker that ends at a hosted step, routing-ticket hash checks, a deterministic stub engine and a feature-detected Chrome built-in AI adapter.",
   "repository": {
     "type": "git",
