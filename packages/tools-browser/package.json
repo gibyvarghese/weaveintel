@@ -7,6 +7,11 @@
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./steps": {
+      "import": "./dist/steps/index.js",
+      "types": "./dist/steps/index.d.ts",
+      "default": "./dist/steps/index.js"
     }
   },
   "main": "./dist/index.js",
