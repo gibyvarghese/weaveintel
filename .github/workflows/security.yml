@@ -18,7 +18,7 @@ jobs:
   # ── CodeQL static analysis ─────────────────────────────────────────────────
   codeql:
     name: CodeQL Analysis
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, mac-local]
     strategy:
       fail-fast: false
       matrix:
@@ -45,7 +45,7 @@ jobs:
   # ── npm audit gate ─────────────────────────────────────────────────────────
   npm-audit:
     name: npm Audit (Critical/High)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, mac-local]
     steps:
       - uses: actions/checkout@v7
 
@@ -90,7 +90,7 @@ jobs:
   # ── Secret scanning (gitleaks) ─────────────────────────────────────────────
   gitleaks:
     name: Secret Scanning (gitleaks)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, mac-local]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -105,7 +105,7 @@ jobs:
   # ── Container / dependency vulnerability scan (Trivy) ─────────────────────
   trivy:
     name: Trivy Vulnerability Scan
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, mac-local]
     steps:
       - uses: actions/checkout@v7
 
@@ -141,7 +141,7 @@ jobs:
   # ── SBOM generation (CycloneDX) ────────────────────────────────────────────
   sbom:
     name: Generate SBOM (CycloneDX)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, mac-local]
     steps:
       - uses: actions/checkout@v7
 
@@ -170,7 +170,7 @@ jobs:
   # ── SPDX header coverage check ────────────────────────────────────────────
   spdx-check:
     name: SPDX License Header Check
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, mac-local]
     steps:
       - uses: actions/checkout@v7
 
