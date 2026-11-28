@@ -8,7 +8,7 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, mac-local]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -57,8 +57,9 @@ jobs:
           # STRESS tests (9M-object builds, 2000-note fan-outs, 50k-key migrations) block the event
           # loop long enough that the Testcontainers Ryuk reaper's heartbeat lapses and it kills the
           # container mid-test — surfacing as Postgres 57P01 ("terminating connection due to
-          # administrator command") even though every assertion passed. The runner VM is ephemeral
-          # and each suite stops its own container in afterAll, so the reaper is unnecessary here.
+          # administrator command") even though every assertion passed. Each suite stops its own
+          # container in afterAll, so the reaper is unnecessary; on the self-hosted Mac runner a crashed
+          # suite can leave a container behind (`docker ps --filter label=org.testcontainers=true`).
           TESTCONTAINERS_RYUK_DISABLED: true
 
       # Playwright e2e tests require a running server — run separately.
